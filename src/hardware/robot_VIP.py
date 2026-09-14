@@ -163,8 +163,12 @@ class FR5Robot:
             return point_name, self.teaching_points[point_name]
         return None, None
 
-    def board_to_pose(self, col, row, z_height):
-        """Chuyển đổi (col, row) bàn cờ logic → tọa độ [x,y,z,rx,ry,rz] robot (mm) bằng Bilinear Interpolation."""
+    def board_to_pose(self, col, row, z_height, rotation=None):
+        """Chuyển grid logic thành pose thật từ R1-R4.
+
+        ``rotation`` là [Rx, Ry, Rz] của tool trong hệ pose FR5. Không truyền
+        rotation sẽ giữ tương thích hoàn toàn với ``config.ROTATION`` cũ.
+        """
         
         # Kiểm tra xem có teaching point trực tiếp cho vị trí cụ thể không
         point_name, point_data = self._get_teaching_point_for_position(col, row)
@@ -172,11 +176,20 @@ class FR5Robot:
             # Dùng tọa độ từ teaching point nhưng thay đổi Z
             pose = point_data["pose"].copy()
             pose[2] = z_height  # Thay đổi Z theo yêu cầu
+            if rotation is not None:
+                pose[3:6] = self._validated_rotation(rotation)
             print(f"[ROBOT] 📍 Dùng teaching point {point_name} cho ({col},{row}) → X={pose[0]:.1f}, Y={pose[1]:.1f}, Z={z_height:.1f}")
             return pose
         
         # Sử dụng Bilinear Interpolation cho tất cả vị trí khác
-        return self.board_to_pose_bilinear(col, row, z_height)
+        return self.board_to_pose_bilinear(col, row, z_height, rotation=rotation)
+
+    @staticmethod
+    def _validated_rotation(rotation):
+        """Return a copy of a Cartesian tool rotation, rejecting malformed config."""
+        if not isinstance(rotation, (list, tuple)) or len(rotation) != 3:
+            raise ValueError("Tool rotation must be a three-value [Rx, Ry, Rz] sequence")
+        return [float(value) for value in rotation]
 
     def _calculate_cell_sizes_from_corners(self):
         """Tính CELL_SIZE tự động từ 4 góc teaching points."""
@@ -203,8 +216,13 @@ class FR5Robot:
         print(f"[ROBOT]   Distance Y: top={distance_y_top:.1f}mm, bottom={distance_y_bottom:.1f}mm")
         print(f"[ROBOT]   Distance X: left={distance_x_left:.1f}mm, right={distance_x_right:.1f}mm")
 
-    def board_to_pose_bilinear(self, col, row, z_height):
-        """Tính tọa độ bằng Bilinear Interpolation từ 4 góc teaching points."""
+    def board_to_pose_bilinear(self, col, row, z_height, rotation=None):
+        """Tính pose vật lý từ grid float qua Bilinear Interpolation R1-R4.
+
+        Grid float được Visual Pick cung cấp chỉ bù XY. Tool orientation luôn
+        lấy từ motion profile đã dạy, không nội suy Euler angles của các corner
+        teaching points vì cách đó có thể tạo pose wrist không mong muốn.
+        """
         try:
             # Tọa độ logic (0-8 cho col, 0-9 cho row)
             col_ratio = col / 8.0  # 0.0 → 1.0
@@ -239,13 +257,16 @@ class FR5Robot:
             print(f"[ROBOT] 🎯 Bilinear Interpolation ({col},{row}) → X={final_x:.1f}, Y={final_y:.1f}, Z={z_height:.1f}")
             print(f"[ROBOT]   Ratios: col={col_ratio:.3f}, row={row_ratio:.3f}")
             
-            return [final_x, final_y, z_height] + list(config.ROTATION)
+            tool_rotation = self._validated_rotation(
+                config.ROTATION if rotation is None else rotation
+            )
+            return [final_x, final_y, z_height] + tool_rotation
             
         except Exception as e:
             print(f"[ROBOT] ⚠️ Lỗi Bilinear Interpolation: {e}, fallback sang linear")
-            return self.board_to_pose_linear(col, row, z_height)
+            return self.board_to_pose_linear(col, row, z_height, rotation=rotation)
 
-    def board_to_pose_linear(self, col, row, z_height):
+    def board_to_pose_linear(self, col, row, z_height, rotation=None):
         """Tính tọa độ bằng phương pháp linear từ R1 + CELL_SIZE (fallback)."""
         # Dùng CELL_SIZE tự động tính nếu có, không thì dùng config
         cell_x = self.auto_cell_sizes["x"]
@@ -278,7 +299,10 @@ class FR5Robot:
         print(f"[ROBOT] 📐 Linear calculation ({col},{row}) → X={x_mm:.1f}, Y={y_mm:.1f}, Z={z_height:.1f}")
         print(f"[ROBOT]   CELL_SIZE: X={cell_x:.2f}, Y={cell_y:.2f}")
         
-        return [x_mm, y_mm, z_height] + list(config.ROTATION)
+        tool_rotation = self._validated_rotation(
+            config.ROTATION if rotation is None else rotation
+        )
+        return [x_mm, y_mm, z_height] + tool_rotation
 
     # -------------------------------------------------------------------------
     # DI CHUYỂN ROBOT
@@ -426,10 +450,26 @@ class FR5Robot:
     # QUY TRÌNH GẮP / ĐẶT / ĂN QUÂN
     # -------------------------------------------------------------------------
 
-    def pick_at(self, col, row):
-        """Gắp 1 quân cờ tại (col, row)."""
-        pose_safe = self.board_to_pose(col, row, config.SAFE_Z)
-        pose_pick = self.board_to_pose(col, row, config.PICK_Z)
+    def pick_at(self, col, row, visual_target=None):
+        """Gắp quân tại XY thực tế, với tool rotation đã dạy trong config.
+
+        Khi ``visual_target`` hợp lệ, chính ``target.col,row`` (float) được
+        dùng cho cả approach SAFE_Z và descent PICK_Z. Không có target thì
+        fallback về tâm ô logic như hành vi cũ.
+        """
+        pick_rotation = getattr(config, "PICK_TOOL_ROTATION", config.ROTATION)
+        if visual_target is not None:
+            pose_safe = self.board_to_pose_bilinear(
+                visual_target.col, visual_target.row, config.SAFE_Z, rotation=pick_rotation
+            )
+            pose_pick = self.board_to_pose_bilinear(
+                visual_target.col, visual_target.row, config.PICK_Z, rotation=pick_rotation
+            )
+            print(f"[ROBOT] 👁️ Visual pick offset={visual_target.offset_cells:.3f} cells, "
+                  f"conf={visual_target.confidence:.2f}")
+        else:
+            pose_safe = self.board_to_pose(col, row, config.SAFE_Z, rotation=pick_rotation)
+            pose_pick = self.board_to_pose(col, row, config.PICK_Z, rotation=pick_rotation)
         print(f"[ROBOT] 🤏 Gắp tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
         self.gripper_ctrl(config.GRIPPER_OPEN)   # Mở kẹp
@@ -441,9 +481,10 @@ class FR5Robot:
         print(f"[ROBOT] ✅ Gắp xong ({col},{row})")
 
     def place_at(self, col, row):
-        """Đặt 1 quân cờ tại (col, row)."""
-        pose_safe  = self.board_to_pose(col, row, config.SAFE_Z)
-        pose_place = self.board_to_pose(col, row, config.PLACE_Z)
+        """Đặt quân ở tâm ô đích vật lý theo R1-R4 và pose đặt đã dạy."""
+        place_rotation = getattr(config, "PLACE_TOOL_ROTATION", config.ROTATION)
+        pose_safe = self.board_to_pose(col, row, config.SAFE_Z, rotation=place_rotation)
+        pose_place = self.board_to_pose(col, row, config.PLACE_Z, rotation=place_rotation)
         print(f"[ROBOT] 📍 Đặt tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
         self.move_safe_pose(pose_safe, col=col, row=row)  # Đến vị trí an toàn
@@ -453,9 +494,15 @@ class FR5Robot:
         self.movel_pose(pose_safe)                # Nhấc lên
         print(f"[ROBOT] ✅ Đặt xong ({col},{row})")
     
-    def move_to_extra_safe(self, col, row):
-        """Di chuyển đến độ cao an toàn trên ô (col, row)."""
-        pose_safe = self.board_to_pose(col, row, config.SAFE_Z)
+    def move_to_extra_safe(self, col, row, visual_target=None):
+        """Nâng tại đúng XY vừa gắp, tránh quay lại tâm ô khi camera đã bù XY."""
+        pick_rotation = getattr(config, "PICK_TOOL_ROTATION", config.ROTATION)
+        if visual_target is not None:
+            pose_safe = self.board_to_pose_bilinear(
+                visual_target.col, visual_target.row, config.SAFE_Z, rotation=pick_rotation
+            )
+        else:
+            pose_safe = self.board_to_pose(col, row, config.SAFE_Z, rotation=pick_rotation)
         print(f"[ROBOT] ⬆️ Nâng lên độ cao an toàn tại ({col},{row}) Z={config.SAFE_Z}")
         self.move_safe_pose(pose_safe, col=col, row=row)
 
@@ -512,13 +559,16 @@ class FR5Robot:
     # HÀM CHÍNH — GỌI TỪ main_VIP.py
     # -------------------------------------------------------------------------
 
-    def move_piece(self, s_col, s_row, d_col, d_row, is_capture):
+    def move_piece(self, s_col, s_row, d_col, d_row, is_capture,
+                   moving_visual_target=None, captured_visual_target=None):
         """Quy trình di chuyển hoàn chỉnh, bao gồm xử lý ăn quân.
         
         Args:
             s_col, s_row: ô nguồn
             d_col, d_row: ô đích
             is_capture:   True nếu ăn quân đối phương
+            moving_visual_target: GridTarget camera cho quân đang di chuyển, hoặc None
+            captured_visual_target: GridTarget camera cho quân bị ăn, hoặc None
         """
         print(f"[ROBOT] ♟️ Di chuyển: ({s_col},{s_row}) → ({d_col},{d_row})"
               + (" [ĂN QUÂN]" if is_capture else ""))
@@ -538,23 +588,23 @@ class FR5Robot:
         # 1. Nếu ăn quân: gắp quân địch → thả vào bãi thải
         if is_capture:
             print(f"[ROBOT] 🎯 Gắp quân địch tại đích ({d_col},{d_row})")
-            self.pick_at(d_col, d_row)
+            self.pick_at(d_col, d_row, visual_target=captured_visual_target)
             
             # Nâng lên độ cao an toàn (SAFE_Z)
             print(f"[ROBOT] ⬆️ Nâng lên SAFE_Z={config.SAFE_Z}mm")
-            self.move_to_extra_safe(d_col, d_row)
+            self.move_to_extra_safe(d_col, d_row, visual_target=captured_visual_target)
             
             # Bay thẳng đến bãi thải ở độ cao SAFE_Z (giữ nguyên Z)
             self.place_in_capture_bin(current_z=config.SAFE_Z)
 
         # 2. Gắp quân mình ở nguồn
         print(f"[ROBOT] 🤏 Gắp quân mình tại nguồn ({s_col},{s_row})")
-        self.pick_at(s_col, s_row)
+        self.pick_at(s_col, s_row, visual_target=moving_visual_target)
         
         # Nâng lên độ cao an toàn nếu di chuyển xa
         if use_extra_safe:
             print(f"[ROBOT] 🛡️ Di chuyển xa ({distance} ô), sử dụng độ cao an toàn")
-            self.move_to_extra_safe(s_col, s_row)
+            self.move_to_extra_safe(s_col, s_row, visual_target=moving_visual_target)
 
         # 3. Đặt quân mình vào đích
         print(f"[ROBOT] 📍 Đặt quân mình tại đích ({d_col},{d_row})")

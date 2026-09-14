@@ -173,7 +173,18 @@ try:
                             if hw.robot.connected:
                                 print(f"[AI] Robot executing move: {s}->{d}")
                                 try:
-                                    hw.robot.move_piece(s[0], s[1], d[0], d[1], is_cap)
+                                    pick_targets = {"moving": None, "captured": None}
+                                    if getattr(config, "VISUAL_PICK_ENABLED", False):
+                                        expected_cells = {"moving": s}
+                                        if is_cap:
+                                            expected_cells["captured"] = d
+                                        # Snapshot happens before the robot enters the board.
+                                        pick_targets = hw.get_visual_pick_targets(expected_cells)
+                                    hw.robot.move_piece(
+                                        s[0], s[1], d[0], d[1], is_cap,
+                                        moving_visual_target=pick_targets.get("moving"),
+                                        captured_visual_target=pick_targets.get("captured"),
+                                    )
                                 except Exception as e:
                                     error_str = str(e)
                                     print(f"⚠️ Robot error: {error_str}")

@@ -9,3 +9,9 @@ perspective.npy
 # Python cache files
 __pycache__/
 *.pyc
+
+# Local Python virtual environments (machine-specific dependencies)
+.venv/
+.venv312/
+venv/
+env/
