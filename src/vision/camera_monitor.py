@@ -41,9 +41,18 @@ class CameraMonitor:
         self._last_frame = None
         self._last_detections = []  # format: (cls_id, conf, (x1, y1, x2, y2))
         self._stop_event = threading.Event()  # Thread-safe shutdown signal
-        self._thread = None
+        self._thread = None                 # Capture thread (30-60 FPS mượt mà)
+        self._detect_thread = None          # YOLO detect thread (Async background)
         self._lock = threading.Lock()       # Bảo vệ _last_frame/_last_detections
         self._cam_lock = threading.Lock()   # Bảo vệ truy cập camera (cap.read/grab)
+
+        # Tự động chọn GPU nếu có CUDA, ngược lại CPU
+        try:
+            import torch
+            self.device = 0 if torch.cuda.is_available() else 'cpu'
+        except Exception:
+            self.device = 'cpu'
+        print(f"[CAM MONITOR] 🚀 Using device: {self.device} for YOLO")
 
         self._load_perspective()
 
@@ -63,56 +72,70 @@ class CameraMonitor:
         """Reload perspective sau khi calibrate lại."""
         self._load_perspective()
 
-    def _capture_and_detect(self):
-        """Thread: đọc camera + chạy YOLO detect liên tục."""
+    def _capture_loop(self):
+        """Luồng 1: Chuyên đọc frame liên tục từ camera ở tốc độ cao nhất (30-60 FPS).
+        Đảm bảo cửa sổ hiển thị mượt mà 100%, không bao giờ bị nghẽn bởi YOLO."""
         while not self._stop_event.is_set():
             if self.cap is None or not self.cap.isOpened():
                 time.sleep(0.1)
                 continue
 
-            # Dùng _cam_lock để không race với get_fresh_snapshot()
             with self._cam_lock:
                 if self._stop_event.is_set():
                     break
-                
-                # FLUSH BUFFER: Xóa sạch các frame cũ bị stack (dồn ứ) 
-                # trong thời gian CPU đang bận chạy YOLO ở vòng lặp trước.
-                # Đây là lý do chính gây ra hiện tượng "khựng/delay" (hình đi chậm hơn thực tế).
-                for _ in range(5):
-                    self.cap.grab()
-                    
                 ret, frame = self.cap.read()
 
-            if not ret:
+            if not ret or frame is None:
                 time.sleep(0.01)
                 continue
 
-            # Chạy YOLO
+            with self._lock:
+                self._last_frame = frame
+
+            time.sleep(0.005)
+
+        print("[CAM MONITOR] 🛑 Camera capture thread exited cleanly.")
+
+    def _detect_loop(self):
+        """Luồng 2: Chạy nền độc lập (Async) nhận diện YOLO định kỳ ở imgsz=640.
+        Cập nhật bounding box đè lên video mà không bao giờ làm đứng hình camera."""
+        while not self._stop_event.is_set():
+            if self.model is None:
+                time.sleep(0.2)
+                continue
+
+            frame_to_detect = None
+            with self._lock:
+                if self._last_frame is not None:
+                    frame_to_detect = self._last_frame.copy()
+
+            if frame_to_detect is None:
+                time.sleep(0.05)
+                continue
+
             detections = []
-            if self.model is not None:
-                try:
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    results = self.model.predict(
-                        frame_rgb, conf=self.conf, iou=0.35,
-                        imgsz=1280, verbose=False
-                    )
-                    for box in results[0].boxes:
-                        cls_id = int(box.cls[0])
-                        conf = float(box.conf[0])
-                        x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        detections.append((cls_id, conf, (x1, y1, x2, y2)))
-                except:
-                    pass
+            try:
+                frame_rgb = cv2.cvtColor(frame_to_detect, cv2.COLOR_BGR2RGB)
+                results = self.model.predict(
+                    frame_rgb, conf=self.conf, iou=0.35,
+                    imgsz=640, device=self.device, verbose=False
+                )
+                for box in results[0].boxes:
+                    cls_id = int(box.cls[0])
+                    conf = float(box.conf[0])
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    detections.append((cls_id, conf, (x1, y1, x2, y2)))
+            except Exception:
+                pass
+
 
             with self._lock:
-                self._last_frame = frame.copy()
                 self._last_detections = detections
 
-            # Bản thân model YOLO đã mất ~100-200ms để chạy xong,
-            # nên vòng lặp này đã có delay tự nhiên, không cần sleep 0.15s nữa.
-            self._stop_event.wait(timeout=0.02)
+            # Nghỉ ngắn giữa các lần quét để không quá tải tài nguyên
+            self._stop_event.wait(timeout=0.05)
 
-        print("[CAM MONITOR] 🛑 Background thread exited cleanly.")
+        print("[CAM MONITOR] 🛑 Detection background thread exited cleanly.")
 
     def _draw_overlay(self, frame, detections):
         """Vẽ bounding box + lưới perspective lên frame."""
@@ -153,7 +176,8 @@ class CameraMonitor:
 
         # --- Info text ---
         n_pieces = len(detections)
-        info = f"Detected: {n_pieces} pieces | SPACE=confirm move"
+        dev_tag = "GPU" if self.device != "cpu" else "CPU"
+        info = f"[{dev_tag}] Detected: {n_pieces} pieces | SPACE=confirm move"
         cv2.putText(display, info, (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
@@ -193,7 +217,8 @@ class CameraMonitor:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = self.model.predict(
                     frame_rgb, conf=self.conf, iou=0.35,
-                    imgsz=1280, verbose=False
+                    imgsz=640, device=self.device, verbose=False
+
                 )
                 for box in results[0].boxes:
                     cls_id = int(box.cls[0])
@@ -211,30 +236,28 @@ class CameraMonitor:
         return frame, detections
 
     def start(self):
-        """Bắt đầu thread capture + detect."""
+        """Bắt đầu 2 thread song song: capture camera mượt mà và detect background."""
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._capture_and_detect, daemon=True)
+        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self._detect_thread = threading.Thread(target=self._detect_loop, daemon=True)
         self._thread.start()
-        print("[CAM MONITOR] 🎥 Camera Monitor started (background thread)")
+        self._detect_thread.start()
+        print("[CAM MONITOR] 🎥 Camera Monitor started (decoupled capture & detect threads)")
 
     def stop(self):
-        """Dừng thread và giải phóng camera AN TOÀN.
-        
-        Đảm bảo background thread HOÀN TOÀN dừng trước khi release camera
-        để tránh race condition gây khóa camera cho lần chạy sau.
-        """
+        """Dừng thread và giải phóng camera AN TOÀN."""
         print("[CAM MONITOR] 🛑 Stopping Camera Monitor...")
         
         # 1. Signal thread dừng
         self._stop_event.set()
         
-        # 2. Chờ thread kết thúc (tối đa 5s, đủ cho YOLO predict xong)
+        # 2. Chờ thread kết thúc
         if self._thread is not None and self._thread.is_alive():
-            self._thread.join(timeout=5)
-            if self._thread.is_alive():
-                print("[CAM MONITOR] ⚠️ Background thread chưa tắt sau 5s! Force continue...")
+            self._thread.join(timeout=2)
+        if self._detect_thread is not None and self._detect_thread.is_alive():
+            self._detect_thread.join(timeout=2)
         
         # 3. Release camera SAU KHI thread đã dừng
         if self.cap is not None:

@@ -247,7 +247,7 @@ def find_all_valid_moves(color, board):
                 elif ptype == 'P':
                     offsets = [(0,-1)] if color=='r' else [(0,1)]
                     if (color=='r' and r<=4) or (color=='b' and r>=5): offsets.extend([(1,0),(-1,0)])
-                    for dr, dc in offsets: possible_dest.append((c+dc, r+dr))
+                    for dc, dr in offsets: possible_dest.append((c+dc, r+dr))
 
                 for d in possible_dest:
                     if is_valid_move((c,r), d, board, color):

@@ -16,3 +16,13 @@ runs/
 outputs/
 *.zip
 hand_detection/
+
+# Local Python virtual environments (machine-specific dependencies)
+.venv/
+.venv312/
+venv/
+env/
+.env
+ENV/
+VENV/
+

@@ -51,15 +51,16 @@ class MoonfishEngine:
         Args:
             engine_path: Absolute or relative path to moonfish_ucci.py
         """
+        self.engine_path = engine_path
+        self.process: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+        self._ready = False
+
         if not os.path.isfile(engine_path):
             raise FileNotFoundError(
                 f"[MOONFISH] Engine not found at: {engine_path}\n"
                 "Clone from: https://github.com/walker8088/moonfish.git"
             )
-        self.engine_path = engine_path
-        self.process: subprocess.Popen | None = None
-        self._lock = threading.Lock()
-        self._ready = False
 
     # -------------------------------------------------------------------------
     # Lifecycle

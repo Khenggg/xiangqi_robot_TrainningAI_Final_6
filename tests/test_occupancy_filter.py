@@ -56,6 +56,7 @@ def make_detection_at_grid(col, row, inv_M, box_w=40, box_h=40):
     px = cv2.perspectiveTransform(pt, inv_M)[0][0]
     cx, cy = float(px[0]), float(px[1])
     
+
     # cx = x1 + box_w / 2 -> x1 = cx - box_w / 2
     # cy = y1 + 0.85 * box_h -> y1 = cy - 0.85 * box_h
     x1 = int(round(cx - box_w / 2.0))
@@ -126,7 +127,9 @@ def run_tests():
     # Clean up test .npy
     if os.path.exists(test_npy):
         try: os.remove(test_npy)
-        except: pass
+        except OSError:
+            pass
+
 
     print(f"\n🎉 HOÀN THÀNH: {passed_count}/{total_tests} bài test đều ĐẠT (PASSED)!\n")
 

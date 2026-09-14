@@ -12,12 +12,13 @@ from src.ai.cloud_engine import CloudEngine
 from src.ai.ai_controller import AIController
 from src.vision.camera_monitor import CameraMonitor
 from src.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetector
+from src.vision.visual_pick_estimator import VisualPickEstimator
 from src.vision.calibrate_camera import calibrate_perspective_camera
 
 try:
     from ultralytics import YOLO
 except ImportError:
-    pass
+    YOLO = None
 
 class HardwareManager:
     """Manages Robot, Camera (Vision), and AI Engine connections."""
@@ -34,6 +35,7 @@ class HardwareManager:
         self.model = None
         self.cam_monitor = None
         self.yolo_detector = None
+        self.pick_estimator = None
         self.perspective_path = Path(project_dir) / "perspective.npy"
         
         self.class_id_to_name = {
@@ -71,6 +73,10 @@ class HardwareManager:
 
     def _calibrate_robot(self):
         print("\n--- ROBOT CALIBRATION (R1 ORIGIN) ---")
+        if not self.robot.connected:
+            print("  ℹ️ Robot chưa kết nối — sử dụng tọa độ gốc mặc định từ config.")
+            return
+
         try:
             if self.dry_run:
                 self.config.BOARD_ORIGIN_X = 200.0
@@ -136,8 +142,11 @@ class HardwareManager:
 
         model_path = str(Path(self.project_dir) / "models" / "best.pt")
         try:
-            self.model = YOLO(model_path)
-            print(f"✅ Model loaded: {model_path}")
+            if YOLO is not None:
+                self.model = YOLO(model_path)
+                print(f"✅ Model loaded: {model_path}")
+            else:
+                print("⚠️ Warning: Module 'ultralytics' chưa được cài đặt, bỏ qua load YOLO model.")
         except Exception as e:
             print(f"⚠️ Warning: Could not load YOLO model: {e}")
             
@@ -177,6 +186,17 @@ class HardwareManager:
             self.cam_monitor.start()
             self.yolo_detector = YoloSnapshotDetector(self.perspective_path, self.class_id_to_name)
             print("[INIT] ✅ YoloSnapshotDetector initialized.")
+            if getattr(self.config, "VISUAL_PICK_ENABLED", False):
+                try:
+                    self.pick_estimator = VisualPickEstimator(
+                        self.perspective_path,
+                        min_confidence=self.config.VISUAL_PICK_MIN_CONFIDENCE,
+                        max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
+                        foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
+                    )
+                    print("[INIT] ✅ VisualPickEstimator initialized.")
+                except Exception as e:
+                    print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
 
     def cleanup(self):
         print("[CLEANUP] Đang dọn dẹp hardware...")
@@ -201,6 +221,44 @@ class HardwareManager:
             except: pass
 
     # --- WRAPPER VISION UTILS ---
+    def get_visual_pick_targets(self, expected_cells):
+        """Lấy snapshot trước khi robot di chuyển và ước lượng điểm gắp thực tế.
+        Bọc phòng thủ toàn diện: Mọi ngoại lệ đều tự động fallback về None (tâm ô lý thuyết).
+        """
+        targets = {name: None for name in expected_cells}
+        if not self.pick_estimator:
+            print("[VISUAL PICK] Fallback: pick_estimator chưa được khởi tạo.")
+            return targets
+
+        if not self.cam_monitor:
+            print("[VISUAL PICK] Fallback: cam_monitor chưa được khởi tạo.")
+            return targets
+
+        # 1. Bọc an toàn khi lấy snapshot từ camera
+        try:
+            if not hasattr(self.cam_monitor, "get_fresh_snapshot"):
+                print("[VISUAL PICK] ⚠️ cam_monitor thiếu method 'get_fresh_snapshot'. Dùng fallback tâm ô.")
+                return targets
+
+            _frame, detections = self.cam_monitor.get_fresh_snapshot()
+            if _frame is None:
+                print("[VISUAL PICK] ⚠️ Không lấy được frame mới từ camera. Dùng fallback tâm ô.")
+                return targets
+        except Exception as e:
+            print(f"[VISUAL PICK] ⚠️ Ngoại lệ khi snapshot camera: {e}. Dùng fallback tâm ô.")
+            return targets
+
+        # 2. Bọc an toàn khi ước lượng từng ô cờ
+        for name, cell in expected_cells.items():
+            try:
+                col, row = cell
+                targets[name] = self.pick_estimator.estimate_pick_target(detections, col, row)
+            except Exception as e:
+                print(f"[VISUAL PICK] ⚠️ Lỗi ước lượng cho {name} tại {cell!r}: {e}. Fallback ô này.")
+                targets[name] = None
+
+        return targets
+
     def capture_baseline_if_needed(self, force_delay=0.0):
         if self.cam_monitor and self.yolo_detector:
             if force_delay > 0:
