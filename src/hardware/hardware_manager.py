@@ -12,6 +12,7 @@ from src.ai.cloud_engine import CloudEngine
 from src.ai.ai_controller import AIController
 from src.vision.camera_monitor import CameraMonitor
 from src.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetector
+from src.vision.visual_pick_estimator import VisualPickEstimator
 from src.vision.calibrate_camera import calibrate_perspective_camera
 
 try:
@@ -34,6 +35,7 @@ class HardwareManager:
         self.model = None
         self.cam_monitor = None
         self.yolo_detector = None
+        self.pick_estimator = None
         self.perspective_path = Path(project_dir) / "perspective.npy"
         
         self.class_id_to_name = {
@@ -184,6 +186,17 @@ class HardwareManager:
             self.cam_monitor.start()
             self.yolo_detector = YoloSnapshotDetector(self.perspective_path, self.class_id_to_name)
             print("[INIT] ✅ YoloSnapshotDetector initialized.")
+            if getattr(self.config, "VISUAL_PICK_ENABLED", False):
+                try:
+                    self.pick_estimator = VisualPickEstimator(
+                        self.perspective_path,
+                        min_confidence=self.config.VISUAL_PICK_MIN_CONFIDENCE,
+                        max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
+                        foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
+                    )
+                    print("[INIT] ✅ VisualPickEstimator initialized.")
+                except Exception as e:
+                    print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
 
     def cleanup(self):
         print("[CLEANUP] Đang dọn dẹp hardware...")
@@ -208,6 +221,31 @@ class HardwareManager:
             except: pass
 
     # --- WRAPPER VISION UTILS ---
+    def get_visual_pick_targets(self, expected_cells):
+        """Take one fresh pre-motion snapshot and estimate requested pick points.
+
+        ``expected_cells`` maps labels (normally ``moving``/``captured``) to
+        ``(col, row)`` logical cells. Every missing/unsafe result is ``None`` so
+        the robot retains its existing center-of-cell fallback.
+        """
+        targets = {name: None for name in expected_cells}
+        if not self.pick_estimator or not self.cam_monitor:
+            print("[VISUAL PICK] Fallback: estimator or camera monitor unavailable.")
+            return targets
+
+        _frame, detections = self.cam_monitor.get_fresh_snapshot()
+        if _frame is None:
+            print("[VISUAL PICK] Fallback: fresh camera snapshot unavailable.")
+            return targets
+
+        for name, cell in expected_cells.items():
+            try:
+                col, row = cell
+                targets[name] = self.pick_estimator.estimate_pick_target(detections, col, row)
+            except (TypeError, ValueError) as e:
+                print(f"[VISUAL PICK] Fallback for {name}: invalid expected cell {cell!r}: {e}")
+        return targets
+
     def capture_baseline_if_needed(self, force_delay=0.0):
         if self.cam_monitor and self.yolo_detector:
             if force_delay > 0:
