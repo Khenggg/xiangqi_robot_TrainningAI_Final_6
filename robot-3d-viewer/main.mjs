@@ -25,9 +25,29 @@ async function fetchRobotProfileConfig(profileId) {
       throw new Error(`Failed to load /shared/robot_profiles/fr3.json: HTTP ${res.status}`);
     }
     const data = await res.json();
+    if (!Array.isArray(data?.joints) || data.joints.length !== 6) {
+      throw new Error(`Invalid fr3.json: expected 6 joints array, got ${data?.joints?.length}`);
+    }
+
+    const visualJointOrigins = data.joints.map((j, idx) => {
+      const xyz = j.origin_xyz_m;
+      if (!Array.isArray(xyz) || xyz.length !== 3 || !xyz.every(Number.isFinite)) {
+        throw new Error(`Joint ${idx} (${j?.name}) has invalid origin_xyz_m: ${JSON.stringify(xyz)}`);
+      }
+      return [Number(xyz[0]), Number(xyz[1]), Number(xyz[2])];
+    });
+
+    const visualJointRpy = data.joints.map((j, idx) => {
+      const rpy = j.origin_rpy_rad;
+      if (!Array.isArray(rpy) || rpy.length !== 3 || !rpy.every(Number.isFinite)) {
+        throw new Error(`Joint ${idx} (${j?.name}) has invalid origin_rpy_rad: ${JSON.stringify(rpy)}`);
+      }
+      return [Number(rpy[0]), Number(rpy[1]), Number(rpy[2])];
+    });
+
     return {
-      visualJointOrigins: data.joints.map((j) => j.origin_xyz),
-      visualJointRpy: data.joints.map((j) => j.origin_rpy),
+      visualJointOrigins,
+      visualJointRpy,
     };
   }
   // FR5 fallback (visual only)

@@ -5,13 +5,13 @@
   "robot_model": "FR3",
   "robot_base_to_3d_world": {
     "rotation_matrix": [
-      [0.0, 1.0, 0.0],
+      [0.0, -1.0, 0.0],
       [0.0, 0.0, 1.0],
       [-1.0, 0.0, 0.0]
     ],
     "translation_m": [0.0, 0.0, 0.0],
     "axis_mapping": {
-      "world_x": "+robot_y",
+      "world_x": "-robot_y",
       "world_y": "+robot_z",
       "world_z": "-robot_x"
     },

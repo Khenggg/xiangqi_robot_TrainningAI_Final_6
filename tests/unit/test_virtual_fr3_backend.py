@@ -153,7 +153,24 @@ class VirtualFR3BackendTests(unittest.TestCase):
 
     def test_cartesian_shortest_path_euler_interpolation(self):
         self.backend.connect()
-        # Verify rot_diff logic produces shortest path in [-180, +180]
+        snap_start = self.backend.get_state_snapshot()
+        cur_tcp = snap_start.tcp_pose_mm_deg
+
+        # Execute actual move_cartesian with small linear translation and rotation
+        target_tcp = [
+            cur_tcp[0] + 5.0,
+            cur_tcp[1],
+            cur_tcp[2],
+            cur_tcp[3],
+            cur_tcp[4],
+            cur_tcp[5] + 2.0,
+        ]
+        ok = self.backend.move_cartesian(target_tcp, speed_factor=100.0, samples=5)
+        self.assertTrue(ok)
+        snap_end = self.backend.get_state_snapshot()
+        self.assertAlmostEqual(snap_end.tcp_pose_mm_deg[5], target_tcp[5], delta=1.0)
+
+        # Verify mathematical wraparound behavior in [-180, +180]
         start_rot = [179.0, 0.0, 0.0]
         target_rot = [-179.0, 0.0, 0.0]
         rot_diff = [(t - s + 180.0) % 360.0 - 180.0 for s, t in zip(start_rot, target_rot)]
