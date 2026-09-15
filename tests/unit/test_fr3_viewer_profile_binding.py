@@ -73,6 +73,110 @@ class ViewerProfileBindingTests(unittest.TestCase):
         self.assertEqual(len(center_world), 3)
         self.assertEqual(center_world, [0.0, 0.05, 0.36])
 
+        grid_robot = placement.get("grid_origin_in_robot_base_m")
+        self.assertIsInstance(grid_robot, list)
+        self.assertEqual(len(grid_robot), 3)
+        self.assertEqual(grid_robot, [-0.18, -0.16, 0.05])
+
+        grid_world = placement.get("grid_origin_in_3d_world_m")
+        self.assertIsInstance(grid_world, list)
+        self.assertEqual(len(grid_world), 3)
+        self.assertEqual(grid_world, [0.16, 0.05, 0.18])
+
+        # Mathematical transformation consistency: R * p_robot_origin + t == p_world_origin
+        import numpy as np
+        R = np.array(rot, dtype=float)
+        t = np.array(trans, dtype=float)
+        p_robot_origin = np.array(grid_robot, dtype=float)
+        p_world_calc = R @ p_robot_origin + t
+        np.testing.assert_allclose(
+            p_world_calc,
+            np.array(grid_world, dtype=float),
+            atol=1e-6,
+            err_msg="R @ grid_origin_in_robot_base_m + t must equal grid_origin_in_3d_world_m",
+        )
+
+    def test_four_corners_and_all_cells_robot_to_world_parity(self):
+        """Verify mathematical parity between robot base and 3D viewer board points.
+
+        For all 4 corners and all 90 cells:
+        R @ p_robot(col, row) + t == p_viewer(col, row)
+        Error must be strictly < 1e-6 m (zero column mirroring).
+        """
+        import numpy as np
+
+        with open(self.scene_path, "r", encoding="utf-8") as f:
+            scene_data = json.load(f)
+
+        phys_path = _PROJECT_ROOT / "shared" / "physical_geometry.json"
+        with open(phys_path, "r", encoding="utf-8") as f:
+            phys_data = json.load(f)
+
+        rot = scene_data["robot_base_to_3d_world"]["rotation_matrix"]
+        trans = scene_data["robot_base_to_3d_world"]["translation_m"]
+        R = np.array(rot, dtype=float)
+        t = np.array(trans, dtype=float)
+
+        placement = scene_data["virtual_board_placement"]
+        grid_robot = np.array(placement["grid_origin_in_robot_base_m"], dtype=float)
+        center_world = np.array(placement["board_center_in_3d_world_m"], dtype=float)
+
+        col_spacing_m = phys_data["board"]["column_spacing"] / 1000.0  # 0.04m
+        row_spacing_m = phys_data["board"]["row_spacing"] / 1000.0     # 0.04m
+        cols = phys_data["board"]["columns"]                          # 9
+        rows = phys_data["board"]["rows"]                             # 10
+
+        playable_width_m = (cols - 1) * col_spacing_m                 # 0.32m
+        playable_depth_m = (rows - 1) * row_spacing_m                 # 0.36m
+
+        def robot_point(c: int, r: int) -> np.ndarray:
+            return np.array([
+                grid_robot[0] - r * row_spacing_m,
+                grid_robot[1] + c * col_spacing_m,
+                grid_robot[2],
+            ], dtype=float)
+
+        def viewer_point(c: int, r: int) -> np.ndarray:
+            origin_x = center_world[0] + playable_width_m / 2.0
+            origin_y = center_world[1]
+            origin_z = center_world[2] - playable_depth_m / 2.0
+            return np.array([
+                origin_x - c * col_spacing_m,
+                origin_y,
+                origin_z + r * row_spacing_m,
+            ], dtype=float)
+
+        corners = [
+            ("Top-Left (Col 0, Row 0 - Black Left Rook)", 0, 0),
+            ("Top-Right (Col 8, Row 0 - Black Right Rook)", 8, 0),
+            ("Bottom-Left (Col 0, Row 9 - Red Left Rook)", 0, 9),
+            ("Bottom-Right (Col 8, Row 9 - Red Right Rook)", 8, 9),
+        ]
+
+        for name, c, r in corners:
+            p_robot = robot_point(c, r)
+            p_world_from_robot = R @ p_robot + t
+            p_viewer = viewer_point(c, r)
+            err = np.linalg.norm(p_world_from_robot - p_viewer)
+            self.assertLess(
+                err,
+                1e-6,
+                f"Corner {name} mismatch: robot_transformed={p_world_from_robot}, viewer={p_viewer}, err={err}",
+            )
+
+        # Check all 90 cells
+        for r in range(rows):
+            for c in range(cols):
+                p_robot = robot_point(c, r)
+                p_world_from_robot = R @ p_robot + t
+                p_viewer = viewer_point(c, r)
+                err = np.linalg.norm(p_world_from_robot - p_viewer)
+                self.assertLess(
+                    err,
+                    1e-6,
+                    f"Cell ({c}, {r}) mismatch: robot_transformed={p_world_from_robot}, viewer={p_viewer}, err={err}",
+                )
+
     def test_node_js_binding_script_executes_successfully(self):
         js_test = _PROJECT_ROOT / "tests" / "unit" / "test_viewer_profile_binding.mjs"
         self.assertTrue(js_test.exists())

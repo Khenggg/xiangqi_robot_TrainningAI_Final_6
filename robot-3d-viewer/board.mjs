@@ -64,8 +64,11 @@ export function getActiveGeometry() {
 export function computeBoardOrigin(geometry = null) {
   const geo = geometry || getActiveGeometry();
   const placement = getScenePlacement();
+  // Under canonical rotation R, X_world = -Y_robot.
+  // Col 0 (Y_robot = -0.16m) maps to X_world = +0.16m (boardCenterX + playableWidthM / 2.0).
+  // Row 0 (X_robot = -0.18m) maps to Z_world = +0.18m (boardCenterZ - playableDepthM / 2.0).
   return new THREE.Vector3(
-    placement.boardCenterX - geo.playableWidthM / 2.0,
+    placement.boardCenterX + geo.playableWidthM / 2.0,
     placement.boardSurfaceY,
     placement.boardCenterZ - geo.playableDepthM / 2.0
   );
@@ -74,8 +77,10 @@ export function computeBoardOrigin(geometry = null) {
 export function boardPointToXYZ(col, row, geometry = null) {
   const geo = geometry || getActiveGeometry();
   const origin = computeBoardOrigin(geo);
+  // col increases (+Y in robot base) -> X_world decreases (-X direction)
+  // row increases (-X in robot base) -> Z_world increases (+Z direction)
   return new THREE.Vector3(
-    origin.x + col * geo.cellM,
+    origin.x - col * geo.cellM,
     origin.y,
     origin.z + row * geo.rowSpacingM
   );
@@ -106,7 +111,9 @@ function createBoardTexture(geometry = null) {
   const stepX = (canvas.width - paddingX * 2) / (geo.columns - 1);
   const stepY = (canvas.height - paddingY * 2) / (geo.rows - 1);
 
-  const getX = (col) => paddingX + col * stepX;
+  // Column 0 maps to X_world = +0.16m (right side of canvas, u ~ 1)
+  // Column 8 maps to X_world = -0.16m (left side of canvas, u ~ 0)
+  const getX = (col) => (canvas.width - paddingX) - col * stepX;
   const getY = (row) => paddingY + row * stepY;
 
   // 1. Vẽ 10 đường ngang (row 0 = Black side, row 9 = Red side)

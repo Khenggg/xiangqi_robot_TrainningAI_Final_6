@@ -18,7 +18,7 @@ Giao diện mô phỏng 3D Web-based và Digital Twin Mirror cho cánh tay robot
   - Cho phép chuyển đổi profile linh hoạt ngay trên giao diện web.
 - **Tích Hợp Scene Extrinsics & Transform Tọa Độ:**
   - Nạp cấu hình vị trí bàn cờ và robot từ `/shared/virtual_fr3_scene.json`.
-  - Thiết lập ma trận biến đổi tọa độ chân đế robot sang không gian Three.js ($X_{world}=Y_{robot}, Y_{world}=Z_{robot}, Z_{world}=-X_{robot}$), đảm bảo 100% tầm với bàn cờ.
+  - Thiết lập ma trận biến đổi tọa độ chân đế robot sang không gian Three.js ($X_{world}=-Y_{robot}, Y_{world}=+Z_{robot}, Z_{world}=-X_{robot}$), đảm bảo 100% tầm với bàn cờ và triệt tiêu mirror theo cột.
 - **WebSocket Live Mirroring:**
   - Đồng bộ góc khớp thời gian thực với robot thật hoặc Virtual FR3 Backend thông qua luồng WebSocket telemetry 30 FPS.
 - **Máy Chủ Tĩnh Bảo Mật (`serve.mjs`):**

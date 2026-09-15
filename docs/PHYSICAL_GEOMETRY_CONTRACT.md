@@ -132,27 +132,32 @@ Hệ thống vận hành theo chuỗi biến đổi tọa độ phân cấp rõ 
    - Đơn vị: Milimét ($mm$).
    - Gốc: Tâm đáy chân đế tay máy công nghiệp.
    - Quy ước: Trục $X$ robot hướng dọc theo chiều tăng của hàng (`row`), trục $Y$ robot hướng ngang theo chiều tăng của cột (`col`), trục $Z$ hướng thẳng đứng lên trên.
-4. **`3d_world`:**
+4. **`3d_world` (Three.js Virtual Simulation):**
    - Đơn vị: Mét ($m$).
-   - Gốc: $(0, 0, 0)$ tại chân đế robot ảo Three.js. Trục $X$ sang ngang bên phải robot, trục $Y$ hướng lên trên (Up-vector), trục $Z$ hướng về phía người xem.
-   - **Tâm bàn cờ ảo (Board Center):**
-     - `SIM_BOARD_CENTER_X = 0.48 m`
-     - `SIM_BOARD_CENTER_Z = 0.00 m`
-     - `SIM_BOARD_CENTER_Y = 0.00 m` (mặt phẳng bàn cờ)
+   - Gốc: $(0, 0, 0)$ tại chân đế robot ảo Three.js. Trục $X$ sang ngang bên phải robot, trục $Y$ hướng lên trên (Up-vector), trục $Z$ hướng về phía trước (bàn cờ).
+   - **Ma trận biến đổi từ robot base sang 3D world (Extrinsics Transform):**
+     $$R = \begin{bmatrix} 0 & -1 & 0 \\ 0 & 0 & 1 \\ -1 & 0 & 0 \end{bmatrix}, \quad \det(R) = +1.0, \quad \mathbf{t} = [0, 0, 0]^T$$
+     Ánh xạ trục: $X_{world} = -Y_{robot}$, $Y_{world} = +Z_{robot}$, $Z_{world} = -X_{robot}$.
+   - **Tâm bàn cờ ảo (Board Center in 3D World):**
+     - Nguồn chân lý: `shared/virtual_fr3_scene.json` (`board_center_in_3d_world_m`)
+     - $X = 0.00\text{ m}$, $Y = 0.05\text{ m}$, $Z = 0.36\text{ m}$
+     - Tương ứng trong `robot_base`: $X = -0.36\text{ m}$, $Y = 0.00\text{ m}$, $Z = 0.05\text{ m}$.
    - **Tọa độ của gốc lưới cờ $(col=0, row=0)$ trong `3d_world`:**
-     Vùng chơi có độ rộng playable $0.320\text{ m}$ (nửa rộng $0.160\text{ m}$) và chiều dài playable $0.360\text{ m}$ (nửa dài $0.180\text{ m}$). Tọa độ bất kỳ ô $(col, row)$ được tính bởi hàm chuẩn `boardPointToXYZ(col, row)`:
-     $$X_{3d} = SIM\_BOARD\_CENTER\_X - \frac{playableWidthM}{2} + col \times cellM = 0.48 - 0.16 + col \times 0.04$$
-     $$Z_{3d} = SIM\_BOARD\_CENTER\_Z - \frac{playableDepthM}{2} + row \times rowSpacingM = 0.00 - 0.18 + row \times 0.04$$
-     Do đó, điểm giao gốc $(col=0, row=0)$ (tương ứng Xe Đen Trái / Black Left Rook) nằm tại:
-     - $X = 0.48 - 0.16 = 0.32\text{ m}$
-     - $Z = 0.00 - 0.18 = -0.18\text{ m}$
-     Và điểm đối góc $(col=8, row=9)$ (Xe Đỏ Phải / Red Right Rook) nằm tại $(X = 0.64\text{ m}, Z = 0.18\text{ m})$.
+     Vùng chơi có độ rộng playable $0.320\text{ m}$ (nửa rộng $0.160\text{ m}$) và chiều dài playable $0.360\text{ m}$ (nửa dài $0.180\text{ m}$). Tọa độ bất kỳ ô $(col, row)$ được tính bởi hàm chuẩn `boardPointToXYZ(col, row)` trong `robot-3d-viewer/board.mjs`:
+     $$X_{3d}(col) = \text{boardCenterX} + \frac{playableWidthM}{2} - col \times cellM = 0.00 + 0.16 - col \times 0.04$$
+     $$Z_{3d}(row) = \text{boardCenterZ} - \frac{playableDepthM}{2} + row \times rowSpacingM = 0.36 - 0.18 + row \times 0.04$$
+     $$Y_{3d} = \text{boardSurfaceY} = 0.05\text{ m}$$
+     Tọa độ 4 góc bàn cờ trong `3d_world` (khớp tuyệt đối với $R \cdot \mathbf{p}_{robot} + \mathbf{t}$):
+     - $(col=0, row=0)$ (Xe Đen Trái / Black Left Rook): $(X = +0.16\text{ m}, Y = 0.05\text{ m}, Z = +0.18\text{ m})$
+     - $(col=8, row=0)$ (Xe Đen Phải / Black Right Rook): $(X = -0.16\text{ m}, Y = 0.05\text{ m}, Z = +0.18\text{ m})$
+     - $(col=0, row=9)$ (Xe Đỏ Trái / Red Left Rook): $(X = +0.16\text{ m}, Y = 0.05\text{ m}, Z = +0.54\text{ m})$
+     - $(col=8, row=9)$ (Xe Đỏ Phải / Red Right Rook): $(X = -0.16\text{ m}, Y = 0.05\text{ m}, Z = +0.54\text{ m})$
 
 ### 4.2. Làm Rõ Về Tọa Độ Gốc và Tâm Bàn Cờ (Origin vs. Center Clarification):
 > [!IMPORTANT]
 > Cần phân biệt rõ ràng giữa **Tâm bàn cờ (Board Center)** và **Gốc lưới cờ (Grid Origin)**:
-> 1. Trong `robot-3d-viewer/board.mjs`, tâm bàn cờ ảo được đặt tại $(X = 0.48\text{ m}, Z = 0.00\text{ m})$.
-> 2. Điểm $(X = 0.32\text{ m}, Z = -0.18\text{ m})$ là **tọa độ của gốc lưới $(col=0, row=0)$** trong không gian 3D, hoàn toàn không phải là tâm bàn cờ.
+> 1. Trong `shared/virtual_fr3_scene.json` và `robot-3d-viewer/board.mjs`, tâm bàn cờ ảo được đặt tại $(X = 0.00\text{ m}, Y = 0.05\text{ m}, Z = 0.36\text{ m})$.
+> 2. Điểm $(X = +0.16\text{ m}, Y = 0.05\text{ m}, Z = +0.18\text{ m})$ là **tọa độ của gốc lưới $(col=0, row=0)$** trong không gian 3D, hoàn toàn không phải là tâm bàn cờ.
 > 3. Trong `config.py` ($X=200, Y=-100$) và điểm dạy robot thật R1 ($X=350.2, Y=-180.5$), đây là các tọa độ ngoại tại (extrinsic mounting pose) của gốc $(col=0, row=0)$ trong hệ trục của chân đế robot thật (`robot_base`), tách rời hoàn toàn khỏi hình học nội tại.
 
 

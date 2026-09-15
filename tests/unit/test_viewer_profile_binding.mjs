@@ -78,5 +78,110 @@ assert.ok(
 );
 assert.deepEqual(boardCenterWorld, [0.0, 0.05, 0.36]);
 
+const gridOriginRobot = sceneData?.virtual_board_placement?.grid_origin_in_robot_base_m;
+assert.ok(
+  Array.isArray(gridOriginRobot) && gridOriginRobot.length === 3 && gridOriginRobot.every(Number.isFinite),
+  "grid_origin_in_robot_base_m must be array of 3 finite numbers"
+);
+assert.deepEqual(gridOriginRobot, [-0.18, -0.16, 0.05]);
+
+const gridOriginWorld = sceneData?.virtual_board_placement?.grid_origin_in_3d_world_m;
+assert.ok(
+  Array.isArray(gridOriginWorld) && gridOriginWorld.length === 3 && gridOriginWorld.every(Number.isFinite),
+  "grid_origin_in_3d_world_m must be array of 3 finite numbers"
+);
+assert.deepEqual(gridOriginWorld, [0.16, 0.05, 0.18]);
+
+// Verify mathematical transformation identity: R * p_robot_origin + t == p_world_origin
+const trans = sceneData?.robot_base_to_3d_world?.translation_m || [0.0, 0.0, 0.0];
+function transformPoint(p) {
+  return [
+    rot[0][0] * p[0] + rot[0][1] * p[1] + rot[0][2] * p[2] + trans[0],
+    rot[1][0] * p[0] + rot[1][1] * p[1] + rot[1][2] * p[2] + trans[1],
+    rot[2][0] * p[0] + rot[2][1] * p[1] + rot[2][2] * p[2] + trans[2],
+  ];
+}
+
+const computedWorldOrigin = transformPoint(gridOriginRobot);
+for (let i = 0; i < 3; i++) {
+  assert.ok(
+    Math.abs(computedWorldOrigin[i] - gridOriginWorld[i]) < 1e-6,
+    `R * grid_origin_in_robot_base_m must equal grid_origin_in_3d_world_m at idx ${i}: computed=${computedWorldOrigin[i]}, expected=${gridOriginWorld[i]}`
+  );
+}
+
+// 3. Test 4-Corner Robot-to-Viewer Parity (No Column Mirroring)
+// Physical geometry: 40mm spacing, 9 cols x 10 rows
+const physPath = path.resolve(repoRoot, "shared", "physical_geometry.json");
+const physData = JSON.parse(fs.readFileSync(physPath, "utf-8"));
+const colSpacingM = physData.board.column_spacing / 1000.0; // 0.04m
+const rowSpacingM = physData.board.row_spacing / 1000.0;   // 0.04m
+const playableWidthM = (physData.board.columns - 1) * colSpacingM; // 0.32m
+const playableDepthM = (physData.board.rows - 1) * rowSpacingM;   // 0.36m
+
+// Viewer formula from board.mjs:
+// origin = Vector3(boardCenterX + playableWidthM / 2.0, boardSurfaceY, boardCenterZ - playableDepthM / 2.0)
+// point = Vector3(origin.x - col * cellM, origin.y, origin.z + row * rowSpacingM)
+function viewerPointToXYZ(col, row) {
+  const originX = boardCenterWorld[0] + playableWidthM / 2.0; // +0.16m
+  const originY = boardCenterWorld[1];                         // 0.05m
+  const originZ = boardCenterWorld[2] - playableDepthM / 2.0; // +0.18m
+  return [
+    originX - col * colSpacingM,
+    originY,
+    originZ + row * rowSpacingM,
+  ];
+}
+
+// Robot base formula:
+// x0 = -0.18 (Row 0), row increases along -X -> x = x0 - row * 0.04
+// y0 = -0.16 (Col 0), col increases along +Y -> y = y0 + col * 0.04
+// z0 = 0.05
+function robotBasePointToXYZ(col, row) {
+  return [
+    gridOriginRobot[0] - row * rowSpacingM,
+    gridOriginRobot[1] + col * colSpacingM,
+    gridOriginRobot[2],
+  ];
+}
+
+const fourCorners = [
+  { name: "Top-Left (Col 0, Row 0 - Black Left Rook)", col: 0, row: 0 },
+  { name: "Top-Right (Col 8, Row 0 - Black Right Rook)", col: 8, row: 0 },
+  { name: "Bottom-Left (Col 0, Row 9 - Red Left Rook)", col: 0, row: 9 },
+  { name: "Bottom-Right (Col 8, Row 9 - Red Right Rook)", col: 8, row: 9 },
+];
+
+for (const corner of fourCorners) {
+  const pRobot = robotBasePointToXYZ(corner.col, corner.row);
+  const pWorldFromRobot = transformPoint(pRobot);
+  const pViewer = viewerPointToXYZ(corner.col, corner.row);
+
+  for (let ax = 0; ax < 3; ax++) {
+    const diff = Math.abs(pWorldFromRobot[ax] - pViewer[ax]);
+    assert.ok(
+      diff < 1e-6,
+      `Corner ${corner.name} axis ${ax} mismatch: robot_transformed=${pWorldFromRobot[ax]}, viewer=${pViewer[ax]}, diff=${diff}`
+    );
+  }
+}
+
+// Check all 90 intersections (9 cols x 10 rows)
+for (let r = 0; r < 10; r++) {
+  for (let c = 0; c < 9; c++) {
+    const pRobot = robotBasePointToXYZ(c, r);
+    const pWorldFromRobot = transformPoint(pRobot);
+    const pViewer = viewerPointToXYZ(c, r);
+    for (let ax = 0; ax < 3; ax++) {
+      const diff = Math.abs(pWorldFromRobot[ax] - pViewer[ax]);
+      assert.ok(
+        diff < 1e-6,
+        `Cell (col=${c}, row=${r}) axis ${ax} mismatch: diff=${diff}`
+      );
+    }
+  }
+}
+
+console.log("  [PASS] 4 corners and all 90 cells match R * p_robot + t == p_viewer (error < 1e-6 m).");
 console.log("  [PASS] virtual_fr3_scene.json successfully binds to viewer scene transform.");
 console.log("ALL VIEWER INTEGRATION CHECKS PASSED SUCCESSFULLY!");
