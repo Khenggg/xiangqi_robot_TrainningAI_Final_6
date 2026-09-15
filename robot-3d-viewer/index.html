@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FR3/FR5 · 3D Live Mirror</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.176.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.176.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app">
+      <header id="hud">
+        <label>
+          Robot:
+          <select id="robotSelect">
+            <option value="fr3">FAIRINO FR3</option>
+            <option value="fr5" selected>FAIRINO FR5</option>
+          </select>
+        </label>
+        <label>
+          WebSocket:
+          <input id="wsUrl" type="text" value="ws://127.0.0.1:8765" size="26" />
+        </label>
+        <button id="liveBtn">Connect live</button>
+        <span id="liveState">OFFLINE</span>
+        <span id="jointsReadout"></span>
+      </header>
+      <canvas id="scene"></canvas>
+    </div>
+    <script type="module" src="./main.mjs"></script>
+  </body>
+</html>

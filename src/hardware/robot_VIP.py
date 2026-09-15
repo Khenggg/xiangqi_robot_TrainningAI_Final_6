@@ -22,6 +22,11 @@ except ImportError:
     print("LỖI: Không tìm thấy module 'robot_sdk_core'...")
     robot_sdk_core = None
 
+try:
+    from src.hardware.telemetry_publisher import TelemetryPublisher
+except ImportError:
+    TelemetryPublisher = None
+
 
 class FR5Robot:
     def __init__(self, ip=None):
@@ -45,6 +50,7 @@ class FR5Robot:
 
         # Kích thước ô cờ (mm), mặc định theo config, tự động cập nhật khi load teaching points
         self.auto_cell_sizes = {"x": config.CELL_SIZE_X, "y": config.CELL_SIZE_Y}
+        self.telemetry = TelemetryPublisher.get_instance() if TelemetryPublisher else None
 
     # -------------------------------------------------------------------------
     # SET MA TRẬN TỪ NGOÀI
@@ -61,8 +67,11 @@ class FR5Robot:
 
     def connect(self):
         if self.dry:
-            print("[ROBOT] DRY RUN — không kết nối thực tế")
+            print("[ROBOT] 🚀 DRY RUN — Khởi động Virtual Robot Simulator (WebSocket ws://127.0.0.1:8765)...")
+            if self.telemetry:
+                self.telemetry.start()
             self.connected = True
+            self._load_teaching_points()
             return
 
         if robot_sdk_core is None:
@@ -95,9 +104,24 @@ class FR5Robot:
     
     def _load_teaching_points(self):
         """Đọc teaching points R1, R2, R3, R4 để tính toán Bilinear Interpolation."""
-        if not self.connected or self.dry:
+        if not self.connected:
             return
         
+        if self.dry:
+            print("[ROBOT] 📍 DRY RUN: Khởi tạo tọa độ tham chiếu chuẩn (R1, R2, R3, R4, R_Trash)...")
+            self.teaching_points = {
+                "R1": {"pose": [350.2, -180.5, 52.0, 180.0, 0.0, 0.0], "joints": [-27.2, -45.0, 85.0, -130.0, -90.0, 0.0]},
+                "R2": {"pose": [350.0, 180.1, 52.0, 180.0, 0.0, 0.0], "joints": [27.2, -45.0, 85.0, -130.0, -90.0, 0.0]},
+                "R3": {"pose": [750.1, 180.1, 51.8, 180.0, 0.0, 0.0], "joints": [13.5, -15.0, 60.0, -135.0, -90.0, 0.0]},
+                "R4": {"pose": [750.3, -180.2, 51.9, 180.0, 0.0, 0.0], "joints": [-13.5, -15.0, 60.0, -135.0, -90.0, 0.0]},
+                "R_Trash": {"pose": [520.0, -320.0, 120.0, 180.0, 0.0, -45.0], "joints": [-31.6, -30.0, 75.0, -135.0, -90.0, -13.4]}
+            }
+            self._calculate_cell_sizes_from_corners()
+            if self.telemetry:
+                self.telemetry.update_pose_immediate([420.0, 0.0, 280.0, 180.0, 0.0, 0.0])
+            print(f"[ROBOT] ✅ Đã khởi tạo {len(self.teaching_points)} teaching points ảo.")
+            return
+
         print("[ROBOT] 📍 Đang load teaching points...")
         
         # Load 4 góc bàn cờ (bắt buộc)

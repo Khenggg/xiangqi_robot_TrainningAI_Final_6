@@ -54,10 +54,26 @@ class InputHandler:
                         self.state.selected_pos = None
 
     def handle_keyboard(self, key):
+        import pygame  # type: ignore
+
+        # G KEY: Test Gripper Tool DO0 (Bật 3s rồi Tắt)
+        if key == pygame.K_g:
+            self._handle_gripper_test(do_id=0)
+            return
+
+        # H KEY: Test Gripper Tool DO1 (Bật 3s rồi Tắt)
+        elif key == pygame.K_h:
+            self._handle_gripper_test(do_id=1)
+            return
+
+        # I KEY: Lấy dữ liệu & Kiểm tra kết nối từ Robot FR3
+        elif key == pygame.K_i:
+            self._handle_robot_info()
+            return
+
         if self.state.allow_mouse_move or self.state.game_over or self.state.turn != "r":
             return
 
-        import pygame  # type: ignore
         # Z KEY: Rollback
         if key == pygame.K_z:
             self.state.handle_rollback(self.hw)
@@ -65,6 +81,56 @@ class InputHandler:
         # SPACE KEY: Trigger YOLO Detection
         elif key == pygame.K_SPACE:
             self._handle_space_key()
+
+    def _handle_gripper_test(self, do_id=0):
+        if not self.hw.robot or not self.hw.robot.connected:
+            print("[GRIPPER TEST] ❌ Robot chưa kết nối!")
+            self.state.set_status("❌ Robot chưa kết nối!", color=(180, 0, 0), duration=3.0)
+            return
+
+        import threading
+        def _worker():
+            print(f"\n[GRIPPER TEST] 🔧 Đang test kích hoạt Tool DO{do_id}...")
+            self.state.set_status(f"🔧 Test Tool DO{do_id}: ON (3s)...", color=(0, 150, 0), duration=3.0)
+            try:
+                print(f"[GRIPPER TEST] 🔴 SetToolDO({do_id}, status=1) - BẬT KẸP")
+                err1 = self.hw.robot.robot.SetToolDO(do_id, 1, block=1)
+                print(f"[GRIPPER TEST]    Kết quả lệnh: err={err1} (0 là robot đã nhận)")
+                time.sleep(3.0)
+                print(f"[GRIPPER TEST] 🟢 SetToolDO({do_id}, status=0) - TẮT KẸP")
+                err0 = self.hw.robot.robot.SetToolDO(do_id, 0, block=1)
+                print(f"[GRIPPER TEST]    Kết quả lệnh: err={err0}")
+                self.state.set_status(f"✅ Test Tool DO{do_id} xong!", color=(0, 100, 180), duration=3.0)
+            except Exception as e:
+                print(f"[GRIPPER TEST] ❌ Lỗi test Tool DO{do_id}: {e}")
+                self.state.set_status(f"❌ Lỗi DO{do_id}: {e}", color=(180, 0, 0), duration=3.0)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _handle_robot_info(self):
+        if not self.hw.robot or not self.hw.robot.connected:
+            print("[ROBOT INFO] ❌ Robot chưa kết nối!")
+            self.state.set_status("❌ Robot chưa kết nối!", color=(180, 0, 0), duration=3.0)
+            return
+
+        try:
+            r = self.hw.robot.robot
+            print("\n" + "="*50)
+            print("🤖 [THÔNG TIN TRẠNG THÁI TỪ ROBOT FAIRINO FR3]")
+            print(f"  - IP Robot: {self.hw.robot.ip}")
+            print(f"  - Trạng thái SDK: {'✅ ĐANG KẾT NỐI TỐT' if self.hw.robot.connected else '❌ MẤT KẾT NỐI'}")
+            err, ip = r.GetControllerIP()
+            if err == 0:
+                print(f"  - Controller IP phản hồi: {ip}")
+            err, tp = r.GetRobotTeachingPoint("HOMECHESS")
+            if err == 0:
+                print(f"  - Tọa độ HOMECHESS đọc từ Controller: X={float(tp[0]):.1f}, Y={float(tp[1]):.1f}, Z={float(tp[2]):.1f}")
+            print(f"  - Cổng kẹp đang cấu hình trong code: Tool DO{self.hw.robot.gripper_do_id}")
+            print("="*50 + "\n")
+            self.state.set_status("✅ Đã lấy thông số từ Robot (Xem Terminal)", color=(0, 100, 180), duration=4.0)
+        except Exception as e:
+            print(f"[ROBOT INFO] ❌ Lỗi đọc dữ liệu: {e}")
+            self.state.set_status(f"❌ Lỗi đọc Robot: {e}", color=(180, 0, 0), duration=3.0)
 
     def _handle_space_key(self):
         print("\n[SPACE] 🎯 Người chơi bấm SPACE — đang chụp T2 snapshot...")
