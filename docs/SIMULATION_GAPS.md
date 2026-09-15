@@ -35,10 +35,13 @@
 
 ### SIM-GAP-004: Mâu Thuẫn và Trùng Lặp Khai Báo Kích Thước Hình Học Bàn Cờ
 - **Severity:** **HIGH**
-- **Status:** **RESOLVED IN P1**
-- **Evidence:** Kích thước bàn cờ và bước lưới bị phân tán và tính toán sai lệch giữa Python, JS, và teaching points.
+- **Status:** **PARTIALLY RESOLVED IN P1 (Virtual Board ↔ Robot Placement Deferred to P2)**
+- **Evidence:** Kích thước bàn cờ và bước lưới từng bị phân tán và tính toán sai lệch giữa Python, JS, và teaching points.
 - **Impact:** Sai số tích lũy giữa các module khiến vị trí gắp đặt ảo không khớp chính xác với tâm giao điểm bàn cờ 3D.
-- **Resolution in P1:** Xác lập `shared/physical_geometry.json` làm nguồn chân lý duy nhất (Single Source of Truth) cho kích thước vật lý đo đạc ($367 \times 410\text{ mm}$, ô $40 \times 40\text{ mm}$, quân $\varnothing 22.5 \times 9.43\text{ mm}$). Tạo `src/domain/geometry.py` kế thừa JSON và tính toán các giá trị phái sinh ($320 \times 360\text{ mm}$, lề $23.5\text{ mm}$ và $25.0\text{ mm}$). Cập nhật `config.py` làm alias tương thích ngược và `robot-3d-viewer/geometry.mjs` nạp động qua endpoint an toàn `/shared/physical_geometry.json`.
+- **Resolution in P1 & P2 Roadmap:** 
+  - **Đã giải quyết trong P1 (Hình học nội tại):** Xác lập `shared/physical_geometry.json` làm nguồn chân lý duy nhất (Single Source of Truth) cho kích thước vật lý đo đạc ($367 \times 410\text{ mm}$, ô $40 \times 40\text{ mm}$, quân $\varnothing 22.5 \times 9.43\text{ mm}$). Tạo `src/domain/geometry.py` kế thừa JSON và tính toán các giá trị phái sinh ($320 \times 360\text{ mm}$, lề $23.5\text{ mm}$ và $25.0\text{ mm}$). Cập nhật `config.py` làm alias tương thích ngược và `robot-3d-viewer/geometry.mjs` nạp động qua endpoint an toàn `/shared/physical_geometry.json`.
+  - **Còn tồn đọng cần giải quyết trong P2 (Vị trí ngoại tại):** Các điểm dạy dry-run R1-R4 trong `robot_VIP.py` và hàm `_calculate_cell_sizes_from_corners()` vẫn đang dựa trên các tọa độ commissioning cũ (tính ra $44.45\text{ mm}$ và $45.08\text{ mm}$). Việc chuẩn hóa vị trí gắn kết bàn cờ ảo so với chân đế robot (`robot_base` ↔ `3d_world`) và calibration điểm dạy ảo sẽ được thực hiện đồng bộ trong **Phase P2** (Virtual FR3 Backend & Placement Calibration).
+
 
 ---
 

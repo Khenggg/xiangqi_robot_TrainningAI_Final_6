@@ -29,7 +29,7 @@ Tài liệu này xác lập bản kiểm toán toàn diện (Audit Baseline) và
 | **Robot Model trong Simulator** | Chỉ có `FR5Kinematics` trong Python; `telemetry_publisher.py` phát cứng `robot_model: "FR5"`. Chưa có kinematics cho FR3. | **CRITICAL GAP** |
 | **3D Viewer Model Selection** | Có STL mesh và URDF cho cả FR3 và FR5 trong `robot-3d-viewer/assets/`. Tuy nhiên nếu chọn FR3 trong giao diện, `live_state.mjs` sẽ reject toàn bộ packet từ Python vì mismatch `robot_model`. | **CRITICAL GAP** |
 | **Thao tác Robot trong DRY_RUN** | Trong `robot_VIP.py`, các lệnh di chuyển chỉ `print` và `time.sleep(0.2)`, KHÔNG phát animation telemetry. Trong `main.py`, khi `DRY_RUN=True`, lệnh `hw.robot.move_piece()` bị bỏ qua hoàn toàn. | **CRITICAL GAP** |
-| **Quy ước Bàn cờ (Board Convention)** | `board.mjs` định nghĩa `START_LAYOUT` với **Red ở row 0, Black ở row 9**, ngược hoàn toàn với quy ước chuẩn của dự án (`PROJECT_CONTEXT.md`: Black ở row 0..4, Red ở row 5..9). | **CRITICAL GAP** |
+| **Quy ước Bàn cờ (Board Convention)** | Tại baseline P0 (`4109106`), `board.mjs` định nghĩa `START_LAYOUT` với **Red ở row 0, Black ở row 9**, ngược quy ước chuẩn của dự án. <br>**[ĐÃ KHẮC PHỤC TRONG P1]**: Chuẩn hóa qua `layout.mjs` với Black row 0..4 (Tướng tại 4,0), Red row 5..9 (Tướng tại 4,9). | **RESOLVED IN P1** (Trước đó là CRITICAL GAP) |
 | **Cập nhật Quân cờ 3D** | Quân cờ chỉ được vẽ tĩnh lúc load trang (`buildPieces()`). Không có cơ chế nhận trạng thái bàn cờ qua WebSocket, không có liên kết với gripper. Hàm `movePieceTo()` chỉ teleport tức thời và chưa từng được gọi trong runtime. | **HIGH GAP** |
 | **Hiển thị Gripper 3D** | Packet telemetry có trường `"gripper": true/false`, nhưng `main.mjs` hoàn toàn không có mesh đầu kẹp và không xử lý trường này. | **MEDIUM GAP** |
 | **Python Dependencies** | `telemetry_publisher.py` import `websockets`, nhưng `requirements.txt` KHÔNG khai báo dependency `websockets`. | **HIGH GAP** |
@@ -208,7 +208,7 @@ Bảng tổng hợp đối chiếu tất cả các nguồn khai báo hình học
 | **Grid Spacing Y**| `40.0 mm` | $410/9 \approx 45.5\text{ mm}$ (Canvas cũ) | $400.1 / 9 = 44.45\text{ mm}$ | `40.0 mm` | **CÓ** (Nguồn 2 cũ & 3 lệch) | `shared/physical_geometry.json` |
 | **Piece Diameter**| `22.5 mm` | `22.5 mm` (`0.0225 m`) | N/A | `22.5 mm` | Không | `shared/physical_geometry.json` |
 | **Piece Height** | `9.43 mm` | `9.43 mm` (`0.00943 m`)| N/A | `9.43 mm` | Không | `shared/physical_geometry.json` |
-| **Board Origin** | $X=200, Y=-100$ | $X=0.32, Z=-0.18$ | R1: $X=350.2, Y=-180.5$ | R1: $(col=0, row=0)$ | **Phân tách theo Frame** | `shared/physical_geometry.json` + Extrinsics |
+| **Board Origin** | $X=200, Y=-100$ | Center: $(0.48, 0.0)\text{ m}$<br>Grid (0,0): $(0.32, -0.18)\text{ m}$ | R1: $X=350.2, Y=-180.5$ | R1: $(col=0, row=0)$ | **Phân tách theo Frame** | `shared/physical_geometry.json` + Extrinsics |
 | **Safe Z** | `290.0 mm` | N/A | $Z=52.0\text{ mm}$ (Mặt bàn) | `210.0 mm` / `290.0 mm` | **CÓ** | `config.py` / `RobotProfile` |
 | **Pick Z** | `190.0 mm` | N/A | N/A | `185.0 mm` / `190.0 mm` | **CÓ** | `config.py` / `RobotProfile` |
 | **Place Z** | `195.0 mm` | N/A | N/A | `190.0 mm` / `195.0 mm` | **CÓ** | `config.py` / `RobotProfile` |
@@ -229,11 +229,11 @@ Bảng tổng hợp đối chiếu tất cả các nguồn khai báo hình học
 
 > [!IMPORTANT]
 > **LÀM RÕ TỌA ĐỘ GỐC GIỮA CÁC HỆ QUY CHIẾU (COORDINATE ORIGIN CLARIFICATION):**
-> Các giá trị tọa độ gốc khác nhau giữa `config.py` ($X=200, Y=-100$), `robot-3d-viewer` ($X=0.32, Z=-0.18$), và điểm dạy robot R1 ($X=350.2, Y=-180.5$) **KHÔNG PHẢI LÀ MÂU THUẪN HÌNH HỌC**, mà là các hệ quy chiếu (coordinate frames) khác nhau:
+> Các giá trị tọa độ gốc khác nhau giữa `config.py` ($X=200, Y=-100$), `robot-3d-viewer`, và điểm dạy robot R1 ($X=350.2, Y=-180.5$) **KHÔNG PHẢI LÀ MÂU THUẪN HÌNH HỌC**, mà là các hệ quy chiếu (coordinate frames) khác nhau:
 > - `board_grid`: Gốc quy ước $(col=0, row=0)$ tại giao điểm Xe Đen Trái.
 > - `board_metric_mm`: Gốc nội tại $(0.0, 0.0)\text{ mm}$ tại giao điểm $(col=0, row=0)$.
 > - `robot_base`: Gốc tại tâm chân đế robot thật. Tọa độ R1 là vị trí lắp đặt ngoại tại (extrinsic mounting pose) của bàn cờ trong không gian làm việc của robot.
-> - `3d_world`: Gốc tại chân đế robot ảo Three.js. Giá trị $(X=0.32\text{ m}, Z=-0.18\text{ m})$ là vị trí đặt trực quan mô phỏng (simulation placement), tách rời khỏi kích thước vật lý nội tại.
+> - `3d_world`: Gốc tại chân đế robot ảo Three.js. Tâm bàn cờ ảo được đặt tại vị trí mô phỏng $(X = 0.48\text{ m}, Z = 0.00\text{ m})$, từ đó gốc lưới cờ $(col=0, row=0)$ nằm tại $(X = 0.32\text{ m}, Z = -0.18\text{ m})$.
 
 
 ---
@@ -271,7 +271,7 @@ Dự án hiện diện 7 hệ tọa độ khác nhau. Bảng dưới đây đị
 4. **`robot_base` (Hệ tọa độ gốc Robot):**
    - Đơn vị: Milimét ($mm$).
    - Gốc: Tâm đáy chân đế tay máy Fairino.
-   - Quy ước trục: Trục $X$ hướng về phía trước robot (dọc theo `row` bàn cờ), Trục $Y$ hướng sang trái/phải robot (ngang theo `col` bàn cờ), Trục $Z$ hướng thẳng đứng lên trời.
+   - Quyước trục: Trục $X$ hướng về phía trước robot (dọc theo `row` bàn cờ), Trục $Y$ hướng sang trái/phải robot (ngang theo `col` bàn cờ), Trục $Z$ hướng thẳng đứng lên trời.
    - Sở hữu: Robot Controller / `robot_VIP.py`.
 5. **`tool / TCP`:**
    - Đơn vị: Milimét ($mm$) và độ ($deg$).
@@ -279,19 +279,25 @@ Dự án hiện diện 7 hệ tọa độ khác nhau. Bảng dưới đây đị
    - Sở hữu: `robot_VIP.py`.
 6. **`3d_world` (Three.js World Frame):**
    - Đơn vị: Mét ($m$).
-   - Gốc: $(0, 0, 0)$ tại chân đế robot ảo. Trục $X$ sang ngang, Trục $Y$ hướng lên trên (Up-vector), Trục $Z$ hướng về phía người xem.
-   - Sở hữu: `robot-3d-viewer/main.mjs`.
+   - Gốc: $(0, 0, 0)$ tại chân đế robot ảo. Trục $X$ sang ngang bên phải, Trục $Y$ hướng lên trên (Up-vector), Trục $Z$ hướng về phía người xem.
+   - Bàn cờ ảo được đặt với tâm tại $(X = 0.48\text{ m}, Z = 0.00\text{ m})$; gốc lưới cờ $(col=0, row=0)$ [Xe Đen Trái] nằm tại $(X = 0.32\text{ m}, Z = -0.18\text{ m})$.
+   - Sở hữu: `robot-3d-viewer/main.mjs`, `board.mjs`.
 
 ---
 
 ## 9. BOARD & PIECE AUDIT
 
-### 9.1. Lỗi Đảo Ngược Phe Cờ (Red/Black Inversion Bug):
-Trong `robot-3d-viewer/board.mjs` (dòng 161–171), mảng `START_LAYOUT` bố trí:
+### 9.1. Lỗi Đảo Ngược Phe Cờ (Red/Black Inversion Bug) [RESOLVED IN P1]:
+
+> [!NOTE]
+> **TRẠNG THÁI HIỆN TẠI (P1 RESOLUTION):** Lỗi này đã được giải quyết dứt điểm trong Phase P1 thông qua module `robot-3d-viewer/layout.mjs`. Bố trí hiện tại hoàn toàn đồng bộ với backend: Black ở `row=0..4` (Tướng Đen tại `col=4, row=0`), Red ở `row=5..9` (Tướng Đỏ tại `col=4, row=9`).
+
+*Bối cảnh kiểm toán ban đầu tại baseline P0 (HEAD `4109106`):*  
+Trước đây, trong `robot-3d-viewer/board.mjs` cũ (dòng 161–171), mảng `START_LAYOUT` từng bố trí:
 - Hàng 0 đến 3: Quân **Đỏ (`r`)** (Ví dụ `[4, 0, "k", "r"]` = Tướng Đỏ ở `row=0`).
 - Hàng 6 đến 9: Quân **Đen (`b`)** (Ví dụ `[4, 9, "k", "b"]` = Tướng Đen ở `row=9`).
 
-**MÂU THUẪN NGHIÊM TRỌNG:** Toàn bộ backend (`PROJECT_CONTEXT.md`, `xiangqi.py`, `fen_utils.py`, `config.py`) đều quy ước:
+**MÂU THUẪN NGHIÊM TRỌNG TRƯỚC ĐÂY:** Toàn bộ backend (`PROJECT_CONTEXT.md`, `xiangqi.py`, `fen_utils.py`, `config.py`) đều quy ước:
 - **`row = 0..4`:** Phe **Đen (Robot Black)**.
 - **`row = 5..9`:** Phe **Đỏ (Người chơi Red)**.
 - Khi robot AI đi nước cờ quân Đen mở màn (ví dụ Mã đen `(1,0) -> (2,2)`), nếu áp vào viewer thì nó lại trở thành di chuyển quân Đỏ của người!

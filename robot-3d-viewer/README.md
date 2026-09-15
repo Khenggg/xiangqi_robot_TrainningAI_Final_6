@@ -1,66 +1,77 @@
-# FR3/FR5 · 3D Live Mirror (project mới, độc lập)
+# Xiangqi Robot · 3D Digital Twin Viewer (FR3 / FR5)
 
-Project tối giản chỉ làm đúng 1 việc: hiển thị mô hình 3D tay robot FR3/FR5
-và **mirror theo robot thật** qua WebSocket telemetry. Không có IDE Python,
-không Firebase, không cờ tướng — bạn tự thêm phần đó vào sau nếu cần.
+Giao diện mô phỏng 3D Web-based và Digital Twin Mirror cho cánh tay robot công nghiệp FAIRINO FR3 và FR5 trong hệ thống Robot Đánh Cờ Tướng (Xiangqi Robot).
 
-## Cấu trúc
+---
+
+## 1. Tính Năng Chính
+
+- **Bàn Cờ & 32 Quân Cờ 3D Chuẩn Hóa:**
+  - Hiển thị đầy đủ bàn cờ và 32 quân cờ với texture chữ Hán truyền thống (KaiTi/STKaiti).
+  - Quy ước chuẩn hóa toàn dự án: Phe **Đen (Robot)** ở `row 0..4` (Tướng Đen tại `(col=4, row=0)`), Phe **Đỏ (Người chơi)** ở `row 5..9` (Tướng Đỏ tại `(col=4, row=9)`).
+- **Tiêu Thụ Hình Học Vật Lý Chuẩn (Canonical Geometry):**
+  - Tự động nạp động thông số hình học từ `/shared/physical_geometry.json` qua `geometry.mjs`.
+  - Không trùng lặp hằng số vật lý; quy đổi chính xác từ milimét ($mm$) sang mét Three.js ($m$): bàn $367 \times 410\text{ mm}$, ô $40 \times 40\text{ mm}$, quân $\varnothing 22.5 \times 9.43\text{ mm}$.
+- **Hỗ Trợ Đa Dòng Robot (FR3 & FR5):**
+  - Nạp mesh STL chi tiết cho cả 2 dòng robot FAIRINO FR3 (sải tay $520\text{ mm}$) và FR5 (sải tay $820\text{ mm}$).
+  - Cho phép chuyển đổi profile linh hoạt ngay trên giao diện web.
+- **WebSocket Live Mirroring:**
+  - Đồng bộ góc khớp thời gian thực với robot thật hoặc Virtual Backend thông qua luồng WebSocket telemetry.
+- **Máy Chủ Tĩnh Bảo Mật (`serve.mjs`):**
+  - Chạy local không cần cài đặt nặng.
+  - Endpoint whitelist kiểm soát chặt chẽ truy cập `/shared/physical_geometry.json`, ngăn chặn hoàn toàn tấn công Directory Traversal.
+
+---
+
+## 2. Cấu Trúc Thư Mục
 
 ```
 robot-3d-viewer/
-├── index.html        # giao diện: canvas 3D + chọn robot + nút Connect live
-├── styles.css
-├── main.mjs           # toàn bộ logic: dựng robot STL, WebSocket, animation
-├── live_state.mjs     # validate gói tin telemetry (copy từ project gốc)
-├── serve.mjs          # static server chạy local
+├── index.html        # Giao diện chính: Canvas Three.js + bảng điều khiển kết nối/profile
+├── styles.css        # Giao diện tối hiện đại, responsive
+├── main.mjs          # Entrypoint Three.js: Quản lý Scene, Lights, Loop, Robot kinematics
+├── geometry.mjs      # Module tải & validate hình học vật lý từ shared/physical_geometry.json
+├── layout.mjs        # Khởi tạo vị trí ban đầu 32 quân cờ (Black row 0..4, Red row 5..9)
+├── board.mjs         # Dựng mesh bàn cờ, lưới ô cờ, quân cờ và hàm map tọa độ boardPointToXYZ
+├── live_state.mjs    # Bộ lọc và validate gói tin telemetry WebSocket
+├── serve.mjs         # Static HTTP server local có bảo vệ traversal và whitelist
 └── assets/
-    ├── fr3_v6/        # mesh STL + urdf tham khảo của FR3
-    └── fr5_v6/        # mesh STL + urdf tham khảo của FR5
+    ├── fr3_v6/       # Mesh STL và URDF của FAIRINO FR3
+    └── fr5_v6/       # Mesh STL và URDF của FAIRINO FR5
 ```
 
-## Chạy thử
+---
 
+## 3. Hướng Dẫn Khởi Chạy
+
+### Yêu cầu:
+- [Node.js](https://nodejs.org/) (phiên bản 18+).
+
+### Chạy máy chủ:
 ```bash
-node serve.mjs
+node serve.mjs [port]
+# Mặc định mở port 8080 nếu không chỉ định
 ```
 
-Mở `http://localhost:8080/`. Bạn sẽ thấy tay robot FR5 (mặc định), có thể
-đổi sang FR3 bằng dropdown.
+Mở trình duyệt tại: `http://localhost:8080/`.
 
-## Kết nối mirror với robot thật
+---
 
-1. Bên code điều khiển robot của bạn: chạy `TelemetryPublisher` (module đã
-   gửi ở tin nhắn trước, đặt trong `src/hardware/telemetry_publisher.py` của
-   project `xiangqi_robot`) — nó mở `ws://<ip-máy-robot>:8765` và phát góc
-   khớp thật liên tục.
-2. Trong ô **WebSocket** trên giao diện, nhập đúng địa chỉ đó (mặc định
-   `ws://127.0.0.1:8765` nếu cùng máy).
-3. Bấm **Connect live**. Trạng thái chuyển sang `LIVE` (màu xanh) và tay
-   robot 3D sẽ di chuyển đúng theo tay robot thật, bao gồm cả lúc gắp/thả
-   quân cờ — vì gói tin chỉ chứa góc khớp, không quan tâm nó đang làm gì.
+## 4. Kết Nối Live Telemetry
 
-### Định dạng gói tin (đã cố định, đừng đổi phía app trừ khi đổi cả 2 bên)
+1. **Phía Python Backend:** Khởi chạy `TelemetryPublisher` (trong `src/hardware/telemetry_publisher.py`), server mở tại `ws://127.0.0.1:8765`.
+2. **Phía Web 3D Viewer:** Nhập địa chỉ WebSocket vào ô input (mặc định `ws://127.0.0.1:8765`), bấm **Connect live**.
+3. Khi kết nối thành công, badge chuyển sang màu xanh **LIVE** và robot 3D sẽ chuyển động theo góc khớp nhận được.
 
+### Định dạng gói tin WebSocket:
 ```json
 {
   "type": "robot_state",
-  "robot_model": "FR5",
+  "robot_model": "FR3",
   "timestamp": 1699999999.123,
   "joints": [j1, j2, j3, j4, j5, j6],
-  "tcp": [x, y, z, rx, ry, rz]
+  "tcp": [x, y, z, rx, ry, rz],
+  "gripper": true
 }
 ```
-
-`robot_model` phải khớp với robot đang chọn trên dropdown ("FR3" hoặc "FR5"),
-nếu không gói tin sẽ bị từ chối (xem console log của trình duyệt).
-
-## Muốn thêm gì tiếp theo?
-
-- **Hiển thị kẹp gắp đóng/mở theo thật**: thêm trường `"gripper": true/false`
-  vào gói tin bên Python, rồi trong `main.mjs` đọc `payload.gripper` để
-  bật/tắt một mesh kẹp đơn giản (hình hộp/trụ) gắn ở cuối `wrist3_link`.
-- **Vẽ bàn cờ tướng 3D bên dưới robot**: thêm một `THREE.PlaneGeometry`/lưới
-  đường kẻ 9x10 vào `scene`, không ảnh hưởng gì đến phần robot hiện có.
-- **Camera preset (Front/Back/Left/Right)**: có thể copy `camera-view.mjs`
-  từ project `frnsimulation-main` nếu muốn giống bản gốc, nhưng
-  `OrbitControls` mặc định ở đây đã đủ dùng để xoay/zoom tự do.
+*Lưu ý: Trường `robot_model` phải khớp với profile robot đang được chọn trên giao diện.*

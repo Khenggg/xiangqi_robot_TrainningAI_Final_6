@@ -12,6 +12,7 @@ Verifies:
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -24,6 +25,10 @@ if _PROJECT_ROOT not in sys.path:
 class BoardLayoutConventionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        node_bin = shutil.which("node")
+        if not node_bin:
+            raise unittest.SkipTest("Node.js runtime not found in PATH; skipping 3D viewer layout test")
+
         layout_mjs = os.path.join(_PROJECT_ROOT, "robot-3d-viewer", "layout.mjs")
         if not os.path.exists(layout_mjs):
             raise FileNotFoundError(f"layout.mjs not found at {layout_mjs}")
@@ -34,12 +39,16 @@ class BoardLayoutConventionTests(unittest.TestCase):
             .then(m => console.log(JSON.stringify(m.START_LAYOUT)))
             .catch(err => { console.error(err); process.exit(1); });
         """
-        proc = subprocess.run(
-            ["node", "--input-type=module", "-e", js_code],
-            capture_output=True,
-            text=True,
-            cwd=_PROJECT_ROOT,
-        )
+        try:
+            proc = subprocess.run(
+                [node_bin, "--input-type=module", "-e", js_code],
+                capture_output=True,
+                text=True,
+                cwd=_PROJECT_ROOT,
+            )
+        except (FileNotFoundError, OSError) as e:
+            raise unittest.SkipTest(f"Failed to execute Node.js ({e}); skipping 3D viewer layout test")
+
         if proc.returncode != 0:
             raise RuntimeError(f"Failed to load layout.mjs via Node: {proc.stderr}")
 

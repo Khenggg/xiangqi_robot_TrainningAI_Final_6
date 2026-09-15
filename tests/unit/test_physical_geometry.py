@@ -19,11 +19,14 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+import tempfile
+
 import config
 from src.domain.geometry import (
     GeometryConfig,
     canonical_geometry,
     grid_to_metric_mm,
+    load_physical_geometry,
     metric_to_grid,
 )
 
@@ -159,6 +162,65 @@ class PhysicalGeometryTests(unittest.TestCase):
         self.assertEqual(config.BOARD_MARGIN_X_MM, 23.5)
         self.assertEqual(config.BOARD_MARGIN_Y_MM, 25.0)
 
+    def test_geometry_validation_fail_fast(self):
+        """Ensure load_physical_geometry rejects invalid / corrupted geometry configurations."""
+        base_valid = {
+            "schema_version": 1,
+            "unit": "mm",
+            "board": {
+                "outer_width": 367.0,
+                "outer_length": 410.0,
+                "columns": 9,
+                "rows": 10,
+                "column_spacing": 40.0,
+                "row_spacing": 40.0,
+            },
+            "piece": {"diameter": 22.5, "height": 9.43},
+            "board_convention": {
+                "black_home_row": 0,
+                "red_home_row": 9,
+                "col_min": 0,
+                "col_max": 8,
+                "row_min": 0,
+                "row_max": 9,
+            },
+        }
+
+        def assert_raises_with_override(override_fn):
+            import copy
+            cfg = copy.deepcopy(base_valid)
+            override_fn(cfg)
+            with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as tf:
+                json.dump(cfg, tf)
+                temp_path = tf.name
+            try:
+                with self.assertRaises(ValueError):
+                    load_physical_geometry(temp_path)
+            finally:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
+        # 1. Invalid unit
+        assert_raises_with_override(lambda c: c.update({"unit": "cm"}))
+        # 2. Negative outer width
+        assert_raises_with_override(lambda c: c["board"].update({"outer_width": -100.0}))
+        # 3. NaN or inf in spacing
+        assert_raises_with_override(lambda c: c["board"].update({"column_spacing": float("nan")}))
+        assert_raises_with_override(lambda c: c["board"].update({"row_spacing": float("inf")}))
+        # 4. Columns < 2
+        assert_raises_with_override(lambda c: c["board"].update({"columns": 1}))
+        # 5. Playable area larger than outer board dimensions
+        assert_raises_with_override(lambda c: c["board"].update({"column_spacing": 60.0}))  # 8 * 60 = 480 > 367
+        # 6. Negative piece diameter or height
+        assert_raises_with_override(lambda c: c["piece"].update({"diameter": 0.0}))
+        assert_raises_with_override(lambda c: c["piece"].update({"height": -5.0}))
+        # 7. Mismatch convention bounds
+        assert_raises_with_override(lambda c: c["board_convention"].update({"col_max": 7}))
+        assert_raises_with_override(lambda c: c["board_convention"].update({"row_max": 10}))
+        # 8. Same black and red home row
+        assert_raises_with_override(lambda c: c["board_convention"].update({"black_home_row": 9, "red_home_row": 9}))
+
 
 if __name__ == "__main__":
     unittest.main()
+

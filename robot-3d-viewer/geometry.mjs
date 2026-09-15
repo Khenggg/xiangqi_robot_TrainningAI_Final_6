@@ -24,11 +24,17 @@ export async function fetchPhysicalGeometry() {
 }
 
 export function parsePhysicalGeometry(data) {
-  if (!data || !data.board || !data.piece) {
-    throw new Error("Invalid physical geometry payload: missing 'board' or 'piece'");
+  if (!data || typeof data !== "object") {
+    throw new Error("Invalid physical geometry payload: must be an object");
   }
   if (data.unit !== "mm") {
     throw new Error(`Expected unit 'mm', found '${data.unit}'`);
+  }
+  if (!data.board || typeof data.board !== "object") {
+    throw new Error("Missing or invalid 'board' configuration in geometry JSON");
+  }
+  if (!data.piece || typeof data.piece !== "object") {
+    throw new Error("Missing or invalid 'piece' configuration in geometry JSON");
   }
 
   const mmToM = 0.001;
@@ -42,11 +48,57 @@ export function parsePhysicalGeometry(data) {
   const pieceDiameterMm = Number(data.piece.diameter);
   const pieceHeightMm = Number(data.piece.height);
 
+  const positiveChecks = [
+    ["board.outer_width", outerWidthMm],
+    ["board.outer_length", outerLengthMm],
+    ["board.column_spacing", columnSpacingMm],
+    ["board.row_spacing", rowSpacingMm],
+    ["piece.diameter", pieceDiameterMm],
+    ["piece.height", pieceHeightMm],
+  ];
+  for (const [name, val] of positiveChecks) {
+    if (!Number.isFinite(val) || val <= 0) {
+      throw new Error(`Invalid ${name}: must be a positive finite number (> 0), got ${val}`);
+    }
+  }
+
+  if (!Number.isInteger(columns) || columns < 2) {
+    throw new Error(`board.columns must be an integer >= 2, got ${columns}`);
+  }
+  if (!Number.isInteger(rows) || rows < 2) {
+    throw new Error(`board.rows must be an integer >= 2, got ${rows}`);
+  }
+
   // Derived in mm
   const playableGridWidthMm = (columns - 1) * columnSpacingMm; // 320 mm
   const playableGridLengthMm = (rows - 1) * rowSpacingMm;     // 360 mm
+
+  if (playableGridWidthMm > outerWidthMm) {
+    throw new Error(
+      `Playable grid width (${playableGridWidthMm}mm) exceeds outer width (${outerWidthMm}mm)`
+    );
+  }
+  if (playableGridLengthMm > outerLengthMm) {
+    throw new Error(
+      `Playable grid length (${playableGridLengthMm}mm) exceeds outer length (${outerLengthMm}mm)`
+    );
+  }
+
   const marginHorizontalMm = (outerWidthMm - playableGridWidthMm) / 2.0; // 23.5 mm
   const marginVerticalMm = (outerLengthMm - playableGridLengthMm) / 2.0;   // 25.0 mm
+
+  // Validate convention if present
+  if (data.board_convention && typeof data.board_convention === "object") {
+    const colMin = Number(data.board_convention.col_min);
+    const colMax = Number(data.board_convention.col_max);
+    const rowMin = Number(data.board_convention.row_min);
+    const rowMax = Number(data.board_convention.row_max);
+    if (colMin !== 0 || colMax !== columns - 1 || rowMin !== 0 || rowMax !== rows - 1) {
+      throw new Error(
+        `Invalid board_convention: expected cols [0, ${columns - 1}] and rows [0, ${rows - 1}]`
+      );
+    }
+  }
 
   return Object.freeze({
     unit: "mm",

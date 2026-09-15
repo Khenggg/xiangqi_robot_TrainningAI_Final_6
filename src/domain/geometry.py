@@ -7,8 +7,10 @@ Does NOT import `config.py` to prevent circular dependencies.
 
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
 from typing import Optional, Tuple
+
 
 
 @dataclass(frozen=True)
@@ -185,8 +187,28 @@ def get_default_json_path() -> Path:
     return repo_root / "shared" / "physical_geometry.json"
 
 
+def _validate_positive_finite(value: object, name: str) -> float:
+    try:
+        val = float(value)
+    except (ValueError, TypeError):
+        raise ValueError(f"{name} must be a valid float number, got {value!r}")
+    if not math.isfinite(val) or val <= 0.0:
+        raise ValueError(f"{name} must be a positive finite number (> 0), got {val}")
+    return val
+
+
+def _validate_int(value: object, name: str, min_val: int = 0) -> int:
+    try:
+        val = int(value)
+    except (ValueError, TypeError):
+        raise ValueError(f"{name} must be an integer, got {value!r}")
+    if val < min_val:
+        raise ValueError(f"{name} must be >= {min_val}, got {val}")
+    return val
+
+
 def load_physical_geometry(json_path: Optional[Path] = None) -> PhysicalGeometry:
-    """Load and validate physical geometry from canonical JSON."""
+    """Load and strictly validate physical geometry from canonical JSON."""
     path = Path(json_path) if json_path else get_default_json_path()
     if not path.is_file():
         raise FileNotFoundError(f"Canonical physical geometry file not found: {path}")
@@ -194,38 +216,97 @@ def load_physical_geometry(json_path: Optional[Path] = None) -> PhysicalGeometry
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    if not isinstance(data, dict):
+        raise ValueError(f"Root configuration must be a JSON object, got {type(data).__name__}")
+
     unit = data.get("unit")
     if unit != "mm":
-        raise ValueError(f"Expected unit 'mm', found '{unit}' in {path}")
+        raise ValueError(f"Expected unit 'mm', found {unit!r} in {path}")
 
-    board_data = data.get("board", {})
+    board_data = data.get("board")
+    if not isinstance(board_data, dict):
+        raise ValueError("Missing or invalid 'board' object in geometry JSON")
+
+    outer_width = _validate_positive_finite(board_data.get("outer_width"), "board.outer_width")
+    outer_length = _validate_positive_finite(board_data.get("outer_length"), "board.outer_length")
+    columns = _validate_int(board_data.get("columns"), "board.columns", min_val=2)
+    rows = _validate_int(board_data.get("rows"), "board.rows", min_val=2)
+    column_spacing = _validate_positive_finite(board_data.get("column_spacing"), "board.column_spacing")
+    row_spacing = _validate_positive_finite(board_data.get("row_spacing"), "board.row_spacing")
+
+    playable_w = (columns - 1) * column_spacing
+    playable_l = (rows - 1) * row_spacing
+    if playable_w > outer_width:
+        raise ValueError(
+            f"Playable grid width ({playable_w}mm) exceeds board outer width ({outer_width}mm)"
+        )
+    if playable_l > outer_length:
+        raise ValueError(
+            f"Playable grid length ({playable_l}mm) exceeds board outer length ({outer_length}mm)"
+        )
+
     board = BoardGeometry(
-        outer_width=float(board_data["outer_width"]),
-        outer_length=float(board_data["outer_length"]),
-        columns=int(board_data["columns"]),
-        rows=int(board_data["rows"]),
-        column_spacing=float(board_data["column_spacing"]),
-        row_spacing=float(board_data["row_spacing"]),
+        outer_width=outer_width,
+        outer_length=outer_length,
+        columns=columns,
+        rows=rows,
+        column_spacing=column_spacing,
+        row_spacing=row_spacing,
     )
 
-    piece_data = data.get("piece", {})
+    piece_data = data.get("piece")
+    if not isinstance(piece_data, dict):
+        raise ValueError("Missing or invalid 'piece' object in geometry JSON")
+
+    piece_diameter = _validate_positive_finite(piece_data.get("diameter"), "piece.diameter")
+    piece_height = _validate_positive_finite(piece_data.get("height"), "piece.height")
+
     piece = PieceGeometry(
-        diameter=float(piece_data["diameter"]),
-        height=float(piece_data["height"]),
+        diameter=piece_diameter,
+        height=piece_height,
     )
 
-    conv_data = data.get("board_convention", {})
+    conv_data = data.get("board_convention")
+    if not isinstance(conv_data, dict):
+        raise ValueError("Missing or invalid 'board_convention' object in geometry JSON")
+
+    col_min = _validate_int(conv_data.get("col_min"), "convention.col_min", min_val=0)
+    col_max = _validate_int(conv_data.get("col_max"), "convention.col_max", min_val=1)
+    row_min = _validate_int(conv_data.get("row_min"), "convention.row_min", min_val=0)
+    row_max = _validate_int(conv_data.get("row_max"), "convention.row_max", min_val=1)
+
+    if col_min != 0 or col_max != columns - 1:
+        raise ValueError(
+            f"convention [col_min, col_max] must be [0, {columns - 1}], got [{col_min}, {col_max}]"
+        )
+    if row_min != 0 or row_max != rows - 1:
+        raise ValueError(
+            f"convention [row_min, row_max] must be [0, {rows - 1}], got [{row_min}, {row_max}]"
+        )
+
+    black_home_row = _validate_int(conv_data.get("black_home_row"), "convention.black_home_row", min_val=row_min)
+    red_home_row = _validate_int(conv_data.get("red_home_row"), "convention.red_home_row", min_val=row_min)
+
+    if not (row_min <= black_home_row <= row_max):
+        raise ValueError(f"black_home_row={black_home_row} must be within [{row_min}, {row_max}]")
+    if not (row_min <= red_home_row <= row_max):
+        raise ValueError(f"red_home_row={red_home_row} must be within [{row_min}, {row_max}]")
+    if black_home_row == red_home_row:
+        raise ValueError("black_home_row and red_home_row cannot be the same row")
+
     convention = BoardConvention(
-        black_home_row=int(conv_data["black_home_row"]),
-        red_home_row=int(conv_data["red_home_row"]),
-        col_min=int(conv_data["col_min"]),
-        col_max=int(conv_data["col_max"]),
-        row_min=int(conv_data["row_min"]),
-        row_max=int(conv_data["row_max"]),
+        black_home_row=black_home_row,
+        red_home_row=red_home_row,
+        col_min=col_min,
+        col_max=col_max,
+        row_min=row_min,
+        row_max=row_max,
     )
+
+    schema_version = _validate_int(data.get("schema_version", 1), "schema_version", min_val=1)
 
     return PhysicalGeometry(
-        schema_version=int(data.get("schema_version", 1)),
+        schema_version=schema_version,
         unit=unit,
         board=board,
         piece=piece,
