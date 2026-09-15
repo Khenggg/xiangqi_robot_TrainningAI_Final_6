@@ -198,10 +198,22 @@ def _validate_positive_finite(value: object, name: str) -> float:
 
 
 def _validate_int(value: object, name: str, min_val: int = 0) -> int:
-    try:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer, got boolean {value!r}")
+    if isinstance(value, int):
+        val = value
+    elif isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer():
+            raise ValueError(f"{name} must be an integer value, got {value!r}")
         val = int(value)
-    except (ValueError, TypeError):
+    elif isinstance(value, str):
+        try:
+            val = int(value)
+        except ValueError:
+            raise ValueError(f"{name} must be an integer, got {value!r}")
+    else:
         raise ValueError(f"{name} must be an integer, got {value!r}")
+
     if val < min_val:
         raise ValueError(f"{name} must be >= {min_val}, got {val}")
     return val

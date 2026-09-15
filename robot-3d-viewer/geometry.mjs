@@ -87,20 +87,51 @@ export function parsePhysicalGeometry(data) {
   const marginHorizontalMm = (outerWidthMm - playableGridWidthMm) / 2.0; // 23.5 mm
   const marginVerticalMm = (outerLengthMm - playableGridLengthMm) / 2.0;   // 25.0 mm
 
-  // Validate convention if present
-  if (data.board_convention && typeof data.board_convention === "object") {
-    const colMin = Number(data.board_convention.col_min);
-    const colMax = Number(data.board_convention.col_max);
-    const rowMin = Number(data.board_convention.row_min);
-    const rowMax = Number(data.board_convention.row_max);
-    if (colMin !== 0 || colMax !== columns - 1 || rowMin !== 0 || rowMax !== rows - 1) {
-      throw new Error(
-        `Invalid board_convention: expected cols [0, ${columns - 1}] and rows [0, ${rows - 1}]`
-      );
-    }
+  const schemaVersion = Number(data.schema_version);
+  if (!Number.isInteger(schemaVersion) || schemaVersion < 1) {
+    throw new Error(`schema_version must be an integer >= 1, got ${data.schema_version}`);
+  }
+
+  // Validate convention
+  if (!data.board_convention || typeof data.board_convention !== "object") {
+    throw new Error("Missing or invalid 'board_convention' configuration in geometry JSON");
+  }
+  const colMin = Number(data.board_convention.col_min);
+  const colMax = Number(data.board_convention.col_max);
+  const rowMin = Number(data.board_convention.row_min);
+  const rowMax = Number(data.board_convention.row_max);
+  const blackHomeRow = Number(data.board_convention.black_home_row);
+  const redHomeRow = Number(data.board_convention.red_home_row);
+
+  if (!Number.isInteger(colMin) || !Number.isInteger(colMax) || !Number.isInteger(rowMin) || !Number.isInteger(rowMax)) {
+    throw new Error("board_convention boundary coordinates must be integers");
+  }
+  if (colMin !== 0 || colMax !== columns - 1) {
+    throw new Error(`Invalid board_convention: expected col bounds [0, ${columns - 1}], got [${colMin}, ${colMax}]`);
+  }
+  if (rowMin !== 0 || rowMax !== rows - 1) {
+    throw new Error(`Invalid board_convention: expected row bounds [0, ${rows - 1}], got [${rowMin}, ${rowMax}]`);
+  }
+  if (!Number.isInteger(blackHomeRow) || blackHomeRow < rowMin || blackHomeRow > rowMax) {
+    throw new Error(`black_home_row (${blackHomeRow}) must be an integer in [${rowMin}, ${rowMax}]`);
+  }
+  if (!Number.isInteger(redHomeRow) || redHomeRow < rowMin || redHomeRow > rowMax) {
+    throw new Error(`red_home_row (${redHomeRow}) must be an integer in [${rowMin}, ${rowMax}]`);
+  }
+  if (blackHomeRow === redHomeRow) {
+    throw new Error("black_home_row and red_home_row cannot be the same row");
   }
 
   return Object.freeze({
+    schemaVersion,
+    convention: Object.freeze({
+      blackHomeRow,
+      redHomeRow,
+      colMin,
+      colMax,
+      rowMin,
+      rowMax,
+    }),
     unit: "mm",
     // Raw measured values in mm
     outerWidthMm,

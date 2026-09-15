@@ -219,8 +219,98 @@ class PhysicalGeometryTests(unittest.TestCase):
         assert_raises_with_override(lambda c: c["board_convention"].update({"row_max": 10}))
         # 8. Same black and red home row
         assert_raises_with_override(lambda c: c["board_convention"].update({"black_home_row": 9, "red_home_row": 9}))
+        # 9. Float columns (e.g. 9.5) rejected without silent truncation
+        assert_raises_with_override(lambda c: c["board"].update({"columns": 9.5}))
+
+    def test_validate_int_strictness(self):
+        """Verify _validate_int rejects non-integral floats, NaNs, infinities, booleans without truncation."""
+        from src.domain.geometry import _validate_int
+        # Valid cases
+        self.assertEqual(_validate_int(9, "val"), 9)
+        self.assertEqual(_validate_int(9.0, "val"), 9)
+        self.assertEqual(_validate_int("9", "val"), 9)
+        self.assertEqual(_validate_int(0, "val", min_val=0), 0)
+
+        # Invalid cases: must raise ValueError
+        invalid_inputs = [9.5, -3.14, float("nan"), float("inf"), float("-inf"), "9.5", True, False, None, [9]]
+        for inp in invalid_inputs:
+            with self.assertRaises(ValueError, msg=f"Should reject {inp!r}"):
+                _validate_int(inp, "val")
+
+        # Boundary check
+        with self.assertRaises(ValueError):
+            _validate_int(-1, "val", min_val=0)
+
+    def test_js_geometry_validation_parity(self):
+        """Verify JavaScript geometry.mjs enforces the same contract parity via Node.js."""
+        import shutil
+        import subprocess
+        node_bin = shutil.which("node")
+        if not node_bin:
+            self.skipTest("Node.js runtime not found; skipping JS geometry contract parity test")
+
+        js_code = """
+        import { parsePhysicalGeometry } from './robot-3d-viewer/geometry.mjs';
+        import fs from 'node:fs';
+
+        const valid = JSON.parse(fs.readFileSync('./shared/physical_geometry.json', 'utf8'));
+        const parsed = parsePhysicalGeometry(valid);
+        if (parsed.schemaVersion !== 1 || parsed.convention.blackHomeRow !== 0 || parsed.convention.redHomeRow !== 9) {
+            throw new Error('Valid parse failed parity check');
+        }
+
+        function assertThrows(fn, desc) {
+            try {
+                fn();
+                throw new Error('Expected failure for: ' + desc);
+            } catch (err) {
+                if (err.message.startsWith('Expected failure')) throw err;
+            }
+        }
+
+        // Test missing schema_version
+        assertThrows(() => {
+            const c = JSON.parse(JSON.stringify(valid));
+            delete c.schema_version;
+            parsePhysicalGeometry(c);
+        }, 'missing schema_version');
+
+        // Test float columns (must fail integer check)
+        assertThrows(() => {
+            const c = JSON.parse(JSON.stringify(valid));
+            c.board.columns = 9.5;
+            parsePhysicalGeometry(c);
+        }, 'float columns');
+
+        // Test missing board_convention
+        assertThrows(() => {
+            const c = JSON.parse(JSON.stringify(valid));
+            delete c.board_convention;
+            parsePhysicalGeometry(c);
+        }, 'missing board_convention');
+
+        // Test same home row
+        assertThrows(() => {
+            const c = JSON.parse(JSON.stringify(valid));
+            c.board_convention.black_home_row = 9;
+            c.board_convention.red_home_row = 9;
+            parsePhysicalGeometry(c);
+        }, 'same home row');
+
+        console.log('OK');
+        """
+
+        proc = subprocess.run(
+            [node_bin, "--input-type=module", "-e", js_code],
+            capture_output=True,
+            text=True,
+            cwd=_PROJECT_ROOT,
+        )
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("OK", proc.stdout)
 
 
 if __name__ == "__main__":
     unittest.main()
+
 
