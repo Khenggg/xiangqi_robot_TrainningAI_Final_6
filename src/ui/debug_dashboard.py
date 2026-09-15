@@ -32,6 +32,7 @@ class DebugDashboard:
         data = {"mode": self.mode, "activity": self.activity,
                 "connection": "Not connected", "live": "Unavailable",
                 "planned": "No robot movement has been planned yet",
+                "motion": "Unavailable", "tcp_speed": "Unavailable",
                 "age": "No telemetry received"}
         robot = self.robot
         if robot is None:
@@ -66,6 +67,19 @@ class DebugDashboard:
             data["connection"] = "Telemetry stale / disconnected"
             return data
         data["connection"] = "Connected"
+        motion_names = {
+            1: "Standby / stopped",
+            2: "Moving",
+            3: "Paused",
+            4: "Teach / drag mode",
+        }
+        data["motion"] = motion_names.get(packet.robot_state, f"Unknown state ({packet.robot_state})")
+        target_linear, target_angular = packet.target_TCP_CmpSpeed
+        actual_linear, actual_angular = packet.actual_TCP_CmpSpeed
+        data["tcp_speed"] = (
+            f"Target: {target_linear:.1f} mm/s  |  {target_angular:.1f} deg/s\n"
+            f"Actual: {actual_linear:.1f} mm/s  |  {actual_angular:.1f} deg/s"
+        )
         pose = list(packet.tl_cur_pos)
         data["live"] = "\n".join(
             f"{axis:>2}: {value:10.2f} {unit}"
@@ -110,7 +124,7 @@ def run_window():
 
     pygame.display.init()
     pygame.font.init()
-    screen = pygame.display.set_mode((620, 650))
+    screen = pygame.display.set_mode((620, 740))
     pygame.display.set_caption("Xiangqi - Debug dashboard")
     title_font = pygame.font.SysFont("Segoe UI", 25, bold=True)
     label_font = pygame.font.SysFont("Segoe UI", 15)
@@ -146,7 +160,8 @@ def run_window():
         screen.blit(title_font.render("System monitor", True, (240, 244, 250)), (24, 20))
         y = 72
         for key, title in (("mode", "APP MODE"), ("activity", "APP STATUS"),
-                           ("connection", "ROBOT CONNECTION"), ("live", "LIVE TCP POSITION"),
+                           ("connection", "ROBOT CONNECTION"), ("motion", "ROBOT MOTION"),
+                           ("tcp_speed", "TCP SPEED"), ("live", "LIVE TCP POSITION"),
                            ("planned", "PLANNED POSITION"), ("age", "TELEMETRY")):
             screen.blit(label_font.render(title, True, (148, 164, 182)), (24, y))
             y += 24
