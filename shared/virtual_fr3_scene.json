@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "status": "SIMULATION_ONLY_PROVISIONAL",
+  "comment": "Simulation extrinsics configuration for Virtual FAIRINO FR3. NOT measured physical calibration.",
+  "robot_model": "FR3",
+  "robot_base_to_3d_world": {
+    "rotation_matrix": [
+      [0.0, 1.0, 0.0],
+      [0.0, 0.0, 1.0],
+      [-1.0, 0.0, 0.0]
+    ],
+    "translation_m": [0.0, 0.0, 0.0],
+    "axis_mapping": {
+      "world_x": "+robot_y",
+      "world_y": "+robot_z",
+      "world_z": "-robot_x"
+    },
+    "handedness": "right_handed",
+    "determinant": 1.0
+  },
+  "virtual_board_placement": {
+    "grid_origin_in_robot_base_m": [-0.18, -0.16, 0.05],
+    "board_center_in_robot_base_m": [-0.36, 0.0, 0.05],
+    "grid_origin_in_3d_world_m": [-0.16, 0.05, 0.18],
+    "board_center_in_3d_world_m": [0.0, 0.05, 0.36],
+    "board_surface_height_m": 0.05,
+    "row_axis_in_robot_base": "-X",
+    "column_axis_in_robot_base": "+Y",
+    "up_axis_in_robot_base": "+Z",
+    "target_tool_orientation_matrix": [
+      [0.0, 1.0, 0.0],
+      [1.0, 0.0, 0.0],
+      [0.0, 0.0, -1.0]
+    ],
+    "target_tool_orientation_euler_deg": [180.0, 0.0, -90.0]
+  },
+  "home_pose": {
+    "joints_deg": [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
+  },
+  "tool_transform": {
+    "status": "SIMULATION_ONLY_UNVERIFIED_PHYSICAL_TOOL_TRANSFORM",
+    "type": "identity_relative_to_flange",
+    "flange_to_tcp_xyz_m": [0.0, 0.0, 0.0],
+    "flange_to_tcp_rpy_deg": [0.0, 0.0, 0.0]
+  }
+}

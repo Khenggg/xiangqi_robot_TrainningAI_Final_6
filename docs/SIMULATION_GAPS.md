@@ -9,9 +9,13 @@
 
 ### SIM-GAP-001: Thiếu hoàn toàn Kinematics cho Robot FR3 trong Python Backend
 - **Severity:** **CRITICAL**
+- **Status:** **RESOLVED IN P2**
 - **Evidence:** Trong `src/hardware/telemetry_publisher.py` chỉ tồn tại class `FR5Kinematics` với kích thước link của FR5 ($a_2=425\text{ mm}, a_3=395\text{ mm}$). Gói tin JSON phát ra cố định `"robot_model": "FR5"`. Không có file hoặc class nào chứa kinematics cho Fairino FR3 ($a_2=280\text{ mm}, a_3=240\text{ mm}$).
 - **Impact:** Simulator hoàn toàn không thể tính toán góc khớp cho cánh tay robot FR3 thật sự. Nếu ép dữ liệu khớp FR5 vào mô hình FR3, cánh tay FR3 trong 3D sẽ bị sai lệch vị trí đầu gắp nghiêm trọng do sải tay ngắn hơn 300 mm.
-- **Recommended Phase:** **Phase P2**
+- **Resolution in P2:**
+  - Tạo generator `tools/simulation/generate_fr3_profile.py` trích xuất thông số hình học khớp chính thức từ `fairino3_v6.urdf` và xuất file `shared/robot_profiles/fr3.json`.
+  - Phát triển module `src/simulation/kinematics/urdf_chain.py` và `src/simulation/kinematics/fr3.py` triển khai Forward Kinematics (biến đổi đồng nhất 4x4) và Inverse Kinematics (Damped Least Squares với multi-seed restart và cấu trúc `IKResult`).
+  - Kiểm thử đạt 100% (90/90 điểm giao bàn cờ reachable với sai số vị trí tối đa $0.8641\text{ mm}$, biên góc khớp an toàn $\ge 2.65^\circ$).
 
 ---
 
@@ -26,31 +30,34 @@
 
 ### SIM-GAP-003: Chế Độ DRY_RUN Không Thực Thi Mô Phỏng Chuyển Động Robot
 - **Severity:** **CRITICAL**
-- **Status:** **PENDING (Phase P2 & P4)**
+- **Status:** **PARTIALLY RESOLVED IN P2 (Backend & Kinematics Ready; Game Loop Integration in P4)**
 - **Evidence:** Trong `src/hardware/robot_VIP.py`, các hàm `move_safe_pose()`, `movel_pose()`, `movej_joint()` chỉ in ra terminal `[ROBOT] DRY Move...` và `time.sleep(0.2)` mà không gọi `TelemetryPublisher.animate_to_pose()`. Đặc biệt, trong `main.py` (dòng 172), khi `config.DRY_RUN = True`, toàn bộ khối gọi `hw.robot.move_piece()` bị bỏ qua hoàn toàn.
 - **Impact:** Khi chạy dry-run, cánh tay robot 3D trên trình duyệt đứng yên hoàn toàn, không có bất kỳ chuyển động nào được mô phỏng.
-- **Recommended Phase:** **Phase P2 & Phase P4**
+- **Resolution in P2:** Xây dựng trừu tượng `RobotBackend` (`src/hardware/backends/base.py`) và triển khai `VirtualFR3Backend` (`src/simulation/virtual_fr3_backend.py`) với đầy đủ khả năng nội suy khớp `move_joint()` và tuyến tính Cartesian `move_cartesian()`, phát telemetry trực tiếp 30 FPS. Kiểm chứng độc lập qua `tools/simulation/demo_virtual_fr3.py`. Tích hợp hoàn toàn vào game loop của `main.py` và refactor `robot_VIP.py` sẽ thực hiện trong **Phase P4**.
 
 ---
 
-### SIM-GAP-004: Mâu Thuẫn và Trùng Lặp Khai Báo Kích Thước Hình Học Bàn Cờ
+### SIM-GAP-004: Mâu Thuẫn và Trùng Lặp Khai Báo Kích Thước Hình Học Bàn Cờ & Vị Trí Robot-Bàn
 - **Severity:** **HIGH**
-- **Status:** **PARTIALLY RESOLVED IN P1 (Virtual Board ↔ Robot Placement Deferred to P2)**
+- **Status:** **RESOLVED IN P1 & P2**
 - **Evidence:** Kích thước bàn cờ và bước lưới từng bị phân tán và tính toán sai lệch giữa Python, JS, và teaching points.
 - **Impact:** Sai số tích lũy giữa các module khiến vị trí gắp đặt ảo không khớp chính xác với tâm giao điểm bàn cờ 3D.
-- **Resolution in P1 & P2 Roadmap:** 
-  - **Đã giải quyết trong P1 (Hình học nội tại):** Xác lập `shared/physical_geometry.json` làm nguồn chân lý duy nhất (Single Source of Truth) cho kích thước vật lý đo đạc ($367 \times 410\text{ mm}$, ô $40 \times 40\text{ mm}$, quân $\varnothing 22.5 \times 9.43\text{ mm}$). Tạo `src/domain/geometry.py` kế thừa JSON và tính toán các giá trị phái sinh ($320 \times 360\text{ mm}$, lề $23.5\text{ mm}$ và $25.0\text{ mm}$). Cập nhật `config.py` làm alias tương thích ngược và `robot-3d-viewer/geometry.mjs` nạp động qua endpoint an toàn `/shared/physical_geometry.json`.
-  - **Còn tồn đọng cần giải quyết trong P2 (Vị trí ngoại tại):** Các điểm dạy dry-run R1-R4 trong `robot_VIP.py` và hàm `_calculate_cell_sizes_from_corners()` vẫn đang dựa trên các tọa độ commissioning cũ (tính ra $44.45\text{ mm}$ và $45.08\text{ mm}$). Việc chuẩn hóa vị trí gắn kết bàn cờ ảo so với chân đế robot (`robot_base` ↔ `3d_world`) và calibration điểm dạy ảo sẽ được thực hiện đồng bộ trong **Phase P2** (Virtual FR3 Backend & Placement Calibration).
-
+- **Resolution in P1 & P2:** 
+  - **Đã giải quyết trong P1 (Hình học nội tại):** Xác lập `shared/physical_geometry.json` làm nguồn chân lý duy nhất cho kích thước vật lý ($367 \times 410\text{ mm}$, ô $40 \times 40\text{ mm}$, quân $\varnothing 22.5 \times 9.43\text{ mm}$). `src/domain/geometry.py` tính toán các giá trị phái sinh ($320 \times 360\text{ mm}$, lề $23.5\text{ mm}$ và $25.0\text{ mm}$).
+  - **Đã giải quyết trong P2 (Vị trí ngoại tại trong Simulation):** Xác lập `shared/virtual_fr3_scene.json` định nghĩa ma trận chuyển đổi chặt chẽ giữa `robot_base` và `3d_world` ($X_{world} = Y_{robot}$, $Y_{world} = Z_{robot}$, $Z_{world} = -X_{robot}$), đặt tâm bàn cờ tại $(X=-0.36, Y=0.0, Z=0.05)\text{ m}$ trong hệ robot. Đạt 100% (90/90) điểm giao reachable.
 
 ---
 
 ### SIM-GAP-005: 3D Viewer Từ Chối Kết Nối Khi Chọn Model FR3
 - **Severity:** **HIGH**
-- **Status:** **PENDING (Phase P2)**
+- **Status:** **RESOLVED IN P2**
 - **Evidence:** Trong `robot-3d-viewer/live_state.mjs` (dòng 5–7), hàm `validateLivePacket` kiểm tra `payload.robot_model !== expectedModel`. Nếu người dùng chọn FR3 trên dropdown, `expectedModel` là `"FR3"`. Tuy nhiên Python backend luôn gửi `"FR5"`.
 - **Impact:** Gói tin bị từ chối với thông báo `Live packet rejected: expected robot_model FR3` và robot 3D không cập nhật.
-- **Recommended Phase:** **Phase P2**
+- **Resolution in P2:**
+  - Cập nhật `TelemetryPublisher` hỗ trợ `robot_model="FR3"` (mặc định) và nhận `RobotStateSnapshot`.
+  - Cập nhật `robot-3d-viewer/index.html` mặc định lựa chọn model FR3.
+  - Cập nhật `robot-3d-viewer/serve.mjs` cho phép nạp `fr3.json` và `virtual_fr3_scene.json`.
+  - Viewer Three.js nạp và cập nhật trực tiếp mô hình FR3 từ telemetry 30 FPS.
 
 ---
 

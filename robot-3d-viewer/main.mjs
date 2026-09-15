@@ -59,7 +59,7 @@ const ROBOT_PROFILES = Object.freeze({
     visualJointRpy: FR3_KINEMATIC_RPY,
   }),
 });
-const getRobotProfile = (id) => ROBOT_PROFILES[id] || ROBOT_PROFILES.fr5;
+const getRobotProfile = (id) => ROBOT_PROFILES[id] || ROBOT_PROFILES.fr3;
 
 const ROBOT_SHELL_COLOR = 0xbfc9d4;
 // Live telemetry chấp nhận biên độ rộng — vì mục đích chỉ để mirror,
@@ -78,10 +78,10 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x11151c);
 
 const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 50);
-camera.position.set(1.1, 0.9, 1.1);
+camera.position.set(0.75, 0.75, 0.75);
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.3, 0);
+controls.target.set(0, 0.15, 0.25);
 controls.enableDamping = true;
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x1a1f27, 1.1));
@@ -154,6 +154,18 @@ async function buildRobotArm(profile) {
       rotator.add(mesh);
       parent = rotator;
     }
+
+    // Canonical root transformation: robot_base -> 3d_world
+    // Maps robot base frame (Z-up, -X facing board, +Y lateral)
+    // to Three.js scene (Y-up, +Z facing board, +X lateral)
+    const rootMatrix = new THREE.Matrix4().set(
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+     -1, 0, 0, 0,
+      0, 0, 0, 1
+    );
+    candidate.group.applyMatrix4(rootMatrix);
+
     return candidate;
   } catch (error) {
     disposeRobotArm(candidate);
@@ -171,7 +183,7 @@ function applyJointsDeg(candidate, jointsDeg) {
 // 4) TRẠNG THÁI ỨNG DỤNG + CHUYỂN ĐỔI ROBOT
 // ---------------------------------------------------------------------------
 const state = {
-  robotProfileId: "fr5",
+  robotProfileId: "fr3",
   currentArm: null,
   jointsDeg: [0, 0, 0, 0, 0, 0],
   // nội suy mượt cho live mirror

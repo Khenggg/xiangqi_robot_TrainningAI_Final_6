@@ -12,14 +12,18 @@ Giao diện mô phỏng 3D Web-based và Digital Twin Mirror cho cánh tay robot
 - **Tiêu Thụ Hình Học Vật Lý Chuẩn (Canonical Geometry):**
   - Tự động nạp động thông số hình học từ `/shared/physical_geometry.json` qua `geometry.mjs`.
   - Không trùng lặp hằng số vật lý; quy đổi chính xác từ milimét ($mm$) sang mét Three.js ($m$): bàn $367 \times 410\text{ mm}$, ô $40 \times 40\text{ mm}$, quân $\varnothing 22.5 \times 9.43\text{ mm}$.
-- **Hỗ Trợ Đa Dòng Robot (FR3 & FR5):**
-  - Nạp mesh STL chi tiết cho cả 2 dòng robot FAIRINO FR3 (sải tay $520\text{ mm}$) và FR5 (sải tay $820\text{ mm}$).
+- **Hỗ Trợ Đa Dòng Robot (Mặc định FR3 & tùy chọn FR5):**
+  - Mặc định khởi tạo dòng robot **FAIRINO FR3** (sải tay $520\text{ mm}$), tương thích hoàn toàn với URDF kinematics và Digital Twin backend.
+  - Nạp mesh STL chi tiết cho cả 2 dòng robot FAIRINO FR3 và FR5.
   - Cho phép chuyển đổi profile linh hoạt ngay trên giao diện web.
+- **Tích Hợp Scene Extrinsics & Transform Tọa Độ:**
+  - Nạp cấu hình vị trí bàn cờ và robot từ `/shared/virtual_fr3_scene.json`.
+  - Thiết lập ma trận biến đổi tọa độ chân đế robot sang không gian Three.js ($X_{world}=Y_{robot}, Y_{world}=Z_{robot}, Z_{world}=-X_{robot}$), đảm bảo 100% tầm với bàn cờ.
 - **WebSocket Live Mirroring:**
-  - Đồng bộ góc khớp thời gian thực với robot thật hoặc Virtual Backend thông qua luồng WebSocket telemetry.
+  - Đồng bộ góc khớp thời gian thực với robot thật hoặc Virtual FR3 Backend thông qua luồng WebSocket telemetry 30 FPS.
 - **Máy Chủ Tĩnh Bảo Mật (`serve.mjs`):**
   - Chạy local không cần cài đặt nặng.
-  - Endpoint whitelist kiểm soát chặt chẽ truy cập `/shared/physical_geometry.json`, ngăn chặn hoàn toàn tấn công Directory Traversal.
+  - Endpoint whitelist kiểm soát chặt chẽ truy cập `/shared/physical_geometry.json`, `/shared/robot_profiles/fr3.json`, và `/shared/virtual_fr3_scene.json`, ngăn chặn hoàn toàn tấn công Directory Traversal.
 
 ---
 
@@ -27,12 +31,12 @@ Giao diện mô phỏng 3D Web-based và Digital Twin Mirror cho cánh tay robot
 
 ```
 robot-3d-viewer/
-├── index.html        # Giao diện chính: Canvas Three.js + bảng điều khiển kết nối/profile
+├── index.html        # Giao diện chính: Canvas Three.js + bảng điều khiển kết nối/profile (mặc định FR3)
 ├── styles.css        # Giao diện tối hiện đại, responsive
-├── main.mjs          # Entrypoint Three.js: Quản lý Scene, Lights, Loop, Robot kinematics
+├── main.mjs          # Entrypoint Three.js: Quản lý Scene, Lights, Loop, Robot kinematics, Scene extrinsics
 ├── geometry.mjs      # Module tải & validate hình học vật lý từ shared/physical_geometry.json
 ├── layout.mjs        # Khởi tạo vị trí ban đầu 32 quân cờ (Black row 0..4, Red row 5..9)
-├── board.mjs         # Dựng mesh bàn cờ, lưới ô cờ, quân cờ và hàm map tọa độ boardPointToXYZ
+├── board.mjs         # Dựng mesh bàn cờ, lưới ô cờ, quân cờ và hàm map tọa độ boardPointToXYZ theo scene
 ├── live_state.mjs    # Bộ lọc và validate gói tin telemetry WebSocket
 ├── serve.mjs         # Static HTTP server local có bảo vệ traversal và whitelist
 └── assets/

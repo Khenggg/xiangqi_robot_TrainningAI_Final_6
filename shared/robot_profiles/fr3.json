@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "robot_model": "FR3",
+  "urdf_robot_name": "fairino3_v6_robot",
+  "source_urdf": "robot-3d-viewer/assets/fr3_v6/fairino3_v6.urdf",
+  "base_link": "base_link",
+  "flange_link": "wrist3_link",
+  "links": [
+    "base_link",
+    "shoulder_link",
+    "upperarm_link",
+    "forearm_link",
+    "wrist1_link",
+    "wrist2_link",
+    "wrist3_link"
+  ],
+  "joints": [
+    {
+      "name": "j1",
+      "parent": "base_link",
+      "child": "shoulder_link",
+      "type": "revolute",
+      "origin_xyz_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "origin_rpy_rad": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "lower_rad": -3.0543,
+      "upper_rad": 3.0543,
+      "velocity_rad_s": 3.15,
+      "effort_nm": 150.0
+    },
+    {
+      "name": "j2",
+      "parent": "shoulder_link",
+      "child": "upperarm_link",
+      "type": "revolute",
+      "origin_xyz_m": [
+        0.0,
+        0.0,
+        0.14
+      ],
+      "origin_rpy_rad": [
+        1.5708,
+        0.0,
+        0.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "lower_rad": -4.6251,
+      "upper_rad": 1.4835,
+      "velocity_rad_s": 3.15,
+      "effort_nm": 150.0
+    },
+    {
+      "name": "j3",
+      "parent": "upperarm_link",
+      "child": "forearm_link",
+      "type": "revolute",
+      "origin_xyz_m": [
+        -0.28,
+        0.0,
+        0.0
+      ],
+      "origin_rpy_rad": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "lower_rad": -2.8274,
+      "upper_rad": 2.8274,
+      "velocity_rad_s": 3.15,
+      "effort_nm": 150.0
+    },
+    {
+      "name": "j4",
+      "parent": "forearm_link",
+      "child": "wrist1_link",
+      "type": "revolute",
+      "origin_xyz_m": [
+        -0.24001,
+        0.0,
+        0.0
+      ],
+      "origin_rpy_rad": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "lower_rad": -4.6251,
+      "upper_rad": 1.4835,
+      "velocity_rad_s": 3.2,
+      "effort_nm": 28.0
+    },
+    {
+      "name": "j5",
+      "parent": "wrist1_link",
+      "child": "wrist2_link",
+      "type": "revolute",
+      "origin_xyz_m": [
+        0.0,
+        0.0,
+        0.102
+      ],
+      "origin_rpy_rad": [
+        1.5708,
+        0.0,
+        0.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "lower_rad": -3.0543,
+      "upper_rad": 3.0543,
+      "velocity_rad_s": 3.2,
+      "effort_nm": 28.0
+    },
+    {
+      "name": "j6",
+      "parent": "wrist2_link",
+      "child": "wrist3_link",
+      "type": "revolute",
+      "origin_xyz_m": [
+        0.0,
+        0.0,
+        0.102
+      ],
+      "origin_rpy_rad": [
+        -1.5708,
+        0.0,
+        0.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "lower_rad": -3.0543,
+      "upper_rad": 3.0543,
+      "velocity_rad_s": 3.2,
+      "effort_nm": 28.0
+    }
+  ]
+}

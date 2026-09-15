@@ -715,3 +715,33 @@ Dựa trên kết quả kiểm toán thực tế, lộ trình triển khai từn
 
 ---
 **KẾT LUẬN GIAI ĐOẠN P0:** ĐẠT YÊU CẦU (PASS). Sẵn sàng chuyển sang Phase P1.
+
+---
+
+## 23. PHASE P2 ARCHITECTURE ADDITIONS: VIRTUAL FR3 & URDF KINEMATICS
+
+Tại Phase P2, kiến trúc mô phỏng đã hoàn tất việc xây dựng Digital Twin cho FAIRINO FR3:
+
+### 23.1. Robot Profile Machine-Readable
+- Source: `robot-3d-viewer/assets/urdf/fairino3_v6.urdf`
+- Generated Profile: `shared/robot_profiles/fr3.json`
+- Generator Tool: `tools/simulation/generate_fr3_profile.py`
+
+### 23.2. Kinematics Engine (`src/simulation/kinematics/`)
+- `urdf_chain.py`: Biến đổi đồng nhất 4x4, quy ước Euler RPY (extrinsic ZYX), và tính toán Jacobian hình học chính xác $J(\mathbf{q}) \in \mathbb{R}^{6 \times 6}$.
+- `fr3.py`: `FR3Kinematics` cung cấp Forward Kinematics (FK) và Inverse Kinematics (IK) với thuật toán Damped Least Squares (DLS, $\lambda=0.05$), khởi tạo đa hạt giống (multi-seed restart), và kiểu dữ liệu trả về có cấu trúc `IKResult` (`IKStatus`).
+
+### 23.3. Hardware Abstraction & VirtualFR3Backend
+- Trừu tượng chung: `RobotBackend` (`src/hardware/backends/base.py`) và `RobotStateSnapshot`.
+- Backend mô phỏng: `VirtualFR3Backend` (`src/simulation/virtual_fr3_backend.py`) hỗ trợ nội suy khớp `move_joint()` và chuyển động tuyến tính trong không gian công cụ `move_cartesian()`.
+- An toàn mô phỏng: Từ chối các pose ngoài tầm với, giữ nguyên trạng thái khớp an toàn, tuyệt đối không dịch chuyển tức thời (teleport).
+
+### 23.4. Scene Extrinsics & Board Reachability
+- Cấu hình: `shared/virtual_fr3_scene.json`
+- Ma trận biến đổi: $R = \begin{bmatrix} 0 & 1 & 0 \\ 0 & 0 & 1 \\ -1 & 0 & 0 \end{bmatrix}$ tương ứng $X_{world}=Y_{robot}, Y_{world}=Z_{robot}, Z_{world}=-X_{robot}$.
+- Tầm vươn bàn cờ: Đặt bàn cờ tại vùng phía trước tay máy ($X_{robot} \in [-0.54, -0.18]\text{ m}$), đạt **100% (90/90 điểm giao bàn cờ)** với sai số vị trí tối đa $0.8641\text{ mm}$ và biên góc khớp an toàn $\ge 2.65^\circ$.
+
+### 23.5. Decoupled Telemetry Pipeline
+- `TelemetryPublisher`: Hỗ trợ snapshot state và phát model `"FR3"` mặc định đến Three.js viewer qua WebSocket `ws://127.0.0.1:8765`.
+- 3D Viewer: Tích hợp cấu hình scene, chọn mặc định FR3, hiển thị chuyển động mượt mà ở 30 FPS.
+

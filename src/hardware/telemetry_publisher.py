@@ -123,22 +123,35 @@ class TelemetryPublisher:
     _lock = threading.Lock()
 
     @classmethod
-    def get_instance(cls, host: str = "127.0.0.1", port: int = 8765) -> 'TelemetryPublisher':
+    def get_instance(cls, host: str = "127.0.0.1", port: int = 8765, robot_model: str = "FR3") -> 'TelemetryPublisher':
         with cls._lock:
             if cls._instance is None:
-                cls._instance = cls(host=host, port=port)
+                cls._instance = cls(host=host, port=port, robot_model=robot_model)
             return cls._instance
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765):
+    @classmethod
+    def reset_instance(cls):
+        """Stop and reset singleton instance (useful for clean unit testing)."""
+        with cls._lock:
+            if cls._instance is not None:
+                cls._instance.stop()
+                cls._instance = None
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 8765, robot_model: str = "FR3"):
         self.host = host
         self.port = port
+        self.robot_model = robot_model
         self.clients: Set = set()
         self.clients_lock = threading.Lock()
+        self._state_lock = threading.Lock()
 
-        # Default Home Chess Pose and Joints
-        # Home chess: X=420.0, Y=0.0, Z=280.0
-        self.current_tcp = [420.0, 0.0, 280.0, 180.0, 0.0, 0.0]
-        self.current_joints = FR5Kinematics.inverse_kinematics(self.current_tcp)
+        # Default Home Pose and Joints
+        if robot_model == "FR3":
+            self.current_joints = [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
+            self.current_tcp = [-367.696, -101.999, 66.0, 90.0, 0.0, 0.0]
+        else:
+            self.current_tcp = [420.0, 0.0, 280.0, 180.0, 0.0, 0.0]
+            self.current_joints = FR5Kinematics.inverse_kinematics(self.current_tcp)
         self.is_gripper_active = False
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -157,7 +170,11 @@ class TelemetryPublisher:
         # Start continuous 30 FPS heartbeat publisher
         self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True, name="TelemetryHeartbeatThread")
         self._heartbeat_thread.start()
-        print(f"[TELEMETRY] 🚀 Virtual Robot Telemetry Server started at ws://{self.host}:{self.port}")
+        print(f"[TELEMETRY] Virtual Robot Telemetry Server started at ws://{self.host}:{self.port}")
+
+    def stop(self):
+        """Stop telemetry server and threads."""
+        self._running = False
 
     def _run_server(self):
         self._loop = asyncio.new_event_loop()
@@ -166,7 +183,7 @@ class TelemetryPublisher:
         async def handler(websocket):
             with self.clients_lock:
                 self.clients.add(websocket)
-            print(f"[TELEMETRY] 🔗 3D Viewer Client connected ({len(self.clients)} active).")
+            print(f"[TELEMETRY] 3D Viewer Client connected ({len(self.clients)} active).")
             try:
                 # Send immediate state on connect
                 await websocket.send(self._make_packet_json())
@@ -178,7 +195,7 @@ class TelemetryPublisher:
             finally:
                 with self.clients_lock:
                     self.clients.discard(websocket)
-                print(f"[TELEMETRY] 🔌 3D Viewer Client disconnected ({len(self.clients)} active).")
+                print(f"[TELEMETRY] 3D Viewer Client disconnected ({len(self.clients)} active).")
 
         async def main():
             async with websockets.serve(handler, self.host, self.port):
@@ -190,15 +207,40 @@ class TelemetryPublisher:
             print(f"[TELEMETRY] Server loop terminated: {e}")
 
     def _make_packet_json(self) -> str:
-        packet = {
-            "type": "robot_state",
-            "robot_model": "FR5",
-            "timestamp": time.time(),
-            "joints": self.current_joints,
-            "tcp": self.current_tcp,
-            "gripper": self.is_gripper_active
-        }
+        with self._state_lock:
+            packet = {
+                "type": "robot_state",
+                "robot_model": self.robot_model,
+                "timestamp": time.time(),
+                "joints": list(self.current_joints),
+                "tcp": list(self.current_tcp),
+                "gripper": self.is_gripper_active,
+            }
         return json.dumps(packet)
+
+    def update_from_snapshot(self, snapshot):
+        """Update telemetry state from authoritative RobotStateSnapshot."""
+        with self._state_lock:
+            self.robot_model = snapshot.robot_model
+            self.current_joints = list(snapshot.joints_deg)
+            self.current_tcp = list(snapshot.tcp_pose_mm_deg)
+            self.is_gripper_active = bool(snapshot.gripper_closed)
+        self._broadcast_sync()
+
+    def update_state(
+        self,
+        joints_deg: List[float],
+        tcp_mm_deg: List[float],
+        gripper: bool = False,
+        robot_model: str = "FR3",
+    ):
+        """Update telemetry state with explicit values."""
+        with self._state_lock:
+            self.robot_model = robot_model
+            self.current_joints = list(joints_deg)
+            self.current_tcp = list(tcp_mm_deg)
+            self.is_gripper_active = bool(gripper)
+        self._broadcast_sync()
 
     def _broadcast_sync(self):
         """Broadcast latest packet to all connected clients."""

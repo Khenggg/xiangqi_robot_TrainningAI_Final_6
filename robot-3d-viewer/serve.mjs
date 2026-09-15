@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(root, "..");
-const canonicalGeometryFile = path.resolve(repoRoot, "shared", "physical_geometry.json");
+const sharedFilesWhitelist = {
+  "/shared/physical_geometry.json": path.resolve(repoRoot, "shared", "physical_geometry.json"),
+  "/shared/robot_profiles/fr3.json": path.resolve(repoRoot, "shared", "robot_profiles", "fr3.json"),
+  "/shared/virtual_fr3_scene.json": path.resolve(repoRoot, "shared", "virtual_fr3_scene.json"),
+};
 
 const port = Number(process.argv[2] || 8080);
 const types = {
@@ -23,9 +27,9 @@ http
     const urlPath = decodeURIComponent(request.url.split("?")[0]);
     let filePath;
 
-    // Controlled access: whitelist only the exact canonical physical_geometry.json asset
-    if (urlPath === "/shared/physical_geometry.json") {
-      filePath = canonicalGeometryFile;
+    // Controlled access: whitelist only exact canonical shared assets
+    if (sharedFilesWhitelist[urlPath]) {
+      filePath = sharedFilesWhitelist[urlPath];
     } else {
       filePath = path.join(
         root,

@@ -7,10 +7,12 @@ export { START_LAYOUT, LABEL_RED, LABEL_BLACK };
 
 // ---------------------------------------------------------------------------
 // SIMULATION SCENE PLACEMENT (NOT INTRINSIC PHYSICAL GEOMETRY)
+// Canonical source: shared/virtual_fr3_scene.json
 // ---------------------------------------------------------------------------
 // Center of the board in Three.js scene coordinates (meters) relative to virtual robot base.
-export const SIM_BOARD_CENTER_X = 0.48;
-export const SIM_BOARD_CENTER_Z = 0.0;
+export const SIM_BOARD_CENTER_X = 0.0;
+export const SIM_BOARD_CENTER_Z = 0.36;
+export const SIM_BOARD_SURFACE_Y = 0.05;
 
 let _activeGeometry = null;
 
@@ -30,7 +32,7 @@ export function computeBoardOrigin(geometry = null) {
   const geo = geometry || getActiveGeometry();
   return new THREE.Vector3(
     SIM_BOARD_CENTER_X - geo.playableWidthM / 2.0,
-    0.001,
+    SIM_BOARD_SURFACE_Y,
     SIM_BOARD_CENTER_Z - geo.playableDepthM / 2.0
   );
 }
