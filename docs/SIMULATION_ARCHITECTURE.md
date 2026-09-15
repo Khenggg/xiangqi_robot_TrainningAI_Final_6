@@ -745,3 +745,11 @@ Tại Phase P2, kiến trúc mô phỏng đã hoàn tất việc xây dựng Dig
 - `TelemetryPublisher`: Hỗ trợ snapshot state và phát model `"FR3"` mặc định đến Three.js viewer qua WebSocket `ws://127.0.0.1:8765`.
 - 3D Viewer: Tích hợp cấu hình scene, chọn mặc định FR3, hiển thị chuyển động mượt mà ở 30 FPS.
 
+### 23.6. Phase P2.1 Hardening & Canonical Unification
+- **Loại bỏ trùng lặp Kinematics Three.js:** 3D viewer nạp động trực tiếp từ `/shared/robot_profiles/fr3.json`, xóa bỏ toàn bộ mảng hardcode `FR3_KINEMATIC_ORIGINS` và `FR3_KINEMATIC_RPY` trong `main.mjs`.
+- **Đồng bộ Scene Placement:** `board.mjs` và `main.mjs` tiêu thụ trực tiếp `/shared/virtual_fr3_scene.json` qua `fetchScenePlacement()` và `fetchSceneConfig()`, loại bỏ các hằng số copy `SIM_BOARD_CENTER_X/Z`.
+- **Ràng buộc vận tốc URDF thật sự trong MoveJ:** Thời lượng chuyển động được điều chỉnh theo vận tốc cực đại của các khớp trong URDF: $t \ge \max_i \frac{|\Delta q_i|}{v_{\max, i} \cdot s_f}$.
+- **Cơ chế Hủy Motion `stop()` Đa Luồng:** Triển khai `threading.Event` hủy tức thì các vòng lặp nội suy khi có tín hiệu `stop()`.
+- **Nội suy Euler góc ngắn nhất:** Khắc phục hiện tượng quay vòng $358^\circ$ quanh $\pm 180^\circ$ trong `move_cartesian()`.
+- **An toàn Telemetry Logging:** Phân biệt `ConnectionClosed` bình thường và ghi log cảnh báo chi tiết các lỗi socket/serialization bất thường.
+

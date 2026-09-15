@@ -56,6 +56,7 @@ class VirtualFR3Backend(RobotBackend):
 
         # Simulation execution parameters
         self._step_delay_s = 0.01
+        self._stop_event = threading.Event()
 
     def _compute_flange_pose_mm_deg(self, joints_rad: np.ndarray) -> List[float]:
         pose = self.kinematics.forward_kinematics(joints_rad)
@@ -122,8 +123,9 @@ class VirtualFR3Backend(RobotBackend):
                         gripper=self._gripper_closed,
                         robot_model="FR3",
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                # Informative warning if telemetry publisher encounters error
+                self._last_error = f"Telemetry sync warning: {e}"
 
     def set_gripper(self, closed: bool) -> bool:
         """Set gripper virtual actuator state."""
@@ -172,11 +174,31 @@ class VirtualFR3Backend(RobotBackend):
             start_rad = self._current_joints_rad.copy()
             self._motion_state = "MOVING"
 
+        # Physical motion duration constrained by URDF maximum joint velocities:
+        # t_i = |Delta q_i| / v_max,i
+        delta_rad = np.abs(target_rad - start_rad)
+        max_vels = np.array(
+            [j.max_velocity_rad_s for j in self.kinematics.chain.joints], dtype=float
+        )
+        joint_durations = delta_rad / np.maximum(max_vels, 1e-4)
+        min_duration_s = float(np.max(joint_durations)) if len(joint_durations) > 0 else 0.05
+
         sf = speed_factor if speed_factor is not None else self.default_speed_factor
-        actual_steps = max(1, int(steps / sf)) if sf < 50.0 else 1
-        sleep_time = (self._step_delay_s / sf) if sf < 50.0 else 0.0
+        scaled_duration_s = max(min_duration_s / max(sf, 1e-4), 0.02)
+        step_dt = 0.02  # 50 Hz interpolation steps
+        actual_steps = max(1, int(math.ceil(scaled_duration_s / step_dt))) if sf < 50.0 else 1
+        sleep_time = (scaled_duration_s / actual_steps) if sf < 50.0 else 0.0
+
+        self._stop_event.clear()
 
         for s in range(1, actual_steps + 1):
+            if self._stop_event.is_set():
+                with self._state_lock:
+                    self._motion_state = "IDLE"
+                    self._last_error = "MoveJ aborted by stop() request"
+                    self._sync_telemetry()
+                return False
+
             alpha = float(s) / float(actual_steps)
             q_interp = start_rad + alpha * (target_rad - start_rad)
             flange = self._compute_flange_pose_mm_deg(q_interp)
@@ -238,15 +260,23 @@ class VirtualFR3Backend(RobotBackend):
         start_rot = np.array(start_pose_mm_deg[3:], dtype=float)
         target_rot = np.array(target_pose_mm_deg[3:], dtype=float)
 
+        # Shortest-path angle difference in [-180, +180] deg to prevent 358-deg wraparounds
+        rot_diff = np.array(
+            [(t - s + 180.0) % 360.0 - 180.0 for s, t in zip(start_rot, target_rot)],
+            dtype=float,
+        )
+
         num_samples = max(2, samples)
         joint_trajectory = []
         seed = start_joints_rad.copy()
+
+        self._stop_event.clear()
 
         # Pre-validate all waypoints before executing motion
         for i in range(1, num_samples + 1):
             alpha = float(i) / float(num_samples)
             p_i = start_p + alpha * (target_p - start_p)
-            rot_i = start_rot + alpha * (target_rot - start_rot)
+            rot_i = start_rot + alpha * rot_diff
             wp_target = list(p_i) + list(rot_i)
 
             ik_res = self.kinematics.inverse_kinematics(
@@ -273,10 +303,30 @@ class VirtualFR3Backend(RobotBackend):
         with self._state_lock:
             self._motion_state = "MOVING"
 
+        # Calculate timing based on URDF max joint velocities across waypoints
+        max_vels = np.array(
+            [j.max_velocity_rad_s for j in self.kinematics.chain.joints], dtype=float
+        )
+        prev_q = start_joints_rad
+        total_joint_time = 0.0
+        for q_wp in joint_trajectory:
+            dq = np.abs(q_wp - prev_q)
+            step_time = float(np.max(dq / np.maximum(max_vels, 1e-4)))
+            total_joint_time += step_time
+            prev_q = q_wp
+
         sf = speed_factor if speed_factor is not None else self.default_speed_factor
-        sleep_time = (self._step_delay_s / sf) if sf < 50.0 else 0.0
+        scaled_duration_s = max(total_joint_time / max(sf, 1e-4), 0.02)
+        sleep_time = (scaled_duration_s / len(joint_trajectory)) if sf < 50.0 else 0.0
 
         for q_step in joint_trajectory:
+            if self._stop_event.is_set():
+                with self._state_lock:
+                    self._motion_state = "IDLE"
+                    self._last_error = "MoveCartesian aborted by stop() request"
+                    self._sync_telemetry()
+                return False
+
             flange = self._compute_flange_pose_mm_deg(q_step)
             with self._state_lock:
                 self._current_joints_rad = q_step
@@ -295,7 +345,8 @@ class VirtualFR3Backend(RobotBackend):
         return True
 
     def stop(self) -> bool:
-        """Halt motion immediately."""
+        """Halt motion immediately across threads."""
+        self._stop_event.set()
         with self._state_lock:
             if self._motion_state == "MOVING":
                 self._motion_state = "IDLE"

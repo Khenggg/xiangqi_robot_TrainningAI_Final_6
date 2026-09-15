@@ -9,10 +9,43 @@ export { START_LAYOUT, LABEL_RED, LABEL_BLACK };
 // SIMULATION SCENE PLACEMENT (NOT INTRINSIC PHYSICAL GEOMETRY)
 // Canonical source: shared/virtual_fr3_scene.json
 // ---------------------------------------------------------------------------
-// Center of the board in Three.js scene coordinates (meters) relative to virtual robot base.
-export const SIM_BOARD_CENTER_X = 0.0;
-export const SIM_BOARD_CENTER_Z = 0.36;
-export const SIM_BOARD_SURFACE_Y = 0.05;
+let _activeScenePlacement = {
+  boardCenterX: 0.0,
+  boardSurfaceY: 0.05,
+  boardCenterZ: 0.36,
+};
+
+export async function fetchScenePlacement(url = "/shared/virtual_fr3_scene.json") {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch scene placement from ${url}: HTTP ${response.status}`);
+  }
+  const data = await response.json();
+  const worldCenter = data?.virtual_board_placement?.board_center_in_3d_world_m;
+  if (!Array.isArray(worldCenter) || worldCenter.length !== 3) {
+    throw new Error("Invalid virtual_board_placement.board_center_in_3d_world_m in scene config");
+  }
+  const placement = {
+    boardCenterX: Number(worldCenter[0]),
+    boardSurfaceY: Number(worldCenter[1]),
+    boardCenterZ: Number(worldCenter[2]),
+  };
+  setScenePlacement(placement);
+  return placement;
+}
+
+export function setScenePlacement(placement) {
+  if (!placement) throw new Error("placement cannot be null or undefined");
+  _activeScenePlacement = {
+    boardCenterX: Number(placement.boardCenterX),
+    boardSurfaceY: Number(placement.boardSurfaceY),
+    boardCenterZ: Number(placement.boardCenterZ),
+  };
+}
+
+export function getScenePlacement() {
+  return _activeScenePlacement;
+}
 
 let _activeGeometry = null;
 
@@ -30,10 +63,11 @@ export function getActiveGeometry() {
 
 export function computeBoardOrigin(geometry = null) {
   const geo = geometry || getActiveGeometry();
+  const placement = getScenePlacement();
   return new THREE.Vector3(
-    SIM_BOARD_CENTER_X - geo.playableWidthM / 2.0,
-    SIM_BOARD_SURFACE_Y,
-    SIM_BOARD_CENTER_Z - geo.playableDepthM / 2.0
+    placement.boardCenterX - geo.playableWidthM / 2.0,
+    placement.boardSurfaceY,
+    placement.boardCenterZ - geo.playableDepthM / 2.0
   );
 }
 

@@ -159,6 +159,10 @@ class URDFJoint:
     upper_limit: float
     velocity_limit: float
 
+    @property
+    def max_velocity_rad_s(self) -> float:
+        return self.velocity_limit
+
     def local_transform(self, q: float) -> np.ndarray:
         """
         Compute 4x4 transform T_parent_child(q) = T_origin @ T_joint(q).

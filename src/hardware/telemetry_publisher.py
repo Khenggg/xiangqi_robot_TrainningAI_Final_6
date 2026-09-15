@@ -190,8 +190,10 @@ class TelemetryPublisher:
                 # Keep connection open until client disconnects
                 async for _ in websocket:
                     pass
-            except Exception:
+            except websockets.exceptions.ConnectionClosed:
                 pass
+            except Exception as e:
+                print(f"[TELEMETRY WARN] Client socket error: {e}")
             finally:
                 with self.clients_lock:
                     self.clients.discard(websocket)
@@ -254,8 +256,11 @@ class TelemetryPublisher:
         for client in clients_copy:
             try:
                 asyncio.run_coroutine_threadsafe(client.send(msg), self._loop)
-            except Exception:
+            except websockets.exceptions.ConnectionClosed:
                 pass
+            except Exception as e:
+                # Throttled/informative warning on failed send
+                print(f"[TELEMETRY WARN] Failed to send packet to client: {e}")
 
     def _heartbeat_loop(self):
         """Broadcast current state at 25 Hz to ensure smooth UI mirror."""

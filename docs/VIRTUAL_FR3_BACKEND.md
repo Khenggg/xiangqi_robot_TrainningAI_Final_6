@@ -36,18 +36,18 @@ $$\text{base\_link} \xrightarrow{j1} \text{shoulder\_link} \xrightarrow{j2} \tex
 
 | Joint | Parent Link | Child Link | Origin $(x, y, z)$ [m] | Origin RPY $(\phi, \theta, \psi)$ [rad] | Axis $[x, y, z]$ | Lower Lim [rad] | Upper Lim [rad] | Max Vel [rad/s] |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **j1** | `base_link` | `shoulder_link` | `[0, 0, 0.135]` | `[0, 0, 0]` | `[0, 0, 1]` | `-3.0543` ($-175^\circ$) | `+3.0543` ($+175^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
-| **j2** | `shoulder_link` | `upperarm_link` | `[0, 0, 0]` | `[1.5708, 0, 0]` | `[0, 0, 1]` | `-4.6251` ($-265^\circ$) | `+1.4835` ($+85^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
-| **j3** | `upperarm_link` | `forearm_link` | `[-0.28, 0, 0]` | `[0, 0, 0]` | `[0, 0, 1]` | `-2.7925` ($-160^\circ$) | `+2.7925` ($+160^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
-| **j4** | `forearm_link` | `wrist1_link` | `[-0.24, 0, 0.108]` | `[0, 0, 0]` | `[0, 0, 1]` | `-4.6251` ($-265^\circ$) | `+1.4835` ($+85^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
-| **j5** | `wrist1_link` | `wrist2_link` | `[0, -0.102, 0]` | `[-1.5708, 0, 0]` | `[0, 0, 1]` | `-3.0543` ($-175^\circ$) | `+3.0543` ($+175^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
-| **j6** | `wrist2_link` | `wrist3_link` | `[0, 0.088, 0]` | `[1.5708, 0, 0]` | `[0, 0, 1]` | `-3.0543` ($-175^\circ$) | `+3.0543` ($+175^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
+| **j1** | `base_link` | `shoulder_link` | `[0.0, 0.0, 0.0]` | `[0.0, 0.0, 0.0]` | `[0, 0, 1]` | `-3.0543` ($-175^\circ$) | `+3.0543` ($+175^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
+| **j2** | `shoulder_link` | `upperarm_link` | `[0.0, 0.0, 0.14]` | `[1.5708, 0.0, 0.0]` | `[0, 0, 1]` | `-4.6251` ($-265^\circ$) | `+1.4835` ($+85^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
+| **j3** | `upperarm_link` | `forearm_link` | `[-0.28, 0.0, 0.0]` | `[0.0, 0.0, 0.0]` | `[0, 0, 1]` | `-2.8274` ($-162^\circ$) | `+2.8274` ($+162^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
+| **j4** | `forearm_link` | `wrist1_link` | `[-0.24001, 0.0, 0.0]` | `[0.0, 0.0, 0.0]` | `[0, 0, 1]` | `-4.6251` ($-265^\circ$) | `+1.4835` ($+85^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
+| **j5** | `wrist1_link` | `wrist2_link` | `[0.0, 0.0, 0.102]` | `[-1.5708, 0.0, 0.0]` | `[0, 0, 1]` | `-3.0543` ($-175^\circ$) | `+3.0543` ($+175^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
+| **j6** | `wrist2_link` | `wrist3_link` | `[0.0, 0.0, 0.102]` | `[1.5708, 0.0, 0.0]` | `[0, 0, 1]` | `-3.0543` ($-175^\circ$) | `+3.0543` ($+175^\circ$) | `3.1416` ($180^\circ/\text{s}$) |
 
 ### 2.2. Critical Geometric Nuance: Forward Reach along $-X_{\text{robot}}$
 
 In standard industrial robots (such as FR5), the arm links often extend along $+X$ or $+Z$. However, in `fairino3_v6.urdf`:
 - Joint 3 origin relative to `upperarm_link` has $x = -0.28\text{ m}$.
-- Joint 4 origin relative to `forearm_link` has $x = -0.24\text{ m}$.
+- Joint 4 origin relative to `forearm_link` has $x = -0.24001\text{ m}$.
 - Joint 1 has symmetric limits $[-175^\circ, +175^\circ]$, meaning the joint **cannot reach $180^\circ$ ($\pm \pi$)**.
 
 Consequently:

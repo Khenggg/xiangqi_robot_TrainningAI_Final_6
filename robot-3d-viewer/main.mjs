@@ -3,9 +3,10 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { validateLivePacket, stabilizeJointTarget } from "./live_state.mjs";
 import { fetchPhysicalGeometry } from "./geometry.mjs";
-import { buildBoardGrid, buildPieces, setBoardGeometry } from "./board.mjs";
+import { buildBoardGrid, buildPieces, setBoardGeometry, fetchScenePlacement } from "./board.mjs";
+
 // ---------------------------------------------------------------------------
-// 1) CẤU HÌNH ROBOT — copy nguyên từ frnsimulation-main/app.js
+// 1) CẤU HÌNH ROBOT & KINEMATICS DYNAMIC LOADER
 // ---------------------------------------------------------------------------
 const LINK_FILES = [
   "base_link",
@@ -17,46 +18,57 @@ const LINK_FILES = [
   "wrist3_link",
 ];
 
-const FR3_KINEMATIC_ORIGINS = [
-  [0, 0, 0],
-  [0, 0, 0.14],
-  [-0.28, 0, 0],
-  [-0.24001, 0, 0],
-  [0, 0, 0.102],
-  [0, 0, 0.102],
-];
-const FR3_KINEMATIC_RPY = [
-  [0, 0, 0],
-  [Math.PI / 2, 0, 0],
-  [0, 0, 0],
-  [0, 0, 0],
-  [Math.PI / 2, 0, 0],
-  [-Math.PI / 2, 0, 0],
-];
-const FR5_KINEMATIC_ORIGINS = [
-  [0, 0, 0],
-  [0, 0, 0.152],
-  [-0.425, 0, 0],
-  [-0.39501, 0, 0],
-  [0, 0, 0.1021],
-  [0, 0, 0.102],
-];
+async function fetchRobotProfileConfig(profileId) {
+  if (profileId === "fr3") {
+    const res = await fetch("/shared/robot_profiles/fr3.json");
+    if (!res.ok) {
+      throw new Error(`Failed to load /shared/robot_profiles/fr3.json: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return {
+      visualJointOrigins: data.joints.map((j) => j.origin_xyz),
+      visualJointRpy: data.joints.map((j) => j.origin_rpy),
+    };
+  }
+  // FR5 fallback (visual only)
+  return {
+    visualJointOrigins: [
+      [0, 0, 0],
+      [0, 0, 0.152],
+      [-0.425, 0, 0],
+      [-0.39501, 0, 0],
+      [0, 0, 0.1021],
+      [0, 0, 0.102],
+    ],
+    visualJointRpy: [
+      [0, 0, 0],
+      [Math.PI / 2, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+      [Math.PI / 2, 0, 0],
+      [-Math.PI / 2, 0, 0],
+    ],
+  };
+}
+
+async function fetchSceneConfig() {
+  const res = await fetch("/shared/virtual_fr3_scene.json");
+  if (!res.ok) {
+    throw new Error(`Failed to load /shared/virtual_fr3_scene.json: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
 
 const ROBOT_PROFILES = Object.freeze({
   fr3: Object.freeze({
     id: "fr3",
     label: "FAIRINO FR3",
     meshBase: "./assets/fr3_v6/",
-    visualJointOrigins: FR3_KINEMATIC_ORIGINS,
-    visualJointRpy: FR3_KINEMATIC_RPY,
   }),
   fr5: Object.freeze({
     id: "fr5",
     label: "FAIRINO FR5",
     meshBase: "./assets/fr5_v6/",
-    visualJointOrigins: FR5_KINEMATIC_ORIGINS,
-    // FR5 dùng chung cấu trúc góc xoay khớp với FR3 (visual only)
-    visualJointRpy: FR3_KINEMATIC_RPY,
   }),
 });
 const getRobotProfile = (id) => ROBOT_PROFILES[id] || ROBOT_PROFILES.fr3;
@@ -132,6 +144,9 @@ async function buildRobotArm(profile) {
   const candidate = { group: new THREE.Group(), jointRotators: [] };
   candidate.group.name = `robot-arm-${profile.id}`;
   try {
+    const kinematicsConfig = await fetchRobotProfileConfig(profile.id);
+    const sceneConfig = await fetchSceneConfig();
+
     const baseGeometry = await loadSTL(loader, profile, "base_link");
     const baseMesh = new THREE.Mesh(baseGeometry, material());
     baseMesh.castShadow = true;
@@ -140,8 +155,8 @@ async function buildRobotArm(profile) {
     let parent = candidate.group;
     for (let i = 0; i < 6; i++) {
       const frame = new THREE.Group();
-      frame.position.fromArray(profile.visualJointOrigins[i]);
-      frame.rotation.set(...profile.visualJointRpy[i]);
+      frame.position.fromArray(kinematicsConfig.visualJointOrigins[i]);
+      frame.rotation.set(...kinematicsConfig.visualJointRpy[i]);
       parent.add(frame);
 
       const rotator = new THREE.Group();
@@ -155,13 +170,15 @@ async function buildRobotArm(profile) {
       parent = rotator;
     }
 
-    // Canonical root transformation: robot_base -> 3d_world
+    // Dynamic canonical root transformation from virtual_fr3_scene.json:
     // Maps robot base frame (Z-up, -X facing board, +Y lateral)
     // to Three.js scene (Y-up, +Z facing board, +X lateral)
+    const rot = sceneConfig.robot_base_to_3d_world.rotation_matrix;
+    const trans = sceneConfig.robot_base_to_3d_world.translation_m;
     const rootMatrix = new THREE.Matrix4().set(
-      0, 1, 0, 0,
-      0, 0, 1, 0,
-     -1, 0, 0, 0,
+      rot[0][0], rot[0][1], rot[0][2], trans[0],
+      rot[1][0], rot[1][1], rot[1][2], trans[1],
+      rot[2][0], rot[2][1], rot[2][2], trans[2],
       0, 0, 0, 1
     );
     candidate.group.applyMatrix4(rootMatrix);
@@ -308,6 +325,7 @@ async function initApp() {
   try {
     const physicalGeometry = await fetchPhysicalGeometry();
     setBoardGeometry(physicalGeometry);
+    await fetchScenePlacement();
 
     scene.add(buildBoardGrid(physicalGeometry));
     const { group: piecesGroup, pieces } = buildPieces(physicalGeometry);

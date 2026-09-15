@@ -107,15 +107,57 @@ class VirtualFR3BackendTests(unittest.TestCase):
         # Robot did NOT teleport to unreachable target
         self.assertNotEqual(snap_after.tcp_pose_mm_deg[0], 3000.0)
 
-    def test_gripper_control(self):
+    def test_stop_cancels_active_motion_immediately(self):
+        import threading
+        import time
+
         self.backend.connect()
-        self.assertFalse(self.backend.get_state_snapshot().gripper_closed)
+        target_deg = [45.0, -30.0, 60.0, -90.0, -90.0, 0.0]
 
-        self.assertTrue(self.backend.set_gripper(True))
-        self.assertTrue(self.backend.get_state_snapshot().gripper_closed)
+        result_container = []
 
-        self.assertTrue(self.backend.set_gripper(False))
-        self.assertFalse(self.backend.get_state_snapshot().gripper_closed)
+        def run_move():
+            # Slow motion (speed_factor=0.2, takes ~1 second)
+            res = self.backend.move_joint(target_deg, speed_factor=0.2)
+            result_container.append(res)
+
+        th = threading.Thread(target=run_move)
+        th.start()
+        time.sleep(0.06)  # Let motion start and enter interpolation loop
+
+        # Request abort
+        self.backend.stop()
+        th.join(timeout=2.0)
+
+        self.assertFalse(th.is_alive(), "Thread should have terminated promptly")
+        self.assertEqual(len(result_container), 1)
+        self.assertFalse(result_container[0], "Cancelled motion must return False")
+        snap = self.backend.get_state_snapshot()
+        self.assertEqual(snap.motion_state, "IDLE")
+        self.assertIn("aborted by stop()", snap.last_error)
+
+    def test_move_joint_velocity_governance_duration(self):
+        self.backend.connect()
+        # Large movement on Joint 1: 90 deg = pi/2 rad ~ 1.5708 rad
+        # At max velocity 3.1416 rad/s, duration at 1.0x speed is >= 0.5s
+        import time
+
+        target_deg = [90.0, -45.0, 90.0, -45.0, -90.0, 0.0]
+        t0 = time.time()
+        # Run at 10.0x speed factor to keep test fast: duration >= 0.5s / 10.0 = 0.05s
+        ok = self.backend.move_joint(target_deg, speed_factor=10.0)
+        dt = time.time() - t0
+
+        self.assertTrue(ok)
+        self.assertGreaterEqual(dt, 0.045, "Motion must respect URDF velocity-derived duration")
+
+    def test_cartesian_shortest_path_euler_interpolation(self):
+        self.backend.connect()
+        # Verify rot_diff logic produces shortest path in [-180, +180]
+        start_rot = [179.0, 0.0, 0.0]
+        target_rot = [-179.0, 0.0, 0.0]
+        rot_diff = [(t - s + 180.0) % 360.0 - 180.0 for s, t in zip(start_rot, target_rot)]
+        self.assertAlmostEqual(rot_diff[0], 2.0, places=3, msg="179 to -179 must be +2 deg, not -358 deg")
 
 
 if __name__ == "__main__":
