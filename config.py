@@ -22,9 +22,15 @@ ROBOT_DIR_X = 1
 ROBOT_DIR_Y = 1  
 
 # Kích thước vật lý từng ô bàn cờ (mm)
-CELL_SIZE_X = 40.75  # 326mm chia cho 8 khoảng cột (ngang)
-CELL_SIZE_Y = 41.00  # 370mm chia cho 9 khoảng hàng (dọc)
-RIVER_GAP_Y = 1.00   # Bù thêm 1mm khe hở của con Sông (Nằm giữa row 4 và row 5)
+CELL_SIZE_X = 40.00  # Cạnh ô cờ 40mm (ngang)
+CELL_SIZE_Y = 40.00  # Cạnh ô cờ 40mm (dọc)
+RIVER_GAP_Y = 0.00   # Bù sông (mặc định 0mm khi dùng cạnh ô 40mm đều)
+
+# Kích thước tổng thể bàn cờ và quân cờ (mm)
+BOARD_WIDTH_MM = 367.0    # Chiều ngang bàn cờ: 36.7 cm
+BOARD_LENGTH_MM = 410.0   # Chiều dài bàn cờ: 41.0 cm
+PIECE_DIAMETER_MM = 22.5  # Đường kính quân cờ: 22.5 mm
+PIECE_HEIGHT_MM = 9.43    # Chiều cao quân cờ: 9.43 mm
 
 # Tọa độ bãi chứa quân bị ăn (X, Y, Z)
 CAPTURE_BIN_X = -226.123

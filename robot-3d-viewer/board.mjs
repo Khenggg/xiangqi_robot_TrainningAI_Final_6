@@ -1,7 +1,18 @@
 import * as THREE from "three";
 
-export const CELL = 0.05; // Khoảng cách giữa 2 đường kẻ
-export const BOARD_ORIGIN = new THREE.Vector3(0.32, 0.001, -0.18);
+export const CELL = 0.040; // Cạnh ô cờ 40mm = 0.04m
+export const BOARD_WIDTH = 0.367; // Chiều ngang bàn cờ 36.7 cm = 0.367m
+export const BOARD_DEPTH = 0.410; // Chiều dài bàn cờ 41.0 cm = 0.410m
+
+export const PIECE_RADIUS = 0.0225 / 2; // Đường kính 22.5mm -> bán kính 11.25mm = 0.01125m
+export const PIECE_HEIGHT = 0.00943;    // Chiều cao quân cờ 9.43mm = 0.00943m
+
+// Gốc ô (0, 0) căn giữa bàn cờ đối diện chân robot FR5 (tâm tại X=0.48m, Z=0.0m)
+export const BOARD_ORIGIN = new THREE.Vector3(
+  0.48 - (8 * CELL) / 2, // 0.32m
+  0.001,
+  0.0 - (9 * CELL) / 2   // -0.18m
+);
 
 export function boardPointToXYZ(col, row) {
   return new THREE.Vector3(
@@ -17,7 +28,7 @@ export function boardPointToXYZ(col, row) {
 function createBoardTexture() {
   const canvas = document.createElement("canvas");
   canvas.width = 1024;
-  canvas.height = 1152;
+  canvas.height = Math.round(1024 * (BOARD_DEPTH / BOARD_WIDTH)); // 1144 px
   const ctx = canvas.getContext("2d");
 
   // Nền gỗ sáng
@@ -25,29 +36,19 @@ function createBoardTexture() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   ctx.strokeStyle = "#1a1a1a";
-  ctx.lineWidth = 6;
+  ctx.lineWidth = 5;
 
-  const paddingX = 64;
-  const paddingY = 64;
+  // Lề ngang: (367mm - 320mm)/2 = 23.5mm -> 23.5 / 367 * canvas.width = 65.6 px
+  const paddingX = Math.round(canvas.width * (23.5 / 367.0));
+  // Lề dọc: (410mm - 360mm)/2 = 25.0mm -> 25.0 / 410 * canvas.height = 69.8 px
+  const paddingY = Math.round(canvas.height * (25.0 / 410.0));
 
-  // Chia 8 cột bằng nhau
+  // Chia 8 cột bằng nhau (cạnh ô 40mm)
   const stepX = (canvas.width - paddingX * 2) / 8;
-  
-  // Tỷ lệ chuẩn: 8 hàng cờ là các ô vuông (chiều cao = stepX)
-  // Chiều cao sông = khoảng còn lại ở giữa
-  const squareHeight = stepX;
-  const riverHeight = (canvas.height - paddingY * 2) - (8 * squareHeight);
+  const squareHeight = (canvas.height - paddingY * 2) / 9;
 
   const getX = (col) => paddingX + col * stepX;
-  
-  // Tính tọa độ Y cho 10 đường ngang (4 hàng bên dưới, 1 Sông, 4 hàng bên trên)
-  const getY = (row) => {
-    if (row <= 4) {
-      return paddingY + row * squareHeight; // Hàng 0 đến 4 (bên dưới)
-    } else {
-      return paddingY + 4 * squareHeight + riverHeight + (row - 5) * squareHeight; // Hàng 5 đến 9 (bên trên)
-    }
-  };
+  const getY = (row) => paddingY + row * squareHeight;
 
   // 1. Vẽ 10 đường ngang
   for (let r = 0; r < 10; r++) {
@@ -116,8 +117,8 @@ export function buildBoardGrid() {
   const group = new THREE.Group();
   group.name = "xiangqi-board";
 
-  const boardWidth = 8 * CELL + CELL * 1.2;
-  const boardDepth = 9 * CELL + CELL * 1.2;
+  const boardWidth = BOARD_WIDTH;
+  const boardDepth = BOARD_DEPTH;
   const boardThickness = 0.02;
 
   // Material dùng MeshLambertMaterial thay vì Standard để tránh bị nhiễu bóng bẩn
@@ -229,8 +230,8 @@ export function buildPieces(layout = START_LAYOUT) {
   const group = new THREE.Group();
   group.name = "xiangqi-pieces";
   const pieces = {};
-  const radius = CELL * 0.42;
-  const height = 0.015;
+  const radius = PIECE_RADIUS;
+  const height = PIECE_HEIGHT;
 
   const geometry = new THREE.CylinderGeometry(radius, radius, height, 32);
 
