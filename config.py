@@ -21,16 +21,22 @@ OFFSET_Y = 0.0   # Không lệch ngang
 ROBOT_DIR_X = 1  
 ROBOT_DIR_Y = 1  
 
-# Kích thước vật lý từng ô bàn cờ (mm)
-CELL_SIZE_X = 40.00  # Cạnh ô cờ 40mm (ngang)
-CELL_SIZE_Y = 40.00  # Cạnh ô cờ 40mm (dọc)
-RIVER_GAP_Y = 0.00   # Bù sông (mặc định 0mm khi dùng cạnh ô 40mm đều)
+# Kích thước vật lý bàn cờ & quân cờ (nguồn chuẩn hóa từ shared/physical_geometry.json)
+from src.domain.geometry import get_physical_geometry as _get_physical_geometry
+_geo = _get_physical_geometry()
 
-# Kích thước tổng thể bàn cờ và quân cờ (mm)
-BOARD_WIDTH_MM = 367.0    # Chiều ngang bàn cờ: 36.7 cm
-BOARD_LENGTH_MM = 410.0   # Chiều dài bàn cờ: 41.0 cm
-PIECE_DIAMETER_MM = 22.5  # Đường kính quân cờ: 22.5 mm
-PIECE_HEIGHT_MM = 9.43    # Chiều cao quân cờ: 9.43 mm
+CELL_SIZE_X = _geo.board.column_spacing   # Cạnh ô cờ 40.0mm (ngang)
+CELL_SIZE_Y = _geo.board.row_spacing      # Cạnh ô cờ 40.0mm (dọc)
+RIVER_GAP_Y = 0.00                        # Bù sông (mặc định 0mm khi dùng cạnh ô 40mm đều)
+
+BOARD_WIDTH_MM = _geo.board.outer_width   # Chiều ngang bàn cờ: 367.0 mm
+BOARD_LENGTH_MM = _geo.board.outer_length # Chiều dài bàn cờ: 410.0 mm
+PIECE_DIAMETER_MM = _geo.piece.diameter   # Đường kính quân cờ: 22.5 mm
+PIECE_HEIGHT_MM = _geo.piece.height       # Chiều cao quân cờ: 9.43 mm
+PLAYABLE_WIDTH_MM = _geo.board.playable_grid_width_mm   # Chiều ngang vùng chơi: 320.0 mm
+PLAYABLE_LENGTH_MM = _geo.board.playable_grid_length_mm # Chiều dài vùng chơi: 360.0 mm
+BOARD_MARGIN_X_MM = _geo.board.margin_horizontal_mm     # Lề trái/phải: 23.5 mm
+BOARD_MARGIN_Y_MM = _geo.board.margin_vertical_mm       # Lề trên/dưới: 25.0 mm
 
 # Tọa độ bãi chứa quân bị ăn (X, Y, Z)
 CAPTURE_BIN_X = -226.123

@@ -2,7 +2,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { validateLivePacket, stabilizeJointTarget } from "./live_state.mjs";
-import { buildBoardGrid, buildPieces } from "./board.mjs";
+import { fetchPhysicalGeometry } from "./geometry.mjs";
+import { buildBoardGrid, buildPieces, setBoardGeometry } from "./board.mjs";
 // ---------------------------------------------------------------------------
 // 1) CẤU HÌNH ROBOT — copy nguyên từ frnsimulation-main/app.js
 // ---------------------------------------------------------------------------
@@ -91,9 +92,7 @@ scene.add(keyLight);
 const grid = new THREE.GridHelper(1.6, 16, 0x2a3140, 0x1c212b);
 scene.add(grid);
 
-scene.add(buildBoardGrid());
-const { group: piecesGroup, pieces: xiangqiPieces } = buildPieces();
-scene.add(piecesGroup);
+let xiangqiPieces = null;
 
 
 function resizeRenderer() {
@@ -292,4 +291,22 @@ function loop(now) {
 }
 
 resizeRenderer();
-switchRobotProfile(state.robotProfileId).then(() => loop(performance.now()));
+
+async function initApp() {
+  try {
+    const physicalGeometry = await fetchPhysicalGeometry();
+    setBoardGeometry(physicalGeometry);
+
+    scene.add(buildBoardGrid(physicalGeometry));
+    const { group: piecesGroup, pieces } = buildPieces(physicalGeometry);
+    xiangqiPieces = pieces;
+    scene.add(piecesGroup);
+
+    await switchRobotProfile(state.robotProfileId);
+    loop(performance.now());
+  } catch (err) {
+    console.error("[VIEWER] ❌ Failed to initialize 3D viewer:", err);
+  }
+}
+
+initApp();

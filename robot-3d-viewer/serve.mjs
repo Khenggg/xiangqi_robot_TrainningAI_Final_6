@@ -4,6 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(root, "..");
+const canonicalGeometryFile = path.resolve(repoRoot, "shared", "physical_geometry.json");
+
 const port = Number(process.argv[2] || 8080);
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -18,15 +21,25 @@ const types = {
 http
   .createServer((request, response) => {
     const urlPath = decodeURIComponent(request.url.split("?")[0]);
-    const filePath = path.join(
-      root,
-      urlPath === "/" ? "/index.html" : urlPath,
-    );
-    if (!filePath.startsWith(root)) {
-      response.writeHead(403);
-      response.end("Forbidden");
-      return;
+    let filePath;
+
+    // Controlled access: whitelist only the exact canonical physical_geometry.json asset
+    if (urlPath === "/shared/physical_geometry.json") {
+      filePath = canonicalGeometryFile;
+    } else {
+      filePath = path.join(
+        root,
+        urlPath === "/" ? "/index.html" : urlPath,
+      );
+      // Strictly prevent path traversal outside robot-3d-viewer root
+      const normalized = path.normalize(filePath);
+      if (!normalized.startsWith(root)) {
+        response.writeHead(403);
+        response.end("Forbidden");
+        return;
+      }
     }
+
     fs.readFile(filePath, (error, data) => {
       if (error) {
         response.writeHead(404);

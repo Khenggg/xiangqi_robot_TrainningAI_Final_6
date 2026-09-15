@@ -200,18 +200,41 @@ main.py
 
 Bảng tổng hợp đối chiếu tất cả các nguồn khai báo hình học trong repository:
 
-| Tham số | Nguồn 1: `config.py` | Nguồn 2: `robot-3d-viewer/board.mjs` | Nguồn 3: `robot_VIP.py` (Dry-run TP) | Nguồn 4: `PROJECT_CONTEXT.md` | Có mâu thuẫn? | Recommended Single Owner |
+| Tham số | Nguồn 1: `config.py` | Nguồn 2: `robot-3d-viewer/board.mjs` (Cũ) | Nguồn 3: `robot_VIP.py` (Dry-run TP) | Nguồn 4: `PROJECT_CONTEXT.md` | Có mâu thuẫn? | Recommended Single Owner |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Board Width** | `367.0 mm` | `367.0 mm` (`0.367 m`) | N/A | `367.0 mm` | Không | `domain/geometry.py` |
-| **Board Length** | `410.0 mm` | `410.0 mm` (`0.410 m`) | N/A | `410.0 mm` | Không | `domain/geometry.py` |
-| **Grid Spacing X**| `40.0 mm` | `40.0 mm` (`0.040 m`) | $360.6 / 8 = 45.08\text{ mm}$ | `40.0 mm` | **CÓ** (Nguồn 3 lệch) | `domain/geometry.py` |
-| **Grid Spacing Y**| `40.0 mm` | $410/9 \approx 45.5\text{ mm}$ (Canvas) | $400.1 / 9 = 44.45\text{ mm}$ | `40.0 mm` | **CÓ** (Nguồn 2 & 3 lệch) | `domain/geometry.py` |
-| **Piece Diameter**| `22.5 mm` | `22.5 mm` (`0.0225 m`) | N/A | `22.5 mm` | Không | `domain/geometry.py` |
-| **Piece Height** | `9.43 mm` | `9.43 mm` (`0.00943 m`)| N/A | `9.43 mm` | Không | `domain/geometry.py` |
-| **Board Origin** | $X=200, Y=-100$ | $X=0.32, Z=-0.18$ | R1: $X=350.2, Y=-180.5$ | R1: $(col=0, row=0)$ | **CÓ** (Origin phân tán)| `domain/geometry.py` |
+| **Board Width** | `367.0 mm` | `367.0 mm` (`0.367 m`) | N/A | `367.0 mm` | Không | `shared/physical_geometry.json` |
+| **Board Length** | `410.0 mm` | `410.0 mm` (`0.410 m`) | N/A | `410.0 mm` | Không | `shared/physical_geometry.json` |
+| **Grid Spacing X**| `40.0 mm` | `40.0 mm` (`0.040 m`) | $360.6 / 8 = 45.08\text{ mm}$ | `40.0 mm` | **CÓ** (Nguồn 3 lệch) | `shared/physical_geometry.json` |
+| **Grid Spacing Y**| `40.0 mm` | $410/9 \approx 45.5\text{ mm}$ (Canvas cũ) | $400.1 / 9 = 44.45\text{ mm}$ | `40.0 mm` | **CÓ** (Nguồn 2 cũ & 3 lệch) | `shared/physical_geometry.json` |
+| **Piece Diameter**| `22.5 mm` | `22.5 mm` (`0.0225 m`) | N/A | `22.5 mm` | Không | `shared/physical_geometry.json` |
+| **Piece Height** | `9.43 mm` | `9.43 mm` (`0.00943 m`)| N/A | `9.43 mm` | Không | `shared/physical_geometry.json` |
+| **Board Origin** | $X=200, Y=-100$ | $X=0.32, Z=-0.18$ | R1: $X=350.2, Y=-180.5$ | R1: $(col=0, row=0)$ | **Phân tách theo Frame** | `shared/physical_geometry.json` + Extrinsics |
 | **Safe Z** | `290.0 mm` | N/A | $Z=52.0\text{ mm}$ (Mặt bàn) | `210.0 mm` / `290.0 mm` | **CÓ** | `config.py` / `RobotProfile` |
 | **Pick Z** | `190.0 mm` | N/A | N/A | `185.0 mm` / `190.0 mm` | **CÓ** | `config.py` / `RobotProfile` |
 | **Place Z** | `195.0 mm` | N/A | N/A | `190.0 mm` / `195.0 mm` | **CÓ** | `config.py` / `RobotProfile` |
+
+> [!NOTE]
+> **HIỆU CHỈNH TOÁN HỌC HÌNH HỌC P0 (P1 CORRECTION):**
+> Trong kiểm toán P0 ban đầu, phép tính `410 / 9 ≈ 45.5 mm` đã được ghi nhận như một mâu thuẫn hình học kích thước. Tuy nhiên, qua đo đạc và xác thực vật lý tại Phase P1:
+> - Chiều dài phủ bì (outer length): `410.0 mm`.
+> - Phần viền lề trên và dưới (border margins): `25.0 mm` mỗi bên.
+> - Vùng chơi thực tế (playable length) từ hàng 0 đến hàng 9 gồm 9 bước lưới: $410.0 - 25.0 - 25.0 = 360.0\text{ mm}$.
+> - Bước lưới dọc: $360.0 / 9 = 40.0\text{ mm}$.
+> - Chiều ngang phủ bì (outer width): `367.0 mm`.
+> - Phần viền lề trái và phải (border margins): `23.5 mm` mỗi bên.
+> - Vùng chơi thực tế (playable width) từ cột 0 đến cột 8 gồm 8 bước lưới: $367.0 - 23.5 - 23.5 = 320.0\text{ mm}$.
+> - Bước lưới ngang: $320.0 / 8 = 40.0\text{ mm}$.
+> 
+> Như vậy, bước lưới bàn cờ vật lý hoàn toàn đồng nhất và vuông vức $40.0\text{ mm} \times 40.0\text{ mm}$. Việc canvas cũ chia đều 410mm cho 9 là do thiếu tính lề bàn cờ, đã được chuẩn hóa triệt để trong P1 qua `shared/physical_geometry.json`.
+
+> [!IMPORTANT]
+> **LÀM RÕ TỌA ĐỘ GỐC GIỮA CÁC HỆ QUY CHIẾU (COORDINATE ORIGIN CLARIFICATION):**
+> Các giá trị tọa độ gốc khác nhau giữa `config.py` ($X=200, Y=-100$), `robot-3d-viewer` ($X=0.32, Z=-0.18$), và điểm dạy robot R1 ($X=350.2, Y=-180.5$) **KHÔNG PHẢI LÀ MÂU THUẪN HÌNH HỌC**, mà là các hệ quy chiếu (coordinate frames) khác nhau:
+> - `board_grid`: Gốc quy ước $(col=0, row=0)$ tại giao điểm Xe Đen Trái.
+> - `board_metric_mm`: Gốc nội tại $(0.0, 0.0)\text{ mm}$ tại giao điểm $(col=0, row=0)$.
+> - `robot_base`: Gốc tại tâm chân đế robot thật. Tọa độ R1 là vị trí lắp đặt ngoại tại (extrinsic mounting pose) của bàn cờ trong không gian làm việc của robot.
+> - `3d_world`: Gốc tại chân đế robot ảo Three.js. Giá trị $(X=0.32\text{ m}, Z=-0.18\text{ m})$ là vị trí đặt trực quan mô phỏng (simulation placement), tách rời khỏi kích thước vật lý nội tại.
+
 
 ---
 

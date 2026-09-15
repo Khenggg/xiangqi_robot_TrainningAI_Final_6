@@ -16,7 +16,7 @@ import numpy as np
 import cv2
 
 # Add project root to sys.path
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
@@ -131,8 +131,11 @@ def run_tests():
             pass
 
 
-    print(f"\n🎉 HOÀN THÀNH: {passed_count}/{total_tests} bài test đều ĐẠT (PASSED)!\n")
+def test_occupancy_filter():
+    """Pytest entrypoint for occupancy filter tests."""
+    run_tests()
 
 
 if __name__ == "__main__":
     run_tests()
+
