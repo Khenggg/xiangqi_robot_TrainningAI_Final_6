@@ -1,4 +1,4 @@
-﻿"""
+"""
 Physical simulation state enums, results, and immutable snapshot models.
 """
 
@@ -66,8 +66,39 @@ class PieceSnapshot:
     nearest_row: int
     distance_to_nearest_intersection_m: float
 
+    @property
+    def is_grasped(self) -> bool:
+        return self.attached
+
+    @property
+    def status(self) -> str:
+        return self.physical_state
+
+    @property
+    def pose_world(self) -> List[float]:
+        return self.position_3d_world_m
+
+    @property
+    def orientation_quat_world(self) -> List[float]:
+        return self.orientation_quaternion_3d_world
+
+    @property
+    def pose_robot(self) -> List[float]:
+        return self.position_robot_base_m
+
+    @property
+    def orientation_quat_robot(self) -> List[float]:
+        return self.orientation_quaternion_robot_base
+
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["pose_world"] = list(self.position_3d_world_m)
+        d["orientation_quat_world"] = list(self.orientation_quaternion_3d_world)
+        d["pose_robot"] = list(self.position_robot_base_m)
+        d["orientation_quat_robot"] = list(self.orientation_quaternion_robot_base)
+        d["is_grasped"] = self.attached
+        d["status"] = self.physical_state
+        return d
 
 
 @dataclass(frozen=True)

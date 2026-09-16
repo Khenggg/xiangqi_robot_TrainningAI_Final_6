@@ -72,19 +72,27 @@
 
 ### SIM-GAP-007: Quân Cờ 3D Chỉ Là Khối Render Tĩnh (Không Có Mô Hình Vật Lý Ảo)
 - **Severity:** **HIGH**
-- **Status:** **PENDING (Phase P3)**
-- **Evidence:** Trong `robot-3d-viewer/main.mjs`, quân cờ được vẽ một lần qua `buildPieces()`. Hàm `movePieceTo()` trong `board.mjs` chỉ dịch chuyển tức thời tọa độ XZ mà không có chuyển động nâng hạ, không có liên kết với đầu gẹp, và không được kết nối với luồng WebSocket.
+- **Status:** **RESOLVED IN P3**
+- **Evidence:** Trong `robot-3d-viewer/main.mjs`, quân cờ từng chỉ được vẽ một lần qua `buildPieces()`. Hàm `movePieceTo()` trong `board.mjs` chỉ dịch chuyển tức thời tọa độ XZ mà không có chuyển động nâng hạ, không có liên kết với đầu gắp, và không được kết nối với luồng WebSocket.
 - **Impact:** Robot ảo chuyển động nhưng quân cờ trên bàn 3D hoàn toàn đứng yên.
-- **Recommended Phase:** **Phase P3**
+- **Resolution in P3:**
+  - Triển khai `VirtualPhysicalWorld` (`src/simulation/physics/world.py`) với PyBullet rigid-body engine (`p.DIRECT`).
+  - Khởi tạo 32 quân cờ với khối trụ va chạm (`GEOM_CYLINDER`), khối lượng 20g, ma sát trượt/lăn/xoay và hệ số nảy.
+  - Quản lý gắp nhả qua `VirtualGripper` với capture volume và liên kết bất biến biến đổi tương đối ($T_{\text{flange\_piece}} = T_{\text{flange}}^{-1} \cdot T_{\text{piece}}$).
+  - Phát gói tin `world_state` (vị trí X,Y,Z và quaternion của 32 quân cờ) qua WebSocket 30 FPS.
+  - Cập nhật `robot-3d-viewer/board.mjs` với `updatePiecesFromWorldState()` đồng bộ trực tiếp vị trí và góc nghiêng quân cờ theo thời gian thực.
 
 ---
 
 ### SIM-GAP-008: 3D Viewer Chưa Render Mesh Đầu Gắp (Gripper)
 - **Severity:** **MEDIUM**
-- **Status:** **PENDING (Phase P3)**
+- **Status:** **RESOLVED IN P3**
 - **Evidence:** Trong `telemetry_publisher.py`, gói tin có chứa trường `"gripper": true/false`. Tuy nhiên trong `main.mjs` không có bất kỳ code nào tạo mesh đầu kẹp gắn vào `wrist3_link` và không đọc giá trị `payload.gripper`.
 - **Impact:** Người dùng không quan sát được trạng thái đóng/mở của ngàm hút/kẹp trên Digital Twin.
-- **Recommended Phase:** **Phase P3**
+- **Resolution in P3:**
+  - Định nghĩa thông số hình học ngàm gắp trong `shared/virtual_gripper_profile.json` (base adapter, body cylinder, 2 ngàm trượt đối xứng).
+  - Xây dựng hàm `buildProceduralGripper()` trong `robot-3d-viewer/main.mjs` tạo mesh Three.js gắn vào `flange` link của robot FR3.
+  - Cập nhật ngàm gắp theo giá trị `payload.gripper` và `jaw_opening_m` từ luồng telemetry `robot_state` và `world_state` với hiệu ứng chuyển động mượt mà.
 
 ---
 

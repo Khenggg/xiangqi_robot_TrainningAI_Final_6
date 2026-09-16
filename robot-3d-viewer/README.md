@@ -19,11 +19,17 @@ Giao diện mô phỏng 3D Web-based và Digital Twin Mirror cho cánh tay robot
 - **Tích Hợp Scene Extrinsics & Transform Tọa Độ:**
   - Nạp cấu hình vị trí bàn cờ và robot từ `/shared/virtual_fr3_scene.json`.
   - Thiết lập ma trận biến đổi tọa độ chân đế robot sang không gian Three.js ($X_{world}=-Y_{robot}, Y_{world}=+Z_{robot}, Z_{world}=-X_{robot}$), đảm bảo 100% tầm với bàn cờ và triệt tiêu mirror theo cột.
+- **Đồng Bộ Quân Cờ 3D Thời Gian Thực (Phase P3):**
+  - Đồng bộ vị trí ($X, Y, Z$) và quaternion xoay của 32 quân cờ từ PyBullet rigid-body world qua gói tin `world_state`.
+  - Hỗ trợ mô phỏng gắp nhả, thả rơi tự do, va chạm quân cờ và phát hiện quân cờ rơi khỏi mép bàn cờ (`OUT_OF_BOUNDS`).
+- **Ngàm Gắp 3D Động (Procedural Animated Gripper - Phase P3):**
+  - Tự động dựng mô hình ngàm kẹp 2 ngón Three.js dựa trên `shared/virtual_gripper_profile.json`, gắn trực tiếp vào `flange` link của robot FR3.
+  - Hoạt họa chuyển động trượt mượt mà của 2 ngàm kẹp khi đóng/mở theo tín hiệu `gripper` và độ mở `jaw_opening_m`.
 - **WebSocket Live Mirroring:**
-  - Đồng bộ góc khớp thời gian thực với robot thật hoặc Virtual FR3 Backend thông qua luồng WebSocket telemetry 30 FPS.
+  - Đồng bộ góc khớp thời gian thực với robot thật hoặc Virtual FR3 Backend thông qua luồng WebSocket telemetry 30 FPS (`robot_state` và `world_state`).
 - **Máy Chủ Tĩnh Bảo Mật (`serve.mjs`):**
   - Chạy local không cần cài đặt nặng.
-  - Endpoint whitelist kiểm soát chặt chẽ truy cập `/shared/physical_geometry.json`, `/shared/robot_profiles/fr3.json`, và `/shared/virtual_fr3_scene.json`, ngăn chặn hoàn toàn tấn công Directory Traversal.
+  - Endpoint whitelist kiểm soát chặt chẽ truy cập `/shared/physical_geometry.json`, `/shared/robot_profiles/fr3.json`, `/shared/virtual_fr3_scene.json`, `/shared/virtual_physics.json`, `/shared/virtual_gripper_profile.json`, và `/shared/xiangqi_start_layout.json`, ngăn chặn hoàn toàn tấn công Directory Traversal.
 
 ---
 

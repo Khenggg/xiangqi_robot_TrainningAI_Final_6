@@ -1,4 +1,4 @@
-﻿"""
+"""
 Xiangqi piece rigid body wrapper for PyBullet simulation.
 """
 
@@ -92,6 +92,15 @@ class XiangqiPieceBody:
             self.col_spacing_m,
             self.row_spacing_m,
         )
+
+    @property
+    def tilt_angle_deg(self) -> float:
+        return self.get_tilt_deg()
+
+    @property
+    def nearest_dist_m(self) -> float:
+        _, _, dist = self.get_nearest_intersection()
+        return dist
 
     def set_pose_robot_base(self, position: Sequence[float], orientation: Sequence[float]) -> None:
         """Force set position and orientation in robot_base."""

@@ -24,7 +24,7 @@ from src.simulation.physics.transforms import (
     continuous_board_coord,
     rpy_deg_to_quat,
 )
-from src.simulation.physics.state import GraspResult, WorldStateSnapshot
+from src.simulation.physics.state import GraspResult, GraspStatus, WorldStateSnapshot
 from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.virtual_fr3_backend import VirtualFR3Backend
 from src.domain.geometry import get_physical_geometry
@@ -183,7 +183,7 @@ class VirtualXiangqiSimulation:
         self.backend.set_gripper(False)
 
         grasp_center_offset = self.world.gripper.tcp_to_grasp_center[2]
-        grasp_z_flange = pz - grasp_center_offset
+        grasp_z_flange = pz + grasp_center_offset
         hover_z_flange = grasp_z_flange + hover_height_m
 
         # Target orientations
@@ -202,9 +202,13 @@ class VirtualXiangqiSimulation:
         grasp_pose = [px * 1000.0, py * 1000.0, grasp_z_flange * 1000.0, rx, ry, rz]
         self.backend.move_cartesian(grasp_pose, speed_factor=speed_factor)
 
-        # Close gripper
+        # Close gripper (triggers _on_robot_state_update -> try_grasp)
         self.backend.set_gripper(True)
-        res = self.world.try_grasp()
+        attached = self.world.get_attached_piece()
+        if attached is not None:
+            res = GraspResult(success=True, status=GraspStatus.SUCCESS, piece_id=attached.piece_id)
+        else:
+            res = self.world.try_grasp()
 
         # Lift back to hover
         self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
@@ -230,7 +234,7 @@ class VirtualXiangqiSimulation:
         piece_z = tz + piece_h / 2.0
 
         grasp_center_offset = self.world.gripper.tcp_to_grasp_center[2]
-        place_z_flange = piece_z - grasp_center_offset
+        place_z_flange = piece_z + grasp_center_offset
         hover_z_flange = place_z_flange + hover_height_m
 
         rx, ry, rz = self.target_tool_euler_deg

@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { fetchPhysicalGeometry, parsePhysicalGeometry } from "./geometry.mjs";
-import { START_LAYOUT, LABEL_RED, LABEL_BLACK } from "./layout.mjs";
+import { START_LAYOUT, LABEL_RED, LABEL_BLACK, PIECE_TYPE_NAMES } from "./layout.mjs";
 
 // Re-export layout for convenience
-export { START_LAYOUT, LABEL_RED, LABEL_BLACK };
+export { START_LAYOUT, LABEL_RED, LABEL_BLACK, PIECE_TYPE_NAMES };
 
 // ---------------------------------------------------------------------------
 // SIMULATION SCENE PLACEMENT (NOT INTRINSIC PHYSICAL GEOMETRY)
@@ -282,7 +282,8 @@ export function buildPieces(geometry = null, layout = START_LAYOUT) {
   const cylinderGeometry = new THREE.CylinderGeometry(radius, radius, height, 32);
   cylinderGeometry.rotateX(Math.PI / 2);
 
-  layout.forEach(([col, row, type, side, pieceId], index) => {
+  const counts = {};
+  layout.forEach(([col, row, type, side], index) => {
     const label = side === "r" ? LABEL_RED[type] : LABEL_BLACK[type];
     const mesh = new THREE.Mesh(cylinderGeometry, makePieceMaterials(label, side));
     const pos = boardPointToXYZ(col, row, geo);
@@ -293,11 +294,17 @@ export function buildPieces(geometry = null, layout = START_LAYOUT) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
-    const id = pieceId || `${side}_${type}_${index}`;
-    mesh.name = id;
-    mesh.userData = { col, row, type, side, id };
-    pieces[id] = mesh;
-    // Also record legacy alias for compatibility
+    const sideName = side === "r" ? "red" : "black";
+    const typeName = PIECE_TYPE_NAMES[type] || type;
+    const key = `${sideName}_${typeName}`;
+    const countIdx = counts[key] || 0;
+    counts[key] = countIdx + 1;
+
+    const canonicalId = `${key}_${countIdx}`;
+    mesh.name = canonicalId;
+    mesh.userData = { col, row, type, side, id: canonicalId };
+    pieces[canonicalId] = mesh;
+    // Also record legacy index alias for compatibility
     pieces[`${side}_${type}_${index}`] = mesh;
     group.add(mesh);
   });

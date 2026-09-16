@@ -753,3 +753,36 @@ Tại Phase P2, kiến trúc mô phỏng đã hoàn tất việc xây dựng Dig
 - **Nội suy Euler góc ngắn nhất:** Khắc phục hiện tượng quay vòng $358^\circ$ quanh $\pm 180^\circ$ trong `move_cartesian()`.
 - **An toàn Telemetry Logging:** Phân biệt `ConnectionClosed` bình thường và ghi log cảnh báo chi tiết các lỗi socket/serialization bất thường.
 
+---
+
+## 24. PHASE P3 ARCHITECTURE ADDITIONS: VIRTUAL PHYSICAL WORLD, RIGID BODIES & PROCEDURAL GRIPPER
+
+Tại Phase P3, hệ thống mô phỏng nâng cấp từ cơ cấu hiển thị góc khớp thuần túy sang **Digital Twin tích hợp mô hình vật lý thời gian thực**:
+
+### 24.1. Headless Rigid-Body Physics Engine (`src/simulation/physics/world.py`)
+- Sử dụng **PyBullet** chạy chế độ không đầu (`p.DIRECT`), cách ly 100% phần cứng thật.
+- Chu kỳ mô phỏng $1/240\text{ s}$ ($4.167\text{ ms}$) với trọng lực chuẩn $g = -9.81\text{ m/s}^2$ dọc trục $+Z$ của `robot_base`.
+- Cấu hình tập trung tại `shared/virtual_physics.json`, đánh dấu rõ ràng `SIMULATION_ONLY_UNVERIFIED_PHYSICAL_PARAMETERS`.
+
+### 24.2. Khối Va Chạm Bàn Cờ & 32 Quân Cờ Chuẩn Hóa
+- **Bàn cờ hữu hạn (Finite Board Collider):** Kích thước hộp va chạm $367 \times 410 \times 40\text{ mm}$ tại vị trí bề mặt $Z=+0.05\text{ m}$. Quân cờ rơi khỏi mép bàn sẽ chịu tác động trọng lực rơi tự do xuống hư vô.
+- **32 Quân cờ Xiangqi (`src/simulation/physics/piece.py`):** Mỗi quân cờ là một khối trụ cứng (`GEOM_CYLINDER`) bán kính $11.25\text{ mm}$, cao $9.43\text{ mm}$, khối lượng $20\text{ g}$.
+- Nhận dạng định danh chuẩn tắc (`black_rook_0`, `red_king_0`...) đồng bộ tuyệt đối giữa PyBullet, layout cờ ban đầu (`shared/xiangqi_start_layout.json`) và Three.js 3D viewer.
+
+### 24.3. Ngàm Gắp Thủ Tục & Khớp Động Học Gắp Nhả (`src/simulation/physics/gripper.py`)
+- **Procedural Gripper Model:** Định nghĩa tại `shared/virtual_gripper_profile.json`, tạo mesh trực quan gắn trực tiếp vào `flange` link của robot FR3 trên Three.js viewer.
+- **Vùng bắt gắp (Capture Volume):** Kiểm tra hình trụ dung sai bắt gắp ($\Delta_{xy} \le 12\text{ mm}, |\Delta z| \le 8\text{ mm}$, độ mở ngàm $\le 25\text{ mm}$).
+- **Từ chối nhập nhằng (Ambiguity Rejection):** Tự động báo lỗi `AMBIGUOUS` nếu có trên 1 quân cờ cùng nằm trong vùng bắt gắp.
+- **Liên kết bất biến biến đổi tương đối:** Khi gắp thành công, quân cờ được khóa vị trí theo công thức:
+  $$T_{\text{flange\_piece}} = T_{\text{flange}}^{-1} \cdot T_{\text{piece}}$$
+  Bảo đảm vị trí quân cờ bám chính xác 100% theo flange trong suốt quỹ đạo 6 bậc tự do không bị trôi số học hoặc rơi rớt do rung lắc tiếp xúc.
+
+### 24.4. Thả Động & Rơi Tự Do (Dynamic Release & Ballistic Flight)
+- Khi nhả kẹp hoặc ngắt khẩn cấp (`force_drop()`), vận tốc tuyến tính và vận tốc góc của đầu gắp tại thời điểm nhả được truyền nguyên vẹn sang quân cờ.
+- Quân cờ tiếp tục quỹ đạo đường đạn tự nhiên dưới trọng lực và tự ổn định (settle) vào trạng thái tĩnh cân bằng (`RESTING`) hoặc rơi khỏi bàn cờ chuyển trạng thái `OUT_OF_BOUNDS`.
+
+### 24.5. Phối Hợp Runtime & Luồng Dữ Liệu (`src/simulation/runtime.py`)
+- `VirtualXiangqiSimulation` đóng vai trò nhạc trưởng điều phối đồng bộ giữa `VirtualFR3Backend` và `VirtualPhysicalWorld`.
+- Khi robot chuyển động, listener đồng bộ cập nhật vị trí flange và các quân cờ đang được gắp.
+- `TelemetryPublisher` phát gói tin `world_state` song song với `robot_state` qua WebSocket, cho phép 3D viewer render mượt mà chuyển động đóng mở ngàm và di chuyển của từng quân cờ.
+
