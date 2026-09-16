@@ -1,9 +1,15 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
-import { validateLivePacket, stabilizeJointTarget } from "./live_state.mjs";
+import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget } from "./live_state.mjs";
 import { fetchPhysicalGeometry } from "./geometry.mjs";
-import { buildBoardGrid, buildPieces, setBoardGeometry, fetchScenePlacement } from "./board.mjs";
+import {
+  buildBoardGrid,
+  buildPieces,
+  updatePiecesFromWorldState,
+  setBoardGeometry,
+  fetchScenePlacement,
+} from "./board.mjs";
 
 // ---------------------------------------------------------------------------
 // 1) CẤU HÌNH ROBOT & KINEMATICS DYNAMIC LOADER
@@ -125,6 +131,7 @@ const grid = new THREE.GridHelper(1.6, 16, 0x2a3140, 0x1c212b);
 scene.add(grid);
 
 let xiangqiPieces = null;
+let piecesGroupRef = null;
 
 
 function resizeRenderer() {
@@ -151,6 +158,66 @@ function disposeRobotArm(candidate) {
     object.geometry?.dispose();
     object.material?.dispose?.();
   });
+}
+
+function buildProceduralGripper() {
+  const gripperGroup = new THREE.Group();
+  gripperGroup.name = "virtual-gripper";
+
+  const palmMtl = new THREE.MeshStandardMaterial({
+    color: 0x556070,
+    roughness: 0.5,
+    metalness: 0.3,
+  });
+  const jawMtl = new THREE.MeshStandardMaterial({
+    color: 0x2a3240,
+    roughness: 0.4,
+    metalness: 0.6,
+  });
+
+  // Palm dimensions: 60mm x 40mm x 30mm
+  const palmGeom = new THREE.BoxGeometry(0.060, 0.040, 0.030);
+  const palmMesh = new THREE.Mesh(palmGeom, palmMtl);
+  palmMesh.position.set(0, 0, 0.015);
+  palmMesh.castShadow = true;
+  gripperGroup.add(palmMesh);
+
+  // Two jaws extending along +Z from Z = 0.030 to 0.065
+  const jawGeom = new THREE.BoxGeometry(0.008, 0.025, 0.035);
+  const leftJaw = new THREE.Mesh(jawGeom, jawMtl);
+  leftJaw.position.set(-0.020, 0, 0.0475);
+  leftJaw.castShadow = true;
+  gripperGroup.add(leftJaw);
+
+  const rightJaw = new THREE.Mesh(jawGeom, jawMtl);
+  rightJaw.position.set(0.020, 0, 0.0475);
+  rightJaw.castShadow = true;
+  gripperGroup.add(rightJaw);
+
+  let currentWidth = 0.040;
+  let targetWidth = 0.040;
+
+  function setClosed(isClosed) {
+    targetWidth = isClosed ? 0.020 : 0.040;
+  }
+
+  function setWidth(w) {
+    targetWidth = Number(w);
+  }
+
+  function update() {
+    currentWidth += (targetWidth - currentWidth) * 0.25;
+    const halfW = currentWidth / 2.0;
+    leftJaw.position.x = -halfW;
+    rightJaw.position.x = halfW;
+  }
+
+  return {
+    group: gripperGroup,
+    setClosed,
+    setWidth,
+    update,
+  };
 }
 
 async function buildRobotArm(profile) {
@@ -189,6 +256,11 @@ async function buildRobotArm(profile) {
       rotator.add(mesh);
       parent = rotator;
     }
+
+    // Attach procedural gripper to flange (wrist3 rotator)
+    const gripper = buildProceduralGripper();
+    parent.add(gripper.group);
+    candidate.gripper = gripper;
 
     // Dynamic canonical root transformation from virtual_fr3_scene.json:
     // Maps robot base frame (Z-up, -X facing board, +Y lateral)
@@ -311,7 +383,23 @@ function connectLive() {
   socket.onopen = () => setLiveBadge("LIVE", "live");
   socket.onmessage = (event) => {
     try {
-      applyLiveState(JSON.parse(event.data));
+      const data = JSON.parse(event.data);
+      if (data.type === "robot_state") {
+        applyLiveState(data);
+        if (data.gripper !== undefined && state.currentArm?.gripper) {
+          state.currentArm.gripper.setClosed(Boolean(data.gripper));
+        }
+      } else if (data.type === "world_state") {
+        const val = validateWorldStatePacket(data);
+        if (val.ok) {
+          if (piecesGroupRef && xiangqiPieces) {
+            updatePiecesFromWorldState(piecesGroupRef, xiangqiPieces, val.pieces);
+          }
+          if (val.gripper && state.currentArm?.gripper) {
+            state.currentArm.gripper.setClosed(Boolean(val.gripper.closed));
+          }
+        }
+      }
     } catch (error) {
       console.warn("Live message error:", error.message);
     }
@@ -334,7 +422,10 @@ document.getElementById("robotSelect").addEventListener("change", (event) => {
 function loop(now) {
   requestAnimationFrame(loop);
   advanceLiveInterpolation(now);
-  if (state.currentArm) applyJointsDeg(state.currentArm, state.jointsDeg);
+  if (state.currentArm) {
+    applyJointsDeg(state.currentArm, state.jointsDeg);
+    state.currentArm.gripper?.update();
+  }
   controls.update();
   renderer.render(scene, camera);
 }
@@ -350,6 +441,7 @@ async function initApp() {
     scene.add(buildBoardGrid(physicalGeometry));
     const { group: piecesGroup, pieces } = buildPieces(physicalGeometry);
     xiangqiPieces = pieces;
+    piecesGroupRef = piecesGroup;
     scene.add(piecesGroup);
 
     await switchRobotProfile(state.robotProfileId);

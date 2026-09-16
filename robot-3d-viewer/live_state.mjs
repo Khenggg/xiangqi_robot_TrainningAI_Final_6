@@ -26,6 +26,25 @@ export function validateLivePacket(payload, jointLimits, expectedModel = "FR5") 
   return { ok: true, joints, tcp };
 }
 
+export function validateWorldStatePacket(payload) {
+  if (!payload || payload.type !== "world_state") {
+    return { ok: false, reason: "not a world_state packet" };
+  }
+  if (!Array.isArray(payload.pieces)) {
+    return { ok: false, reason: "missing pieces array" };
+  }
+  for (const piece of payload.pieces) {
+    if (!piece || typeof piece.id !== "string") {
+      return { ok: false, reason: "invalid piece in pieces list: missing id" };
+    }
+    const pose = piece.pose_world || piece.pose_robot;
+    if (!Array.isArray(pose) || pose.length < 3 || pose.some((v) => !Number.isFinite(v))) {
+      return { ok: false, reason: `piece ${piece.id} has non-finite 3D coordinates` };
+    }
+  }
+  return { ok: true, pieces: payload.pieces, gripper: payload.gripper || null };
+}
+
 export function liveControlsLocked({ socketOpen = false, live = false, connecting = false } = {}) {
   return Boolean(socketOpen || live || connecting);
 }

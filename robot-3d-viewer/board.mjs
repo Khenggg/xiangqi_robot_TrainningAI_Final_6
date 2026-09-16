@@ -278,25 +278,64 @@ export function buildPieces(geometry = null, layout = START_LAYOUT) {
   const radius = geo.pieceRadiusM;
   const height = geo.pieceHeightM;
 
+  // Align cylinder axis with local Z to match PyBullet convention
   const cylinderGeometry = new THREE.CylinderGeometry(radius, radius, height, 32);
+  cylinderGeometry.rotateX(Math.PI / 2);
 
-  layout.forEach(([col, row, type, side], index) => {
+  layout.forEach(([col, row, type, side, pieceId], index) => {
     const label = side === "r" ? LABEL_RED[type] : LABEL_BLACK[type];
     const mesh = new THREE.Mesh(cylinderGeometry, makePieceMaterials(label, side));
     const pos = boardPointToXYZ(col, row, geo);
 
     mesh.position.set(pos.x, pos.y + height / 2.0, pos.z);
+    // Canonical upright piece orientation in 3d_world
+    mesh.quaternion.set(-0.5, 0.5, 0.5, 0.5);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
-    const id = `${side}_${type}_${index}`;
+    const id = pieceId || `${side}_${type}_${index}`;
     mesh.name = id;
-    mesh.userData = { col, row, type, side };
+    mesh.userData = { col, row, type, side, id };
     pieces[id] = mesh;
+    // Also record legacy alias for compatibility
+    pieces[`${side}_${type}_${index}`] = mesh;
     group.add(mesh);
   });
 
   return { group, pieces };
+}
+
+export function updatePiecesFromWorldState(piecesGroup, piecesDict, piecesList) {
+  if (!piecesDict || !Array.isArray(piecesList)) return;
+
+  for (const p of piecesList) {
+    const mesh = piecesDict[p.id];
+    if (!mesh) continue;
+
+    if (Array.isArray(p.pose_world) && p.pose_world.length >= 3) {
+      mesh.position.set(p.pose_world[0], p.pose_world[1], p.pose_world[2]);
+    }
+
+    if (Array.isArray(p.orientation_quat_world) && p.orientation_quat_world.length >= 4) {
+      mesh.quaternion.set(
+        p.orientation_quat_world[0],
+        p.orientation_quat_world[1],
+        p.orientation_quat_world[2],
+        p.orientation_quat_world[3]
+      );
+    }
+
+    if (p.status === "OUT_OF_BOUNDS") {
+      mesh.visible = false;
+    } else {
+      mesh.visible = true;
+    }
+
+    mesh.userData.status = p.status;
+    mesh.userData.is_grasped = p.is_grasped;
+    mesh.userData.board_col = p.board_col;
+    mesh.userData.board_row = p.board_row;
+  }
 }
 
 export function movePieceTo(mesh, col, row, geometry = null) {

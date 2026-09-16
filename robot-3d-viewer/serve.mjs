@@ -9,6 +9,9 @@ const sharedFilesWhitelist = {
   "/shared/physical_geometry.json": path.resolve(repoRoot, "shared", "physical_geometry.json"),
   "/shared/robot_profiles/fr3.json": path.resolve(repoRoot, "shared", "robot_profiles", "fr3.json"),
   "/shared/virtual_fr3_scene.json": path.resolve(repoRoot, "shared", "virtual_fr3_scene.json"),
+  "/shared/virtual_physics.json": path.resolve(repoRoot, "shared", "virtual_physics.json"),
+  "/shared/virtual_gripper_profile.json": path.resolve(repoRoot, "shared", "virtual_gripper_profile.json"),
+  "/shared/xiangqi_start_layout.json": path.resolve(repoRoot, "shared", "xiangqi_start_layout.json"),
 };
 
 const port = Number(process.argv[2] || 8080);
