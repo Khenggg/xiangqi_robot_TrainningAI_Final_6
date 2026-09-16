@@ -1,4 +1,4 @@
-﻿// robot-3d-viewer/layout.mjs
+// robot-3d-viewer/layout.mjs
 // Single source of truth loader for start layout in 3D viewer.
 // Canonical source: shared/xiangqi_start_layout.json
 //
@@ -124,6 +124,7 @@ export async function fetchStartLayout(url = "/shared/xiangqi_start_layout.json"
 // In Node.js environments (such as unit test test_board_layout.py), dynamically load
 // START_LAYOUT from shared/xiangqi_start_layout.json without hardcoding it in this file.
 let _nodeLayout = null;
+let _nodeLayoutError = null;
 if (typeof window === "undefined") {
   try {
     const fs = await import("node:fs");
@@ -134,7 +135,12 @@ if (typeof window === "undefined") {
     const raw = fs.readFileSync(filePath, "utf-8");
     const parsed = parseStartLayout(JSON.parse(raw));
     _nodeLayout = parsed.tupleLayout;
-  } catch {}
+  } catch (err) {
+    _nodeLayoutError = err;
+    console.error("[LAYOUT] Failed to load canonical xiangqi_start_layout.json in Node environment:", err);
+    throw err;
+  }
 }
 
 export const START_LAYOUT = _nodeLayout;
+export const NODE_LAYOUT_ERROR = _nodeLayoutError;

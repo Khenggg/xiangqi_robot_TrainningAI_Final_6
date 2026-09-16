@@ -203,6 +203,32 @@ class ViewerProfileBindingTests(unittest.TestCase):
         )
         self.assertIn("ALL VIEWER INTEGRATION CHECKS PASSED", res.stdout)
 
+    def test_node_js_gripper_and_telemetry_script_executes_successfully(self):
+        js_test = _PROJECT_ROOT / "tests" / "unit" / "test_viewer_gripper_and_telemetry.mjs"
+        self.assertTrue(js_test.exists())
+
+        node_bin = shutil.which("node")
+        if not node_bin:
+            raise unittest.SkipTest("Node.js runtime not found in PATH; skipping 3D viewer gripper test")
+
+        try:
+            res = subprocess.run(
+                [node_bin, str(js_test)],
+                cwd=str(_PROJECT_ROOT),
+                capture_output=True,
+                text=True,
+            )
+        except (FileNotFoundError, OSError) as e:
+            raise unittest.SkipTest(f"Failed to execute Node.js ({e}); skipping 3D viewer gripper test")
+
+        self.assertEqual(
+            res.returncode,
+            0,
+            f"Node viewer gripper test failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}",
+        )
+        self.assertIn("ALL VIEWER GRIPPER & TELEMETRY TESTS PASSED", res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
+

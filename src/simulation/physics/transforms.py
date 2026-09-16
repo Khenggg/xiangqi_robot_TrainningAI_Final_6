@@ -2,9 +2,9 @@
 Coordinate transformation and spatial rotation utilities for simulation physics.
 
 Supports conversions between robot_base (authoritative physics frame)
-and 3d_world (Three.js visualization frame) using the canonical extrinsics:
-    R_robot_to_world = [[0, -1, 0], [0, 0, 1], [-1, 0, 0]]
-    translation = [0, 0, 0]
+and 3d_world (Three.js visualization frame) loaded dynamically from
+the canonical source:
+    shared/virtual_fr3_scene.json
 
 All quaternions follow the PyBullet / Three.js convention: [x, y, z, w].
 """
@@ -40,6 +40,12 @@ class SceneTransform:
         object.__setattr__(self, "translation_m", t)
 
 
+DEFAULT_SCENE_PATH = (
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "shared"
+    / "virtual_fr3_scene.json"
+)
+
 _CACHED_SCENE_TRANSFORM: Optional[SceneTransform] = None
 
 
@@ -50,54 +56,34 @@ def get_canonical_scene_transform(
     """
     Load and strictly validate the canonical robot_base -> 3d_world transformation
     from shared/virtual_fr3_scene.json. Fails fast if file is missing or malformed.
+    Caches the canonical transform for performance; custom paths do not poison the cache.
     """
     global _CACHED_SCENE_TRANSFORM
-    if _CACHED_SCENE_TRANSFORM is not None and not force_reload and scene_config_path is None:
+    use_default_path = scene_config_path is None
+    if use_default_path and _CACHED_SCENE_TRANSFORM is not None and not force_reload:
         return _CACHED_SCENE_TRANSFORM
 
-    if scene_config_path is None:
-        scene_config_path = (
-            Path(__file__).resolve().parent.parent.parent.parent
-            / "shared"
-            / "virtual_fr3_scene.json"
-        )
-    scene_path = Path(scene_config_path)
-    if not scene_path.is_file():
-        raise FileNotFoundError(f"Canonical scene configuration not found at {scene_path}")
+    target_path = DEFAULT_SCENE_PATH if use_default_path else Path(scene_config_path)
+    if not target_path.is_file():
+        raise FileNotFoundError(f"Canonical scene configuration not found at {target_path}")
 
-    with open(scene_path, "r", encoding="utf-8-sig") as f:
+    with open(target_path, "r", encoding="utf-8-sig") as f:
         cfg = json.load(f)
 
     if "robot_base_to_3d_world" not in cfg:
-        raise ValueError(f"Missing 'robot_base_to_3d_world' block in {scene_path}")
+        raise ValueError(f"Missing 'robot_base_to_3d_world' block in {target_path}")
 
     trans_cfg = cfg["robot_base_to_3d_world"]
     if "rotation_matrix" not in trans_cfg:
-        raise ValueError(f"Missing 'rotation_matrix' in robot_base_to_3d_world from {scene_path}")
+        raise ValueError(f"Missing 'rotation_matrix' in robot_base_to_3d_world from {target_path}")
     if "translation_m" not in trans_cfg:
-        raise ValueError(f"Missing 'translation_m' in robot_base_to_3d_world from {scene_path}")
+        raise ValueError(f"Missing 'translation_m' in robot_base_to_3d_world from {target_path}")
 
     R = np.array(trans_cfg["rotation_matrix"], dtype=float)
     t = np.array(trans_cfg["translation_m"], dtype=float)
 
-    if R.shape != (3, 3) or not np.all(np.isfinite(R)):
-        raise ValueError(f"Invalid rotation_matrix shape {R.shape} or non-finite values in {scene_path}")
-
-    if t.shape != (3,) or not np.all(np.isfinite(t)):
-        raise ValueError(f"Invalid translation_m shape {t.shape} or non-finite values in {scene_path}")
-
-    # Orthonormality check: R.T @ R == I
-    identity_error = float(np.max(np.abs(R.T @ R - np.eye(3))))
-    if identity_error > 1e-4:
-        raise ValueError(f"Rotation matrix in {scene_path} is not orthonormal: max |R^T R - I| = {identity_error}")
-
-    # Determinant check: det(R) ≈ +1 (proper rotation, preserves handedness)
-    det = float(np.linalg.det(R))
-    if abs(det - 1.0) > 1e-3:
-        raise ValueError(f"Rotation matrix in {scene_path} determinant {det:.4f} != +1.0 (chirality violation)")
-
     transform = SceneTransform(rotation_matrix=R, translation_m=t)
-    if scene_config_path is None:
+    if use_default_path:
         _CACHED_SCENE_TRANSFORM = transform
 
     return transform

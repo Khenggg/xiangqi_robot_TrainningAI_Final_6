@@ -114,12 +114,31 @@
   3. Viewer Three.js còn hardcode mảng `START_LAYOUT` và kích thước ngàm kẹp thủ tục, tách rời nguồn chân lý JSON.
 - **Impact:** Thiếu độ chân thực vật lý của Digital Twin, tiềm ẩn nguy cơ sai lệch trạng thái kẹp và phân rã các nguồn cấu hình chuẩn.
 - **Resolution in P3.1:**
-  - **PyBullet Gripper Proxies:** Tạo 3 kinematic collision bodies trong PyBullet (palm plate, left jaw, right jaw) với kích thước từ `shared/virtual_gripper_profile.json`. Ngàm di chuyển trượt dọc trục $Y$ theo trạng thái đóng/mở. Quản lý `p.setCollisionFilterPair` linh hoạt: tắt va chạm ngàm-quân khi đang kẹp, tự động bật lại va chạm vật lý ngay khi nhả/rơi.
+  - **PyBullet Gripper Proxies:** Tạo 3 kinematic collision bodies trong PyBullet (palm plate, left jaw, right jaw) với kích thước từ `shared/virtual_gripper_profile.json`. Ngàm di chuyển trượt dọc theo trục `travel_axis` (mặc định X) theo trạng thái đóng/mở. Quản lý `p.setCollisionFilterPair` linh hoạt: tắt va chạm ngàm-quân khi đang kẹp, tự động bật lại va chạm vật lý ngay khi nhả/rơi.
   - **True Mid-Motion Drop:** Triển khai `schedule_force_drop()` trong `SimulationRuntime` kích hoạt chính xác tại thời điểm robot đang chuyển động tốc độ cao (`motion_state == "MOVING"`). Kế thừa vận tốc tuyến tính $> 0.02\text{ m/s}$, ghi nhận đầy đủ chẩn đoán trong `DropEvent` (tọa độ, vận tốc, trạng thái robot, thời gian bay, vị trí ổn định cuối cùng), trong khi robot tiếp tục hoàn tất quỹ đạo độc lập.
   - **Single Sources of Truth:**
     - Viewer nạp động `layout.mjs` từ `/shared/xiangqi_start_layout.json` (32 quân cờ chuẩn tắc).
     - Tạo `gripper_profile.mjs` nạp động `/shared/virtual_gripper_profile.json` cho Three.js viewer.
     - `transforms.py` nạp ma trận chân đế robot từ `/shared/virtual_fr3_scene.json` kèm kiểm tra trực giao ($R^T R = I$) và định thức chirality ($\det(R) \approx +1.0$).
   - **Concurrency & Validation:** Đổi lock backend sang `threading.RLock()` triệt tiêu hoàn toàn nguy cơ deadlock reentrant khi listener kích hoạt `set_gripper(False)`. Bổ sung module `validation.py` kiểm tra cấu hình nghiêm ngặt với cơ chế giải phóng tài nguyên PyBullet an toàn khi có ngoại lệ.
+
+---
+
+### SIM-GAP-011: Lỗi Scoping Runtime Three.js Viewer, Fallback Geometry & Bộ Nhớ Đệm Scene Transform
+- **Severity:** **BLOCKER / HIGH**
+- **Status:** **RESOLVED IN P3.2**
+- **Evidence:** 
+  1. Trong `robot-3d-viewer/main.mjs`, `buildRobotArm` gọi `buildProceduralGripper(gripperProfile)` nhưng `gripperProfile` không nằm trong danh sách tham số của `buildRobotArm`, gây ra `ReferenceError: gripperProfile is not defined` khi khởi chạy ứng dụng 3D.
+  2. `buildProceduralGripper` còn chứa các giá trị kích thước hình học và màu sắc fallback hardcode (`[0.060, 0.040, 0.030]`, `0.040`, `0.020`...).
+  3. Trong `transforms.py`, biến `_CACHED_SCENE_TRANSFORM` không bao giờ được gán do điều kiện `if scene_config_path is None:` bị vô hiệu hóa sau khi gán đường dẫn mặc định, dẫn đến mỗi snapshot đọc lại file đĩa 64 lần.
+  4. Bộ lọc `validateWorldStatePacket` sử dụng `Boolean(...)` chấp nhận chuỗi `"false"` hoặc số `1` không đúng chuẩn dữ liệu.
+- **Impact:** Ứng dụng web 3D viewer có nguy cơ sập khi load, snapshot bị giảm hiệu năng do đọc file lặp lại, và dữ liệu telemetry thiếu tính chặt chẽ.
+- **Resolution in P3.2:**
+  - Sửa `buildRobotArm(profile, gripperProfile)` nhận tham số rõ ràng và ném ngoại lệ nếu thiếu profile; xóa sạch toàn bộ fallback hardcode trong `buildProceduralGripper`.
+  - Hỗ trợ đầy đủ `travel_axis` ("X", "Y", "Z") cho cả vị trí ban đầu và hoạt họa trượt của ngàm.
+  - Sửa logic gán cache với cờ `use_default_path`, bảo đảm cache hoạt động thực sự và cô lập an toàn với các file tùy biến.
+  - Thắt chặt validation JavaScript cho cả `gripper_profile.mjs` và `live_state.mjs` (bắt buộc boolean thuần túy, kiểm tra quaternion non-zero).
+  - Bổ sung assertion kiểm chứng tính độc lập quỹ đạo sau khi thả rơi trong `test_runtime_mid_motion_drop.py`.
+
 
 

@@ -162,16 +162,20 @@ function disposeRobotArm(candidate) {
   });
 }
 
-function buildProceduralGripper(profile = null) {
+export function buildProceduralGripper(profile) {
+  if (!profile) {
+    throw new Error("Virtual gripper profile is required to build procedural gripper");
+  }
   const gripperGroup = new THREE.Group();
   gripperGroup.name = "virtual-gripper";
 
-  const palmDims = profile?.palmDimensionsM || [0.060, 0.040, 0.030];
-  const jawDims = profile?.jawDimensionsM || [0.008, 0.025, 0.035];
-  const palmColor = profile?.colorHex ? new THREE.Color(profile.colorHex) : new THREE.Color(0x556070);
-  const jawColor = profile?.jawColorHex ? new THREE.Color(profile.jawColorHex) : new THREE.Color(0x2a3240);
-  const openW = profile?.openWidthM ?? 0.040;
-  const closedW = profile?.closedWidthM ?? 0.020;
+  const palmDims = profile.palmDimensionsM;
+  const jawDims = profile.jawDimensionsM;
+  const palmColor = new THREE.Color(profile.colorHex);
+  const jawColor = new THREE.Color(profile.jawColorHex);
+  const openW = profile.openWidthM;
+  const closedW = profile.closedWidthM;
+  const travelAxis = profile.travelAxis;
 
   const palmMtl = new THREE.MeshStandardMaterial({
     color: palmColor,
@@ -197,13 +201,21 @@ function buildProceduralGripper(profile = null) {
   const halfOpen = openW / 2.0;
 
   const leftJaw = new THREE.Mesh(jawGeom, jawMtl);
-  leftJaw.position.set(-halfOpen, 0, jawCenterZ);
-  leftJaw.castShadow = true;
-  gripperGroup.add(leftJaw);
-
   const rightJaw = new THREE.Mesh(jawGeom, jawMtl);
-  rightJaw.position.set(halfOpen, 0, jawCenterZ);
+  leftJaw.castShadow = true;
   rightJaw.castShadow = true;
+
+  if (travelAxis === "Y") {
+    leftJaw.position.set(0, -halfOpen, jawCenterZ);
+    rightJaw.position.set(0, halfOpen, jawCenterZ);
+  } else if (travelAxis === "Z") {
+    leftJaw.position.set(0, 0, jawCenterZ - halfOpen);
+    rightJaw.position.set(0, 0, jawCenterZ + halfOpen);
+  } else { // "X"
+    leftJaw.position.set(-halfOpen, 0, jawCenterZ);
+    rightJaw.position.set(halfOpen, 0, jawCenterZ);
+  }
+  gripperGroup.add(leftJaw);
   gripperGroup.add(rightJaw);
 
   let currentWidth = openW;
@@ -220,8 +232,16 @@ function buildProceduralGripper(profile = null) {
   function update() {
     currentWidth += (targetWidth - currentWidth) * 0.25;
     const halfW = currentWidth / 2.0;
-    leftJaw.position.x = -halfW;
-    rightJaw.position.x = halfW;
+    if (travelAxis === "Y") {
+      leftJaw.position.y = -halfW;
+      rightJaw.position.y = halfW;
+    } else if (travelAxis === "Z") {
+      leftJaw.position.z = jawCenterZ - halfW;
+      rightJaw.position.z = jawCenterZ + halfW;
+    } else { // "X"
+      leftJaw.position.x = -halfW;
+      rightJaw.position.x = halfW;
+    }
   }
 
   return {
@@ -232,7 +252,10 @@ function buildProceduralGripper(profile = null) {
   };
 }
 
-async function buildRobotArm(profile) {
+export async function buildRobotArm(profile, gripperProfile) {
+  if (!gripperProfile) {
+    throw new Error("Virtual gripper profile is required to build robot arm");
+  }
   const loader = new STLLoader();
   const material = () =>
     new THREE.MeshStandardMaterial({

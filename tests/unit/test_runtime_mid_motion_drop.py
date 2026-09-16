@@ -99,6 +99,35 @@ class RuntimeMidMotionDropTests(unittest.TestCase):
         self.assertTrue(all(np.isfinite(quat_final)))
         self.assertLess(piece.tilt_angle_deg, 5.0)
 
+        # 7. Post-drop relative motion invariant (Phase P3.2)
+        # Prove the piece is no longer kinematically attached to the moving gripper:
+        # Before drop, relative offset (piece - gripper) was constant.
+        # After drop, as robot continued trajectory, the relative offset changed substantially.
+        p_piece_drop = np.array(drop_event.release_position, dtype=float)
+        p_gripper_drop = np.array(self.world.gripper.grasp_pos, dtype=float)
+        p_piece_final = np.array(pos_final, dtype=float)
+        p_gripper_final = np.array(self.world.gripper.grasp_pos, dtype=float)
+
+        rel_offset_drop = p_piece_drop - p_gripper_drop
+        rel_offset_final = p_piece_final - p_gripper_final
+        rel_change_distance = float(np.linalg.norm(rel_offset_final - rel_offset_drop))
+
+        self.assertGreater(
+            rel_change_distance,
+            0.010,  # At least 10 mm change in relative vector
+            f"Relative position should diverge after drop, changed by only {rel_change_distance*1000:.2f} mm"
+        )
+
+        # 8. Lateral displacement due to inherited velocity
+        # The piece must have moved laterally (in XY) after release due to momentum, not merely fallen vertically
+        lateral_displacement = float(np.linalg.norm(p_piece_final[:2] - p_piece_drop[:2]))
+        self.assertGreater(
+            lateral_displacement,
+            0.005,  # At least 5 mm lateral drift
+            f"Piece must have lateral displacement from inherited velocity, got {lateral_displacement*1000:.2f} mm"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
+

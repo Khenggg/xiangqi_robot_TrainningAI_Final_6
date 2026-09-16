@@ -797,15 +797,21 @@ Tại Phase P3.1, kiến trúc mô phỏng vật lý và đồng bộ Digital Tw
 - **Kế thừa động lượng:** Quân cờ kế thừa đầy đủ vận tốc tuyến tính tức thời ($\|\mathbf{v}_{\text{release}}\| > 0.02\text{ m/s}$) và vận tốc góc tại thời điểm nhả.
 - **Tách biệt độc lập:** Sau khi thả, quân cờ bay theo quỹ đạo đường đạn trong trọng lực và tự ổn định (settle) vào trạng thái `RESTING` hoặc `OUT_OF_BOUNDS`, trong khi robot tiếp tục di chuyển độc lập để hoàn thành quỹ đạo tới đích.
 - **Cấu trúc dữ liệu `DropEvent`:** Ghi nhận toàn diện các thông số chẩn đoán:
-  - `piece_id`, `drop_time`
-  - `release_position_m`, `release_velocity_mps`, `release_speed`
-  - `robot_motion_state` (bắt buộc `"MOVING"`)
-  - `settle_position_m`, `settle_time_s`, `flight_duration_s`
-  - `settled_on_board` (boolean)
+- **Cấu trúc dữ liệu `DropEvent`:** Ghi nhận toàn diện các thông số chẩn đoán (khớp hoàn toàn với dataclass trong `src/simulation/physics/state.py`):
+  - `triggered: bool`
+  - `timestamp: float`
+  - `sim_time: float`
+  - `robot_motion_state: str` (bắt buộc `"MOVING"`)
+  - `release_position: List[float]`
+  - `release_linear_velocity: List[float]`
+  - `release_angular_velocity: List[float]`
+  - `attached_piece_id: Optional[str]`
+  - `trajectory_progress: float`
+  - `release_speed: float` (> 0.02 m/s)
 
 ### 25.2. PyBullet Gripper Collision Proxies & Quản Lý Va Chạm
-- **Kinematic Collision Bodies:** Khởi tạo 3 khối va chạm PyBullet (palm plate, left jaw, right jaw) gắn vào `VirtualGripper`, kích thước trích xuất trực tiếp từ `shared/virtual_gripper_profile.json`.
-- **Dịch chuyển ngàm động học:** Khi kẹp đóng/mở, các ngàm trượt tịnh tiến dọc trục $Y$ của flange tương ứng với `jaw_opening_m` ($0.040\text{ m}$ khi mở, $0.020\text{ m}$ khi đóng).
+- **Kinematic Collision Bodies:** Khởi tạo 3 khối va chạm PyBullet (palm plate, left jaw, right jaw) gắn vào `VirtualGripper`, kích thước trích xuất trực tiếp từ `shared/virtual_gripper_profile.json` (Palm $60 \times 40 \times 30\text{ mm}$, Jaw $8 \times 25 \times 35\text{ mm}$).
+- **Dịch chuyển ngàm động học:** Khi kẹp đóng/mở, các ngàm trượt tịnh tiến đối xứng dọc theo trục hành trình `travel_axis` (mặc định trục $X$) tương ứng với `jaw_width_m` ($0.040\text{ m}$ khi mở, $0.020\text{ m}$ khi đóng).
 - **Bộ lọc va chạm thông minh (`p.setCollisionFilterPair`):**
   - Khi quân cờ được gắp (`ATTACHED`), va chạm giữa quân cờ và 3 proxy ngàm kẹp tạm thời bị vô hiệu hóa để ngăn ngừa xung lực phản hồi và bất ổn định số học.
   - Ngay khi nhả kẹp hoặc thả rơi (`RELEASED` / `DROPPED`), va chạm vật lý giữa quân cờ và các ngàm kẹp lập tức được tái kích hoạt.
@@ -831,7 +837,34 @@ Tại Phase P3.1, kiến trúc mô phỏng vật lý và đồng bộ Digital Tw
 
 ### 25.6. Chuẩn Hóa Schema Gói Tin `world_state`
 - Thuộc tính trạng thái kẹp trong `world_state` được chuẩn hóa thành `closed: bool`.
-- Bổ sung thuộc tính tương thích ngược `is_closed: bool` và trường `jaw_opening_m: float`.
+- Bổ sung thuộc tính tương thích ngược `is_closed: bool` và trường `jaw_width_m: float`.
 - 3D viewer trong `live_state.mjs` hỗ trợ tự động chuẩn hóa cả hai trường `closed` và `is_closed`.
+
+---
+
+## 26. PHASE P3.2 ARCHITECTURE ADDITIONS: FINAL PHASE-3 CLOSURE
+
+Tại Phase P3.2, toàn bộ các khiếm khuyết runtime, caching và tính nhất quán đơn nhất đã được đóng lại triệt để:
+
+### 26.1. Khắc phục Lỗi Scoping Runtime Trong Three.js Viewer
+- Sửa đổi chữ ký hàm `buildRobotArm(profile, gripperProfile)` nhận tường minh `gripperProfile` và kiểm tra fail-fast `if (!gripperProfile) throw new Error(...)`.
+- Loại bỏ hoàn toàn các hằng số kích thước hình học và màu sắc fallback trong `buildProceduralGripper()`, tiêu thụ trực tiếp các trường chuẩn từ `profile` đã qua xác thực.
+- Hỗ trợ đầy đủ các trục chuyển động `travel_axis` ("X", "Y", "Z") cho cả vị trí khởi tạo lẫn hiệu ứng trượt của 2 ngàm kẹp.
+
+### 26.2. Sửa Lỗi Caching Scene Transform
+- Khắc phục điều kiện gán `_CACHED_SCENE_TRANSFORM` trong `transforms.py` bằng cách theo dõi cờ `use_default_path = scene_config_path is None`.
+- Đảm bảo các lần gọi `load_scene_transform()` liên tiếp tái sử dụng biến đổi trong bộ nhớ đệm mà không đọc lại file đĩa, giảm tải 64 lần mở file/giải mã JSON trong mỗi snapshot.
+- Cô lập tuyệt đối: các đường dẫn cấu hình tùy biến không bao giờ ghi đè hoặc làm ô nhiễm cache mặc định.
+
+### 26.3. Thắt chặt Bộ Lọc Gói Tin Telemetry JavaScript
+- Loại bỏ hoàn toàn ép kiểu chân lý lỏng lẻo `Boolean(...)`. Bắt buộc `closed` và `is_closed` phải là giá trị boolean thực sự và không được mâu thuẫn nhau.
+- Kiểm tra nghiêm ngặt 32 quân cờ: tọa độ 3D hữu hạn, quaternion có đúng 4 phần tử hữu hạn và chuẩn khác 0 ($\|\mathbf{q}\|^2 > 10^{-12}$).
+
+### 26.4. Bằng Chứng Tách Biệt Độc Lập Quỹ Đạo Sau Khi Thả Rơi
+- Kiểm chứng thực nghiệm trong `test_runtime_mid_motion_drop.py`:
+  - Trước khi thả rơi, vị trí tương đối giữa quân cờ và ngàm kẹp được giữ bất biến.
+  - Sau khi thả rơi giữa hành trình, robot tiếp tục di chuyển về đích trong khi quân cờ rơi tự do: vector tương đối $\|\Delta \mathbf{p}_{\text{later}} - \Delta \mathbf{p}_{\text{drop}}\|$ biến thiên rõ rệt ($> 10\text{ mm}$), chứng minh dứt điểm quân cờ không còn bị khóa vào tay máy.
+  - Quân cờ dịch chuyển ngang rõ rệt trong mặt phẳng $XY$ ($> 5\text{ mm}$) do kế thừa động lượng ban đầu.
+
 
 
