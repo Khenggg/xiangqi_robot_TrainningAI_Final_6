@@ -131,7 +131,7 @@ Hệ thống vận hành theo chuỗi biến đổi tọa độ phân cấp rõ 
 3. **`robot_base`:**
    - Đơn vị: Milimét ($mm$).
    - Gốc: Tâm đáy chân đế tay máy công nghiệp.
-   - Quy ước: Trục $X$ robot hướng dọc theo chiều tăng của hàng (`row`), trục $Y$ robot hướng ngang theo chiều tăng của cột (`col`), trục $Z$ hướng thẳng đứng lên trên.
+   - Quy ước: Hàng (`row`) tăng dần dọc theo chiều âm trục $X$ robot ($-X_{robot}$), cột (`col`) tăng dần dọc theo chiều dương trục $Y$ robot ($+Y_{robot}$), trục $Z$ hướng thẳng đứng lên trên ($+Z_{robot}$).
 4. **`3d_world` (Three.js Virtual Simulation):**
    - Đơn vị: Mét ($m$).
    - Gốc: $(0, 0, 0)$ tại chân đế robot ảo Three.js. Trục $X$ sang ngang bên phải robot, trục $Y$ hướng lên trên (Up-vector), trục $Z$ hướng về phía trước (bàn cờ).

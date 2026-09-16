@@ -22,6 +22,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from src.domain.geometry import get_physical_geometry
 from src.simulation.kinematics.fr3 import FR3Kinematics, IKResult, IKStatus
 from src.simulation.kinematics.urdf_chain import Pose3D
 
@@ -34,7 +35,7 @@ def evaluate_board_reachability(
     rot_tol_deg: float = 1.0,
 ) -> dict:
     """
-    Evaluate all 90 board intersections for a candidate height offset.
+    Evaluate all board intersections for a candidate height offset.
     Returns evaluation summary dict.
     """
     if scene_config_path is None:
@@ -50,8 +51,11 @@ def evaluate_board_reachability(
     z_target = z0 + height_offset_m
     R_target = np.array(board_cfg["target_tool_orientation_matrix"], dtype=float)
 
-    col_spacing = 0.040  # 40 mm
-    row_spacing = 0.040  # 40 mm
+    geom = get_physical_geometry()
+    col_spacing = geom.board.column_spacing / 1000.0  # Derived from canonical geometry
+    row_spacing = geom.board.row_spacing / 1000.0     # Derived from canonical geometry
+    num_rows = geom.board.rows
+    num_cols = geom.board.columns
 
     reachable_count = 0
     unreachable_cells = []
@@ -65,11 +69,11 @@ def evaluate_board_reachability(
 
     cell_results = []
 
-    for r in range(10):
-        # Row 0 is at x0, Row 9 is at x0 - 9 * 0.040 (along -X in robot base)
+    for r in range(num_rows):
+        # Row 0 is at x0, Row (num_rows-1) along -X in robot base
         x = x0 - r * row_spacing
-        for c in range(9):
-            # Col 0 is at y0, Col 8 is at y0 + 8 * 0.040 (along +Y in robot base)
+        for c in range(num_cols):
+            # Col 0 is at y0, Col (num_cols-1) along +Y in robot base
             y = y0 + c * col_spacing
 
             T_target = np.eye(4, dtype=float)
@@ -124,7 +128,7 @@ def evaluate_board_reachability(
         "scene_status": scene.get("status"),
         "robot_model": scene.get("robot_model"),
         "target_height_m": z_target,
-        "total_cells": 90,
+        "total_cells": num_rows * num_cols,
         "reachable_count": reachable_count,
         "unreachable_count": len(unreachable_cells),
         "unreachable_cells": unreachable_cells,

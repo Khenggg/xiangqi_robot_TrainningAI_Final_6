@@ -11,6 +11,7 @@ Verifies that:
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import unittest
 
@@ -181,12 +182,20 @@ class ViewerProfileBindingTests(unittest.TestCase):
         js_test = _PROJECT_ROOT / "tests" / "unit" / "test_viewer_profile_binding.mjs"
         self.assertTrue(js_test.exists())
 
-        res = subprocess.run(
-            ["node", str(js_test)],
-            cwd=str(_PROJECT_ROOT),
-            capture_output=True,
-            text=True,
-        )
+        node_bin = shutil.which("node")
+        if not node_bin:
+            raise unittest.SkipTest("Node.js runtime not found in PATH; skipping 3D viewer profile binding test")
+
+        try:
+            res = subprocess.run(
+                [node_bin, str(js_test)],
+                cwd=str(_PROJECT_ROOT),
+                capture_output=True,
+                text=True,
+            )
+        except (FileNotFoundError, OSError) as e:
+            raise unittest.SkipTest(f"Failed to execute Node.js ({e}); skipping 3D viewer profile binding test")
+
         self.assertEqual(
             res.returncode,
             0,
