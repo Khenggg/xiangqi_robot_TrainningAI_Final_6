@@ -58,15 +58,15 @@ class TrajectoryWaypointsTests(unittest.TestCase):
             q_grasp = np.radians(cell["grasp_joints_deg"])
             q_approach = np.radians(cell["approach_joints_deg"])
 
-            # FK check for grasp
+            # FK check for grasp (piece center height: 0.0105 + 0.00943/2 = 0.015215m -> clearance ~4.715mm)
             T_grasp = self.kin.forward_kinematics(q_grasp).as_matrix()
             flange_z_grasp = T_grasp[2, 3]
             tip_z_grasp = flange_z_grasp - self.L_gripper
             clearance_grasp_mm = (tip_z_grasp - self.z0) * 1000.0
-            self.assertAlmostEqual(clearance_grasp_mm, 1.5, delta=0.5,
-                                   msg=f"Cell ({r},{c}) grasp clearance not ~1.5mm")
+            self.assertAlmostEqual(clearance_grasp_mm, 4.715, delta=0.5,
+                                   msg=f"Cell ({r},{c}) grasp clearance not ~4.715mm (piece center)")
 
-            # FK check for approach (safe lift)
+            # FK check for approach (safe lift: 0.0805m -> clearance 70.0mm)
             T_app = self.kin.forward_kinematics(q_approach).as_matrix()
             flange_z_app = T_app[2, 3]
             tip_z_app = flange_z_app - self.L_gripper
@@ -137,10 +137,10 @@ class TrajectoryWaypointsTests(unittest.TestCase):
             self.assertLess(xy_drift_m, 0.015,
                             f"Cell ({r},{c}) XY drift during vertical lift {xy_drift_m*1000:.1f}mm exceeds 15mm")
 
-            # Z delta must be positive lift ~ 68.5mm
+            # Z delta must be positive lift ~ 65.285mm (0.0805 - 0.015215)
             z_lift_m = T_app[2, 3] - T_grasp[2, 3]
-            self.assertAlmostEqual(z_lift_m * 1000.0, 68.5, delta=1.5,
-                                   msg=f"Cell ({r},{c}) lift height delta not ~68.5mm")
+            self.assertAlmostEqual(z_lift_m * 1000.0, 65.285, delta=1.5,
+                                   msg=f"Cell ({r},{c}) lift height delta not ~65.285mm")
 
 
 if __name__ == "__main__":

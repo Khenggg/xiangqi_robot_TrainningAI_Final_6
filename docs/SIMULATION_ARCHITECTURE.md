@@ -874,5 +874,51 @@ Tại Phase P3.2, toàn bộ các khiếm khuyết runtime, caching và tính nh
   - Sau khi thả rơi giữa hành trình, robot tiếp tục di chuyển về đích trong khi quân cờ rơi tự do: vector tương đối $\|\Delta \mathbf{p}_{\text{later}} - \Delta \mathbf{p}_{\text{drop}}\|$ biến thiên rõ rệt ($> 10\text{ mm}$), chứng minh dứt điểm quân cờ không còn bị khóa vào tay máy.
   - Quân cờ dịch chuyển ngang rõ rệt trong mặt phẳng $XY$ ($> 5\text{ mm}$) do kế thừa động lượng ban đầu.
 
+---
+
+## 27. PHASE 3 FINAL CLOSURE: UNIFIED TOOL FRAME, CANONICAL GEOMETRY, AUTHORITATIVE TRAJECTORY & FULL FR3 COLLISION GUARD
+
+Tại Phase 3 Final Closure, toàn bộ chuỗi mắt xích hình học, tool-frame, kiểm soát va chạm toàn thân và tính toán quỹ đạo chuyển động được chuẩn hóa tuyệt đối:
+
+### 27.1. Nguồn Chân Lý Hình Học Duy Nhất (Canonical Geometry SSOT)
+- Bàn cờ được chuẩn hóa thống nhất trên toàn hệ thống (`shared/physical_geometry.json`, `shared/virtual_physics.json`, `src/domain/geometry.py`, `robot-3d-viewer/geometry.mjs`):
+  - Kích thước bàn cờ: $367.0 \times 410.0 \times 10.5\text{ mm}$.
+  - Độ dày bàn cờ $10.5\text{ mm}$ ($0.0105\text{ m}$), mặt trên bàn cờ tại $Z_{\text{robot}} = +0.0105\text{ m}$.
+  - Bounding box va chạm PyBullet của bàn cờ: $X \in [-0.565, -0.155]\text{ m}$, $Y \in [-0.1835, +0.1835]\text{ m}$, $Z \in [0.000, 0.0105]\text{ m}$.
+  - Kích thước quân cờ: đường kính $22.5\text{ mm}$, chiều cao $9.43\text{ mm}$, khối lượng $0.020\text{ kg}$. Mặt trên quân cờ khi đặt trên bàn cờ là $Z = 0.0105 + 0.00943 = 0.01993\text{ m}$. Tâm quân cờ ở $Z = 0.015215\text{ m}$.
+
+### 27.2. Chuẩn Hóa Khung Dụng Cụ Thống Nhất (Unified Tool Frame & Rigid Invariant)
+- **Tool Center Point (TCP):** Được định nghĩa chính xác tại trung điểm giữa hai đầu ngón kẹp (fingertip midpoint).
+- Vector dịch chuyển từ J6 Flange tới TCP: $T_{\text{flange\_tcp}} = [0, 0, 0.218]\text{ m}$ ($218\text{ mm}$).
+- Tâm gắp (`grasp_center`): Trùng khít $100\%$ với TCP: `tcp_to_grasp_center_m = [0.0, 0.0, 0.0]`.
+- **Bất biến hình học cứng (Rigid TCP Invariant):**
+  Trong mọi trạng thái di chuyển khớp và giải nghịch động học, khoảng cách Euclid từ tâm flange J6 tới TCP luôn tuân thủ nghiêm ngặt:
+  $$\|p_{\text{flange}} - p_{\text{tcp}}\| \equiv 0.218\text{ m}$$
+- Backend giải IK trực tiếp từ tư thế TCP mục tiêu thông qua biến đổi:
+  $$T_{\text{base\_flange}} = T_{\text{base\_tcp}} \cdot T_{\text{tcp\_flange}} = T_{\text{base\_tcp}} \cdot T_{\text{flange\_tcp}}^{-1}$$
+
+### 27.3. Bản Sao Động Học Articulated FR3 Trong PyBullet (`fairino3_v6_pybullet.urdf`)
+- Module `src/simulation/physics/urdf_resolver.py` nạp file `fairino3_v6.urdf` gốc mà không làm biến đổi file gốc, giải quyết đường dẫn tuyệt đối cho các file mesh STL và sinh ra bản nạp headless tương thích cho PyBullet.
+- Cánh tay robot được nạp với `useFixedBase=True` và duy trì điều khiển vị trí khớp `p.setJointMotorControl2(..., p.POSITION_CONTROL, force=500.0)` để giữ tay máy cố định tuyệt đối, triệt tiêu hiện tượng sụp đổ (ragdoll collapse) do trọng lực.
+- Khi robot di chuyển, các khớp trong PyBullet được cập nhật đồng bộ với backend.
+
+### 27.4. Hệ Thống Bảo Vệ Va Chạm Toàn Thân FR3 (`FR3CollisionGuard`)
+- Triển khai lớp `FR3CollisionGuard` (`src/simulation/physics/collision_guard.py`) kiểm tra an toàn va chạm toàn diện trong PyBullet:
+  1. `links <-> board`: Kiểm tra mọi link cánh tay robot với bàn cờ.
+  2. `links <-> pieces`: Kiểm tra mọi link cánh tay với 32 quân cờ.
+  3. `gripper <-> board`: Kiểm tra 3 proxy ngàm kẹp với bàn cờ (cho phép biên an toàn $0.5\text{ mm}$ cho các tư thế gắp/hạ hợp lệ).
+  4. `gripper <-> pieces`: Kiểm tra proxy ngàm kẹp với các quân cờ không gắp; bỏ qua quân cờ đang được gắp (`allowed_grasp_piece_id`).
+  5. `self-collision`: Kiểm tra tự va chạm giữa các link của cánh tay FR3 (loại trừ các cặp link liền kề có khớp nối cơ học).
+- Toàn bộ các quỹ đạo `move_cartesian()` đều được kiểm duyệt trước (pre-validation) qua `FR3CollisionGuard.validate_trajectory()`. Nếu phát hiện bất kỳ điểm nào vi phạm va chạm, lệnh chuyển động sẽ bị từ chối fail-fast và giữ nguyên trạng thái an toàn trước đó.
+
+### 27.5. Quỹ Đạo 3 Giai Đoạn Authoritative (Lift -> Transit -> Land)
+- Quỹ đạo gắp và đặt được thực thi độc quyền bởi Python backend runtime (`SimulationRuntime.execute_3stage_trajectory`):
+  1. **Lift:** Nâng thẳng đứng từ $Z_{\text{grasp}} = 0.015215\text{ m}$ lên độ cao an toàn $Z_{\text{safe}} = 0.0805\text{ m}$ (cách mặt bàn $70.0\text{ mm}$).
+  2. **Transit:** Di chuyển ngang thuần túy trong mặt phẳng $XY$ ở cao độ cố định $Z_{\text{safe}} = 0.0805\text{ m}$ (cách mặt trên quân cờ $> 60\text{ mm}$).
+  3. **Land:** Hạ thẳng đứng từ $Z_{\text{safe}} = 0.0805\text{ m}$ xuống $Z_{\text{grasp}} = 0.015215\text{ m}$ tại ô đích.
+- Bộ dữ liệu `shared/cell_reachability_dataset.json` được tái tạo cho toàn bộ 90/90 ô cờ, bảo đảm 100% reachable và 100% collision-free trong kiểm tra vật lý PyBullet thực tế.
+- Loại bỏ hoàn toàn các tuyên bố tiếp thị rỗng ("AN TOÀN 100%") trên viewer, thay bằng telemetry kỹ thuật xác thực (`COLLISION-FREE`, `TRAJECTORY COMPLETE`, `Authoritative IK`, `Safe Z`).
+
+
 
 

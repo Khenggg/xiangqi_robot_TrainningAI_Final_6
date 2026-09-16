@@ -120,6 +120,10 @@ class VirtualPhysicalWorld:
             # Gripper proxy and PyBullet collision bodies
             self.gripper = VirtualGripper(profile_path=self.gripper_profile_path)
             self._spawn_gripper_proxies()
+
+            # Full articulated FR3 robot for collision queries
+            self.robot_body_id = -1
+            self._spawn_robot()
         except Exception:
             if self.client_id >= 0:
                 try:
@@ -134,10 +138,58 @@ class VirtualPhysicalWorld:
         if hasattr(self.gripper, "spawn_proxies"):
             self.gripper.spawn_proxies(self.client_id)
 
+    def _spawn_robot(self) -> None:
+        """Spawn full articulated FAIRINO FR3 URDF for collision queries in PyBullet."""
+        from src.simulation.physics.urdf_resolver import get_simulation_ready_fr3_urdf
+        urdf_path = get_simulation_ready_fr3_urdf()
+        self.robot_body_id = p.loadURDF(
+            str(urdf_path.resolve()),
+            basePosition=[0.0, 0.0, 0.0],
+            baseOrientation=[0.0, 0.0, 0.0, 1.0],
+            useFixedBase=True,
+            flags=p.URDF_USE_SELF_COLLISION,
+            physicsClientId=self.client_id,
+        )
+
+        # Initialize robot to scene home pose and hold joints with position control
+        home_deg = self.scene_cfg.get("home_pose", {}).get("joints_deg", [0.0, -45.0, 90.0, -45.0, -90.0, 0.0])
+        home_rad = np.deg2rad(home_deg)
+        self.sync_robot_configuration(home_rad)
+
+    def sync_robot_configuration(self, joints_rad: Sequence[float]) -> None:
+        """
+        Mirror robot joint configuration into PyBullet FR3 model and update gripper proxies.
+        """
+        if self.robot_body_id < 0 or self.client_id < 0:
+            return
+        for j_idx in range(min(6, len(joints_rad))):
+            target_pos = float(joints_rad[j_idx])
+            p.resetJointState(self.robot_body_id, j_idx, target_pos, targetVelocity=0.0, physicsClientId=self.client_id)
+            p.setJointMotorControl2(
+                self.robot_body_id,
+                j_idx,
+                p.POSITION_CONTROL,
+                targetPosition=target_pos,
+                force=500.0,
+                physicsClientId=self.client_id,
+            )
+
+        # Flange link 5 (wrist3_link)
+        link_state = p.getLinkState(self.robot_body_id, 5, computeForwardKinematics=True, physicsClientId=self.client_id)
+        flange_pos = np.array(link_state[4], dtype=float)
+        flange_quat = np.array(link_state[5], dtype=float)
+
+        R_flange = quat_to_rot_matrix(flange_quat)
+        tool_cfg = self.scene_cfg.get("tool_transform", {})
+        tool_offset = np.array(tool_cfg.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.218]), dtype=float)
+        p_tcp = flange_pos + R_flange @ tool_offset
+        self.gripper.set_tcp_pose(p_tcp, flange_quat)
+
     def _spawn_board(self) -> None:
         """Create finite static board box collider."""
         board_physics = self.physics_cfg.get("board", {})
-        thickness_m = float(board_physics.get("collision_thickness_m", 0.040))
+        # Canonical board thickness strictly derived from shared/physical_geometry.json (0.0105m)
+        thickness_m = self.geom.thickness_mm / 1000.0
 
         # Dimensions from canonical physical geometry
         outer_length_m = self.geom.outer_length_mm / 1000.0  # Along X in robot_base (410 mm)
@@ -148,7 +200,7 @@ class VirtualPhysicalWorld:
         half_z = thickness_m / 2.0
 
         board_center = self.board_cfg["board_center_in_robot_base_m"]
-        surface_height = float(self.board_cfg.get("board_surface_height_m", 0.05))
+        surface_height = float(self.board_cfg.get("board_surface_height_m", 0.0105))
 
         # Box center is placed such that its top surface is at surface_height
         box_center = [board_center[0], board_center[1], surface_height - half_z]

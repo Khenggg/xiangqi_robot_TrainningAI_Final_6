@@ -8,6 +8,7 @@ Implements the RobotBackend interface for headless digital-twin simulation.
 - Thread-safe state access with fast-execution support for unit tests
 """
 
+import json
 import logging
 import math
 from pathlib import Path
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 from src.hardware.backends.base import RobotBackend, RobotStateSnapshot
 from src.simulation.kinematics.fr3 import FR3Kinematics, IKResult, IKStatus
-from src.simulation.kinematics.urdf_chain import Pose3D
+from src.simulation.kinematics.urdf_chain import Pose3D, matrix_to_rpy, rpy_to_matrix
 
 
 class VirtualFR3Backend(RobotBackend):
@@ -40,7 +41,15 @@ class VirtualFR3Backend(RobotBackend):
         self.kinematics = kinematics or FR3Kinematics()
         self.telemetry_publisher = telemetry_publisher
         self.default_speed_factor = max(0.01, float(default_speed_factor))
-        self.scene_config_path = scene_config_path
+
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        self.scene_config_path = Path(scene_config_path) if scene_config_path else (
+            repo_root / "shared" / "virtual_fr3_scene.json"
+        )
+        self._load_tool_transform()
+
+        self.collision_guard = None
+        self._allowed_grasp_piece_id: Optional[str] = None
 
         self._state_lock = threading.RLock()
         self._connected = False
@@ -54,8 +63,7 @@ class VirtualFR3Backend(RobotBackend):
             [math.radians(d) for d in self._current_joints_deg], dtype=float
         )
         self._flange_pose_mm_deg = self._compute_flange_pose_mm_deg(self._current_joints_rad)
-        # In P2, provisional tool transform is identity relative to flange
-        self._tcp_pose_mm_deg = list(self._flange_pose_mm_deg)
+        self._tcp_pose_mm_deg = self._compute_tcp_pose_mm_deg(self._current_joints_rad)
 
         # Simulation execution parameters
         self._step_delay_s = 0.01
@@ -74,9 +82,47 @@ class VirtualFR3Backend(RobotBackend):
             if callback in self._listeners:
                 self._listeners.remove(callback)
 
+    def _load_tool_transform(self) -> None:
+        """Load fixed tool transform from canonical scene configuration."""
+        tool_xyz = [0.0, 0.0, 0.218]
+        tool_rpy = [0.0, 0.0, 0.0]
+        if self.scene_config_path.is_file():
+            try:
+                with open(self.scene_config_path, "r", encoding="utf-8-sig") as f:
+                    data = json.load(f)
+                tool_cfg = data.get("tool_transform", {})
+                tool_xyz = tool_cfg.get("flange_to_tcp_xyz_m", tool_xyz)
+                tool_rpy = tool_cfg.get("flange_to_tcp_rpy_deg", tool_rpy)
+            except Exception as e:
+                logger.warning(f"Could not load tool_transform from {self.scene_config_path}: {e}")
+
+        R_tool = rpy_to_matrix(np.radians(tool_rpy))
+        T_flange_tcp = np.eye(4, dtype=float)
+        T_flange_tcp[:3, :3] = R_tool
+        T_flange_tcp[:3, 3] = np.array(tool_xyz, dtype=float)
+
+        self._T_flange_tcp = T_flange_tcp
+        self._T_tcp_flange = np.linalg.inv(T_flange_tcp)
+        self.flange_to_tcp_distance_m = float(np.linalg.norm(T_flange_tcp[:3, 3]))
+
+    def set_collision_guard(self, guard) -> None:
+        """Attach collision guard validator."""
+        self.collision_guard = guard
+
+    def set_allowed_grasp_piece_id(self, piece_id: Optional[str]) -> None:
+        """Set or clear the allowed target piece during grasp."""
+        self._allowed_grasp_piece_id = piece_id
+
     def _compute_flange_pose_mm_deg(self, joints_rad: np.ndarray) -> List[float]:
         pose = self.kinematics.forward_kinematics(joints_rad)
         return pose.to_xyz_rpy_deg()
+
+    def _compute_tcp_pose_mm_deg(self, joints_rad: np.ndarray) -> List[float]:
+        """Compute tool TCP pose via rigid transformation composition: T_base_tcp = T_base_flange @ T_flange_tcp."""
+        pose_flange = self.kinematics.forward_kinematics(joints_rad)
+        T_base_flange = pose_flange.as_matrix()
+        T_base_tcp = T_base_flange @ self._T_flange_tcp
+        return Pose3D.from_matrix(T_base_tcp).to_xyz_rpy_deg()
 
     def connect(self) -> bool:
         """Connect virtual backend and initialize authoritative state."""
@@ -98,6 +144,24 @@ class VirtualFR3Backend(RobotBackend):
     def is_connected(self) -> bool:
         with self._state_lock:
             return self._connected
+
+    def solve_tcp_ik(
+        self,
+        tcp_pose_mm_deg: Sequence[float],
+        seed_joints: Optional[Sequence[float]] = None,
+        allow_multi_seed: bool = True,
+    ) -> IKResult:
+        """Solve inverse kinematics for a target TCP pose (in mm and deg)."""
+        p_m = np.array(tcp_pose_mm_deg[:3], dtype=float) / 1000.0
+        R_tcp = rpy_to_matrix(np.radians(tcp_pose_mm_deg[3:]))
+        T_tcp = np.eye(4, dtype=float)
+        T_tcp[:3, :3] = R_tcp
+        T_tcp[:3, 3] = p_m
+        T_flange = T_tcp @ self._T_tcp_flange
+        pose_flange = Pose3D.from_matrix(T_flange)
+        return self.kinematics.inverse_kinematics(
+            pose_flange, seed_joints=seed_joints, allow_multi_seed=allow_multi_seed
+        )
 
     def get_state_snapshot(self) -> RobotStateSnapshot:
         """Return immutable, thread-safe snapshot of current authoritative state."""
@@ -195,6 +259,22 @@ class VirtualFR3Backend(RobotBackend):
             start_rad = self._current_joints_rad.copy()
             self._motion_state = "MOVING"
 
+        # Pre-validate trajectory through collision guard if configured
+        if self.collision_guard is not None:
+            max_joint_step_rad = math.radians(2.0)
+            diff_rad = np.abs(target_rad - start_rad)
+            n_sub = max(2, int(math.ceil(float(np.max(diff_rad)) / max_joint_step_rad)))
+            q_samples = [start_rad + (float(k) / n_sub) * (target_rad - start_rad) for k in range(1, n_sub + 1)]
+            col_res = self.collision_guard.validate_trajectory(
+                q_samples,
+                allowed_grasp_piece_id=self._allowed_grasp_piece_id,
+            )
+            if not col_res.safe:
+                with self._state_lock:
+                    self._last_error = f"MoveJ rejected by collision guard: {col_res.failure_reason}"
+                    self._motion_state = "COLLISION_REJECTED"
+                return False
+
         # Physical motion duration constrained by URDF maximum joint velocities:
         # t_i = |Delta q_i| / v_max,i
         delta_rad = np.abs(target_rad - start_rad)
@@ -223,12 +303,13 @@ class VirtualFR3Backend(RobotBackend):
             alpha = float(s) / float(actual_steps)
             q_interp = start_rad + alpha * (target_rad - start_rad)
             flange = self._compute_flange_pose_mm_deg(q_interp)
+            tcp = self._compute_tcp_pose_mm_deg(q_interp)
 
             with self._state_lock:
                 self._current_joints_rad = q_interp
                 self._current_joints_deg = [round(math.degrees(float(val)), 3) for val in q_interp]
                 self._flange_pose_mm_deg = flange
-                self._tcp_pose_mm_deg = list(flange)
+                self._tcp_pose_mm_deg = tcp
                 self._sync_telemetry()
 
             if sleep_time > 0:
@@ -239,7 +320,7 @@ class VirtualFR3Backend(RobotBackend):
             self._current_joints_rad = target_rad
             self._current_joints_deg = [round(math.degrees(float(val)), 3) for val in target_rad]
             self._flange_pose_mm_deg = self._compute_flange_pose_mm_deg(target_rad)
-            self._tcp_pose_mm_deg = list(self._flange_pose_mm_deg)
+            self._tcp_pose_mm_deg = self._compute_tcp_pose_mm_deg(target_rad)
             self._motion_state = "IDLE"
             self._sync_telemetry()
 
@@ -298,15 +379,24 @@ class VirtualFR3Backend(RobotBackend):
             alpha = float(i) / float(num_samples)
             p_i = start_p + alpha * (target_p - start_p)
             rot_i = start_rot + alpha * rot_diff
-            wp_target = list(p_i) + list(rot_i)
+
+            # Convert TCP waypoint to required flange target via rigid transformation:
+            # T_base_flange = T_base_tcp @ (T_flange_tcp)^(-1)
+            p_m = p_i / 1000.0
+            R_tcp_i = rpy_to_matrix(np.radians(rot_i))
+            T_base_tcp_i = np.eye(4, dtype=float)
+            T_base_tcp_i[:3, :3] = R_tcp_i
+            T_base_tcp_i[:3, 3] = p_m
+            T_base_flange_i = T_base_tcp_i @ self._T_tcp_flange
+            wp_flange = Pose3D.from_matrix(T_base_flange_i)
 
             ik_res = self.kinematics.inverse_kinematics(
-                wp_target, seed_joints=seed, allow_multi_seed=False
+                wp_flange, seed_joints=seed, allow_multi_seed=False
             )
             if not ik_res.success:
                 # Try with multi-seed fallback
                 ik_res = self.kinematics.inverse_kinematics(
-                    wp_target, seed_joints=seed, allow_multi_seed=True
+                    wp_flange, seed_joints=seed, allow_multi_seed=True
                 )
 
             if not ik_res.success:
@@ -319,6 +409,18 @@ class VirtualFR3Backend(RobotBackend):
 
             joint_trajectory.append(ik_res.joints_rad)
             seed = ik_res.joints_rad.copy()
+
+        # Pre-validate trajectory through collision guard if configured
+        if self.collision_guard is not None:
+            col_res = self.collision_guard.validate_trajectory(
+                joint_trajectory,
+                allowed_grasp_piece_id=self._allowed_grasp_piece_id,
+            )
+            if not col_res.safe:
+                with self._state_lock:
+                    self._last_error = f"MoveCartesian rejected by collision guard: {col_res.failure_reason}"
+                    self._motion_state = "COLLISION_REJECTED"
+                return False
 
         # Waypoints all validated: execute trajectory
         with self._state_lock:
@@ -349,11 +451,12 @@ class VirtualFR3Backend(RobotBackend):
                 return False
 
             flange = self._compute_flange_pose_mm_deg(q_step)
+            tcp = self._compute_tcp_pose_mm_deg(q_step)
             with self._state_lock:
                 self._current_joints_rad = q_step
                 self._current_joints_deg = [round(math.degrees(float(val)), 3) for val in q_step]
                 self._flange_pose_mm_deg = flange
-                self._tcp_pose_mm_deg = list(flange)
+                self._tcp_pose_mm_deg = tcp
                 self._sync_telemetry()
 
             if sleep_time > 0:

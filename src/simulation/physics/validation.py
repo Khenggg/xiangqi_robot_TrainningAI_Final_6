@@ -46,6 +46,10 @@ def validate_physics_config(cfg: Dict[str, Any]) -> None:
     thick = board.get("collision_thickness_m")
     if not _is_finite_num(thick) or float(thick) <= 0.0:
         raise ValueError(f"Invalid board 'collision_thickness_m': {thick}")
+    if abs(float(thick) - 0.0105) > 1e-4:
+        raise ValueError(
+            f"board 'collision_thickness_m' ({thick}) must equal canonical physical geometry thickness (0.0105m)"
+        )
     if not _is_finite_num(board.get("lateral_friction")) or float(board["lateral_friction"]) < 0.0:
         raise ValueError(f"Invalid board 'lateral_friction': {board.get('lateral_friction')}")
     if not _is_finite_num(board.get("spinning_friction")) or float(board["spinning_friction"]) < 0.0:
@@ -145,10 +149,15 @@ def validate_gripper_profile(cfg: Dict[str, Any]) -> None:
     if axis not in ("X", "Y", "Z"):
         raise ValueError(f"Unsupported travel_axis: {axis} (must be 'X', 'Y', or 'Z')")
 
-    # TCP to grasp center
+    # TCP to grasp center (must be exactly [0.0, 0.0, 0.0] under single tool frame contract)
     t2g = cfg.get("tcp_to_grasp_center_m")
-    if not isinstance(t2g, (list, tuple)) or len(t2g) != 3 or not all(_is_finite_num(v) for v in t2g):
-        raise ValueError(f"Invalid 'tcp_to_grasp_center_m': {t2g} (must be 3 finite numbers)")
+    if t2g is not None:
+        if not isinstance(t2g, (list, tuple)) or len(t2g) != 3 or not all(_is_finite_num(v) for v in t2g):
+            raise ValueError(f"Invalid 'tcp_to_grasp_center_m': {t2g} (must be 3 finite numbers)")
+        if any(abs(float(v)) > 1e-6 for v in t2g):
+            raise ValueError(
+                f"Deprecated 'tcp_to_grasp_center_m' must be [0.0, 0.0, 0.0] under unified tool frame contract, got {t2g}"
+            )
 
     # Capture volume
     cap = cfg.get("capture_volume")

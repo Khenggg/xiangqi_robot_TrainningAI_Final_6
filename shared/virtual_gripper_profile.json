@@ -14,7 +14,7 @@
     "closed_width_m": 0.020,
     "travel_axis": "X"
   },
-  "tcp_to_grasp_center_m": [0.0, 0.0, 0.035],
+  "tcp_to_grasp_center_m": [0.0, 0.0, 0.0],
   "capture_volume": {
     "xy_radius_m": 0.016,
     "z_half_height_m": 0.012

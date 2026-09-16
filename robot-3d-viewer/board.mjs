@@ -184,8 +184,8 @@ export function buildBoardGrid(geometry = null) {
 
   const boardWidth = geo.boardWidthM;
   const boardDepth = geo.boardDepthM;
-  // Chiều cao bàn cờ 1.05cm (0.0105m) tính từ mặt sàn (Y=0), không dùng bệ nâng phụ
-  const boardThickness = 0.0105;
+  // Canonical board thickness derived from physical_geometry.json (0.0105m)
+  const boardThickness = geo.boardThicknessM || 0.0105;
 
   const boardMaterial = new THREE.MeshLambertMaterial({
     map: createBoardTexture(geo),

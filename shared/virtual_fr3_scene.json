@@ -35,7 +35,7 @@
       [1.0, 0.0, 0.0],
       [0.0, 0.0, -1.0]
     ],
-    "target_tool_orientation_euler_deg": [180.0, 0.0, -90.0]
+    "target_tool_orientation_euler_deg": [180.0, 0.0, 90.0]
   },
   "home_pose": {
     "joints_deg": [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]

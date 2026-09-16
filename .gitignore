@@ -26,3 +26,6 @@ env/
 ENV/
 VENV/
 
+# Generated PyBullet URDFs
+fairino3_v6_pybullet.urdf
+

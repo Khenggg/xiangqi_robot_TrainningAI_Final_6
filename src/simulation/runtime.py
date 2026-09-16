@@ -19,6 +19,8 @@ import numpy as np
 from src.hardware.backends.base import RobotStateSnapshot
 from src.hardware.telemetry_publisher import TelemetryPublisher
 from src.simulation.kinematics.fr3 import FR3Kinematics
+from src.simulation.kinematics.urdf_chain import matrix_to_rpy
+from src.simulation.physics.collision_guard import FR3CollisionGuard
 from src.simulation.physics.transforms import (
     DEFAULT_R_ROBOT_TO_WORLD,
     continuous_board_coord,
@@ -44,11 +46,19 @@ class VirtualXiangqiSimulation:
         telemetry: Optional[TelemetryPublisher] = None,
         auto_sync_telemetry: bool = True,
         scene_config_path: Optional[Union[str, Path]] = None,
+        enable_collision_guard: bool = True,
     ):
-        self.backend = backend or VirtualFR3Backend()
         self.world = world or VirtualPhysicalWorld()
+        self.backend = backend or VirtualFR3Backend()
         self.telemetry = telemetry
         self.auto_sync_telemetry = auto_sync_telemetry
+
+        # Attach collision guard
+        if enable_collision_guard:
+            self.collision_guard = FR3CollisionGuard(world=self.world)
+            self.backend.set_collision_guard(self.collision_guard)
+        else:
+            self.collision_guard = None
 
         # Project root resolution
         project_root = Path(__file__).resolve().parent.parent.parent
@@ -72,25 +82,53 @@ class VirtualXiangqiSimulation:
         # Register listener with backend
         self.backend.add_state_listener(self._on_robot_state_update)
 
-        # Initial gripper sync
-        self._sync_gripper_to_flange(self.backend.get_state_snapshot())
+        # Initial gripper sync to TCP
+        self._sync_gripper_to_tcp(self.backend.get_state_snapshot())
 
     def _load_scene_config(self):
         if self.scene_config_path.is_file():
             with open(self.scene_config_path, "r", encoding="utf-8-sig") as f:
                 cfg = json.load(f)
             bp = cfg.get("virtual_board_placement", {})
-            self.grid_origin_robot = bp.get("grid_origin_in_robot_base_m", [-0.18, -0.16, 0.05])
-            self.board_surface_z = bp.get("board_surface_height_m", 0.05)
-            self.target_tool_euler_deg = bp.get("target_tool_orientation_euler_deg", [180.0, 0.0, -90.0])
+            self.grid_origin_robot = bp.get("grid_origin_in_robot_base_m", [-0.18, -0.16, 0.0105])
+            self.board_surface_z = bp.get("board_surface_height_m", 0.0105)
+            if "target_tool_orientation_matrix" in bp:
+                R_mat = np.array(bp["target_tool_orientation_matrix"], dtype=float)
+                self.target_tool_euler_deg = [round(float(v), 2) for v in np.rad2deg(matrix_to_rpy(R_mat))]
+            else:
+                self.target_tool_euler_deg = bp.get("target_tool_orientation_euler_deg", [180.0, 0.0, 90.0])
         else:
-            self.grid_origin_robot = [-0.18, -0.16, 0.05]
-            self.board_surface_z = 0.05
-            self.target_tool_euler_deg = [180.0, 0.0, -90.0]
+            self.grid_origin_robot = [-0.18, -0.16, 0.0105]
+            self.board_surface_z = 0.0105
+            self.target_tool_euler_deg = [180.0, 0.0, 90.0]
 
-    def _sync_gripper_to_flange(self, snapshot: RobotStateSnapshot):
-        pos_m = np.array(snapshot.flange_pose_mm_deg[:3], dtype=float) / 1000.0
-        rpy_deg = snapshot.flange_pose_mm_deg[3:]
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        reach_path = repo_root / "shared" / "cell_reachability_dataset.json"
+        self.reachability_dataset = {}
+        if reach_path.is_file():
+            try:
+                with open(reach_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.reachability_dataset = {
+                        (c["row"], c["col"]): c for c in data.get("cells", [])
+                    }
+            except Exception:
+                pass
+
+    def find_nearest_cell(self, pos_robot_m: Sequence[float]) -> Tuple[int, int]:
+        """Map a 3D position in robot_base to nearest board grid (row, col)."""
+        px, py = float(pos_robot_m[0]), float(pos_robot_m[1])
+        x0, y0, _ = self.grid_origin_robot
+        col_sp = self.geom.board.column_spacing / 1000.0
+        row_sp = self.geom.board.row_spacing / 1000.0
+        row = int(round((x0 - px) / row_sp))
+        col = int(round((py - y0) / col_sp))
+        return max(0, min(9, row)), max(0, min(8, col))
+
+    def _sync_gripper_to_tcp(self, snapshot: RobotStateSnapshot):
+        """Authoritative synchronization of physical gripper proxies to backend TCP."""
+        pos_m = np.array(snapshot.tcp_pose_mm_deg[:3], dtype=float) / 1000.0
+        rpy_deg = snapshot.tcp_pose_mm_deg[3:]
         quat_xyzw = rpy_deg_to_quat(rpy_deg)
 
         # Update kinematic gripper and slaved attachments
@@ -102,7 +140,7 @@ class VirtualXiangqiSimulation:
 
     def _on_robot_state_update(self, snapshot: RobotStateSnapshot):
         """Called automatically when VirtualFR3Backend state changes."""
-        self._sync_gripper_to_flange(snapshot)
+        self._sync_gripper_to_tcp(snapshot)
 
         # Detect gripper transition
         if snapshot.gripper_closed != self._last_gripper_closed:
@@ -122,7 +160,7 @@ class VirtualXiangqiSimulation:
             if piece is not None:
                 tgt_id = self._scheduled_drop.get("target_piece_id")
                 if tgt_id is None or tgt_id == piece.piece_id:
-                    curr_p = np.array(snapshot.flange_pose_mm_deg[:3], dtype=float) / 1000.0
+                    curr_p = np.array(snapshot.tcp_pose_mm_deg[:3], dtype=float) / 1000.0
                     if self._scheduled_drop.get("start_tcp_m") is None:
                         self._scheduled_drop["start_tcp_m"] = curr_p.copy()
 
@@ -217,25 +255,30 @@ class VirtualXiangqiSimulation:
         # Open gripper
         self.backend.set_gripper(False)
 
-        grasp_center_offset = self.world.gripper.tcp_to_grasp_center[2]
-        grasp_z_flange = pz + grasp_center_offset
-        hover_z_flange = grasp_z_flange + hover_height_m
-
         # Target orientations
         rx, ry, rz = self.target_tool_euler_deg
 
-        # Move to hover
-        hover_pose = [px * 1000.0, py * 1000.0, hover_z_flange * 1000.0, rx, ry, rz]
-        if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
-            ik = self.backend.kinematics.inverse_kinematics(hover_pose, allow_multi_seed=True)
+        # Nearest cell verified approach
+        r, c = self.find_nearest_cell(pos_robot)
+        cell_info = self.reachability_dataset.get((r, c))
+
+        hover_pose = [px * 1000.0, py * 1000.0, (pz + hover_height_m) * 1000.0, rx, ry, rz]
+        if cell_info and "approach_joints_deg" in cell_info:
+            self.backend.move_joint(cell_info["approach_joints_deg"], speed_factor=speed_factor)
+            self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
+        else:
+            ik = self.backend.solve_tcp_ik(hover_pose, allow_multi_seed=True)
             if ik.success:
                 self.backend.move_joint(np.degrees(ik.joints_rad), speed_factor=speed_factor)
             else:
                 return GraspResult(success=False, status=None, reason="Hover pose unreachable")
 
-        # Descend to grasp
-        grasp_pose = [px * 1000.0, py * 1000.0, grasp_z_flange * 1000.0, rx, ry, rz]
-        self.backend.move_cartesian(grasp_pose, speed_factor=speed_factor)
+        # Descend to grasp (TCP directly at piece center)
+        grasp_pose = [px * 1000.0, py * 1000.0, pz * 1000.0, rx, ry, rz]
+        self.backend.set_allowed_grasp_piece_id(piece_id)
+        if not self.backend.move_cartesian(grasp_pose, speed_factor=speed_factor):
+            self.backend.set_allowed_grasp_piece_id(None)
+            return GraspResult(success=False, status=None, reason=f"Grasp descent rejected: {self.backend._last_error}")
 
         # Close gripper (triggers _on_robot_state_update -> try_grasp)
         self.backend.set_gripper(True)
@@ -247,6 +290,7 @@ class VirtualXiangqiSimulation:
 
         # Lift back to hover
         self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
+        self.backend.set_allowed_grasp_piece_id(None)
 
         return res
 
@@ -260,7 +304,7 @@ class VirtualXiangqiSimulation:
         """
         Execute place trajectory to target board cell:
         1. Move to hover above cell
-        2. Descend to board surface + piece thickness
+        2. Descend to board surface + piece thickness / 2
         3. Open gripper (release)
         4. Lift back to hover
         """
@@ -268,31 +312,28 @@ class VirtualXiangqiSimulation:
         piece_h = self.geom.piece_height_mm / 1000.0
         piece_z = tz + piece_h / 2.0
 
-        grasp_center_offset = self.world.gripper.tcp_to_grasp_center[2]
-        place_z_flange = piece_z + grasp_center_offset
-        hover_z_flange = place_z_flange + hover_height_m
-
         rx, ry, rz = self.target_tool_euler_deg
 
-        # Hover above target
-        hover_pose = [tx * 1000.0, ty * 1000.0, hover_z_flange * 1000.0, rx, ry, rz]
+        hover_pose = [tx * 1000.0, ty * 1000.0, (piece_z + hover_height_m) * 1000.0, rx, ry, rz]
+        place_pose = [tx * 1000.0, ty * 1000.0, piece_z * 1000.0, rx, ry, rz]
+
+        # 1. Move to hover
         if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
-            ik = self.backend.kinematics.inverse_kinematics(hover_pose, allow_multi_seed=True)
+            ik = self.backend.solve_tcp_ik(hover_pose, allow_multi_seed=True)
             if ik.success:
                 self.backend.move_joint(np.degrees(ik.joints_rad), speed_factor=speed_factor)
             else:
                 return False
 
-        # Descend
-        place_pose = [tx * 1000.0, ty * 1000.0, place_z_flange * 1000.0, rx, ry, rz]
+        # 2. Descend to place
         self.backend.move_cartesian(place_pose, speed_factor=speed_factor)
 
-        # Release
+        # 3. Open gripper (release)
         self.backend.set_gripper(False)
         self.world.release_attached_piece()
         self.world.step_until_settled(max_steps=20)
 
-        # Ascend
+        # 4. Lift back to hover
         self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
         return True
 
@@ -425,13 +466,86 @@ class VirtualXiangqiSimulation:
 
         return event
 
+    def cell_to_robot_xyz_m(self, row: int, col: int, z_m: float) -> List[float]:
+        """Convert board cell (row, col) and altitude z_m to robot base XYZ coordinates."""
+        x0, y0, _ = self.grid_origin_robot
+        row_spacing = self.geom.grid_cell_length_mm / 1000.0
+        col_spacing = self.geom.grid_cell_width_mm / 1000.0
+        x = x0 - row * row_spacing
+        y = y0 + col * col_spacing
+        return [round(x, 5), round(y, 5), round(z_m, 5)]
+
+    def execute_3stage_trajectory(
+        self,
+        src_cell: Tuple[int, int],
+        dst_cell: Tuple[int, int],
+        speed_factor: Optional[float] = None,
+        samples_per_stage: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Execute authoritative 3-stage Pick & Place Cartesian trajectory:
+        1. LIFT: Cartesian MoveL (same X/Y, increasing Z from grasp to approach)
+        2. TRANSIT: Cartesian MoveL (source approach -> target approach at constant safe Z)
+        3. LAND: Cartesian MoveL (same target X/Y, decreasing Z from approach to grasp)
+
+        Uses downward tool orientation [180.0, 0.0, -90.0] deg.
+        Pre-validates collision guard and publishes authoritative telemetry.
+        """
+        r_src, c_src = src_cell
+        r_dst, c_dst = dst_cell
+
+        # Canonical heights
+        board_z = self.board_surface_z  # 0.0105 m
+        piece_h = self.geom.piece_height_mm / 1000.0  # 0.00943 m
+        z_grasp = board_z + piece_h / 2.0  # 0.015215 m (piece center)
+        z_transit = board_z + 0.070        # 0.0805 m (canonical +70mm safe clearance)
+        tool_rpy = list(self.target_tool_euler_deg)
+
+        src_app_m = self.cell_to_robot_xyz_m(r_src, c_src, z_transit)
+        dst_app_m = self.cell_to_robot_xyz_m(r_dst, c_dst, z_transit)
+        dst_grasp_m = self.cell_to_robot_xyz_m(r_dst, c_dst, z_grasp)
+
+        to_mm_deg = lambda p_m: [p_m[0] * 1000.0, p_m[1] * 1000.0, p_m[2] * 1000.0] + tool_rpy
+
+        # Ensure robot is positioned at src grasp pose before starting Lift
+        src_info = self.reachability_dataset.get((r_src, c_src))
+        if src_info and "grasp_joints_deg" in src_info:
+            self.backend.move_joint(src_info["grasp_joints_deg"], speed_factor=speed_factor)
+
+        # Stage 1: LIFT (vertical MoveL from grasp to safe transit height)
+        ok1 = self.move_cartesian(to_mm_deg(src_app_m), speed_factor=speed_factor, samples=samples_per_stage)
+        if not ok1:
+            return {"success": False, "failed_stage": "LIFT", "error": self.backend._last_error}
+
+        # Stage 2: TRANSIT (horizontal MoveL across safe transit plane)
+        ok2 = self.move_cartesian(to_mm_deg(dst_app_m), speed_factor=speed_factor, samples=samples_per_stage)
+        if not ok2:
+            return {"success": False, "failed_stage": "TRANSIT", "error": self.backend._last_error}
+
+        # Stage 3: LAND (vertical MoveL from safe transit height down to grasp target)
+        ok3 = self.move_cartesian(to_mm_deg(dst_grasp_m), speed_factor=speed_factor, samples=samples_per_stage)
+        if not ok3:
+            return {"success": False, "failed_stage": "LAND", "error": self.backend._last_error}
+
+        return {
+            "success": True,
+            "stages": ["LIFT", "TRANSIT", "LAND"],
+            "src": src_cell,
+            "dst": dst_cell,
+            "z_grasp_m": z_grasp,
+            "z_transit_m": z_transit,
+        }
+
     def start(self) -> None:
         """Start or initialize simulation coordinator (idempotent)."""
-        pass
+        if not self.backend.is_connected():
+            self.backend.connect()
 
     def stop(self) -> None:
         """Stop simulation coordinator and clean up resources."""
-        pass
+        if self.backend.is_connected():
+            self.backend.disconnect()
+        self.world.close()
 
 
 # Backward-compatibility alias

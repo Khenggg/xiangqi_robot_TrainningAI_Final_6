@@ -44,6 +44,7 @@ export function parsePhysicalGeometry(data) {
   const rows = Number(data.board.rows);
   const columnSpacingMm = Number(data.board.column_spacing);
   const rowSpacingMm = Number(data.board.row_spacing);
+  const boardThicknessMm = Number(data.board.thickness || 10.5);
 
   const pieceDiameterMm = Number(data.piece.diameter);
   const pieceHeightMm = Number(data.piece.height);
@@ -53,6 +54,7 @@ export function parsePhysicalGeometry(data) {
     ["board.outer_length", outerLengthMm],
     ["board.column_spacing", columnSpacingMm],
     ["board.row_spacing", rowSpacingMm],
+    ["board.thickness", boardThicknessMm],
     ["piece.diameter", pieceDiameterMm],
     ["piece.height", pieceHeightMm],
   ];
@@ -150,6 +152,7 @@ export function parsePhysicalGeometry(data) {
     // Converted to Three.js scene units (meters)
     boardWidthM: outerWidthMm * mmToM,          // 0.367 m
     boardDepthM: outerLengthMm * mmToM,          // 0.410 m
+    boardThicknessM: boardThicknessMm * mmToM,    // 0.0105 m
     cellM: columnSpacingMm * mmToM,              // 0.040 m
     rowSpacingM: rowSpacingMm * mmToM,          // 0.040 m
     playableWidthM: playableGridWidthMm * mmToM, // 0.320 m
@@ -158,5 +161,6 @@ export function parsePhysicalGeometry(data) {
     marginYM: marginVerticalMm * mmToM,          // 0.0250 m
     pieceRadiusM: (pieceDiameterMm / 2.0) * mmToM, // 0.01125 m
     pieceHeightM: pieceHeightMm * mmToM,           // 0.00943 m
+    boardThicknessMm,
   });
 }

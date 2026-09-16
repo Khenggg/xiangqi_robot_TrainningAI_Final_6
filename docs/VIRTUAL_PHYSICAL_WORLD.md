@@ -60,12 +60,12 @@ The physical world operates strictly within the authoritative **Robot Base Coord
    - Determinant $\det(R_{\text{scene}}) = +1.0$ (proper rotation, preserves chirality).
 
 ### 3.2. Board Physical Collider Bounds
-- Center: $(-0.360, 0.000, 0.030)\text{ m}$ (in `robot_base`)
-- Surface elevation $Z_{\text{surface}} = +0.050\text{ m}$
+- Center: $(-0.360, 0.000, 0.00525)\text{ m}$ (in `robot_base`)
+- Surface elevation $Z_{\text{surface}} = +0.0105\text{ m}$ ($10.5\text{ mm}$)
 - Bounding Box:
   - $X \in [-0.565\text{ m}, -0.155\text{ m}]$ (Length: $410\text{ mm}$)
   - $Y \in [-0.1835\text{ m}, +0.1835\text{ m}]$ (Width: $367\text{ mm}$)
-  - $Z \in [0.010\text{ m}, 0.050\text{ m}]$ (Thickness: $40\text{ mm}$)
+  - $Z \in [0.000\text{ m}, 0.0105\text{ m}]$ (Thickness: $10.5\text{ mm}$)
 
 ---
 
@@ -240,8 +240,11 @@ The physical simulation subsystem is backed by comprehensive automated unit test
 - `tests/unit/test_grasp_attachment.py`: Validates relative-transform invariance under 6-DOF translation and rotation.
 - `tests/unit/test_piece_drop.py`: Validates normal release settling, dynamic release velocity inheritance, off-board falling, and piece-on-piece collision resolution.
 - `tests/unit/test_world_coordinate_parity.py`: Validates parity of all 90 board intersections between Python and Three.js.
+- `tests/unit/test_phase3_final_closure.py`: Validates canonical geometry SSOT, rigid tool invariant $\|p_{\text{flange}} - p_{\text{tcp}}\| \equiv 0.218\text{ m}$, downward orientation contract, 3-stage trajectory fidelity, negative below-board collision rejection, and state preservation.
+- `src/simulation/physics/collision_guard.py`: Validates link-board, link-piece, gripper-board, gripper-piece, and link-link self-collision across all Cartesian waypoints.
 - `tools/simulation/demo_virtual_physical_world.py`: Demonstrates all 4 acceptance scenarios:
   1. **Scenario A (Normal)**: Clean pick-and-place with hover approach, grasp, Cartesian transfer, and accurate placement ($< 0.1\text{ mm}$ residual).
   2. **Scenario B (Dynamic Drop)**: Mid-flight emergency force drop with ballistic flight and settling on board.
   3. **Scenario C (Off-Board)**: Transfer beyond board boundary, release into void, and out-of-bounds state detection.
   4. **Scenario D (Collision)**: Stacking two pieces directly and verifying stable contact resolution without numerical explosion.
+

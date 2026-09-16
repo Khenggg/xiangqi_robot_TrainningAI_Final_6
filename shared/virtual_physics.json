@@ -6,7 +6,7 @@
   "fixed_timestep_s": 0.0041666667,
   "solver_iterations": 50,
   "board": {
-    "collision_thickness_m": 0.040,
+    "collision_thickness_m": 0.0105,
     "lateral_friction": 0.6,
     "spinning_friction": 0.005,
     "restitution": 0.05

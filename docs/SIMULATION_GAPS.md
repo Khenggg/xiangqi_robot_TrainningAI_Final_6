@@ -140,5 +140,38 @@
   - Thắt chặt validation JavaScript cho cả `gripper_profile.mjs` và `live_state.mjs` (bắt buộc boolean thuần túy, kiểm tra quaternion non-zero).
   - Bổ sung assertion kiểm chứng tính độc lập quỹ đạo sau khi thả rơi trong `test_runtime_mid_motion_drop.py`.
 
+---
+
+### SIM-GAP-012: Bất Đồng Bộ Tool-Frame, Tâm Gắp và Độ Dày Bàn Cờ Giữa Backend, Viewer và PyBullet
+- **Severity:** **CRITICAL**
+- **Status:** **RESOLVED IN PHASE 3 FINAL CLOSURE**
+- **Evidence:** 
+  1. Độ dày bàn cờ từng có mâu thuẫn giữa $40\text{ mm}$ (trong một số cấu hình vật lý cũ) và $10.5\text{ mm}$ (đo đạc thực tế trên `physical_geometry.json`).
+  2. TCP và tâm gắp từng bị phân tách với offset giả định $35\text{ mm}$, trong khi ngàm kẹp song song kẹp trực tiếp bằng đầu ngón tay ($0.218\text{ m}$ từ flange J6).
+  3. Backend giải IK từ Flange nhưng không có bất biến cứng $\|p_{\text{flange}} - p_{\text{tcp}}\| \equiv 0.218\text{ m}$ bảo đảm ràng buộc dụng cụ.
+- **Impact:** Nguy cơ sai lệch vị trí đầu gắp khi hạ kẹp, ngàm kẹp đâm vào mặt bàn hoặc kẹp hụt quân cờ.
+- **Resolution in Phase 3 Final Closure:**
+  - Đồng bộ độ dày bàn cờ $10.5\text{ mm}$ ($0.0105\text{ m}$) trên toàn hệ thống (`physical_geometry.json`, `virtual_physics.json`, `geometry.py`, `geometry.mjs`). Bề mặt bàn cờ cố định tại $Z_{\text{robot}} = +0.0105\text{ m}$.
+  - Xác lập TCP tại chính giữa hai đầu ngón kẹp với vector $T_{\text{flange\_tcp}} = [0, 0, 0.218]\text{ m}$. Tâm gắp trùng khít TCP (`tcp_to_grasp_center_m = [0.0, 0.0, 0.0]`).
+  - Thiết lập bất biến hình học cứng $\|p_{\text{flange}} - p_{\text{tcp}}\| \equiv 0.218\text{ m}$ trong `VirtualFR3Backend` và giải IK từ pose TCP mục tiêu.
+
+---
+
+### SIM-GAP-013: Thiếu Kiểm Tra Va Chạm Articulated Robot Toàn Diện Trong PyBullet và Trajectory Chưa Authoritative
+- **Severity:** **CRITICAL**
+- **Status:** **RESOLVED IN PHASE 3 FINAL CLOSURE**
+- **Evidence:** 
+  1. PyBullet trước đây chỉ chứa 3 khối va chạm proxy của gripper, hoàn toàn thiếu mô hình động học articulated của cánh tay FR3. Các va chạm giữa các link của robot với bàn cờ, quân cờ hoặc tự va chạm không được phát hiện.
+  2. Quỹ đạo 3 giai đoạn (Lift -> Transit -> Land) từng bị viewer Three.js nội suy client-side thay vì được kiểm soát độc quyền bởi Python backend runtime.
+  3. Viewer hiển thị nhãn tiếp thị "AN TOÀN 100%" mà không có bằng chứng va chạm PyBullet.
+- **Impact:** Robot có thể chuyển động xuyên thấu bàn cờ hoặc tự va chạm ở các góc gập sâu mà không bị chặn; viewer thiếu tính trung thực kỹ thuật.
+- **Resolution in Phase 3 Final Closure:**
+  - Nạp URDF cánh tay FR3 vào PyBullet thông qua `src/simulation/physics/urdf_resolver.py` với điều khiển vị trí giữ cứng tư thế.
+  - Xây dựng `FR3CollisionGuard` (`src/simulation/physics/collision_guard.py`) kiểm tra va chạm toàn thân: link-bàn, link-quân, kẹp-bàn, kẹp-quân và tự va chạm giữa các link. Pre-validate toàn bộ quỹ đạo trong `move_cartesian()`.
+  - Tái tạo `cell_reachability_dataset.json` bảo đảm 90/90 ô cờ 100% reachable và 100% collision-free trong PyBullet.
+  - `SimulationRuntime` chịu trách nhiệm độc quyền thực thi quỹ đạo Lift -> Transit -> Land.
+  - Xóa bỏ nhãn tiếp thị trên viewer, chuyển thành telemetry kỹ thuật (`COLLISION-FREE`, `TRAJECTORY COMPLETE`).
+
+
 
 

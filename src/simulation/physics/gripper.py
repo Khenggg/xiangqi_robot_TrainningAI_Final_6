@@ -164,7 +164,10 @@ class VirtualGripper:
         jaw_dz = float(self.jaw_dimensions_m[2])
         half_w = float(self.jaw_width_m) / 2.0
 
-        p_palm = p_tcp + R_tcp @ np.array([0.0, 0.0, palm_dz / 2.0])
+        # TCP is at the midpoint of the finger tips at Z=0.
+        # Jaws extend backwards (towards flange) along -Z from Z=0 to -jaw_dz.
+        # Palm extends backwards behind the jaws from -jaw_dz to -(jaw_dz + palm_dz).
+        p_palm = p_tcp + R_tcp @ np.array([0.0, 0.0, -jaw_dz - palm_dz / 2.0])
         p.resetBasePositionAndOrientation(
             self.palm_body_id,
             p_palm.tolist(),
@@ -173,14 +176,14 @@ class VirtualGripper:
         )
 
         if self.travel_axis == "Y":
-            left_loc = np.array([0.0, -half_w, palm_dz + jaw_dz / 2.0])
-            right_loc = np.array([0.0, half_w, palm_dz + jaw_dz / 2.0])
+            left_loc = np.array([0.0, -half_w, -jaw_dz / 2.0])
+            right_loc = np.array([0.0, half_w, -jaw_dz / 2.0])
         elif self.travel_axis == "Z":
-            left_loc = np.array([0.0, 0.0, palm_dz + jaw_dz / 2.0 - half_w])
-            right_loc = np.array([0.0, 0.0, palm_dz + jaw_dz / 2.0 + half_w])
+            left_loc = np.array([0.0, 0.0, -jaw_dz / 2.0 - half_w])
+            right_loc = np.array([0.0, 0.0, -jaw_dz / 2.0 + half_w])
         else:  # "X"
-            left_loc = np.array([-half_w, 0.0, palm_dz + jaw_dz / 2.0])
-            right_loc = np.array([half_w, 0.0, palm_dz + jaw_dz / 2.0])
+            left_loc = np.array([-half_w, 0.0, -jaw_dz / 2.0])
+            right_loc = np.array([half_w, 0.0, -jaw_dz / 2.0])
 
         p_left = p_tcp + R_tcp @ left_loc
         p_right = p_tcp + R_tcp @ right_loc

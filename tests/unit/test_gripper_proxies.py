@@ -168,8 +168,9 @@ class GripperCollisionProxiesTests(unittest.TestCase):
         self.assertFalse(self.gripper.is_attached)
 
         # When detached, collision filtering is re-enabled
-        # Move jaw to intersect piece directly to confirm collision detection is active
+        # Close gripper and move jaw to intersect piece directly to confirm collision detection is active
         piece_pos, _ = piece.get_pose_robot_base()
+        self.gripper.set_gripper_state(True)
         self.gripper.set_tcp_pose(piece_pos, [0, 0, 0, 1])
         self.world.step(1)
         contacts = self.world.get_gripper_piece_contacts()

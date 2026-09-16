@@ -7,6 +7,7 @@
   "board": {
     "outer_width": 367.0,
     "outer_length": 410.0,
+    "thickness": 10.5,
     "columns": 9,
     "rows": 10,
     "column_spacing": 40.0,

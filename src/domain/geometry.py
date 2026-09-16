@@ -21,6 +21,7 @@ class BoardGeometry:
     rows: int                   # 10
     column_spacing: float       # mm (40.0)
     row_spacing: float          # mm (40.0)
+    thickness: float = 10.5     # mm (10.5)
 
     @property
     def playable_grid_width_mm(self) -> float:
@@ -79,6 +80,14 @@ class PhysicalGeometry:
     @property
     def outer_length_mm(self) -> float:
         return self.board.outer_length
+
+    @property
+    def thickness_mm(self) -> float:
+        return self.board.thickness
+
+    @property
+    def board_thickness_m(self) -> float:
+        return self.board.thickness / 1000.0
 
     @property
     def grid_cell_width_mm(self) -> float:
@@ -245,6 +254,7 @@ def load_physical_geometry(json_path: Optional[Path] = None) -> PhysicalGeometry
     rows = _validate_int(board_data.get("rows"), "board.rows", min_val=2)
     column_spacing = _validate_positive_finite(board_data.get("column_spacing"), "board.column_spacing")
     row_spacing = _validate_positive_finite(board_data.get("row_spacing"), "board.row_spacing")
+    thickness = _validate_positive_finite(board_data.get("thickness", 10.5), "board.thickness")
 
     playable_w = (columns - 1) * column_spacing
     playable_l = (rows - 1) * row_spacing
@@ -264,6 +274,7 @@ def load_physical_geometry(json_path: Optional[Path] = None) -> PhysicalGeometry
         rows=rows,
         column_spacing=column_spacing,
         row_spacing=row_spacing,
+        thickness=thickness,
     )
 
     piece_data = data.get("piece")

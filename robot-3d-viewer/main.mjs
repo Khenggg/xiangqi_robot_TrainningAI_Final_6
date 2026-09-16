@@ -985,7 +985,7 @@ function finishTrajectory() {
   const badge = document.getElementById("diagStatusBadge");
   if (badge) {
     badge.className = "badge-safe";
-    badge.textContent = "✅ ĐÃ ĐẾN Ô (AN TOÀN 100%)";
+    badge.textContent = "✅ TRAJECTORY COMPLETE (COLLISION-FREE)";
   }
 
   const j4Val = document.getElementById("diagJ4Val");
@@ -995,20 +995,20 @@ function finishTrajectory() {
 
   const j4Angle = targetCell.j4_grasp_deg ?? targetCell.j4_deg;
   if (j4Val) {
-    j4Val.textContent = `${j4Angle}° (Tự động bù trừ)`;
+    j4Val.textContent = `${j4Angle}° (Authoritative IK)`;
     j4Val.style.color = "#58a6ff";
   }
   if (tiltVal) {
-    tiltVal.textContent = `0° ✓ Cắm thẳng đứng 90° (Kẹp chắc 100%)`;
+    tiltVal.textContent = `0.0° ✓ Cắm thẳng đứng 90° (DOWNWARD)`;
     tiltVal.style.color = "#3fb950";
   }
   const tipClearance = targetCell.gripper_tip_grasp_clearance_mm ?? targetCell.gripper_tip_clearance_mm ?? 1.5;
   if (clearanceVal) {
-    clearanceVal.textContent = `✅ Đầu ngàm kẹp cách mặt bàn +${tipClearance} mm (An toàn 100%)`;
+    clearanceVal.textContent = `✅ Đầu ngàm kẹp cách mặt bàn +${tipClearance} mm (COLLISION-FREE)`;
     clearanceVal.style.color = "#3fb950";
   }
   if (expl) {
-    expl.innerHTML = `✅ <strong>Đã hoàn thành di chuyển 3 giai đoạn:</strong> Robot đã nhấc bổng an toàn (+70mm) qua toàn bộ quân cờ, bay ngang trên không, và hạ cánh chúc thẳng đứng $90^\\circ$ tại ô (Cột ${targetCell.col}, Hàng ${targetCell.row}). Đầu ngàm kẹp hover ở cao độ <strong>+${tipClearance}\\text{mm}</strong>, ôm khít quân cờ mà <strong>hoàn toàn KHÔNG gây va chạm hay xô lệch quân cờ khác</strong>!`;
+    expl.innerHTML = `✅ <strong>Đã hoàn thành quỹ đạo 3 giai đoạn:</strong> Robot đã thực thi Lift (+70mm) ➔ Transit ➔ Land tại ô (Cột ${targetCell.col}, Hàng ${targetCell.row}). Trạng thái: <strong>COLLISION-FREE</strong>.`;
   }
 }
 
