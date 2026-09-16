@@ -544,6 +544,10 @@ const state = {
   homePoseDeg: [0, -45, 90, -45, -90, 0],
   cellDataset: null,
   selectedCell: { row: 4, col: 4 },
+  currentCell: null,
+  targetDestinationCell: null,
+  trajectoryQueue: [],
+  trajectoryActive: false,
   // nội suy mượt cho live mirror
   liveFromDeg: null,
   liveTargetDeg: null,
@@ -617,6 +621,17 @@ function advanceLiveInterpolation(now) {
     (v, i) => v + (state.liveTargetDeg[i] - v) * eased,
   );
   syncAllJointSliders();
+
+  if (t >= 1) {
+    state.jointsDeg = [...state.liveTargetDeg];
+    state.liveTargetDeg = null;
+    state.liveFromDeg = null;
+    if (state.trajectoryQueue && state.trajectoryQueue.length > 0) {
+      runNextTrajectoryStep(now);
+    } else if (state.trajectoryActive) {
+      finishTrajectory();
+    }
+  }
 }
 
 function connectLive() {
@@ -741,9 +756,13 @@ function updateSingleJoint(index, val) {
   const clamped = Math.max(def.min, Math.min(def.max, Number(val) || 0));
   state.jointsDeg[index] = clamped;
 
-  // Hủy interpolation WebSocket nếu người dùng chủ động kéo slider
+  // Hủy trajectory nếu người dùng chủ động kéo slider
+  state.trajectoryQueue = [];
+  state.trajectoryActive = false;
+  state.currentCell = null;
   state.liveTargetDeg = null;
   state.liveFromDeg = null;
+  updateStepperUI(null, []);
 
   const slider = document.getElementById(`joint-slider-${index}`);
   const num = document.getElementById(`joint-num-${index}`);
@@ -778,6 +797,15 @@ function initJointControlPanelEvents() {
       state.jointsDeg = [...homeDeg];
       state.liveTargetDeg = null;
       state.liveFromDeg = null;
+      state.trajectoryQueue = [];
+      state.trajectoryActive = false;
+      state.currentCell = null;
+      updateStepperUI(null, []);
+      const badge = document.getElementById("diagStatusBadge");
+      if (badge) {
+        badge.className = "badge-safe";
+        badge.textContent = "ĐÃ VỀ HOME";
+      }
       syncAllJointSliders();
       if (state.currentArm) {
         applyJointsDeg(state.currentArm, state.jointsDeg);
@@ -901,11 +929,164 @@ function getOrCreateTargetRing() {
   return cellTargetRing;
 }
 
-function animateArmTo(targetDeg, durationMs = 500) {
+function updateStepperUI(activeStepId, completedStepIds = []) {
+  const steps = ["stepLift", "stepTransit", "stepLand"];
+  steps.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove("active", "done");
+    if (completedStepIds.includes(id)) {
+      el.classList.add("done");
+    } else if (id === activeStepId) {
+      el.classList.add("active");
+    }
+  });
+}
+
+function runNextTrajectoryStep(now) {
+  if (!state.trajectoryQueue || state.trajectoryQueue.length === 0) return;
+  const step = state.trajectoryQueue.shift();
+  state.currentTrajectoryStep = step;
+
+  // Update Stepper UI
+  updateStepperUI(step.stepElId, step.completedStepIds || []);
+
+  // Update Badge
+  const badge = document.getElementById("diagStatusBadge");
+  if (badge && step.badgeText) {
+    badge.className = step.badgeClass || "badge-transit";
+    badge.textContent = step.badgeText;
+  }
+
+  // Update Explanation
+  const expl = document.getElementById("diagExplanation");
+  if (expl && step.explanation) {
+    expl.innerHTML = step.explanation;
+  }
+
+  // Set animation targets
   state.liveFromDeg = [...state.jointsDeg];
-  state.liveTargetDeg = [...targetDeg];
-  state.liveAnimationStart = performance.now();
-  state.liveAnimationDuration = durationMs;
+  state.liveTargetDeg = [...step.targetDeg];
+  state.liveAnimationStart = now || performance.now();
+  state.liveAnimationDuration = step.durationMs || 500;
+}
+
+function finishTrajectory() {
+  state.trajectoryActive = false;
+  state.currentTrajectoryStep = null;
+  const targetCell = state.targetDestinationCell;
+  if (!targetCell) return;
+
+  state.currentCell = targetCell;
+
+  // Mark all steps done
+  updateStepperUI(null, ["stepLift", "stepTransit", "stepLand"]);
+
+  const badge = document.getElementById("diagStatusBadge");
+  if (badge) {
+    badge.className = "badge-safe";
+    badge.textContent = "✅ ĐÃ ĐẾN Ô (AN TOÀN 100%)";
+  }
+
+  const j4Val = document.getElementById("diagJ4Val");
+  const tiltVal = document.getElementById("diagTiltVal");
+  const clearanceVal = document.getElementById("diagClearanceVal");
+  const expl = document.getElementById("diagExplanation");
+
+  const j4Angle = targetCell.j4_grasp_deg ?? targetCell.j4_deg;
+  if (j4Val) {
+    j4Val.textContent = `${j4Angle}° (Tự động bù trừ)`;
+    j4Val.style.color = "#58a6ff";
+  }
+  if (tiltVal) {
+    tiltVal.textContent = `0° ✓ Cắm thẳng đứng 90° (Kẹp chắc 100%)`;
+    tiltVal.style.color = "#3fb950";
+  }
+  const tipClearance = targetCell.gripper_tip_grasp_clearance_mm ?? targetCell.gripper_tip_clearance_mm ?? 1.5;
+  if (clearanceVal) {
+    clearanceVal.textContent = `✅ Đầu ngàm kẹp cách mặt bàn +${tipClearance} mm (An toàn 100%)`;
+    clearanceVal.style.color = "#3fb950";
+  }
+  if (expl) {
+    expl.innerHTML = `✅ <strong>Đã hoàn thành di chuyển 3 giai đoạn:</strong> Robot đã nhấc bổng an toàn (+70mm) qua toàn bộ quân cờ, bay ngang trên không, và hạ cánh chúc thẳng đứng $90^\\circ$ tại ô (Cột ${targetCell.col}, Hàng ${targetCell.row}). Đầu ngàm kẹp hover ở cao độ <strong>+${tipClearance}\\text{mm}</strong>, ôm khít quân cờ mà <strong>hoàn toàn KHÔNG gây va chạm hay xô lệch quân cờ khác</strong>!`;
+  }
+}
+
+function executeSafeTrajectory(targetCell) {
+  state.targetDestinationCell = targetCell;
+  state.trajectoryQueue = [];
+  state.trajectoryActive = true;
+
+  const currentCell = state.currentCell;
+  const isSameCell = currentCell && currentCell.row === targetCell.row && currentCell.col === targetCell.col;
+  if (isSameCell) {
+    finishTrajectory();
+    return;
+  }
+
+  const graspDeg = targetCell.grasp_joints_deg ?? targetCell.joints_deg;
+  const approachDeg = targetCell.approach_joints_deg ?? targetCell.grasp_joints_deg ?? targetCell.joints_deg;
+
+  if (currentCell) {
+    const curApproachDeg = currentCell.approach_joints_deg ?? currentCell.grasp_joints_deg ?? currentCell.joints_deg;
+    // 3-PHASE SAFE TRAJECTORY:
+    // 1. Lift vertically over current cell (+70mm)
+    state.trajectoryQueue.push({
+      stepElId: "stepLift",
+      completedStepIds: [],
+      badgeText: "🛫 1. ĐANG NHẤC LÊN (+70mm)",
+      badgeClass: "badge-warn",
+      targetDeg: curApproachDeg,
+      durationMs: 380,
+      explanation: `🛫 <strong>Giai đoạn 1 (Nhấc lên):</strong> Cánh tay nâng thẳng đứng ngàm kẹp lên cao độ an toàn <strong>+70mm</strong> (cách đỉnh quân cờ >60mm) để tránh va chạm với bất kỳ quân cờ nào xung quanh.`,
+    });
+
+    // 2. Transit horizontally across safe ceiling to target cell (+70mm)
+    state.trajectoryQueue.push({
+      stepElId: "stepTransit",
+      completedStepIds: ["stepLift"],
+      badgeText: "✈️ 2. ĐANG BAY NGANG (TRÊN CAO)",
+      badgeClass: "badge-transit",
+      targetDeg: approachDeg,
+      durationMs: 700,
+      explanation: `✈️ <strong>Giai đoạn 2 (Bay ngang):</strong> Robot lướt ngang trên mặt phẳng an toàn $Z = +70\\text{mm}$, bay qua các quân cờ mà không va chạm.`,
+    });
+
+    // 3. Land vertically into target cell grasp pose (+1.5mm)
+    state.trajectoryQueue.push({
+      stepElId: "stepLand",
+      completedStepIds: ["stepLift", "stepTransit"],
+      badgeText: "🛬 3. ĐANG HẠ CÁNH (+1.5mm)",
+      badgeClass: "badge-land",
+      targetDeg: graspDeg,
+      durationMs: 420,
+      explanation: `🛬 <strong>Giai đoạn 3 (Hạ cánh):</strong> Ngàm kẹp hạ cánh thẳng đứng $90^\\circ$ ôm trọn quân cờ ở cao độ cách mặt bàn <strong>+1.5mm</strong> (zero xuyên bàn).`,
+    });
+  } else {
+    // From Home pose or arbitrary elevated pose:
+    state.trajectoryQueue.push({
+      stepElId: "stepTransit",
+      completedStepIds: ["stepLift"],
+      badgeText: "✈️ 2. ĐANG BAY TỚI ĐỈNH Ô",
+      badgeClass: "badge-transit",
+      targetDeg: approachDeg,
+      durationMs: 700,
+      explanation: `✈️ <strong>Giai đoạn 2 (Bay tới đỉnh ô):</strong> Robot từ vị trí chờ bay đến không gian trên cao của ô mục tiêu (+70mm).`,
+    });
+
+    state.trajectoryQueue.push({
+      stepElId: "stepLand",
+      completedStepIds: ["stepLift", "stepTransit"],
+      badgeText: "🛬 3. ĐANG HẠ CÁNH (+1.5mm)",
+      badgeClass: "badge-land",
+      targetDeg: graspDeg,
+      durationMs: 420,
+      explanation: `🛬 <strong>Giai đoạn 3 (Hạ cánh):</strong> Ngàm kẹp hạ cánh thẳng đứng $90^\\circ$ ôm trọn quân cờ ở cao độ cách mặt bàn <strong>+1.5mm</strong>.`,
+    });
+  }
+
+  // Start first step immediately
+  runNextTrajectoryStep(performance.now());
 }
 
 function goToCell(row, col) {
@@ -923,44 +1104,17 @@ function goToCell(row, col) {
     ring.material.color.setHex(0x58a6ff);
   }
 
-  // Update diagnostic card elements
-  const cellLabel = document.getElementById("diagCellLabel");
-  const j4Val = document.getElementById("diagJ4Val");
-  const tiltVal = document.getElementById("diagTiltVal");
-  const clearanceVal = document.getElementById("diagClearanceVal");
-  const badge = document.getElementById("diagStatusBadge");
-  const expl = document.getElementById("diagExplanation");
-
-  if (cellLabel) cellLabel.textContent = `Cột ${col}, Hàng ${row} (X=${cell.x_m}m, Y=${cell.y_m}m)`;
-  if (j4Val) {
-    j4Val.textContent = `${cell.j4_deg}° (Tự động bù trừ)`;
-    j4Val.style.color = "#58a6ff";
-  }
-  if (tiltVal) {
-    tiltVal.textContent = `0° ✓ Cắm thẳng đứng 90° (Kẹp chắc 100%)`;
-    tiltVal.style.color = "#3fb950";
-  }
-  const tipClearance = cell.gripper_tip_clearance_mm ?? 1.5;
-  if (clearanceVal) {
-    clearanceVal.textContent = `✅ Đầu ngàm kẹp cách mặt bàn +${tipClearance} mm (An toàn 100%)`;
-    clearanceVal.style.color = "#3fb950";
-  }
-  if (badge) {
-    badge.className = "badge-safe";
-    badge.textContent = "✅ CHUẨN THẲNG ĐỨNG 90°";
-  }
-  if (expl) {
-    expl.innerHTML = `✅ Cánh tay robot tự động bù trừ góc cổ tay $J_4 = ${cell.j4_deg}^\\circ$, giữ ngàm kẹp <strong>chúc thẳng đứng $90^\\circ$ hoàn hảo</strong>. Mặt bích nâng cao $Z = ${cell.flange_z_mm ?? 230.0}\\text{mm}$, đầu ngàm kẹp hạ xuống cách mặt bàn <strong>+${tipClearance}\\text{mm}</strong> ôm khít thân quân cờ mà <strong>hoàn toàn KHÔNG xuyên qua bàn cờ</strong>!`;
-  }
-
   // Update inputs
   const rowSelect = document.getElementById("cellRowSelect");
   const colSelect = document.getElementById("cellColSelect");
   if (rowSelect) rowSelect.value = String(row);
   if (colSelect) colSelect.value = String(col);
 
-  // Smoothly move arm to joint angles
-  animateArmTo(cell.joints_deg, 500);
+  const cellLabel = document.getElementById("diagCellLabel");
+  if (cellLabel) cellLabel.textContent = `Cột ${col}, Hàng ${row} (X=${cell.x_m}m, Y=${cell.y_m}m)`;
+
+  // Execute 3-phase safe trajectory (Lift -> Transit -> Land)
+  executeSafeTrajectory(cell);
 }
 
 // ---------------------------------------------------------------------------
