@@ -26,6 +26,7 @@ BTN_COLOR = (200, 50, 50)
 BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT - 60, 120, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(SCREEN_WIDTH / 2 + 30, SCREEN_HEIGHT - 60, 120, 40)
+BTN_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 110, 350, 220, 56)
 
 PIECE_DISPLAY_NAMES = {
     "r_K": "帥", "r_A": "仕", "r_E": "相", "r_R": "俥",
@@ -66,6 +67,30 @@ class BoardRenderer:
     def _render_ui_text(self, text, color):
         """Render UI copy after removing glyphs without a reliable fallback."""
         return self.ui_font.render(_ui_safe_text(text), True, color)
+
+    def draw_main_menu(self):
+        """Draw the pre-game menu while the camera feed remains active."""
+        self.screen.fill(BOARD_COLOR)
+
+        title_font = pygame.font.SysFont("segoe ui", 36, bold=True)
+        subtitle_font = pygame.font.SysFont("segoe ui", 18, bold=False)
+        title = title_font.render("AI XIANGQI ROBOT ARM PROJECT", True, (0, 0, 0))
+        subtitle = subtitle_font.render(
+            "Prepare the physical board, then choose a game mode.",
+            True, (0, 0, 0),
+        )
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 155)))
+        self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 215)))
+
+        pygame.draw.rect(
+            self.screen, BTN_NEW_GAME_COLOR, BTN_VS_ROBOT_RECT, border_radius=10
+        )
+        pygame.draw.rect(
+            self.screen, (25, 105, 155), BTN_VS_ROBOT_RECT, width=2, border_radius=10
+        )
+        button_font = pygame.font.SysFont("segoe ui", 22, bold=True)
+        button = button_font.render("VS ROBOT", True, (255, 255, 255))
+        self.screen.blit(button, button.get_rect(center=BTN_VS_ROBOT_RECT.center))
 
     # --- Chuyển đổi tọa độ ---
     @staticmethod

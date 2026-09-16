@@ -58,7 +58,9 @@ _kill_zombie_processes()
 pygame.init()
 pygame.font.init()
 
-from src.ui.board_renderer import BoardRenderer, SCREEN_WIDTH, SCREEN_HEIGHT  # type: ignore
+from src.ui.board_renderer import (  # type: ignore
+    BoardRenderer, SCREEN_WIDTH, SCREEN_HEIGHT, BTN_VS_ROBOT_RECT,
+)
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption(f"Xiangqi Robot VIP - { _mode_label }")
 renderer = BoardRenderer(screen)
@@ -87,34 +89,46 @@ atexit.register(_cleanup_all)
 # ==========================================
 running = True
 clock = pygame.time.Clock()
+screen_mode = "MENU"
 
-print(f"\n[GAME] === GAME STARTED ===")
-print(f"[FEN] {state.current_fen}")
+def start_vs_robot():
+    """Start a real match only after the player confirms the board is ready."""
+    global screen_mode
+    print("\n[GAME] === VS ROBOT STARTED ===")
+    print(f"[FEN] {state.current_fen}")
+    hw.capture_baseline_if_needed(force_delay=1.0)
 
-hw.capture_baseline_if_needed(force_delay=1.0)
-
-# [API] Bắt đầu khởi tạo trận đấu truyền hình trực tiếp
-if not config.DRY_RUN:
-    state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
+    # [API] Create the live match at game start, not while the menu is open.
+    if not config.DRY_RUN:
+        state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
+    screen_mode = "GAME"
 
 # Khởi chạy main loop (Đã bỏ Chọn độ khó)
 try:
     while running:
         # 2a. Vẽ khung hình
-        renderer.draw_ui(state.get_render_state())
-        renderer.draw_pieces(state.board)
-        renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
-        if state.game_over:
-            renderer.draw_game_over(state.winner)
+        if screen_mode == "MENU":
+            renderer.draw_main_menu()
+        else:
+            renderer.draw_ui(state.get_render_state())
+            renderer.draw_pieces(state.board)
+            renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
+            if state.game_over:
+                renderer.draw_game_over(state.winner)
 
         # 2b. Xử lý Input
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
-                input_mgr.handle_keyboard(event.key)
+                if screen_mode == "GAME":
+                    input_mgr.handle_keyboard(event.key)
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
+                if screen_mode == "MENU":
+                    if BTN_VS_ROBOT_RECT.collidepoint(event.pos):
+                        start_vs_robot()
+                else:
+                    input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
 
         # 2c. Camera Feed update
         if hw.cam_monitor is not None:
@@ -122,7 +136,7 @@ try:
             if key == ord("q"): running = False
 
         # 2d. Xử lý AI Turn (Non-blocking)
-        if state.turn == "b" and not state.game_over:
+        if screen_mode == "GAME" and state.turn == "b" and not state.game_over:
             
             # --- Khởi động Thread suy nghĩ ---
             if not state.ai_thinking and state.ai_thread is None:
