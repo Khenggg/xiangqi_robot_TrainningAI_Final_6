@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "pieces": [
+    {"id": "black_rook_0", "side": "b", "type": "r", "col": 0, "row": 0},
+    {"id": "black_knight_0", "side": "b", "type": "n", "col": 1, "row": 0},
+    {"id": "black_elephant_0", "side": "b", "type": "b", "col": 2, "row": 0},
+    {"id": "black_advisor_0", "side": "b", "type": "a", "col": 3, "row": 0},
+    {"id": "black_king_0", "side": "b", "type": "k", "col": 4, "row": 0},
+    {"id": "black_advisor_1", "side": "b", "type": "a", "col": 5, "row": 0},
+    {"id": "black_elephant_1", "side": "b", "type": "b", "col": 6, "row": 0},
+    {"id": "black_knight_1", "side": "b", "type": "n", "col": 7, "row": 0},
+    {"id": "black_rook_1", "side": "b", "type": "r", "col": 8, "row": 0},
+    {"id": "black_cannon_0", "side": "b", "type": "c", "col": 1, "row": 2},
+    {"id": "black_cannon_1", "side": "b", "type": "c", "col": 7, "row": 2},
+    {"id": "black_pawn_0", "side": "b", "type": "p", "col": 0, "row": 3},
+    {"id": "black_pawn_1", "side": "b", "type": "p", "col": 2, "row": 3},
+    {"id": "black_pawn_2", "side": "b", "type": "p", "col": 4, "row": 3},
+    {"id": "black_pawn_3", "side": "b", "type": "p", "col": 6, "row": 3},
+    {"id": "black_pawn_4", "side": "b", "type": "p", "col": 8, "row": 3},
+
+    {"id": "red_pawn_0", "side": "r", "type": "p", "col": 0, "row": 6},
+    {"id": "red_pawn_1", "side": "r", "type": "p", "col": 2, "row": 6},
+    {"id": "red_pawn_2", "side": "r", "type": "p", "col": 4, "row": 6},
+    {"id": "red_pawn_3", "side": "r", "type": "p", "col": 6, "row": 6},
+    {"id": "red_pawn_4", "side": "r", "type": "p", "col": 8, "row": 6},
+    {"id": "red_cannon_0", "side": "r", "type": "c", "col": 1, "row": 7},
+    {"id": "red_cannon_1", "side": "r", "type": "c", "col": 7, "row": 7},
+    {"id": "red_rook_0", "side": "r", "type": "r", "col": 0, "row": 9},
+    {"id": "red_knight_0", "side": "r", "type": "n", "col": 1, "row": 9},
+    {"id": "red_elephant_0", "side": "r", "type": "b", "col": 2, "row": 9},
+    {"id": "red_advisor_0", "side": "r", "type": "a", "col": 3, "row": 9},
+    {"id": "red_king_0", "side": "r", "type": "k", "col": 4, "row": 9},
+    {"id": "red_advisor_1", "side": "r", "type": "a", "col": 5, "row": 9},
+    {"id": "red_elephant_1", "side": "r", "type": "b", "col": 6, "row": 9},
+    {"id": "red_knight_1", "side": "r", "type": "n", "col": 7, "row": 9},
+    {"id": "red_rook_1", "side": "r", "type": "r", "col": 8, "row": 9}
+  ]
+}

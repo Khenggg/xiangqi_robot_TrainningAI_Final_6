@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "status": "SIMULATION_ONLY_UNVERIFIED_PHYSICAL_PARAMETERS",
+  "comment": "Simulation-only physics properties for Virtual FAIRINO FR3 Xiangqi environment. NOT measured real-world calibration.",
+  "gravity_m_s2": [0.0, 0.0, -9.81],
+  "fixed_timestep_s": 0.0041666667,
+  "solver_iterations": 50,
+  "board": {
+    "collision_thickness_m": 0.040,
+    "lateral_friction": 0.6,
+    "spinning_friction": 0.005,
+    "restitution": 0.05
+  },
+  "piece": {
+    "mass_kg": 0.020,
+    "lateral_friction": 0.5,
+    "rolling_friction": 0.001,
+    "spinning_friction": 0.001,
+    "restitution": 0.05
+  },
+  "settling": {
+    "max_settle_steps": 1200,
+    "linear_velocity_threshold_m_s": 0.005,
+    "angular_velocity_threshold_rad_s": 0.05,
+    "consecutive_settled_steps": 20
+  },
+  "out_of_bounds": {
+    "z_min_m": -0.20,
+    "xy_boundary_margin_m": 0.15
+  }
+}

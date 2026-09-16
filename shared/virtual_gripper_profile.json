@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "status": "SIMULATION_ONLY_UNVERIFIED_PHYSICAL_GEOMETRY",
+  "comment": "Provisional procedural two-jaw gripper profile for Virtual FR3. NOT measured physical gripper calibration.",
+  "gripper_model": "PROCEDURAL_2JAW_V1",
+  "palm": {
+    "dimensions_m": [0.060, 0.040, 0.030]
+  },
+  "jaw": {
+    "dimensions_m": [0.008, 0.025, 0.035]
+  },
+  "stroke": {
+    "open_width_m": 0.040,
+    "closed_width_m": 0.020,
+    "travel_axis": "X"
+  },
+  "tcp_to_grasp_center_m": [0.0, 0.0, 0.035],
+  "capture_volume": {
+    "xy_radius_m": 0.016,
+    "z_half_height_m": 0.012
+  },
+  "visual": {
+    "color_hex": "#556070",
+    "jaw_color_hex": "#2a3240"
+  }
+}
