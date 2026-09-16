@@ -106,9 +106,17 @@ class VirtualFR3Backend(RobotBackend):
         self._T_tcp_flange = np.linalg.inv(T_flange_tcp)
         self.flange_to_tcp_distance_m = float(np.linalg.norm(T_flange_tcp[:3, 3]))
 
+        self.collision_guard = None
+        self.collision_guard_enabled = True
+
     def set_collision_guard(self, guard) -> None:
         """Attach collision guard validator."""
         self.collision_guard = guard
+
+    def set_collision_guard_enabled(self, enabled: bool) -> None:
+        """Dynamically enable or disable collision guard checking."""
+        self.collision_guard_enabled = bool(enabled)
+        logger.info(f"[BACKEND] Collision guard enabled set to: {self.collision_guard_enabled}")
 
     def set_allowed_grasp_piece_id(self, piece_id: Optional[str]) -> None:
         """Set or clear the allowed target piece during grasp."""
@@ -273,7 +281,7 @@ class VirtualFR3Backend(RobotBackend):
             self._motion_state = "MOVING"
 
         # Pre-validate trajectory through collision guard if configured
-        if self.collision_guard is not None:
+        if self.collision_guard is not None and getattr(self, "collision_guard_enabled", True):
             max_joint_step_rad = math.radians(1.0)  # Bounded to <= 1.0 degree
             diff_rad = np.abs(target_rad - start_rad)
             n_sub = max(2, int(math.ceil(float(np.max(diff_rad)) / max_joint_step_rad)))
@@ -513,7 +521,7 @@ class VirtualFR3Backend(RobotBackend):
             seed = ik_res.joints_rad.copy()
 
         # Pre-validate trajectory through collision guard if configured
-        if self.collision_guard is not None:
+        if self.collision_guard is not None and getattr(self, "collision_guard_enabled", True):
             col_res = self.collision_guard.validate_trajectory(
                 joint_trajectory,
                 allowed_grasp_piece_id=self._allowed_grasp_piece_id,

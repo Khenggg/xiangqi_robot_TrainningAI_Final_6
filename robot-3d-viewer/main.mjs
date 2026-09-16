@@ -846,6 +846,39 @@ function initJointControlPanelEvents() {
     });
   }
 
+  // Toggle collision guard
+  const chkDisableGuard = document.getElementById("chkDisableCollisionGuard");
+  if (chkDisableGuard) {
+    chkDisableGuard.addEventListener("change", (e) => {
+      const disabled = e.target.checked;
+      if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+        state.liveSocket.send(JSON.stringify({
+          command: "SET_COLLISION_GUARD",
+          enabled: !disabled,
+        }));
+      }
+      const badge = document.getElementById("diagStatusBadge");
+      const expl = document.getElementById("diagExplanation");
+      if (disabled) {
+        if (badge) {
+          badge.className = "badge-warn";
+          badge.textContent = "⚠️ COLLISION GUARD: OFF (ÉP CHUYỂN ĐỘNG)";
+        }
+        if (expl) {
+          expl.innerHTML = `<span style="color:#f0883e">⚠️ <strong>Đã tắt Collision Guard:</strong> Robot sẽ thực thi chuyển động ép buộc kể cả khi các đốt cánh tay hoặc ngàm kẹp cấn chạm. Bạn có thể zoom gần vào các đốt vai (Link 1) và cẳng tay (Link 3) để quan sát va chạm hình học.</span>`;
+        }
+      } else {
+        if (badge) {
+          badge.className = "badge-safe";
+          badge.textContent = "🛡️ COLLISION GUARD: ON";
+        }
+        if (expl) {
+          expl.innerHTML = `🛡️ <strong>Collision Guard đang BẬT:</strong> Robot sẽ tự động từ chối hoặc kích hoạt Lift Recovery nếu phát hiện nguy cơ va chạm.`;
+        }
+      }
+    });
+  }
+
   // Quick cell buttons
   document.querySelectorAll(".quick-cell-btn").forEach((btn) => {
     btn.addEventListener("click", () => {

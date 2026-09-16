@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--host", default="127.0.0.1", help="WebSocket host")
     parser.add_argument("--port", type=int, default=8765, help="WebSocket port")
     parser.add_argument("--speed-factor", type=float, default=25.0, help="Trajectory speed factor")
+    parser.add_argument("--disable-collision-guard", action="store_true", help="Disable collision guard (allow forced motion)")
     args = parser.parse_args()
 
     print("=" * 65)
@@ -36,6 +37,7 @@ def main():
     print(f"   WebSocket: ws://{args.host}:{args.port}")
     print(f"   Viewer:    http://127.0.0.1:8085/")
     print("   Authority: Single Authoritative Python Runtime")
+    print(f"   Guard:     {'DISABLED (FORCED MOTION ALLOWED)' if args.disable_collision_guard else 'ACTIVE (FAIL-SAFE)'}")
     print("=" * 65)
 
     telemetry = TelemetryPublisher.get_instance(host=args.host, port=args.port, robot_model="FR3")
@@ -43,7 +45,7 @@ def main():
 
     world = VirtualPhysicalWorld()
     backend = VirtualFR3Backend(telemetry_publisher=telemetry, default_speed_factor=args.speed_factor)
-    sim = VirtualXiangqiSimulation(backend=backend, world=world, telemetry=telemetry, enable_collision_guard=True)
+    sim = VirtualXiangqiSimulation(backend=backend, world=world, telemetry=telemetry, enable_collision_guard=not args.disable_collision_guard)
     sim.connect()
 
     print("\n[READY] Server running. Listening for viewer commands...")

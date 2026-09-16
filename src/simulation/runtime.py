@@ -522,6 +522,14 @@ class VirtualXiangqiSimulation:
             self.backend.reset_to_home()
         elif action == "STOP":
             self.backend.stop()
+        elif action == "SET_COLLISION_GUARD":
+            enabled = bool(cmd.get("enabled", True))
+            self.backend.set_collision_guard_enabled(enabled)
+            if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+                self.telemetry.broadcast_custom({
+                    "type": "collision_guard_status",
+                    "enabled": enabled,
+                })
 
     def _run_trajectory_async(self, src: Tuple[int, int], dst: Tuple[int, int]) -> None:
         """Execute trajectory asynchronously and broadcast authoritative completion packet."""
