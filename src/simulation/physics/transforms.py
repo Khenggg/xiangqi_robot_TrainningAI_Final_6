@@ -1,4 +1,4 @@
-﻿"""
+"""
 Coordinate transformation and spatial rotation utilities for simulation physics.
 
 Supports conversions between robot_base (authoritative physics frame)
@@ -76,6 +76,26 @@ def rot_matrix_to_quat(R: np.ndarray) -> np.ndarray:
     if norm > 1e-12:
         q /= norm
     return q
+
+
+def rpy_to_rot_matrix(rpy_rad: Sequence[float]) -> np.ndarray:
+    """Convert extrinsic Euler angles [roll, pitch, yaw] in radians to 3x3 rotation matrix."""
+    r, p, y = float(rpy_rad[0]), float(rpy_rad[1]), float(rpy_rad[2])
+    cr, sr = math.cos(r), math.sin(r)
+    cp, sp = math.cos(p), math.sin(p)
+    cy, sy = math.cos(y), math.sin(y)
+
+    Rx = np.array([[1.0, 0.0, 0.0], [0.0, cr, -sr], [0.0, sr, cr]], dtype=float)
+    Ry = np.array([[cp, 0.0, sp], [0.0, 1.0, 0.0], [-sp, 0.0, cp]], dtype=float)
+    Rz = np.array([[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]], dtype=float)
+    return Rz @ Ry @ Rx
+
+
+def rpy_deg_to_quat(rpy_deg: Sequence[float]) -> np.ndarray:
+    """Convert extrinsic Euler angles [rx, ry, rz] in degrees to quaternion [x, y, z, w]."""
+    rpy_rad = [math.radians(float(v)) for v in rpy_deg]
+    R = rpy_to_rot_matrix(rpy_rad)
+    return rot_matrix_to_quat(R)
 
 
 def transform_point_robot_to_world(

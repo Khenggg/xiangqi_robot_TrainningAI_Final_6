@@ -12,7 +12,7 @@ import math
 from pathlib import Path
 import threading
 import time
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Callable, Dict, List, Optional, Sequence, Union
 import numpy as np
 
 from src.hardware.backends.base import RobotBackend, RobotStateSnapshot
@@ -57,6 +57,19 @@ class VirtualFR3Backend(RobotBackend):
         # Simulation execution parameters
         self._step_delay_s = 0.01
         self._stop_event = threading.Event()
+        self._listeners: List[Callable[[RobotStateSnapshot], None]] = []
+
+    def add_state_listener(self, callback: Callable[[RobotStateSnapshot], None]) -> None:
+        """Register a callback invoked whenever robot authoritative state updates."""
+        with self._state_lock:
+            if callback not in self._listeners:
+                self._listeners.append(callback)
+
+    def remove_state_listener(self, callback: Callable[[RobotStateSnapshot], None]) -> None:
+        """Unregister a state listener callback."""
+        with self._state_lock:
+            if callback in self._listeners:
+                self._listeners.remove(callback)
 
     def _compute_flange_pose_mm_deg(self, joints_rad: np.ndarray) -> List[float]:
         pose = self.kinematics.forward_kinematics(joints_rad)
@@ -99,21 +112,21 @@ class VirtualFR3Backend(RobotBackend):
             )
 
     def _sync_telemetry(self):
-        """Push current authoritative state to telemetry publisher if available."""
+        """Push current authoritative state to telemetry publisher and listeners."""
+        snapshot = RobotStateSnapshot(
+            robot_model="FR3",
+            connected=self._connected,
+            motion_state=self._motion_state,
+            joints_deg=list(self._current_joints_deg),
+            flange_pose_mm_deg=list(self._flange_pose_mm_deg),
+            tcp_pose_mm_deg=list(self._tcp_pose_mm_deg),
+            gripper_closed=self._gripper_closed,
+            timestamp=time.time(),
+            last_error=self._last_error,
+        )
+
         if self.telemetry_publisher is not None:
             try:
-                # TelemetryPublisher accepts snapshot or state dictionary
-                snapshot = RobotStateSnapshot(
-                    robot_model="FR3",
-                    connected=self._connected,
-                    motion_state=self._motion_state,
-                    joints_deg=list(self._current_joints_deg),
-                    flange_pose_mm_deg=list(self._flange_pose_mm_deg),
-                    tcp_pose_mm_deg=list(self._tcp_pose_mm_deg),
-                    gripper_closed=self._gripper_closed,
-                    timestamp=time.time(),
-                    last_error=self._last_error,
-                )
                 if hasattr(self.telemetry_publisher, "update_from_snapshot"):
                     self.telemetry_publisher.update_from_snapshot(snapshot)
                 elif hasattr(self.telemetry_publisher, "update_state"):
@@ -124,8 +137,13 @@ class VirtualFR3Backend(RobotBackend):
                         robot_model="FR3",
                     )
             except Exception as e:
-                # Informative warning if telemetry publisher encounters error
                 self._last_error = f"Telemetry sync warning: {e}"
+
+        for listener in list(self._listeners):
+            try:
+                listener(snapshot)
+            except Exception as e:
+                pass
 
     def set_gripper(self, closed: bool) -> bool:
         """Set gripper virtual actuator state."""

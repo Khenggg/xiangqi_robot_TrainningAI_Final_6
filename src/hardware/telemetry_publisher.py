@@ -153,6 +153,7 @@ class TelemetryPublisher:
             self.current_tcp = [420.0, 0.0, 280.0, 180.0, 0.0, 0.0]
             self.current_joints = FR5Kinematics.inverse_kinematics(self.current_tcp)
         self.is_gripper_active = False
+        self._latest_world_state: Optional[dict] = None
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._server_thread: Optional[threading.Thread] = None
@@ -187,6 +188,10 @@ class TelemetryPublisher:
             try:
                 # Send immediate state on connect
                 await websocket.send(self._make_packet_json())
+                with self._state_lock:
+                    ws_data = self._latest_world_state
+                if ws_data is not None:
+                    await websocket.send(json.dumps(ws_data))
                 # Keep connection open until client disconnects
                 async for _ in websocket:
                     pass
@@ -244,6 +249,36 @@ class TelemetryPublisher:
             self.is_gripper_active = bool(gripper)
         self._broadcast_sync()
 
+    def update_world_state(self, world_state):
+        """Update and broadcast latest world_state (pieces and gripper physics)."""
+        if hasattr(world_state, "to_dict"):
+            data = world_state.to_dict()
+        else:
+            data = dict(world_state)
+        with self._state_lock:
+            self._latest_world_state = data
+        self._broadcast_world_state_sync()
+
+    def _broadcast_world_state_sync(self):
+        """Broadcast latest world_state packet to connected clients."""
+        if not self._loop or not self.clients:
+            return
+        with self._state_lock:
+            if self._latest_world_state is None:
+                return
+            msg = json.dumps(self._latest_world_state)
+
+        with self.clients_lock:
+            clients_copy = list(self.clients)
+
+        for client in clients_copy:
+            try:
+                asyncio.run_coroutine_threadsafe(client.send(msg), self._loop)
+            except websockets.exceptions.ConnectionClosed:
+                pass
+            except Exception as e:
+                pass
+
     def _broadcast_sync(self):
         """Broadcast latest packet to all connected clients."""
         if not self._loop or not self.clients:
@@ -264,8 +299,12 @@ class TelemetryPublisher:
 
     def _heartbeat_loop(self):
         """Broadcast current state at 25 Hz to ensure smooth UI mirror."""
+        step_idx = 0
         while self._running:
             self._broadcast_sync()
+            if step_idx % 2 == 0:
+                self._broadcast_world_state_sync()
+            step_idx += 1
             time.sleep(0.04)
 
     def set_gripper(self, active: bool):
