@@ -11,6 +11,7 @@ const sharedFilesWhitelist = {
   "/shared/virtual_fr3_scene.json": path.resolve(repoRoot, "shared", "virtual_fr3_scene.json"),
   "/shared/virtual_physics.json": path.resolve(repoRoot, "shared", "virtual_physics.json"),
   "/shared/virtual_gripper_profile.json": path.resolve(repoRoot, "shared", "virtual_gripper_profile.json"),
+  "/shared/gripper_visual_asset.json": path.resolve(repoRoot, "shared", "gripper_visual_asset.json"),
   "/shared/xiangqi_start_layout.json": path.resolve(repoRoot, "shared", "xiangqi_start_layout.json"),
 };
 

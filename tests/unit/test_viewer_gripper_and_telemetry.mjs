@@ -16,6 +16,7 @@ import {
 } from "../../robot-3d-viewer/gripper_profile.mjs";
 import { validateWorldStatePacket } from "../../robot-3d-viewer/live_state.mjs";
 import { parseStartLayout } from "../../robot-3d-viewer/layout.mjs";
+import { parseGripperVisualAsset } from "../../robot-3d-viewer/gripper_asset.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
@@ -157,4 +158,36 @@ assert.throws(
 );
 
 console.log("  [PASS] Gripper builder enforces required non-null profile parameter.");
+
+// ============================================================================
+// 5. CANONICAL GRIPPER VISUAL ASSET VALIDATION
+// ============================================================================
+const visualAssetJsonPath = path.resolve(repoRoot, "shared", "gripper_visual_asset.json");
+const rawVisualAsset = JSON.parse(fs.readFileSync(visualAssetJsonPath, "utf-8"));
+const parsedVisualAsset = parseGripperVisualAsset(rawVisualAsset);
+
+assert.equal(parsedVisualAsset.schemaVersion, 1);
+assert.equal(parsedVisualAsset.status, "VISUAL_CALIBRATION_PROVISIONAL");
+assert.equal(parsedVisualAsset.scaleToM, 0.0008);
+assert.equal(parsedVisualAsset.assetFile, "Assieme_pinza_dita_parallele.stp");
+assert.ok(parsedVisualAsset.profiles.fr3);
+assert.ok(parsedVisualAsset.profiles.fr5);
+
+function expectVisualAssetError(modifier, expectedSubstr) {
+  const clone = JSON.parse(JSON.stringify(rawVisualAsset));
+  modifier(clone);
+  assert.throws(
+    () => parseGripperVisualAsset(clone),
+    (err) => err instanceof Error && err.message.includes(expectedSubstr),
+    `Expected error containing '${expectedSubstr}'`
+  );
+}
+
+expectVisualAssetError((c) => { c.schema_version = 2; }, "schema_version");
+expectVisualAssetError((c) => { delete c.status; }, "status");
+expectVisualAssetError((c) => { c.scale_to_m = -1; }, "scale_to_m");
+expectVisualAssetError((c) => { c.cad_flange_origin = [1, 2]; }, "cad_flange_origin");
+expectVisualAssetError((c) => { delete c.profiles.fr3; }, "profiles.fr3");
+
+console.log("  [PASS] Canonical gripper visual asset parses and validates correctly.");
 console.log("ALL VIEWER GRIPPER & TELEMETRY TESTS PASSED!\n");

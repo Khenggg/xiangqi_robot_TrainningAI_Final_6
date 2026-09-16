@@ -232,3 +232,45 @@ def validate_start_layout(cfg: Dict[str, Any]) -> None:
             act = counts[side][ptype]
             if act != exp:
                 raise ValueError(f"{side_name} piece type '{ptype}' count {act} != expected {exp}")
+
+
+def validate_gripper_visual_asset(cfg: Dict[str, Any]) -> None:
+    """
+    Validate shared/gripper_visual_asset.json strictly.
+    Raises ValueError on missing or malformed configuration fields.
+    """
+    if not isinstance(cfg, dict):
+        raise ValueError("Gripper visual asset config must be a JSON object")
+
+    if cfg.get("schema_version") != 1:
+        raise ValueError(f"Unsupported schema_version: {cfg.get('schema_version')} (expected 1)")
+
+    if "status" not in cfg or not isinstance(cfg["status"], str) or not cfg["status"].strip():
+        raise ValueError("Gripper visual asset config missing required non-empty 'status'")
+
+    if "asset_file" not in cfg or not isinstance(cfg["asset_file"], str) or not cfg["asset_file"].strip():
+        raise ValueError("Gripper visual asset config missing required non-empty 'asset_file'")
+
+    scale = cfg.get("scale_to_m")
+    if not _is_finite_num(scale) or float(scale) <= 0.0:
+        raise ValueError(f"Invalid 'scale_to_m': {scale} (must be positive finite number)")
+
+    flange_orig = cfg.get("cad_flange_origin")
+    if not isinstance(flange_orig, (list, tuple)) or len(flange_orig) != 3 or not all(_is_finite_num(v) for v in flange_orig):
+        raise ValueError(f"Invalid 'cad_flange_origin': {flange_orig} (must be 3 finite numbers)")
+
+    profiles = cfg.get("profiles")
+    if not isinstance(profiles, dict) or "fr3" not in profiles:
+        raise ValueError("Gripper visual asset config missing required 'profiles.fr3' mapping")
+
+    for pid, pdata in profiles.items():
+        if not isinstance(pdata, dict):
+            raise ValueError(f"Profile '{pid}' entry must be a dictionary")
+        for vec_key in ("mount_offset_m", "mount_rotation_euler_rad", "flange_target_offset_m"):
+            vec = pdata.get(vec_key)
+            if not isinstance(vec, (list, tuple)) or len(vec) != 3 or not all(_is_finite_num(v) for v in vec):
+                raise ValueError(f"Profile '{pid}' invalid '{vec_key}': {vec} (must be 3 finite numbers)")
+        roll = pdata.get("mount_roll_rad")
+        if not _is_finite_num(roll):
+            raise ValueError(f"Profile '{pid}' invalid 'mount_roll_rad': {roll} (must be finite number)")
+

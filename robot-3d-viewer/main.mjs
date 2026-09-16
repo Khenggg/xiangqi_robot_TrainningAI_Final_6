@@ -4,6 +4,7 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget } from "./live_state.mjs";
 import { fetchPhysicalGeometry } from "./geometry.mjs";
 import { fetchVirtualGripperProfile } from "./gripper_profile.mjs";
+import { fetchGripperVisualAsset } from "./gripper_asset.mjs";
 import { fetchStartLayout } from "./layout.mjs";
 import {
   buildBoardGrid,
@@ -165,38 +166,25 @@ function disposeRobotArm(candidate) {
 // ---------------------------------------------------------------------------
 // 2.5) CAD STEP GRIPPER (Tương thích hoàn toàn với frnsimulation)
 // ---------------------------------------------------------------------------
-const GRIPPER_FILE = "Assieme_pinza_dita_parallele.stp";
-const GRIPPER_BASE = "./assets/fr3_v6/";
-const GRIPPER_MOUNT_OFFSET_BY_PROFILE = Object.freeze({
-  fr3: [-0.03, 0.014, 0.16],
-  fr5: [-0.03, 0.014, 0.16],
-});
-const GRIPPER_MOUNT_ROTATION_BY_PROFILE = Object.freeze({
-  fr3: [Math.PI, 0, 0],
-  fr5: [Math.PI, 0, 0],
-});
-const GRIPPER_MOUNT_ROLL_BY_PROFILE = Object.freeze({
-  fr3: 0,
-  fr5: (3 * Math.PI) / 4,
-});
-const GRIPPER_SCALE = 0.0008;
-const GRIPPER_FINGER_SOURCE_COLOR = 0x694d3b;
-const GRIPPER_FINGER_TRAVEL = 16;
-const GRIPPER_ANIMATION_MS = 220;
-const GRIPPER_FLANGE_ORIGIN_CAD = [37.555, 17.5, 75];
-const GRIPPER_FLANGE_TARGET_BY_PROFILE = Object.freeze({
-  fr3: [0, 0, 0.1],
-  fr5: [0, 0, 0.1],
-});
+// ---------------------------------------------------------------------------
+// 2.5) CAD STEP GRIPPER (Tương thích hoàn toàn với frnsimulation)
+// Canonical alignment source: shared/gripper_visual_asset.json
+// ---------------------------------------------------------------------------
+let _cachedVisualAsset = null;
+async function getGripperVisualAsset() {
+  if (!_cachedVisualAsset) {
+    _cachedVisualAsset = await fetchGripperVisualAsset();
+  }
+  return _cachedVisualAsset;
+}
 
-function gripperMountQuaternion(profileId = "fr3") {
-  const baseRotation =
-    GRIPPER_MOUNT_ROTATION_BY_PROFILE[profileId] ||
-    GRIPPER_MOUNT_ROTATION_BY_PROFILE.fr3;
+function gripperMountQuaternion(profileId, visualAsset) {
+  const pcfg = visualAsset.profiles[profileId] || visualAsset.profiles.fr3;
+  const baseRotation = pcfg.mount_rotation_euler_rad;
   const quaternion = new THREE.Quaternion().setFromEuler(
     new THREE.Euler(...baseRotation),
   );
-  const roll = GRIPPER_MOUNT_ROLL_BY_PROFILE[profileId] || 0;
+  const roll = pcfg.mount_roll_rad || 0;
   if (roll) {
     quaternion.multiply(
       new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), roll),
@@ -205,18 +193,16 @@ function gripperMountQuaternion(profileId = "fr3") {
   return quaternion;
 }
 
-function gripperMountOffset(profileId = "fr3") {
-  const calibratedOffset = GRIPPER_MOUNT_OFFSET_BY_PROFILE[profileId];
-  if (calibratedOffset && !GRIPPER_MOUNT_ROLL_BY_PROFILE[profileId]) {
+function gripperMountOffset(profileId, visualAsset) {
+  const pcfg = visualAsset.profiles[profileId] || visualAsset.profiles.fr3;
+  const calibratedOffset = pcfg.mount_offset_m;
+  if (calibratedOffset && !pcfg.mount_roll_rad) {
     return calibratedOffset;
   }
-  const target = new THREE.Vector3(
-    ...(GRIPPER_FLANGE_TARGET_BY_PROFILE[profileId] ||
-      GRIPPER_FLANGE_TARGET_BY_PROFILE.fr3),
-  );
-  const flange = new THREE.Vector3(...GRIPPER_FLANGE_ORIGIN_CAD)
-    .multiplyScalar(GRIPPER_SCALE)
-    .applyQuaternion(gripperMountQuaternion(profileId));
+  const target = new THREE.Vector3(...pcfg.flange_target_offset_m);
+  const flange = new THREE.Vector3(...visualAsset.cadFlangeOrigin)
+    .multiplyScalar(visualAsset.scaleToM)
+    .applyQuaternion(gripperMountQuaternion(profileId, visualAsset));
   return target.sub(flange).toArray();
 }
 
@@ -228,7 +214,7 @@ const gripperVisual = {
   animation: null,
 };
 
-function buildStepMesh(stepMesh) {
+function buildStepMesh(stepMesh, visualAsset) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
@@ -253,8 +239,9 @@ function buildStepMesh(stepMesh) {
     metalness: 0.12,
   });
   const mesh = new THREE.Mesh(geometry, material);
+  const fingerColorHex = visualAsset?.fingerSourceColorHex || "#694d3b";
   mesh.userData.isGripperFinger =
-    new THREE.Color(red, green, blue).getHex() === GRIPPER_FINGER_SOURCE_COLOR;
+    new THREE.Color(red, green, blue).getHex() === new THREE.Color(fingerColorHex).getHex();
   return mesh;
 }
 
@@ -265,7 +252,8 @@ async function loadSharedGripper() {
     if (typeof window === "undefined" || typeof window.occtimportjs !== "function") {
       throw new Error("STEP importer (occt-import-js) is not available");
     }
-    const response = await fetch(`${GRIPPER_BASE}${GRIPPER_FILE}`);
+    const visualAsset = await getGripperVisualAsset();
+    const response = await fetch(`${visualAsset.assetBasePath}${visualAsset.assetFile}`);
     if (!response.ok) {
       throw new Error(`Unable to load gripper STEP (HTTP ${response.status})`);
     }
@@ -273,7 +261,7 @@ async function loadSharedGripper() {
     const result = occt.ReadStepFile(
       new Uint8Array(await response.arrayBuffer()),
       {
-        linearUnit: "millimeter",
+        linearUnit: visualAsset.cadUnits || "millimeter",
         linearDeflectionType: "bounding_box_ratio",
         linearDeflection: 0.001,
         angularDeflection: 0.5,
@@ -287,7 +275,7 @@ async function loadSharedGripper() {
     gripper.userData.robotVisualRole = "shared-gripper";
     gripperVisual.fingers = [];
     result.meshes.forEach((stepMesh) => {
-      const mesh = buildStepMesh(stepMesh);
+      const mesh = buildStepMesh(stepMesh, visualAsset);
       if (mesh.userData.isGripperFinger) {
         const bounds = new THREE.Box3().setFromBufferAttribute(
           mesh.geometry.getAttribute("position"),
@@ -311,11 +299,14 @@ async function loadSharedGripper() {
   return gripperVisual.loadPromise;
 }
 
-function setGripperClosed(closed) {
+async function setGripperClosed(closed) {
   if (!gripperVisual.fingers.length || gripperVisual.closed === closed) {
-    return Promise.resolve();
+    return;
   }
   if (gripperVisual.animation) return gripperVisual.animation;
+  const visualAsset = await getGripperVisualAsset();
+  const fingerTravel = visualAsset.fingerTravelMm;
+  const animDuration = visualAsset.animationDurationMs;
   const fingers = gripperVisual.fingers.map(
     ({ mesh, openPosition, direction }) => ({
       mesh,
@@ -324,14 +315,14 @@ function setGripperClosed(closed) {
         .clone()
         .addScaledVector(
           new THREE.Vector3(1, 0, 0),
-          closed ? direction * GRIPPER_FINGER_TRAVEL : 0,
+          closed ? direction * fingerTravel : 0,
         ),
     }),
   );
   gripperVisual.animation = new Promise((resolve) => {
     const startedAt = performance.now();
     const tick = (now) => {
-      const progress = Math.min(Math.max((now - startedAt) / GRIPPER_ANIMATION_MS, 0), 1);
+      const progress = Math.min(Math.max((now - startedAt) / animDuration, 0), 1);
       const eased = progress * progress * (3 - 2 * progress);
       fingers.forEach(({ mesh, from, to }) =>
         mesh.position.lerpVectors(from, to, eased),
@@ -482,14 +473,15 @@ export async function buildRobotArm(profile, gripperProfile) {
     // Mount the CAD gripper if available, otherwise fallback to procedural gripper
     let armGripper = null;
     try {
+      const visualAsset = await getGripperVisualAsset();
       const loadedGripper = await loadSharedGripper();
       if (loadedGripper.parent) loadedGripper.parent.remove(loadedGripper);
       const j6ToolMount = new THREE.Group();
       j6ToolMount.name = `${profile.id}-j6-tool-mount`;
       j6ToolMount.userData.robotVisualRole = "j6-tool-mount";
-      j6ToolMount.position.fromArray(gripperMountOffset(profile.id));
-      j6ToolMount.quaternion.copy(gripperMountQuaternion(profile.id));
-      j6ToolMount.scale.setScalar(GRIPPER_SCALE);
+      j6ToolMount.position.fromArray(gripperMountOffset(profile.id, visualAsset));
+      j6ToolMount.quaternion.copy(gripperMountQuaternion(profile.id, visualAsset));
+      j6ToolMount.scale.setScalar(visualAsset.scaleToM);
       j6ToolMount.add(loadedGripper);
       parent.add(j6ToolMount);
       armGripper = {
@@ -538,7 +530,7 @@ const state = {
   robotProfileId: "fr3",
   gripperProfile: null,
   currentArm: null,
-  jointsDeg: [0, 0, 0, 0, 0, 0],
+  jointsDeg: [0, -45, 90, -45, -90, 0],
   // nội suy mượt cho live mirror
   liveFromDeg: null,
   liveTargetDeg: null,
@@ -684,6 +676,19 @@ async function initApp() {
     const physicalGeometry = await fetchPhysicalGeometry();
     setBoardGeometry(physicalGeometry);
     await fetchScenePlacement();
+
+    const sceneConfig = await fetchSceneConfig();
+    if (
+      sceneConfig?.home_pose?.joints_deg &&
+      Array.isArray(sceneConfig.home_pose.joints_deg) &&
+      sceneConfig.home_pose.joints_deg.length === 6 &&
+      sceneConfig.home_pose.joints_deg.every((v) => typeof v === "number" && Number.isFinite(v))
+    ) {
+      state.jointsDeg = [...sceneConfig.home_pose.joints_deg];
+    }
+    if (jointsReadoutEl) {
+      jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ");
+    }
 
     const startLayout = await fetchStartLayout();
     const gripperProfile = await fetchVirtualGripperProfile();
