@@ -324,8 +324,10 @@ class VirtualXiangqiSimulation:
         piece: XiangqiPieceBody,
         progress: float,
     ) -> DropEvent:
-        pos_robot, _ = piece.get_pose_robot_base()
+        pos_robot, quat_robot = piece.get_pose_robot_base()
         lin_vel, ang_vel = self.world.gripper.estimate_velocity()
+        gripper_pos = list(self.world.gripper.grasp_pos)
+        gripper_quat = list(self.world.gripper.grasp_quat)
 
         # Detach piece mid-flight from gripper
         self.backend.set_gripper(False)
@@ -343,6 +345,9 @@ class VirtualXiangqiSimulation:
             attached_piece_id=piece.piece_id,
             trajectory_progress=float(progress),
             release_speed=speed,
+            release_gripper_position=gripper_pos,
+            release_gripper_orientation=gripper_quat,
+            release_piece_orientation=quat_robot.tolist(),
         )
         self.last_drop_event = event
         self._scheduled_drop["triggered"] = True
@@ -391,8 +396,10 @@ class VirtualXiangqiSimulation:
             return None
 
         snap = self.backend.get_state_snapshot()
-        pos, _ = attached.get_pose_robot_base()
+        pos, quat = attached.get_pose_robot_base()
         lin_vel, ang_vel = self.world.gripper.estimate_velocity()
+        gripper_pos = list(self.world.gripper.grasp_pos)
+        gripper_quat = list(self.world.gripper.grasp_quat)
         self.backend.set_gripper(False)
         dropped = self.world.force_drop_attached_piece()
 
@@ -407,6 +414,9 @@ class VirtualXiangqiSimulation:
             attached_piece_id=attached.piece_id,
             trajectory_progress=1.0,
             release_speed=float(np.linalg.norm(lin_vel)),
+            release_gripper_position=gripper_pos,
+            release_gripper_orientation=gripper_quat,
+            release_piece_orientation=quat.tolist(),
         )
         self.last_drop_event = event
 

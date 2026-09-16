@@ -175,7 +175,10 @@ class VirtualGripper:
         if self.travel_axis == "Y":
             left_loc = np.array([0.0, -half_w, palm_dz + jaw_dz / 2.0])
             right_loc = np.array([0.0, half_w, palm_dz + jaw_dz / 2.0])
-        else:
+        elif self.travel_axis == "Z":
+            left_loc = np.array([0.0, 0.0, palm_dz + jaw_dz / 2.0 - half_w])
+            right_loc = np.array([0.0, 0.0, palm_dz + jaw_dz / 2.0 + half_w])
+        else:  # "X"
             left_loc = np.array([-half_w, 0.0, palm_dz + jaw_dz / 2.0])
             right_loc = np.array([half_w, 0.0, palm_dz + jaw_dz / 2.0])
 

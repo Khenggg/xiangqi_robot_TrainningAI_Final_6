@@ -796,7 +796,6 @@ Tại Phase P3.1, kiến trúc mô phỏng vật lý và đồng bộ Digital Tw
 - **Ngữ nghĩa Mid-Motion thực sự:** Thả rơi được kích hoạt thông qua `schedule_force_drop(progress_threshold=0.5)` trong `SimulationRuntime` khi robot đang chuyển động với vận tốc lớn (`motion_state == "MOVING"`).
 - **Kế thừa động lượng:** Quân cờ kế thừa đầy đủ vận tốc tuyến tính tức thời ($\|\mathbf{v}_{\text{release}}\| > 0.02\text{ m/s}$) và vận tốc góc tại thời điểm nhả.
 - **Tách biệt độc lập:** Sau khi thả, quân cờ bay theo quỹ đạo đường đạn trong trọng lực và tự ổn định (settle) vào trạng thái `RESTING` hoặc `OUT_OF_BOUNDS`, trong khi robot tiếp tục di chuyển độc lập để hoàn thành quỹ đạo tới đích.
-- **Cấu trúc dữ liệu `DropEvent`:** Ghi nhận toàn diện các thông số chẩn đoán:
 - **Cấu trúc dữ liệu `DropEvent`:** Ghi nhận toàn diện các thông số chẩn đoán (khớp hoàn toàn với dataclass trong `src/simulation/physics/state.py`):
   - `triggered: bool`
   - `timestamp: float`
@@ -808,10 +807,19 @@ Tại Phase P3.1, kiến trúc mô phỏng vật lý và đồng bộ Digital Tw
   - `attached_piece_id: Optional[str]`
   - `trajectory_progress: float`
   - `release_speed: float` (> 0.02 m/s)
+  - `release_gripper_position: List[float]`
+  - `release_gripper_orientation: List[float]`
+  - `release_piece_orientation: List[float]`
+- **Chứng minh toán học quỹ đạo độc lập hậu thả rơi (Post-Drop SE(3) Invariance):**
+  Tại thời điểm nhả, transform tương đối giữa kẹp và quân cờ tuân theo bất biến gắp cứng:
+  $$T_{\text{rel, drop}} = T_{\text{gripper, drop}}^{-1} \cdot T_{\text{piece, drop}}$$
+  Khi robot tiếp tục quỹ đạo độc lập tới đích còn quân cờ rơi tự do và ổn định trên bàn, transform tương đối sau đó phân kỳ rõ rệt:
+  $$\|T_{\text{rel, later}} - T_{\text{rel, drop}}\| > 0.010$$
+  chứng minh bằng toán học rằng quân cờ hoàn toàn độc lập và không còn bị ràng buộc động học với ngàm kẹp.
 
 ### 25.2. PyBullet Gripper Collision Proxies & Quản Lý Va Chạm
 - **Kinematic Collision Bodies:** Khởi tạo 3 khối va chạm PyBullet (palm plate, left jaw, right jaw) gắn vào `VirtualGripper`, kích thước trích xuất trực tiếp từ `shared/virtual_gripper_profile.json` (Palm $60 \times 40 \times 30\text{ mm}$, Jaw $8 \times 25 \times 35\text{ mm}$).
-- **Dịch chuyển ngàm động học:** Khi kẹp đóng/mở, các ngàm trượt tịnh tiến đối xứng dọc theo trục hành trình `travel_axis` (mặc định trục $X$) tương ứng với `jaw_width_m` ($0.040\text{ m}$ khi mở, $0.020\text{ m}$ khi đóng).
+- **Dịch chuyển ngàm động học đa trục:** Khi kẹp đóng/mở, các ngàm trượt tịnh tiến đối xứng dọc theo trục hành trình `travel_axis` (hỗ trợ $X$, $Y$, hoặc $Z$ tương ứng hoàn toàn với Three.js viewer) tương ứng với `jaw_width_m` ($0.040\text{ m}$ khi mở, $0.020\text{ m}$ khi đóng).
 - **Bộ lọc va chạm thông minh (`p.setCollisionFilterPair`):**
   - Khi quân cờ được gắp (`ATTACHED`), va chạm giữa quân cờ và 3 proxy ngàm kẹp tạm thời bị vô hiệu hóa để ngăn ngừa xung lực phản hồi và bất ổn định số học.
   - Ngay khi nhả kẹp hoặc thả rơi (`RELEASED` / `DROPPED`), va chạm vật lý giữa quân cờ và các ngàm kẹp lập tức được tái kích hoạt.

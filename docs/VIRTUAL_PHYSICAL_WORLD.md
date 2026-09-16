@@ -143,7 +143,7 @@ Phase P3.1/P3.2 implements authoritative mid-motion force drop evaluated synchro
    $$\mathbf{v} = \frac{\mathbf{p}(t) - \mathbf{p}(t - \Delta t)}{\Delta t}$$
    Guarantees non-zero release velocity ($> 0.02\text{ m/s}$, typically $0.5 - 1.5\text{ m/s}$ in fast moves).
 3. **Independent Ballistic Flight:** The piece is detached and injected into PyBullet with inherited linear and angular velocities. The piece tumbles and settles on the board under gravity and friction while the robot arm independently continues along its trajectory to completion.
-4. **`DropEvent` Diagnostics:** Captures full telemetry diagnostics matching dataclass fields in `state.py`:
+4. **`DropEvent` Diagnostics & Relative Trajectory Invariance:** Captures full telemetry diagnostics matching dataclass fields in `state.py`:
    - `triggered: bool`
    - `timestamp: float`
    - `sim_time: float`
@@ -154,6 +154,16 @@ Phase P3.1/P3.2 implements authoritative mid-motion force drop evaluated synchro
    - `attached_piece_id: Optional[str]`
    - `trajectory_progress: float`
    - `release_speed: float` (> 0.02 m/s)
+   - `release_gripper_position: List[float]`
+   - `release_gripper_orientation: List[float]`
+   - `release_piece_orientation: List[float]`
+
+   **Post-Drop SE(3) Invariance Proof:**
+   At release, the rigid grasp transform is given by:
+   $$T_{\text{rel, drop}} = T_{\text{gripper, drop}}^{-1} \cdot T_{\text{piece, drop}}$$
+   As the robot arm independently continues its trajectory towards the target, the relative SE(3) transform at a later settled state $T_{\text{rel, later}} = T_{\text{gripper, later}}^{-1} \cdot T_{\text{piece, later}}$ diverges substantially:
+   $$\|T_{\text{rel, later}} - T_{\text{rel, drop}}\| > 0.010$$
+   proving mathematically that the piece followed an independent trajectory after drop.
 
 ### 6.2. Settling Criteria
 A dropped or placed piece transitions from `FALLING` / `MOVING` to `RESTING` when its velocities remain below threshold for 20 consecutive simulation steps ($0.083\text{ s}$):

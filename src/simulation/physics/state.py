@@ -137,6 +137,9 @@ class DropEvent:
     attached_piece_id: Optional[str]
     trajectory_progress: float
     release_speed: float
+    release_gripper_position: Optional[List[float]] = None
+    release_gripper_orientation: Optional[List[float]] = None
+    release_piece_orientation: Optional[List[float]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

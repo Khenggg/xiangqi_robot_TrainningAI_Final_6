@@ -1,4 +1,4 @@
-﻿"""
+"""
 Unit tests for PyBullet gripper collision proxies and attached piece filtering (Phase P3.1).
 
 Verifies:
@@ -76,6 +76,71 @@ class GripperCollisionProxiesTests(unittest.TestCase):
         # Traveled along X axis (Y and Z relative offsets remain equal)
         self.assertAlmostEqual(pos_l_open[1], pos_l_closed[1], places=4)
         self.assertAlmostEqual(pos_l_open[2], pos_l_closed[2], places=4)
+
+    def test_jaw_motion_along_travel_axis_y_and_z(self):
+        tcp = [0.0, 0.0, 0.10]
+        quat = [0.0, 0.0, 0.0, 1.0]
+        orig_axis = self.gripper.travel_axis
+
+        try:
+            # 1. Test Y axis travel
+            self.gripper.travel_axis = "Y"
+            self.gripper.set_gripper_state(False)
+            self.gripper.set_tcp_pose(tcp, quat)
+
+            pos_l_open, _ = p.getBasePositionAndOrientation(
+                self.gripper.left_jaw_body_id, physicsClientId=self.world.client_id
+            )
+            pos_r_open, _ = p.getBasePositionAndOrientation(
+                self.gripper.right_jaw_body_id, physicsClientId=self.world.client_id
+            )
+            dist_y_open = abs(pos_r_open[1] - pos_l_open[1])
+            self.assertAlmostEqual(dist_y_open, self.gripper.open_width_m, places=3)
+
+            self.gripper.set_gripper_state(True)
+            self.gripper.set_tcp_pose(tcp, quat)
+            pos_l_closed, _ = p.getBasePositionAndOrientation(
+                self.gripper.left_jaw_body_id, physicsClientId=self.world.client_id
+            )
+            pos_r_closed, _ = p.getBasePositionAndOrientation(
+                self.gripper.right_jaw_body_id, physicsClientId=self.world.client_id
+            )
+            dist_y_closed = abs(pos_r_closed[1] - pos_l_closed[1])
+            self.assertAlmostEqual(dist_y_closed, self.gripper.closed_width_m, places=3)
+            # X and Z coordinates remain constant across open/closed
+            self.assertAlmostEqual(pos_l_open[0], pos_l_closed[0], places=4)
+            self.assertAlmostEqual(pos_l_open[2], pos_l_closed[2], places=4)
+
+            # 2. Test Z axis travel (Phase P3.2.1 parity)
+            self.gripper.travel_axis = "Z"
+            self.gripper.set_gripper_state(False)
+            self.gripper.set_tcp_pose(tcp, quat)
+
+            pos_l_z_open, _ = p.getBasePositionAndOrientation(
+                self.gripper.left_jaw_body_id, physicsClientId=self.world.client_id
+            )
+            pos_r_z_open, _ = p.getBasePositionAndOrientation(
+                self.gripper.right_jaw_body_id, physicsClientId=self.world.client_id
+            )
+            dist_z_open = abs(pos_r_z_open[2] - pos_l_z_open[2])
+            self.assertAlmostEqual(dist_z_open, self.gripper.open_width_m, places=3)
+
+            self.gripper.set_gripper_state(True)
+            self.gripper.set_tcp_pose(tcp, quat)
+            pos_l_z_closed, _ = p.getBasePositionAndOrientation(
+                self.gripper.left_jaw_body_id, physicsClientId=self.world.client_id
+            )
+            pos_r_z_closed, _ = p.getBasePositionAndOrientation(
+                self.gripper.right_jaw_body_id, physicsClientId=self.world.client_id
+            )
+            dist_z_closed = abs(pos_r_z_closed[2] - pos_l_z_closed[2])
+            self.assertAlmostEqual(dist_z_closed, self.gripper.closed_width_m, places=3)
+            # X and Y coordinates remain constant across open/closed
+            self.assertAlmostEqual(pos_l_z_open[0], pos_l_z_closed[0], places=4)
+            self.assertAlmostEqual(pos_l_z_open[1], pos_l_z_closed[1], places=4)
+        finally:
+            self.gripper.travel_axis = orig_axis
+            self.gripper.set_gripper_state(False)
 
     def test_attached_piece_collision_filter_toggle(self):
         piece = self.world.pieces["black_rook_0"]
