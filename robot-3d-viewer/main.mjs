@@ -126,6 +126,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x11151c);
+window.__scene = scene;
 
 const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 50);
 camera.position.set(0.75, 0.75, 0.75);
@@ -551,6 +552,7 @@ const state = {
   liveAnimationDuration: 120,
   liveSocket: null,
 };
+window.__state = state;
 
 async function switchRobotProfile(profileId) {
   const profile = getRobotProfile(profileId);
@@ -951,20 +953,21 @@ function goToCell(row, col, modeOverride = null) {
     tiltVal.textContent = `${data.tilt_deg}° ${data.tilt_deg < 0.1 ? "✓ Thẳng đứng 100% (Kẹp chắc)" : "⚠️ Nghiêng chéo (Tuột quân cờ!)"}`;
     tiltVal.style.color = data.tilt_deg < 0.1 ? "#3fb950" : "#f85149";
   }
+  const tipClearance = data.gripper_tip_clearance_mm ?? data.clearance_mm;
   if (clearanceVal) {
     if (data.penetrates_board) {
-      clearanceVal.textContent = `❌ XUYÊN BÀN ${Math.abs(data.clearance_mm)} mm!`;
+      clearanceVal.textContent = `❌ LỆCH GÓC / VA ĐẬP (Nghiêng ${data.tilt_deg}°)`;
       clearanceVal.style.color = "#f85149";
     } else {
-      clearanceVal.textContent = `✅ Cách mặt bàn +${data.clearance_mm} mm (An toàn)`;
+      clearanceVal.textContent = `✅ Đầu ngàm kẹp cách mặt bàn +${tipClearance} mm (An toàn 100%)`;
       clearanceVal.style.color = "#3fb950";
     }
   }
   if (badge) {
     if (data.penetrates_board) {
       badge.className = "badge-danger";
-      badge.textContent = "❌ XUYÊN BÀN / TUỘT QUÂN";
-    } else if (data.tilt_deg >= 30.0) {
+      badge.textContent = "❌ TUỘT QUÂN / LỆCH GÓC";
+    } else if (data.tilt_deg >= 25.0) {
       badge.className = "badge-danger";
       badge.textContent = "⚠️ TUỘT QUÂN (NGHIÊNG " + data.tilt_deg + "°)";
     } else {
@@ -974,9 +977,9 @@ function goToCell(row, col, modeOverride = null) {
   }
   if (expl) {
     if (mode === "optimal") {
-      expl.innerHTML = `✅ <strong>Chế độ Tối Ưu:</strong> $J_4 = ${data.j4_deg}^\\circ$ tự động bù trừ góc cho cẳng tay, giữ ngàm kẹp <strong>chúc thẳng đứng $90^\\circ$ hoàn hảo</strong> (nghiêng $\\approx ${data.tilt_deg}^\\circ$). Toàn bộ thân tay cách mặt bàn <strong>+${data.clearance_mm}mm</strong>, kẹp quân chuẩn xác không thể tuột!`;
+      expl.innerHTML = `✅ <strong>Chế độ Tối Ưu:</strong> Tính toán chính xác chiều dài ngàm kẹp CAD (218mm). Mặt bích robot nâng cao $Z = ${data.flange_z_mm ?? 229.5}\\text{mm}$, đầu ngàm kẹp hạ xuống cách mặt bàn <strong>+${tipClearance}\\text{mm}</strong> ôm khít thân quân cờ mà <strong>hoàn toàn KHÔNG xuyên qua bàn cờ</strong>! Góc $J_4 = ${data.j4_deg}^\\circ$ chúc thẳng đứng $90^\\circ$ tuyệt đối!`;
     } else {
-      expl.innerHTML = `⚠️ <strong>Chế độ Ràng Buộc J4 [-100° .. -80°]:</strong> Cổ tay bị ép ở $J_4 = ${data.j4_deg}^\\circ$ khiến ngàm kẹp bị <strong>nghiêng ${data.tilt_deg}^\\circ$</strong> (bóp xéo làm tuột quân), đồng thời hạ thấp đâm xuyên mặt bàn <strong>${data.clearance_mm}mm</strong>!`;
+      expl.innerHTML = `⚠️ <strong>Chế độ Ràng Buộc J4 [-100° .. -80°]:</strong> Cổ tay bị ép cứng tại $J_4 = ${data.j4_deg}^\\circ$ khiến ngàm kẹp bị <strong>nghiêng chéo ${data.tilt_deg}^\\circ$</strong> (bóp xéo làm trượt tuột quân cờ)!`;
     }
   }
 

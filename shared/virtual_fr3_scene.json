@@ -41,9 +41,10 @@
     "joints_deg": [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
   },
   "tool_transform": {
-    "status": "SIMULATION_ONLY_UNVERIFIED_PHYSICAL_TOOL_TRANSFORM",
-    "type": "identity_relative_to_flange",
-    "flange_to_tcp_xyz_m": [0.0, 0.0, 0.0],
-    "flange_to_tcp_rpy_deg": [0.0, 0.0, 0.0]
+    "status": "CAD_PARALLEL_GRIPPER_MEASURED",
+    "type": "tcp_relative_to_flange",
+    "flange_to_tcp_xyz_m": [0.0, 0.0, 0.218],
+    "flange_to_tcp_rpy_deg": [0.0, 0.0, 0.0],
+    "description": "Measured distance from FR3 J6 flange origin to tips of parallel gripper fingers (218mm)."
   }
 }

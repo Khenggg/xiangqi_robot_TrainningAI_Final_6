@@ -1,13 +1,11 @@
 {
   "metadata": {
     "total_cells": 90,
-    "board_dimensions_m": {
-      "width": 0.367,
-      "length": 0.41,
-      "height": 0.0105
-    },
-    "grid_step_m": 0.04,
-    "description": "Kinematic reachability across all 90 cells comparing optimal IK vs constrained J4 [-100 deg, -80 deg]"
+    "gripper_length_m": 0.218,
+    "gripper_tip_clearance_above_board_m": 0.0015,
+    "flange_target_z_m": 0.23,
+    "board_surface_z_m": 0.0105,
+    "description": "Authoritative cell reachability accounting for 218mm CAD gripper length, ensuring gripper tips hover 1.5mm above board without penetration"
   },
   "cells": [
     {
@@ -18,31 +16,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          16.51,
-          -10.25,
-          142.11,
-          -221.86,
-          -89.99,
-          16.51
+          16.44,
+          -96.77,
+          148.48,
+          -141.71,
+          -90.0,
+          16.43
         ],
-        "j4_deg": -221.86,
-        "tilt_deg": 0.007,
-        "clearance_mm": 0.6,
+        "j4_deg": -141.71,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          16.58,
-          -48.55,
-          136.04,
-          -100.0,
+          16.56,
+          -105.02,
+          136.42,
+          -88.48,
           -89.95,
           0.0
         ],
-        "j4_deg": -100.0,
-        "tilt_deg": 77.5,
-        "clearance_mm": 0.0,
+        "j4_deg": -88.48,
+        "tilt_deg": 32.9,
+        "gripper_tip_clearance_mm": -14.8,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -54,31 +54,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          5.63,
-          -3.37,
-          145.94,
-          -232.57,
+          5.57,
+          -104.07,
+          153.25,
+          -139.18,
           -90.0,
-          5.63
+          5.57
         ],
-        "j4_deg": -232.57,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.1,
+        "j4_deg": -139.18,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          5.52,
-          -49.12,
-          140.79,
-          -99.6,
+          5.53,
+          -112.37,
+          140.72,
+          -85.76,
           -89.95,
           0.0
         ],
-        "j4_deg": -99.6,
-        "tilt_deg": 82.1,
-        "clearance_mm": 0.3,
+        "j4_deg": -85.76,
+        "tilt_deg": 32.6,
+        "gripper_tip_clearance_mm": -14.7,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -90,31 +92,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -7.09,
-          3.73,
-          148.67,
-          -242.4,
+          -7.15,
+          -111.34,
+          156.75,
+          -135.41,
           -90.0,
-          -7.09
+          -7.15
         ],
-        "j4_deg": -242.4,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.1,
+        "j4_deg": -135.41,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -7.23,
-          -49.09,
-          143.78,
-          -97.37,
+          -7.25,
+          -119.12,
+          144.19,
+          -83.83,
           -89.95,
           0.0
         ],
-        "j4_deg": -97.37,
-        "tilt_deg": 87.3,
-        "clearance_mm": 0.0,
+        "j4_deg": -83.83,
+        "tilt_deg": 31.2,
+        "gripper_tip_clearance_mm": -14.1,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -126,31 +130,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -20.94,
-          9.26,
-          150.15,
-          -249.4,
+          -20.97,
+          -117.21,
+          158.73,
+          -131.53,
           -90.0,
-          -20.94
+          -20.97
         ],
-        "j4_deg": -249.4,
+        "j4_deg": -131.53,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -21.06,
-          -48.85,
-          145.64,
-          -95.52,
+          -124.25,
+          146.92,
+          -84.01,
           -89.95,
           0.0
         ],
-        "j4_deg": -95.52,
-        "tilt_deg": 91.3,
-        "clearance_mm": 0.0,
+        "j4_deg": -84.01,
+        "tilt_deg": 28.7,
+        "gripper_tip_clearance_mm": -12.9,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -163,30 +169,32 @@
         "reachable": true,
         "joints_deg": [
           -34.49,
-          11.38,
-          150.6,
-          -251.97,
+          -119.58,
+          159.34,
+          -129.76,
           -90.0,
           -34.49
         ],
-        "j4_deg": -251.97,
+        "j4_deg": -129.76,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -34.52,
-          -48.74,
-          146.11,
-          -94.21,
+          -34.49,
+          -126.36,
+          148.43,
+          -85.73,
           -89.95,
           0.0
         ],
-        "j4_deg": -94.21,
-        "tilt_deg": 93.2,
-        "clearance_mm": 0.1,
+        "j4_deg": -85.73,
+        "tilt_deg": 26.3,
+        "gripper_tip_clearance_mm": -11.8,
+        "flange_z_mm": 230.1,
         "penetrates_board": true
       }
     },
@@ -199,30 +207,32 @@
         "reachable": true,
         "joints_deg": [
           -46.13,
-          9.32,
-          150.16,
-          -249.48,
+          -117.31,
+          158.72,
+          -131.41,
           -90.0,
           -46.13
         ],
-        "j4_deg": -249.48,
+        "j4_deg": -131.41,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -46.18,
-          -48.98,
-          145.12,
-          -93.44,
+          -46.13,
+          -124.35,
+          148.25,
+          -88.38,
           -89.95,
           0.0
         ],
-        "j4_deg": -93.44,
-        "tilt_deg": 92.7,
-        "clearance_mm": 0.2,
+        "j4_deg": -88.38,
+        "tilt_deg": 25.5,
+        "gripper_tip_clearance_mm": -11.4,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -234,31 +244,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -55.38,
-          4.12,
-          148.83,
-          -242.95,
+          -55.34,
+          -111.71,
+          156.86,
+          -135.15,
           -90.0,
-          -55.38
+          -55.34
         ],
-        "j4_deg": -242.95,
-        "tilt_deg": 0.002,
-        "clearance_mm": 0.2,
+        "j4_deg": -135.15,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -55.16,
-          -49.25,
-          142.57,
-          -93.09,
+          -55.21,
+          -119.3,
+          146.68,
+          -91.89,
           -89.95,
           0.0
         ],
-        "j4_deg": -93.09,
-        "tilt_deg": 90.2,
-        "clearance_mm": 0.0,
+        "j4_deg": -91.89,
+        "tilt_deg": 25.5,
+        "gripper_tip_clearance_mm": -11.4,
+        "flange_z_mm": 229.9,
         "penetrates_board": true
       }
     },
@@ -270,31 +282,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -62.02,
-          -3.2,
-          146.13,
-          -232.93,
+          -61.93,
+          -104.16,
+          153.34,
+          -139.18,
           -90.0,
-          -62.02
+          -61.93
         ],
-        "j4_deg": -232.93,
-        "tilt_deg": 0.002,
-        "clearance_mm": 0.5,
+        "j4_deg": -139.18,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -61.83,
-          -49.31,
-          139.0,
-          -93.53,
+          -112.27,
+          143.64,
+          -95.72,
           -89.95,
           0.0
         ],
-        "j4_deg": -93.53,
-        "tilt_deg": 86.2,
-        "clearance_mm": 0.0,
+        "j4_deg": -95.72,
+        "tilt_deg": 25.7,
+        "gripper_tip_clearance_mm": -11.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -306,31 +320,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -66.83,
-          -10.33,
-          142.05,
-          -221.72,
+          -66.73,
+          -96.77,
+          148.4,
+          -141.63,
           -90.0,
-          -66.83
+          -66.73
         ],
-        "j4_deg": -221.72,
-        "tilt_deg": 0.003,
-        "clearance_mm": 0.6,
+        "j4_deg": -141.63,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -66.62,
-          -48.89,
-          134.98,
-          -95.76,
+          -66.67,
+          -104.72,
+          139.28,
+          -98.55,
           -89.95,
           0.0
         ],
-        "j4_deg": -95.76,
-        "tilt_deg": 80.3,
-        "clearance_mm": 0.5,
+        "j4_deg": -98.55,
+        "tilt_deg": 26.0,
+        "gripper_tip_clearance_mm": -11.7,
+        "flange_z_mm": 229.9,
         "penetrates_board": true
       }
     },
@@ -342,31 +358,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          14.0,
-          -16.46,
-          136.04,
-          -209.58,
+          14.01,
+          -89.28,
+          141.61,
+          -142.33,
           -90.0,
-          14.0
+          14.01
         ],
-        "j4_deg": -209.58,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.1,
+        "j4_deg": -142.33,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          14.01,
-          -47.28,
-          129.75,
-          -100.0,
+          14.07,
+          -96.92,
+          130.04,
+          -88.98,
           -89.95,
           0.0
         ],
-        "j4_deg": -100.0,
-        "tilt_deg": 72.5,
-        "clearance_mm": -0.0,
+        "j4_deg": -88.98,
+        "tilt_deg": 34.1,
+        "gripper_tip_clearance_mm": -15.3,
+        "flange_z_mm": 229.6,
         "penetrates_board": true
       }
     },
@@ -378,31 +396,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          4.6,
-          -12.51,
-          140.11,
-          -217.6,
+          4.74,
+          -94.24,
+          146.36,
+          -142.12,
           -90.0,
-          4.6
+          4.74
         ],
-        "j4_deg": -217.6,
+        "j4_deg": -142.12,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           4.59,
-          -48.33,
-          134.01,
-          -99.55,
+          -102.36,
+          133.95,
+          -87.06,
           -89.95,
           0.0
         ],
-        "j4_deg": -99.55,
-        "tilt_deg": 76.1,
-        "clearance_mm": 0.3,
+        "j4_deg": -87.06,
+        "tilt_deg": 34.5,
+        "gripper_tip_clearance_mm": -15.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -414,31 +434,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -5.65,
-          -8.58,
-          143.15,
-          -224.56,
+          -5.7,
+          -98.66,
+          149.85,
+          -141.19,
           -90.0,
-          -5.65
+          -5.7
         ],
-        "j4_deg": -224.56,
-        "tilt_deg": 0.002,
-        "clearance_mm": 0.3,
+        "j4_deg": -141.19,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -5.97,
-          -48.85,
-          137.05,
-          -98.4,
+          -5.87,
+          -106.99,
+          137.02,
+          -85.73,
           -89.95,
           0.0
         ],
-        "j4_deg": -98.4,
-        "tilt_deg": 79.8,
-        "clearance_mm": 0.1,
+        "j4_deg": -85.73,
+        "tilt_deg": 34.3,
+        "gripper_tip_clearance_mm": -15.4,
+        "flange_z_mm": 230.1,
         "penetrates_board": true
       }
     },
@@ -450,31 +472,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -16.72,
-          -5.47,
-          144.91,
-          -229.43,
+          -16.75,
+          -101.87,
+          151.97,
+          -140.1,
           -90.0,
-          -16.72
+          -16.75
         ],
-        "j4_deg": -229.43,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.1,
+        "j4_deg": -140.1,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -16.84,
-          -49.08,
-          138.71,
-          -97.53,
+          -16.85,
+          -110.28,
+          139.13,
+          -85.16,
           -89.95,
           0.0
         ],
-        "j4_deg": -97.53,
-        "tilt_deg": 82.1,
-        "clearance_mm": 0.0,
+        "j4_deg": -85.16,
+        "tilt_deg": 33.7,
+        "gripper_tip_clearance_mm": -15.1,
+        "flange_z_mm": 230.2,
         "penetrates_board": true
       }
     },
@@ -487,30 +511,32 @@
         "reachable": true,
         "joints_deg": [
           -27.63,
-          -4.28,
-          145.48,
-          -231.19,
+          -103.09,
+          152.67,
+          -139.59,
           -90.0,
           -27.63
         ],
-        "j4_deg": -231.19,
+        "j4_deg": -139.59,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -27.63,
-          -49.19,
-          139.27,
-          -96.93,
+          -111.17,
+          140.1,
+          -86.3,
           -89.95,
           0.0
         ],
-        "j4_deg": -96.93,
-        "tilt_deg": 83.2,
-        "clearance_mm": 0.1,
+        "j4_deg": -86.3,
+        "tilt_deg": 32.6,
+        "gripper_tip_clearance_mm": -14.7,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -522,31 +548,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -37.52,
-          -5.43,
-          144.9,
-          -229.47,
+          -37.51,
+          -101.91,
+          151.94,
+          -140.04,
           -90.0,
-          -37.52
+          -37.51
         ],
-        "j4_deg": -229.47,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.0,
+        "j4_deg": -140.04,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -37.42,
-          -49.27,
-          138.57,
-          -96.71,
+          -37.47,
+          -110.1,
+          139.92,
+          -88.09,
           -89.95,
           0.0
         ],
-        "j4_deg": -96.71,
-        "tilt_deg": 82.6,
-        "clearance_mm": 0.5,
+        "j4_deg": -88.09,
+        "tilt_deg": 31.7,
+        "gripper_tip_clearance_mm": -14.3,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -558,31 +586,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -45.9,
-          -8.48,
-          143.15,
-          -224.67,
+          -45.88,
+          -98.7,
+          149.81,
+          -141.11,
           -90.0,
-          -45.9
+          -45.88
         ],
-        "j4_deg": -224.67,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.1,
+        "j4_deg": -141.11,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -45.81,
-          -48.9,
-          136.51,
-          -96.99,
+          -45.86,
+          -106.95,
+          138.38,
+          -90.12,
           -89.95,
           0.0
         ],
-        "j4_deg": -96.99,
-        "tilt_deg": 80.6,
-        "clearance_mm": 0.0,
+        "j4_deg": -90.12,
+        "tilt_deg": 31.3,
+        "gripper_tip_clearance_mm": -14.1,
+        "flange_z_mm": 229.7,
         "penetrates_board": true
       }
     },
@@ -594,31 +624,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -52.7,
-          -12.49,
-          140.2,
-          -217.72,
+          -52.66,
+          -94.27,
+          146.33,
+          -142.06,
           -90.0,
-          -52.7
+          -52.66
         ],
-        "j4_deg": -217.72,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.2,
+        "j4_deg": -142.06,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -52.62,
-          -48.35,
-          133.51,
-          -97.9,
+          -52.63,
+          -102.29,
+          135.36,
+          -91.99,
           -89.95,
           0.0
         ],
-        "j4_deg": -97.9,
-        "tilt_deg": 77.3,
-        "clearance_mm": 0.1,
+        "j4_deg": -91.99,
+        "tilt_deg": 31.1,
+        "gripper_tip_clearance_mm": -14.0,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -630,31 +662,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -58.1,
-          -16.47,
-          136.07,
-          -209.61,
+          -58.06,
+          -89.29,
+          141.64,
+          -142.35,
           -90.0,
-          -58.1
+          -58.06
         ],
-        "j4_deg": -209.61,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.2,
+        "j4_deg": -142.35,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -58.05,
-          -47.3,
-          129.66,
-          -99.71,
+          -58.04,
+          -96.85,
+          131.12,
+          -93.05,
           -89.95,
           0.0
         ],
-        "j4_deg": -99.71,
-        "tilt_deg": 72.7,
-        "clearance_mm": 0.0,
+        "j4_deg": -93.05,
+        "tilt_deg": 31.2,
+        "gripper_tip_clearance_mm": -14.1,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -666,31 +700,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          12.1,
-          -20.5,
-          129.14,
-          -198.63,
+          12.14,
+          -82.61,
+          134.11,
+          -141.5,
           -90.0,
-          12.1
+          12.14
         ],
-        "j4_deg": -198.63,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.1,
+        "j4_deg": -141.5,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          12.09,
-          -45.58,
-          120.67,
-          -92.15,
+          12.08,
+          -89.34,
+          122.82,
+          -89.1,
           -89.95,
           0.0
         ],
-        "j4_deg": -92.15,
-        "tilt_deg": 72.9,
-        "clearance_mm": 0.0,
+        "j4_deg": -89.1,
+        "tilt_deg": 34.4,
+        "gripper_tip_clearance_mm": -15.4,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -702,31 +738,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          3.99,
-          -18.49,
-          133.14,
-          -204.65,
+          3.97,
+          -86.3,
+          138.44,
+          -142.14,
           -90.0,
-          3.99
+          3.97
         ],
-        "j4_deg": -204.65,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.2,
+        "j4_deg": -142.14,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           3.9,
-          -46.77,
-          124.6,
-          -92.1,
+          -93.54,
+          126.62,
+          -88.1,
           -89.95,
           0.0
         ],
-        "j4_deg": -92.1,
-        "tilt_deg": 75.7,
-        "clearance_mm": 0.0,
+        "j4_deg": -88.1,
+        "tilt_deg": 35.0,
+        "gripper_tip_clearance_mm": -15.7,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -738,31 +776,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -4.85,
-          -16.44,
-          136.06,
-          -209.62,
+          -4.86,
+          -89.33,
+          141.67,
+          -142.35,
           -90.0,
-          -4.85
+          -4.86
         ],
-        "j4_deg": -209.62,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.1,
+        "j4_deg": -142.35,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -4.92,
-          -47.56,
-          127.66,
-          -92.47,
+          -4.94,
+          -96.95,
+          129.48,
+          -87.33,
           -89.95,
           0.0
         ],
-        "j4_deg": -92.47,
-        "tilt_deg": 77.6,
-        "clearance_mm": 0.1,
+        "j4_deg": -87.33,
+        "tilt_deg": 35.2,
+        "gripper_tip_clearance_mm": -15.8,
+        "flange_z_mm": 230.1,
         "penetrates_board": true
       }
     },
@@ -774,31 +814,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -14.03,
-          -14.9,
-          137.82,
-          -212.92,
+          -14.04,
+          -91.35,
+          143.66,
+          -142.32,
           -90.0,
-          -14.03
+          -14.04
         ],
-        "j4_deg": -212.92,
+        "j4_deg": -142.32,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -14.09,
-          -47.99,
-          129.77,
-          -93.33,
+          -14.07,
+          -99.07,
+          131.21,
+          -86.93,
           -89.95,
           0.0
         ],
-        "j4_deg": -93.33,
-        "tilt_deg": 78.4,
-        "clearance_mm": 0.1,
+        "j4_deg": -86.93,
+        "tilt_deg": 35.2,
+        "gripper_tip_clearance_mm": -15.8,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -811,30 +853,32 @@
         "reachable": true,
         "joints_deg": [
           -23.1,
-          -14.32,
-          138.41,
-          -214.09,
+          -92.06,
+          144.33,
+          -142.27,
           -90.0,
           -23.1
         ],
-        "j4_deg": -214.09,
+        "j4_deg": -142.27,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -23.1,
-          -48.07,
-          130.75,
-          -94.82,
+          -23.11,
+          -99.88,
+          131.97,
+          -87.17,
           -89.95,
           0.0
         ],
-        "j4_deg": -94.82,
-        "tilt_deg": 77.9,
-        "clearance_mm": 0.0,
+        "j4_deg": -87.17,
+        "tilt_deg": 34.9,
+        "gripper_tip_clearance_mm": -15.7,
+        "flange_z_mm": 229.9,
         "penetrates_board": true
       }
     },
@@ -846,31 +890,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -31.59,
-          -14.9,
-          137.81,
-          -212.92,
+          -31.58,
+          -91.34,
+          143.65,
+          -142.31,
           -90.0,
-          -31.59
+          -31.58
         ],
-        "j4_deg": -212.92,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.0,
+        "j4_deg": -142.31,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -31.55,
-          -47.89,
-          130.77,
-          -96.99,
+          -31.57,
+          -99.12,
+          131.72,
+          -88.34,
           -89.95,
           0.0
         ],
-        "j4_deg": -96.99,
-        "tilt_deg": 75.9,
-        "clearance_mm": 0.1,
+        "j4_deg": -88.34,
+        "tilt_deg": 34.3,
+        "gripper_tip_clearance_mm": -15.4,
+        "flange_z_mm": 229.7,
         "penetrates_board": true
       }
     },
@@ -883,30 +929,32 @@
         "reachable": true,
         "joints_deg": [
           -39.15,
-          -16.43,
-          136.05,
-          -209.62,
+          -89.31,
+          141.65,
+          -142.34,
           -90.0,
           -39.15
         ],
-        "j4_deg": -209.62,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.0,
+        "j4_deg": -142.34,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -39.12,
-          -47.35,
-          129.4,
-          -98.72,
+          -39.09,
+          -96.86,
+          130.23,
+          -89.52,
           -89.95,
           0.0
         ],
-        "j4_deg": -98.72,
-        "tilt_deg": 73.3,
-        "clearance_mm": 0.0,
+        "j4_deg": -89.52,
+        "tilt_deg": 33.9,
+        "gripper_tip_clearance_mm": -15.2,
+        "flange_z_mm": 229.2,
         "penetrates_board": true
       }
     },
@@ -918,31 +966,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -45.67,
-          -18.46,
-          133.13,
-          -204.67,
+          -45.65,
+          -86.29,
+          138.41,
+          -142.12,
           -90.0,
-          -45.66
+          -45.65
         ],
-        "j4_deg": -204.67,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.1,
+        "j4_deg": -142.12,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -45.64,
-          -46.53,
-          126.76,
-          -99.77,
+          -93.51,
+          127.31,
+          -90.5,
           -89.95,
           0.0
         ],
-        "j4_deg": -99.77,
-        "tilt_deg": 70.5,
-        "clearance_mm": 0.1,
+        "j4_deg": -90.5,
+        "tilt_deg": 33.3,
+        "gripper_tip_clearance_mm": -15.0,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -954,31 +1004,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -51.14,
-          -20.49,
-          129.12,
-          -198.63,
+          -51.13,
+          -82.59,
+          134.04,
+          -141.45,
           -90.0,
-          -51.14
+          -51.13
         ],
-        "j4_deg": -198.63,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.1,
+        "j4_deg": -141.45,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -51.15,
-          -45.36,
-          123.0,
-          -100.0,
+          -51.12,
+          -89.31,
+          123.51,
+          -91.5,
           -89.95,
           0.0
         ],
-        "j4_deg": -100.0,
-        "tilt_deg": 67.6,
-        "clearance_mm": -0.1,
+        "j4_deg": -91.5,
+        "tilt_deg": 32.7,
+        "gripper_tip_clearance_mm": -14.7,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -990,31 +1042,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          10.64,
-          -22.67,
-          121.36,
-          -188.69,
+          10.61,
+          -76.37,
+          125.73,
+          -139.36,
           -90.0,
-          10.63
+          10.61
         ],
-        "j4_deg": -188.69,
-        "tilt_deg": 0.001,
-        "clearance_mm": 0.2,
+        "j4_deg": -139.36,
+        "tilt_deg": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          10.55,
-          -43.13,
-          112.37,
-          -88.81,
+          10.61,
+          -82.15,
+          114.72,
+          -87.8,
           -89.95,
           0.0
         ],
-        "j4_deg": -88.81,
-        "tilt_deg": 70.4,
-        "clearance_mm": 0.4,
+        "j4_deg": -87.8,
+        "tilt_deg": 34.8,
+        "gripper_tip_clearance_mm": -15.6,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1026,31 +1080,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          3.43,
-          -21.82,
-          125.18,
-          -193.36,
+          3.42,
+          -79.34,
+          129.83,
+          -140.49,
           -90.0,
           3.43
         ],
-        "j4_deg": -193.36,
+        "j4_deg": -140.49,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          3.39,
-          -44.46,
-          115.96,
-          -88.56,
+          3.4,
+          -85.55,
+          118.32,
+          -87.26,
           -89.95,
           0.0
         ],
-        "j4_deg": -88.56,
-        "tilt_deg": 72.9,
-        "clearance_mm": 0.5,
+        "j4_deg": -87.26,
+        "tilt_deg": 35.5,
+        "gripper_tip_clearance_mm": -15.9,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1062,31 +1118,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          -4.22,
-          -20.92,
-          127.98,
-          -197.07,
+          -4.23,
+          -81.64,
+          132.84,
+          -141.19,
           -90.0,
-          -4.22
+          -4.23
         ],
-        "j4_deg": -197.07,
+        "j4_deg": -141.19,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -4.25,
-          -45.22,
-          118.53,
-          -88.69,
+          -88.19,
+          121.03,
+          -87.02,
           -89.95,
           0.0
         ],
-        "j4_deg": -88.69,
-        "tilt_deg": 74.6,
-        "clearance_mm": 0.0,
+        "j4_deg": -87.02,
+        "tilt_deg": 35.8,
+        "gripper_tip_clearance_mm": -16.1,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1099,30 +1157,32 @@
         "reachable": true,
         "joints_deg": [
           -12.09,
-          -20.23,
-          129.68,
-          -199.46,
+          -83.11,
+          134.67,
+          -141.56,
           -90.0,
           -12.09
         ],
-        "j4_deg": -199.46,
+        "j4_deg": -141.56,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -12.1,
-          -45.76,
-          120.32,
-          -89.12,
+          -89.87,
+          122.77,
+          -87.1,
           -89.95,
           0.0
         ],
-        "j4_deg": -89.12,
-        "tilt_deg": 75.4,
-        "clearance_mm": 0.0,
+        "j4_deg": -87.1,
+        "tilt_deg": 35.8,
+        "gripper_tip_clearance_mm": -16.0,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1135,30 +1195,32 @@
         "reachable": true,
         "joints_deg": [
           -19.88,
-          -19.97,
-          130.25,
-          -200.28,
+          -83.62,
+          135.29,
+          -141.67,
           -90.0,
           -19.88
         ],
-        "j4_deg": -200.28,
+        "j4_deg": -141.67,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -19.88,
-          -45.94,
-          121.13,
-          -89.93,
+          -90.48,
+          123.49,
+          -87.51,
           -89.95,
           0.0
         ],
-        "j4_deg": -89.93,
-        "tilt_deg": 75.3,
-        "clearance_mm": 0.1,
+        "j4_deg": -87.51,
+        "tilt_deg": 35.5,
+        "gripper_tip_clearance_mm": -15.9,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1171,30 +1233,32 @@
         "reachable": true,
         "joints_deg": [
           -27.3,
-          -20.23,
-          129.68,
-          -199.45,
+          -83.11,
+          134.66,
+          -141.56,
           -90.0,
           -27.3
         ],
-        "j4_deg": -199.45,
+        "j4_deg": -141.56,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -27.31,
-          -45.78,
-          120.96,
-          -91.12,
+          -27.32,
+          -90.0,
+          123.21,
+          -88.25,
           -89.95,
           0.0
         ],
-        "j4_deg": -91.12,
-        "tilt_deg": 74.1,
-        "clearance_mm": 0.1,
+        "j4_deg": -88.25,
+        "tilt_deg": 35.0,
+        "gripper_tip_clearance_mm": -15.7,
+        "flange_z_mm": 230.1,
         "penetrates_board": true
       }
     },
@@ -1207,30 +1271,32 @@
         "reachable": true,
         "joints_deg": [
           -34.12,
-          -20.92,
-          127.97,
-          -197.05,
+          -81.63,
+          132.82,
+          -141.19,
           -90.0,
           -34.12
         ],
-        "j4_deg": -197.05,
+        "j4_deg": -141.19,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -34.21,
-          -45.27,
-          119.89,
-          -92.71,
+          -34.11,
+          -88.21,
+          121.74,
+          -89.34,
           -89.95,
           0.0
         ],
-        "j4_deg": -92.71,
-        "tilt_deg": 71.9,
-        "clearance_mm": 0.1,
+        "j4_deg": -89.34,
+        "tilt_deg": 34.2,
+        "gripper_tip_clearance_mm": -15.4,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1243,30 +1309,32 @@
         "reachable": true,
         "joints_deg": [
           -40.21,
-          -21.82,
-          125.17,
-          -193.35,
+          -79.33,
+          129.82,
+          -140.49,
           -90.0,
           -40.21
         ],
-        "j4_deg": -193.35,
+        "j4_deg": -140.49,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -40.21,
-          -44.26,
-          117.62,
-          -94.79,
+          -85.59,
+          119.37,
+          -90.64,
           -89.95,
           0.0
         ],
-        "j4_deg": -94.79,
-        "tilt_deg": 68.6,
-        "clearance_mm": 0.0,
+        "j4_deg": -90.64,
+        "tilt_deg": 33.1,
+        "gripper_tip_clearance_mm": -14.9,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1279,30 +1347,32 @@
         "reachable": true,
         "joints_deg": [
           -45.53,
-          -22.65,
-          121.3,
-          -188.66,
+          -76.37,
+          125.73,
+          -139.36,
           -90.0,
           -45.53
         ],
-        "j4_deg": -188.66,
+        "j4_deg": -139.36,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -45.52,
-          -42.9,
-          114.66,
-          -97.25,
+          -45.5,
+          -82.2,
+          116.11,
+          -92.07,
           -89.95,
           0.0
         ],
-        "j4_deg": -97.25,
-        "tilt_deg": 64.5,
-        "clearance_mm": 0.1,
+        "j4_deg": -92.07,
+        "tilt_deg": 31.8,
+        "gripper_tip_clearance_mm": -14.3,
+        "flange_z_mm": 229.7,
         "penetrates_board": true
       }
     },
@@ -1315,30 +1385,32 @@
         "reachable": true,
         "joints_deg": [
           9.45,
-          -23.25,
-          112.69,
-          -179.44,
+          -70.37,
+          116.75,
+          -136.38,
           -90.0,
           9.45
         ],
-        "j4_deg": -179.44,
+        "j4_deg": -136.38,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          9.43,
-          -39.89,
-          103.52,
-          -86.71,
+          9.42,
+          -75.27,
+          106.14,
+          -86.31,
           -89.95,
           0.0
         ],
-        "j4_deg": -86.71,
-        "tilt_deg": 66.9,
-        "clearance_mm": 0.2,
+        "j4_deg": -86.31,
+        "tilt_deg": 34.6,
+        "gripper_tip_clearance_mm": -15.5,
+        "flange_z_mm": 229.8,
         "penetrates_board": true
       }
     },
@@ -1351,30 +1423,32 @@
         "reachable": true,
         "joints_deg": [
           3.02,
-          -23.16,
-          116.42,
-          -183.26,
+          -72.9,
+          120.63,
+          -137.74,
           -90.0,
           3.02
         ],
-        "j4_deg": -183.26,
+        "j4_deg": -137.74,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          3.0,
-          -41.27,
-          106.92,
-          -86.45,
+          2.99,
+          -78.16,
+          109.57,
+          -85.92,
           -89.95,
           0.0
         ],
-        "j4_deg": -86.45,
-        "tilt_deg": 69.2,
-        "clearance_mm": 0.2,
+        "j4_deg": -85.92,
+        "tilt_deg": 35.5,
+        "gripper_tip_clearance_mm": -15.9,
+        "flange_z_mm": 229.7,
         "penetrates_board": true
       }
     },
@@ -1387,30 +1461,32 @@
         "reachable": true,
         "joints_deg": [
           -3.73,
-          -22.94,
-          119.12,
-          -186.19,
+          -74.79,
+          123.45,
+          -138.66,
           -90.0,
           -3.73
         ],
-        "j4_deg": -186.19,
+        "j4_deg": -138.66,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -3.73,
-          -42.27,
-          109.48,
-          -86.49,
+          -3.74,
+          -80.34,
+          112.15,
+          -85.83,
           -89.95,
           0.0
         ],
-        "j4_deg": -86.49,
-        "tilt_deg": 70.7,
-        "clearance_mm": 0.3,
+        "j4_deg": -85.83,
+        "tilt_deg": 36.0,
+        "gripper_tip_clearance_mm": -16.1,
+        "flange_z_mm": 229.6,
         "penetrates_board": true
       }
     },
@@ -1423,30 +1499,32 @@
         "reachable": true,
         "joints_deg": [
           -10.62,
-          -22.72,
-          120.76,
-          -188.03,
+          -75.97,
+          125.16,
+          -139.19,
           -90.0,
           -10.62
         ],
-        "j4_deg": -188.03,
+        "j4_deg": -139.19,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -10.58,
-          -42.9,
-          111.17,
-          -86.84,
+          -10.62,
+          -81.65,
+          113.66,
+          -86.11,
           -89.95,
           0.0
         ],
-        "j4_deg": -86.84,
-        "tilt_deg": 71.4,
-        "clearance_mm": 0.4,
+        "j4_deg": -86.11,
+        "tilt_deg": 35.9,
+        "gripper_tip_clearance_mm": -16.1,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1459,30 +1537,32 @@
         "reachable": true,
         "joints_deg": [
           -17.46,
-          -22.64,
-          121.3,
-          -188.66,
+          -76.37,
+          125.73,
+          -139.36,
           -90.0,
           -17.46
         ],
-        "j4_deg": -188.66,
+        "j4_deg": -139.36,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -17.46,
-          -42.98,
-          111.8,
-          -87.56,
+          -82.13,
+          114.37,
+          -86.67,
           -89.95,
           0.0
         ],
-        "j4_deg": -87.56,
-        "tilt_deg": 71.3,
-        "clearance_mm": 0.0,
+        "j4_deg": -86.67,
+        "tilt_deg": 35.6,
+        "gripper_tip_clearance_mm": -16.0,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1495,30 +1575,32 @@
         "reachable": true,
         "joints_deg": [
           -24.05,
-          -22.73,
-          120.75,
-          -188.03,
+          -75.97,
+          125.16,
+          -139.19,
           -90.0,
           -24.05
         ],
-        "j4_deg": -188.03,
+        "j4_deg": -139.19,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -24.04,
-          -42.81,
-          111.6,
-          -88.58,
+          -24.05,
+          -81.68,
+          114.12,
+          -87.56,
           -89.95,
           0.0
         ],
-        "j4_deg": -88.58,
-        "tilt_deg": 70.2,
-        "clearance_mm": 0.0,
+        "j4_deg": -87.56,
+        "tilt_deg": 34.9,
+        "gripper_tip_clearance_mm": -15.7,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1531,30 +1613,32 @@
         "reachable": true,
         "joints_deg": [
           -30.22,
-          -22.94,
-          119.12,
-          -186.18,
+          -74.78,
+          123.44,
+          -138.66,
           -90.0,
           -30.22
         ],
-        "j4_deg": -186.18,
+        "j4_deg": -138.66,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -30.22,
-          -42.24,
-          110.48,
-          -89.92,
+          -80.34,
+          112.93,
+          -88.78,
           -89.95,
           0.0
         ],
-        "j4_deg": -89.92,
-        "tilt_deg": 68.3,
-        "clearance_mm": 0.0,
+        "j4_deg": -88.78,
+        "tilt_deg": 33.8,
+        "gripper_tip_clearance_mm": -15.2,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1567,30 +1651,32 @@
         "reachable": true,
         "joints_deg": [
           -35.87,
-          -23.16,
-          116.42,
-          -183.26,
+          -72.89,
+          120.63,
+          -137.74,
           -90.0,
-          -35.88
+          -35.87
         ],
-        "j4_deg": -183.26,
+        "j4_deg": -137.74,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -35.89,
-          -41.27,
-          108.47,
-          -91.59,
+          -78.19,
+          110.84,
+          -90.28,
           -89.95,
           0.0
         ],
-        "j4_deg": -91.59,
-        "tilt_deg": 65.6,
-        "clearance_mm": 0.1,
+        "j4_deg": -90.28,
+        "tilt_deg": 32.4,
+        "gripper_tip_clearance_mm": -14.6,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1603,30 +1689,32 @@
         "reachable": true,
         "joints_deg": [
           -40.95,
-          -23.25,
-          112.69,
-          -179.44,
+          -70.38,
+          116.75,
+          -136.38,
           -90.0,
           -40.95
         ],
-        "j4_deg": -179.44,
+        "j4_deg": -136.38,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -40.99,
-          -39.89,
-          105.61,
-          -93.56,
+          -41.01,
+          -75.35,
+          107.9,
+          -92.07,
           -89.95,
           0.0
         ],
-        "j4_deg": -93.56,
-        "tilt_deg": 62.2,
-        "clearance_mm": 0.1,
+        "j4_deg": -92.07,
+        "tilt_deg": 30.5,
+        "gripper_tip_clearance_mm": -13.7,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1639,30 +1727,32 @@
         "reachable": true,
         "joints_deg": [
           8.51,
-          -22.55,
-          103.23,
-          -170.69,
+          -64.42,
+          107.05,
+          -132.63,
           -90.0,
           8.51
         ],
-        "j4_deg": -170.69,
+        "j4_deg": -132.63,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          8.51,
-          -36.14,
-          94.22,
-          -85.09,
+          8.5,
+          -68.41,
+          96.82,
+          -84.99,
           -89.95,
           0.0
         ],
-        "j4_deg": -85.09,
-        "tilt_deg": 63.0,
-        "clearance_mm": 0.1,
+        "j4_deg": -84.99,
+        "tilt_deg": 33.4,
+        "gripper_tip_clearance_mm": -15.0,
+        "flange_z_mm": 229.9,
         "penetrates_board": true
       }
     },
@@ -1675,30 +1765,32 @@
         "reachable": true,
         "joints_deg": [
           2.7,
-          -22.95,
-          106.88,
-          -173.94,
+          -66.67,
+          110.79,
+          -134.12,
           -90.0,
           2.7
         ],
-        "j4_deg": -173.94,
+        "j4_deg": -134.12,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           2.69,
-          -37.59,
-          97.51,
-          -84.84,
+          -70.96,
+          100.12,
+          -84.67,
           -89.95,
           0.0
         ],
-        "j4_deg": -84.84,
-        "tilt_deg": 65.1,
-        "clearance_mm": 0.1,
+        "j4_deg": -84.67,
+        "tilt_deg": 34.5,
+        "gripper_tip_clearance_mm": -15.5,
+        "flange_z_mm": 229.9,
         "penetrates_board": true
       }
     },
@@ -1711,30 +1803,32 @@
         "reachable": true,
         "joints_deg": [
           -3.34,
-          -23.14,
-          109.51,
-          -176.37,
+          -68.32,
+          113.48,
+          -135.16,
           -90.0,
           -3.34
         ],
-        "j4_deg": -176.37,
+        "j4_deg": -135.16,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -3.34,
-          -38.61,
-          99.96,
-          -84.88,
+          -72.85,
+          102.58,
+          -84.65,
           -89.95,
           0.0
         ],
-        "j4_deg": -84.88,
-        "tilt_deg": 66.5,
-        "clearance_mm": 0.1,
+        "j4_deg": -84.65,
+        "tilt_deg": 35.1,
+        "gripper_tip_clearance_mm": -15.7,
+        "flange_z_mm": 229.9,
         "penetrates_board": true
       }
     },
@@ -1747,30 +1841,32 @@
         "reachable": true,
         "joints_deg": [
           -9.47,
-          -23.21,
-          111.09,
-          -177.88,
+          -69.34,
+          115.11,
+          -135.78,
           -90.0,
           -9.47
         ],
-        "j4_deg": -177.88,
+        "j4_deg": -135.78,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -9.47,
-          -39.24,
-          101.56,
-          -85.22,
+          -74.03,
+          104.18,
+          -84.94,
           -89.95,
           0.0
         ],
-        "j4_deg": -85.22,
-        "tilt_deg": 67.1,
-        "clearance_mm": 0.1,
+        "j4_deg": -84.94,
+        "tilt_deg": 35.2,
+        "gripper_tip_clearance_mm": -15.8,
+        "flange_z_mm": 229.8,
         "penetrates_board": true
       }
     },
@@ -1783,30 +1879,32 @@
         "reachable": true,
         "joints_deg": [
           -15.57,
-          -23.23,
-          111.62,
-          -178.4,
+          -69.68,
+          115.66,
+          -135.98,
           -90.0,
           -15.57
         ],
-        "j4_deg": -178.4,
+        "j4_deg": -135.98,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -15.55,
-          -39.49,
-          102.28,
-          -85.87,
+          -74.46,
+          104.91,
+          -85.54,
           -89.95,
           0.0
         ],
-        "j4_deg": -85.87,
-        "tilt_deg": 66.9,
-        "clearance_mm": 0.3,
+        "j4_deg": -85.54,
+        "tilt_deg": 34.9,
+        "gripper_tip_clearance_mm": -15.7,
+        "flange_z_mm": 229.7,
         "penetrates_board": true
       }
     },
@@ -1819,30 +1917,32 @@
         "reachable": true,
         "joints_deg": [
           -21.49,
-          -23.21,
-          111.09,
-          -177.88,
+          -69.34,
+          115.11,
+          -135.78,
           -90.0,
           -21.49
         ],
-        "j4_deg": -177.88,
+        "j4_deg": -135.78,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -21.44,
-          -39.36,
-          102.15,
-          -86.81,
+          -21.49,
+          -74.03,
+          104.59,
+          -86.5,
           -89.95,
           0.0
         ],
-        "j4_deg": -86.81,
-        "tilt_deg": 66.0,
-        "clearance_mm": 0.4,
+        "j4_deg": -86.5,
+        "tilt_deg": 34.1,
+        "gripper_tip_clearance_mm": -15.3,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1855,30 +1955,32 @@
         "reachable": true,
         "joints_deg": [
           -27.12,
-          -23.14,
-          109.51,
-          -176.37,
+          -68.32,
+          113.48,
+          -135.17,
           -90.0,
           -27.12
         ],
-        "j4_deg": -176.37,
+        "j4_deg": -135.17,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -27.12,
-          -38.64,
-          100.95,
-          -88.12,
+          -72.88,
+          103.49,
+          -87.73,
           -89.95,
           0.0
         ],
-        "j4_deg": -88.12,
-        "tilt_deg": 64.2,
-        "clearance_mm": 0.0,
+        "j4_deg": -87.73,
+        "tilt_deg": 32.9,
+        "gripper_tip_clearance_mm": -14.8,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1891,30 +1993,32 @@
         "reachable": true,
         "joints_deg": [
           -32.36,
-          -22.95,
-          106.89,
-          -173.94,
+          -66.66,
+          110.79,
+          -134.13,
           -90.0,
           -32.36
         ],
-        "j4_deg": -173.94,
+        "j4_deg": -134.13,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -32.36,
-          -37.63,
-          98.99,
-          -89.68,
+          -71.0,
+          101.5,
+          -89.27,
           -89.95,
           0.0
         ],
-        "j4_deg": -89.68,
-        "tilt_deg": 61.7,
-        "clearance_mm": 0.0,
+        "j4_deg": -89.27,
+        "tilt_deg": 31.2,
+        "gripper_tip_clearance_mm": -14.1,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1927,30 +2031,32 @@
         "reachable": true,
         "joints_deg": [
           -37.16,
-          -22.55,
-          103.23,
-          -170.68,
+          -64.42,
+          107.06,
+          -132.64,
           -90.0,
           -37.16
         ],
-        "j4_deg": -170.68,
+        "j4_deg": -132.64,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -37.16,
-          -36.18,
-          96.17,
-          -91.53,
+          -68.44,
+          98.65,
+          -91.08,
           -89.95,
           0.0
         ],
-        "j4_deg": -91.53,
-        "tilt_deg": 58.5,
-        "clearance_mm": 0.0,
+        "j4_deg": -91.08,
+        "tilt_deg": 29.1,
+        "gripper_tip_clearance_mm": -13.1,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1962,31 +2068,33 @@
       "optimal": {
         "reachable": true,
         "joints_deg": [
-          7.75,
-          -20.72,
-          92.86,
-          -162.14,
+          7.74,
+          -58.35,
+          96.54,
+          -128.19,
           -90.0,
           7.74
         ],
-        "j4_deg": -162.14,
+        "j4_deg": -128.19,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.1,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           7.73,
-          -31.83,
-          84.2,
-          -83.82,
+          -61.48,
+          86.83,
+          -83.87,
           -89.95,
           0.0
         ],
-        "j4_deg": -83.82,
-        "tilt_deg": 58.6,
-        "clearance_mm": 0.0,
+        "j4_deg": -83.87,
+        "tilt_deg": 31.5,
+        "gripper_tip_clearance_mm": -14.2,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -1999,30 +2107,32 @@
         "reachable": true,
         "joints_deg": [
           2.44,
-          -21.44,
-          96.45,
-          -165.01,
+          -60.42,
+          100.18,
+          -129.76,
           -90.0,
           2.44
         ],
-        "j4_deg": -165.01,
+        "j4_deg": -129.76,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           2.44,
-          -33.34,
-          87.47,
-          -83.55,
+          -63.82,
+          90.09,
+          -83.58,
           -89.95,
           0.0
         ],
-        "j4_deg": -83.55,
-        "tilt_deg": 60.6,
-        "clearance_mm": 0.0,
+        "j4_deg": -83.58,
+        "tilt_deg": 32.7,
+        "gripper_tip_clearance_mm": -14.7,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2035,30 +2145,32 @@
         "reachable": true,
         "joints_deg": [
           -3.02,
-          -21.91,
-          99.06,
-          -167.14,
+          -61.94,
+          102.82,
+          -130.88,
           -90.0,
           -3.02
         ],
-        "j4_deg": -167.14,
+        "j4_deg": -130.88,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -3.02,
-          -34.41,
-          89.88,
-          -83.6,
+          -65.54,
+          92.49,
+          -83.59,
           -89.95,
           0.0
         ],
-        "j4_deg": -83.6,
-        "tilt_deg": 61.9,
-        "clearance_mm": 0.0,
+        "j4_deg": -83.59,
+        "tilt_deg": 33.4,
+        "gripper_tip_clearance_mm": -15.0,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2071,30 +2183,32 @@
         "reachable": true,
         "joints_deg": [
           -8.55,
-          -22.17,
-          100.62,
-          -168.45,
+          -62.86,
+          104.41,
+          -131.55,
           -90.0,
           -8.55
         ],
-        "j4_deg": -168.45,
+        "j4_deg": -131.55,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -8.55,
-          -35.06,
-          91.44,
-          -83.94,
+          -66.6,
+          94.05,
+          -83.9,
           -89.95,
           0.0
         ],
-        "j4_deg": -83.94,
-        "tilt_deg": 62.4,
-        "clearance_mm": 0.1,
+        "j4_deg": -83.9,
+        "tilt_deg": 33.5,
+        "gripper_tip_clearance_mm": -15.1,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2107,30 +2221,32 @@
         "reachable": true,
         "joints_deg": [
           -14.06,
-          -22.25,
-          101.14,
-          -168.89,
+          -63.17,
+          104.93,
+          -131.77,
           -90.0,
           -14.06
         ],
-        "j4_deg": -168.89,
+        "j4_deg": -131.77,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -14.05,
-          -35.3,
-          92.14,
-          -84.59,
+          -14.06,
+          -66.98,
+          94.75,
+          -84.53,
           -89.95,
           0.0
         ],
-        "j4_deg": -84.59,
-        "tilt_deg": 62.3,
-        "clearance_mm": 0.1,
+        "j4_deg": -84.53,
+        "tilt_deg": 33.2,
+        "gripper_tip_clearance_mm": -14.9,
+        "flange_z_mm": 229.9,
         "penetrates_board": true
       }
     },
@@ -2143,30 +2259,32 @@
         "reachable": true,
         "joints_deg": [
           -19.43,
-          -22.17,
-          100.62,
-          -168.45,
+          -62.86,
+          104.41,
+          -131.55,
           -90.0,
           -19.43
         ],
-        "j4_deg": -168.45,
+        "j4_deg": -131.55,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -19.42,
-          -35.13,
-          91.99,
-          -85.53,
+          -66.66,
+          94.6,
+          -85.46,
           -89.95,
           0.0
         ],
-        "j4_deg": -85.53,
-        "tilt_deg": 61.3,
-        "clearance_mm": 0.2,
+        "j4_deg": -85.46,
+        "tilt_deg": 32.5,
+        "gripper_tip_clearance_mm": -14.6,
+        "flange_z_mm": 229.9,
         "penetrates_board": true
       }
     },
@@ -2179,30 +2297,32 @@
         "reachable": true,
         "joints_deg": [
           -24.59,
-          -21.91,
-          99.06,
-          -167.14,
+          -61.94,
+          102.82,
+          -130.88,
           -90.0,
           -24.59
         ],
-        "j4_deg": -167.14,
+        "j4_deg": -130.88,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -24.56,
-          -34.56,
-          90.99,
-          -86.76,
+          -65.66,
+          93.6,
+          -86.68,
           -89.95,
           0.0
         ],
-        "j4_deg": -86.76,
-        "tilt_deg": 59.7,
-        "clearance_mm": 0.3,
+        "j4_deg": -86.68,
+        "tilt_deg": 31.3,
+        "gripper_tip_clearance_mm": -14.1,
+        "flange_z_mm": 229.8,
         "penetrates_board": true
       }
     },
@@ -2215,30 +2335,32 @@
         "reachable": true,
         "joints_deg": [
           -29.45,
-          -21.44,
-          96.45,
-          -165.01,
+          -60.42,
+          100.19,
+          -129.77,
           -90.0,
           -29.45
         ],
-        "j4_deg": -165.01,
+        "j4_deg": -129.77,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -29.4,
-          -33.57,
-          89.15,
-          -88.26,
+          -29.45,
+          -63.89,
+          91.54,
+          -88.25,
           -89.95,
           0.0
         ],
-        "j4_deg": -88.26,
-        "tilt_deg": 57.3,
-        "clearance_mm": 0.5,
+        "j4_deg": -88.25,
+        "tilt_deg": 29.4,
+        "gripper_tip_clearance_mm": -13.2,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2251,30 +2373,32 @@
         "reachable": true,
         "joints_deg": [
           -33.97,
-          -20.69,
-          92.8,
-          -162.11,
+          -58.33,
+          96.5,
+          -128.17,
           -90.0,
           -33.97
         ],
-        "j4_deg": -162.11,
+        "j4_deg": -128.17,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -33.97,
-          -31.9,
-          86.16,
-          -90.13,
+          -61.55,
+          88.74,
+          -90.07,
           -89.95,
           0.0
         ],
-        "j4_deg": -90.13,
-        "tilt_deg": 54.1,
-        "clearance_mm": 0.0,
+        "j4_deg": -90.07,
+        "tilt_deg": 27.1,
+        "gripper_tip_clearance_mm": -12.2,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2287,30 +2411,32 @@
         "reachable": true,
         "joints_deg": [
           7.09,
-          -17.7,
-          81.1,
-          -153.4,
+          -51.92,
+          84.82,
+          -122.91,
           -90.0,
           7.09
         ],
-        "j4_deg": -153.4,
+        "j4_deg": -122.91,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           7.09,
-          -26.87,
-          74.01,
-          -85.37,
+          -54.32,
+          76.44,
+          -84.63,
           -89.95,
           0.0
         ],
-        "j4_deg": -85.37,
-        "tilt_deg": 51.8,
-        "clearance_mm": 0.0,
+        "j4_deg": -84.63,
+        "tilt_deg": 27.5,
+        "gripper_tip_clearance_mm": -12.3,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2323,30 +2449,32 @@
         "reachable": true,
         "joints_deg": [
           2.23,
-          -18.75,
-          84.87,
-          -156.12,
+          -53.95,
+          88.57,
+          -124.63,
           -90.0,
           2.23
         ],
-        "j4_deg": -156.12,
+        "j4_deg": -124.63,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           2.23,
-          -28.47,
-          77.14,
-          -84.44,
+          -56.55,
+          79.53,
+          -83.68,
           -89.95,
           0.0
         ],
-        "j4_deg": -84.44,
-        "tilt_deg": 54.2,
-        "clearance_mm": 0.0,
+        "j4_deg": -83.68,
+        "tilt_deg": 29.3,
+        "gripper_tip_clearance_mm": -13.2,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2359,30 +2487,32 @@
         "reachable": true,
         "joints_deg": [
           -2.75,
-          -19.44,
-          87.53,
-          -158.09,
+          -55.4,
+          91.23,
+          -125.83,
           -90.0,
           -2.75
         ],
-        "j4_deg": -158.09,
+        "j4_deg": -125.83,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -2.75,
-          -29.6,
-          79.37,
-          -83.83,
+          -58.16,
+          81.74,
+          -83.04,
           -89.95,
           0.0
         ],
-        "j4_deg": -83.83,
-        "tilt_deg": 56.0,
-        "clearance_mm": 0.0,
+        "j4_deg": -83.04,
+        "tilt_deg": 30.5,
+        "gripper_tip_clearance_mm": -13.7,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2395,30 +2525,32 @@
         "reachable": true,
         "joints_deg": [
           -7.79,
-          -19.83,
-          89.12,
-          -159.28,
+          -56.28,
+          92.81,
+          -126.54,
           -90.0,
           -7.79
         ],
-        "j4_deg": -159.28,
+        "j4_deg": -126.54,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -7.79,
-          -30.27,
-          80.73,
-          -83.53,
+          -7.8,
+          -59.14,
+          83.2,
+          -83.08,
           -89.95,
           0.0
         ],
-        "j4_deg": -83.53,
-        "tilt_deg": 56.9,
-        "clearance_mm": 0.0,
+        "j4_deg": -83.08,
+        "tilt_deg": 31.0,
+        "gripper_tip_clearance_mm": -13.9,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2431,30 +2563,32 @@
         "reachable": true,
         "joints_deg": [
           -12.81,
-          -19.96,
-          89.64,
-          -159.68,
+          -56.57,
+          93.34,
+          -126.77,
           -90.0,
           -12.81
         ],
-        "j4_deg": -159.68,
+        "j4_deg": -126.77,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -12.81,
-          -30.5,
-          81.26,
-          -83.63,
+          -59.5,
+          83.91,
+          -83.72,
           -89.95,
           0.0
         ],
-        "j4_deg": -83.63,
-        "tilt_deg": 57.1,
-        "clearance_mm": 0.1,
+        "j4_deg": -83.72,
+        "tilt_deg": 30.7,
+        "gripper_tip_clearance_mm": -13.8,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2467,30 +2601,32 @@
         "reachable": true,
         "joints_deg": [
           -17.73,
-          -19.83,
-          89.12,
-          -159.28,
+          -56.28,
+          92.81,
+          -126.54,
           -90.0,
           -17.73
         ],
-        "j4_deg": -159.28,
+        "j4_deg": -126.54,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -17.73,
-          -30.31,
-          81.11,
-          -84.58,
+          -59.2,
+          83.76,
+          -84.66,
           -89.95,
           0.0
         ],
-        "j4_deg": -84.58,
-        "tilt_deg": 56.2,
-        "clearance_mm": 0.1,
+        "j4_deg": -84.66,
+        "tilt_deg": 29.9,
+        "gripper_tip_clearance_mm": -13.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2503,30 +2639,32 @@
         "reachable": true,
         "joints_deg": [
           -22.49,
-          -19.44,
-          87.53,
-          -158.09,
+          -55.4,
+          91.23,
+          -125.83,
           -90.0,
           -22.49
         ],
-        "j4_deg": -158.09,
+        "j4_deg": -125.83,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -22.48,
-          -29.69,
-          80.09,
-          -85.83,
+          -58.27,
+          82.75,
+          -85.9,
           -89.95,
           0.0
         ],
-        "j4_deg": -85.83,
-        "tilt_deg": 54.6,
-        "clearance_mm": 0.1,
+        "j4_deg": -85.9,
+        "tilt_deg": 28.6,
+        "gripper_tip_clearance_mm": -12.8,
+        "flange_z_mm": 229.9,
         "penetrates_board": true
       }
     },
@@ -2539,30 +2677,32 @@
         "reachable": true,
         "joints_deg": [
           -27.01,
-          -18.75,
-          84.87,
-          -156.13,
+          -53.95,
+          88.57,
+          -124.63,
           -90.0,
           -27.01
         ],
-        "j4_deg": -156.13,
+        "j4_deg": -124.63,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -27.0,
-          -28.62,
-          78.21,
-          -87.36,
+          -56.7,
+          80.88,
+          -87.44,
           -89.95,
           0.0
         ],
-        "j4_deg": -87.36,
-        "tilt_deg": 52.2,
-        "clearance_mm": 0.2,
+        "j4_deg": -87.44,
+        "tilt_deg": 26.7,
+        "gripper_tip_clearance_mm": -12.0,
+        "flange_z_mm": 229.9,
         "penetrates_board": true
       }
     },
@@ -2575,31 +2715,33 @@
         "reachable": true,
         "joints_deg": [
           -31.27,
-          -17.7,
-          81.11,
-          -153.41,
+          -51.92,
+          84.83,
+          -122.91,
           -90.0,
           -31.27
         ],
-        "j4_deg": -153.41,
+        "j4_deg": -122.91,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -31.25,
-          -27.07,
-          75.43,
-          -89.17,
+          -54.51,
+          78.13,
+          -89.25,
           -89.95,
           0.0
         ],
-        "j4_deg": -89.17,
-        "tilt_deg": 49.2,
-        "clearance_mm": 0.3,
-        "penetrates_board": true
+        "j4_deg": -89.25,
+        "tilt_deg": 24.4,
+        "gripper_tip_clearance_mm": -10.9,
+        "flange_z_mm": 229.8,
+        "penetrates_board": false
       }
     },
     {
@@ -2611,31 +2753,33 @@
         "reachable": true,
         "joints_deg": [
           6.55,
-          -13.5,
-          67.73,
-          -144.23,
+          -44.93,
+          71.63,
+          -116.69,
           -90.0,
           6.55
         ],
-        "j4_deg": -144.23,
+        "j4_deg": -116.69,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.1,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           6.54,
-          -20.95,
-          62.68,
-          -88.48,
+          -46.61,
+          65.32,
+          -87.73,
           -89.95,
           0.0
         ],
-        "j4_deg": -88.48,
-        "tilt_deg": 43.2,
-        "clearance_mm": 0.0,
-        "penetrates_board": true
+        "j4_deg": -87.73,
+        "tilt_deg": 21.0,
+        "gripper_tip_clearance_mm": -9.2,
+        "flange_z_mm": 230.0,
+        "penetrates_board": false
       }
     },
     {
@@ -2647,31 +2791,33 @@
         "reachable": true,
         "joints_deg": [
           2.05,
-          -14.79,
-          71.65,
-          -146.86,
+          -46.96,
+          75.5,
+          -118.54,
           -90.0,
           2.05
         ],
-        "j4_deg": -146.86,
+        "j4_deg": -118.54,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           2.05,
-          -22.91,
-          66.32,
-          -87.4,
+          -48.88,
+          68.62,
+          -86.74,
           -89.95,
           0.0
         ],
-        "j4_deg": -87.4,
-        "tilt_deg": 46.0,
-        "clearance_mm": 0.1,
-        "penetrates_board": true
+        "j4_deg": -86.74,
+        "tilt_deg": 23.0,
+        "gripper_tip_clearance_mm": -10.2,
+        "flange_z_mm": 230.0,
+        "penetrates_board": false
       }
     },
     {
@@ -2683,31 +2829,33 @@
         "reachable": true,
         "joints_deg": [
           -2.53,
-          -15.7,
-          74.48,
-          -148.78,
+          -48.43,
+          78.29,
+          -119.86,
           -90.0,
           -2.53
         ],
-        "j4_deg": -148.78,
+        "j4_deg": -119.86,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -2.55,
-          -24.15,
-          68.7,
-          -86.72,
+          -2.53,
+          -50.48,
+          70.94,
+          -86.07,
           -89.95,
           0.0
         ],
-        "j4_deg": -86.72,
-        "tilt_deg": 47.8,
-        "clearance_mm": 0.1,
-        "penetrates_board": true
+        "j4_deg": -86.07,
+        "tilt_deg": 24.4,
+        "gripper_tip_clearance_mm": -10.9,
+        "flange_z_mm": 230.0,
+        "penetrates_board": false
       }
     },
     {
@@ -2719,30 +2867,32 @@
         "reachable": true,
         "joints_deg": [
           -7.16,
-          -16.22,
-          76.16,
-          -149.94,
+          -49.3,
+          79.94,
+          -120.64,
           -90.0,
           -7.16
         ],
-        "j4_deg": -149.94,
+        "j4_deg": -120.64,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -7.16,
-          -24.73,
-          69.84,
-          -86.45,
+          -51.45,
+          72.34,
+          -85.72,
           -89.95,
           0.0
         ],
-        "j4_deg": -86.45,
-        "tilt_deg": 48.7,
-        "clearance_mm": 0.0,
+        "j4_deg": -85.72,
+        "tilt_deg": 25.2,
+        "gripper_tip_clearance_mm": -11.3,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2755,30 +2905,32 @@
         "reachable": true,
         "joints_deg": [
           -11.77,
-          -16.4,
-          76.72,
-          -150.32,
+          -49.6,
+          80.49,
+          -120.89,
           -90.0,
           -11.77
         ],
-        "j4_deg": -150.32,
+        "j4_deg": -120.89,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -11.77,
-          -24.98,
-          70.35,
-          -86.42,
+          -51.78,
+          72.84,
+          -85.69,
           -89.95,
           0.0
         ],
-        "j4_deg": -86.42,
-        "tilt_deg": 49.0,
-        "clearance_mm": 0.0,
+        "j4_deg": -85.69,
+        "tilt_deg": 25.4,
+        "gripper_tip_clearance_mm": -11.4,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2791,30 +2943,32 @@
         "reachable": true,
         "joints_deg": [
           -16.31,
-          -16.23,
-          76.16,
-          -149.94,
+          -49.31,
+          79.94,
+          -120.64,
           -90.0,
           -16.31
         ],
-        "j4_deg": -149.94,
+        "j4_deg": -120.64,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -16.31,
-          -24.76,
-          69.96,
-          -86.71,
+          -51.47,
+          72.46,
+          -85.98,
           -89.95,
           0.0
         ],
-        "j4_deg": -86.71,
-        "tilt_deg": 48.5,
-        "clearance_mm": 0.1,
+        "j4_deg": -85.98,
+        "tilt_deg": 25.0,
+        "gripper_tip_clearance_mm": -11.2,
+        "flange_z_mm": 230.0,
         "penetrates_board": true
       }
     },
@@ -2827,31 +2981,33 @@
         "reachable": true,
         "joints_deg": [
           -20.71,
-          -15.7,
-          74.49,
-          -148.79,
+          -48.43,
+          78.29,
+          -119.86,
           -90.0,
           -20.71
         ],
-        "j4_deg": -148.79,
+        "j4_deg": -119.86,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -20.71,
-          -24.05,
-          68.66,
-          -87.32,
+          -50.54,
+          71.19,
+          -86.61,
           -89.95,
           0.0
         ],
-        "j4_deg": -87.32,
-        "tilt_deg": 47.3,
-        "clearance_mm": 0.1,
-        "penetrates_board": true
+        "j4_deg": -86.61,
+        "tilt_deg": 24.0,
+        "gripper_tip_clearance_mm": -10.7,
+        "flange_z_mm": 230.0,
+        "penetrates_board": false
       }
     },
     {
@@ -2863,31 +3019,33 @@
         "reachable": true,
         "joints_deg": [
           -24.94,
-          -14.79,
-          71.65,
-          -146.86,
+          -46.96,
+          75.5,
+          -118.54,
           -90.0,
           -24.94
         ],
-        "j4_deg": -146.86,
+        "j4_deg": -118.54,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -24.94,
-          -22.85,
-          66.45,
-          -88.27,
+          -48.98,
+          69.03,
+          -87.57,
           -89.95,
           0.0
         ],
-        "j4_deg": -88.27,
-        "tilt_deg": 45.3,
-        "clearance_mm": 0.2,
-        "penetrates_board": true
+        "j4_deg": -87.57,
+        "tilt_deg": 22.5,
+        "gripper_tip_clearance_mm": -10.0,
+        "flange_z_mm": 229.9,
+        "penetrates_board": false
       }
     },
     {
@@ -2899,31 +3057,33 @@
         "reachable": true,
         "joints_deg": [
           -28.95,
-          -13.43,
-          67.58,
-          -144.15,
+          -44.89,
+          71.52,
+          -116.64,
           -90.0,
           -28.95
         ],
-        "j4_deg": -144.15,
+        "j4_deg": -116.64,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -28.95,
-          -21.12,
-          63.28,
-          -89.54,
+          -46.78,
+          65.97,
+          -88.96,
           -89.95,
           0.0
         ],
-        "j4_deg": -89.54,
-        "tilt_deg": 42.6,
-        "clearance_mm": 0.3,
-        "penetrates_board": true
+        "j4_deg": -88.96,
+        "tilt_deg": 20.2,
+        "gripper_tip_clearance_mm": -8.9,
+        "flange_z_mm": 229.9,
+        "penetrates_board": false
       }
     },
     {
@@ -2935,31 +3095,33 @@
         "reachable": true,
         "joints_deg": [
           6.07,
-          -7.4,
-          50.99,
-          -133.59,
+          -36.71,
+          55.52,
+          -108.82,
           -90.0,
           6.07
         ],
-        "j4_deg": -133.59,
+        "j4_deg": -108.82,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.1,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           6.07,
-          -13.38,
-          48.74,
-          -92.45,
+          -37.69,
+          51.89,
+          -91.56,
           -89.95,
           0.0
         ],
-        "j4_deg": -92.45,
-        "tilt_deg": 32.9,
-        "clearance_mm": 0.0,
-        "penetrates_board": true
+        "j4_deg": -91.56,
+        "tilt_deg": 12.6,
+        "gripper_tip_clearance_mm": -5.1,
+        "flange_z_mm": 230.0,
+        "penetrates_board": false
       }
     },
     {
@@ -2971,31 +3133,33 @@
         "reachable": true,
         "joints_deg": [
           1.9,
-          -9.17,
-          55.67,
-          -136.5,
+          -38.99,
+          60.03,
+          -111.04,
           -90.0,
           1.9
         ],
-        "j4_deg": -136.5,
+        "j4_deg": -111.04,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          1.89,
-          -15.79,
-          53.07,
-          -91.21,
+          1.9,
+          -40.2,
+          55.72,
+          -90.46,
           -89.95,
           0.0
         ],
-        "j4_deg": -91.21,
-        "tilt_deg": 36.1,
-        "clearance_mm": 0.3,
-        "penetrates_board": true
+        "j4_deg": -90.46,
+        "tilt_deg": 15.1,
+        "gripper_tip_clearance_mm": -6.3,
+        "flange_z_mm": 230.0,
+        "penetrates_board": false
       }
     },
     {
@@ -3007,31 +3171,33 @@
         "reachable": true,
         "joints_deg": [
           -2.34,
-          -10.38,
-          58.95,
-          -138.57,
+          -40.59,
+          63.18,
+          -112.59,
           -90.0,
           -2.34
         ],
-        "j4_deg": -138.57,
+        "j4_deg": -112.59,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
-          -2.35,
-          -17.25,
-          55.76,
-          -90.43,
+          -2.36,
+          -42.14,
+          58.66,
+          -89.6,
           -89.95,
           0.0
         ],
-        "j4_deg": -90.43,
-        "tilt_deg": 38.1,
-        "clearance_mm": 0.2,
-        "penetrates_board": true
+        "j4_deg": -89.6,
+        "tilt_deg": 16.9,
+        "gripper_tip_clearance_mm": -7.2,
+        "flange_z_mm": 229.9,
+        "penetrates_board": false
       }
     },
     {
@@ -3043,31 +3209,33 @@
         "reachable": true,
         "joints_deg": [
           -6.62,
-          -11.08,
-          60.87,
-          -139.79,
+          -41.53,
+          65.01,
+          -113.49,
           -90.0,
           -6.62
         ],
-        "j4_deg": -139.79,
+        "j4_deg": -113.49,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -6.62,
-          -17.95,
-          57.09,
-          -90.07,
+          -42.96,
+          59.89,
+          -89.28,
           -89.95,
           0.0
         ],
-        "j4_deg": -90.07,
-        "tilt_deg": 39.1,
-        "clearance_mm": 0.0,
-        "penetrates_board": true
+        "j4_deg": -89.28,
+        "tilt_deg": 17.7,
+        "gripper_tip_clearance_mm": -7.6,
+        "flange_z_mm": 230.0,
+        "penetrates_board": false
       }
     },
     {
@@ -3079,31 +3247,33 @@
         "reachable": true,
         "joints_deg": [
           -10.89,
-          -11.3,
-          61.5,
-          -140.19,
+          -41.84,
+          65.62,
+          -113.78,
           -90.0,
           -10.89
         ],
-        "j4_deg": -140.19,
+        "j4_deg": -113.78,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -10.89,
-          -18.24,
-          57.64,
-          -89.97,
+          -43.31,
+          60.43,
+          -89.2,
           -89.95,
           0.0
         ],
-        "j4_deg": -89.97,
-        "tilt_deg": 39.4,
-        "clearance_mm": 0.0,
-        "penetrates_board": true
+        "j4_deg": -89.2,
+        "tilt_deg": 17.9,
+        "gripper_tip_clearance_mm": -7.7,
+        "flange_z_mm": 230.0,
+        "penetrates_board": false
       }
     },
     {
@@ -3115,31 +3285,33 @@
         "reachable": true,
         "joints_deg": [
           -15.1,
-          -11.08,
-          60.87,
-          -139.79,
+          -41.53,
+          65.02,
+          -113.49,
           -90.0,
           -15.1
         ],
-        "j4_deg": -139.79,
+        "j4_deg": -113.49,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -15.1,
-          -17.98,
-          57.18,
-          -90.21,
+          -42.99,
+          59.99,
+          -89.45,
           -89.95,
           0.0
         ],
-        "j4_deg": -90.21,
-        "tilt_deg": 39.0,
-        "clearance_mm": 0.1,
-        "penetrates_board": true
+        "j4_deg": -89.45,
+        "tilt_deg": 17.5,
+        "gripper_tip_clearance_mm": -7.5,
+        "flange_z_mm": 230.0,
+        "penetrates_board": false
       }
     },
     {
@@ -3151,31 +3323,33 @@
         "reachable": true,
         "joints_deg": [
           -19.2,
-          -10.39,
-          58.96,
-          -138.57,
+          -40.59,
+          63.18,
+          -112.59,
           -90.0,
           -19.2
         ],
-        "j4_deg": -138.57,
+        "j4_deg": -112.59,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -19.2,
-          -17.15,
-          55.69,
-          -90.8,
+          -42.0,
+          58.56,
+          -90.05,
           -89.95,
           0.0
         ],
-        "j4_deg": -90.8,
-        "tilt_deg": 37.7,
-        "clearance_mm": 0.1,
-        "penetrates_board": true
+        "j4_deg": -90.05,
+        "tilt_deg": 16.5,
+        "gripper_tip_clearance_mm": -7.0,
+        "flange_z_mm": 230.0,
+        "penetrates_board": false
       }
     },
     {
@@ -3187,31 +3361,33 @@
         "reachable": true,
         "joints_deg": [
           -23.16,
-          -9.17,
-          55.68,
-          -136.51,
+          -38.99,
+          60.04,
+          -111.05,
           -90.0,
           -23.16
         ],
-        "j4_deg": -136.51,
+        "j4_deg": -111.05,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -23.16,
-          -15.73,
-          53.14,
-          -91.74,
+          -40.33,
+          56.11,
+          -91.0,
           -89.95,
           0.0
         ],
-        "j4_deg": -91.74,
-        "tilt_deg": 35.7,
-        "clearance_mm": 0.2,
-        "penetrates_board": true
+        "j4_deg": -91.0,
+        "tilt_deg": 14.8,
+        "gripper_tip_clearance_mm": -6.2,
+        "flange_z_mm": 229.9,
+        "penetrates_board": false
       }
     },
     {
@@ -3223,31 +3399,33 @@
         "reachable": true,
         "joints_deg": [
           -26.94,
-          -7.34,
-          50.84,
-          -133.51,
+          -36.68,
+          55.45,
+          -108.78,
           -90.0,
           -26.94
         ],
-        "j4_deg": -133.51,
+        "j4_deg": -108.78,
         "tilt_deg": 0.0,
-        "clearance_mm": 0.0,
+        "gripper_tip_clearance_mm": 1.5,
+        "flange_z_mm": 230.0,
         "penetrates_board": false
       },
       "constrained_j4": {
         "reachable": true,
         "joints_deg": [
           -26.94,
-          -13.37,
-          48.93,
-          -93.17,
+          -37.67,
+          52.12,
+          -92.43,
           -89.95,
           0.0
         ],
-        "j4_deg": -93.17,
-        "tilt_deg": 32.4,
-        "clearance_mm": 0.0,
-        "penetrates_board": true
+        "j4_deg": -92.43,
+        "tilt_deg": 12.0,
+        "gripper_tip_clearance_mm": -4.7,
+        "flange_z_mm": 230.0,
+        "penetrates_board": false
       }
     }
   ]
