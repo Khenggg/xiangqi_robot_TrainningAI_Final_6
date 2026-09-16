@@ -15,6 +15,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
+import pybullet as p
 
 from src.hardware.backends.base import RobotStateSnapshot
 from src.hardware.telemetry_publisher import TelemetryPublisher
@@ -146,6 +147,8 @@ class VirtualXiangqiSimulation:
 
     def _on_robot_state_update(self, snapshot: RobotStateSnapshot):
         """Called automatically when VirtualFR3Backend state changes."""
+        if not hasattr(self.world, "client_id") or self.world.client_id < 0 or not p.isConnected(self.world.client_id):
+            return
         self._sync_gripper_to_tcp(snapshot)
 
         # Detect gripper transition
