@@ -162,6 +162,193 @@ function disposeRobotArm(candidate) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// 2.5) CAD STEP GRIPPER (Tương thích hoàn toàn với frnsimulation)
+// ---------------------------------------------------------------------------
+const GRIPPER_FILE = "Assieme_pinza_dita_parallele.stp";
+const GRIPPER_BASE = "./assets/fr3_v6/";
+const GRIPPER_MOUNT_OFFSET_BY_PROFILE = Object.freeze({
+  fr3: [-0.03, 0.014, 0.16],
+  fr5: [-0.03, 0.014, 0.16],
+});
+const GRIPPER_MOUNT_ROTATION_BY_PROFILE = Object.freeze({
+  fr3: [Math.PI, 0, 0],
+  fr5: [Math.PI, 0, 0],
+});
+const GRIPPER_MOUNT_ROLL_BY_PROFILE = Object.freeze({
+  fr3: 0,
+  fr5: (3 * Math.PI) / 4,
+});
+const GRIPPER_SCALE = 0.0008;
+const GRIPPER_FINGER_SOURCE_COLOR = 0x694d3b;
+const GRIPPER_FINGER_TRAVEL = 16;
+const GRIPPER_ANIMATION_MS = 220;
+const GRIPPER_FLANGE_ORIGIN_CAD = [37.555, 17.5, 75];
+const GRIPPER_FLANGE_TARGET_BY_PROFILE = Object.freeze({
+  fr3: [0, 0, 0.1],
+  fr5: [0, 0, 0.1],
+});
+
+function gripperMountQuaternion(profileId = "fr3") {
+  const baseRotation =
+    GRIPPER_MOUNT_ROTATION_BY_PROFILE[profileId] ||
+    GRIPPER_MOUNT_ROTATION_BY_PROFILE.fr3;
+  const quaternion = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(...baseRotation),
+  );
+  const roll = GRIPPER_MOUNT_ROLL_BY_PROFILE[profileId] || 0;
+  if (roll) {
+    quaternion.multiply(
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), roll),
+    );
+  }
+  return quaternion;
+}
+
+function gripperMountOffset(profileId = "fr3") {
+  const calibratedOffset = GRIPPER_MOUNT_OFFSET_BY_PROFILE[profileId];
+  if (calibratedOffset && !GRIPPER_MOUNT_ROLL_BY_PROFILE[profileId]) {
+    return calibratedOffset;
+  }
+  const target = new THREE.Vector3(
+    ...(GRIPPER_FLANGE_TARGET_BY_PROFILE[profileId] ||
+      GRIPPER_FLANGE_TARGET_BY_PROFILE.fr3),
+  );
+  const flange = new THREE.Vector3(...GRIPPER_FLANGE_ORIGIN_CAD)
+    .multiplyScalar(GRIPPER_SCALE)
+    .applyQuaternion(gripperMountQuaternion(profileId));
+  return target.sub(flange).toArray();
+}
+
+const gripperVisual = {
+  group: null,
+  loadPromise: null,
+  fingers: [],
+  closed: false,
+  animation: null,
+};
+
+function buildStepMesh(stepMesh) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(stepMesh.attributes.position.array, 3),
+  );
+  if (stepMesh.attributes.normal) {
+    geometry.setAttribute(
+      "normal",
+      new THREE.Float32BufferAttribute(stepMesh.attributes.normal.array, 3),
+    );
+  } else {
+    geometry.computeVertexNormals();
+  }
+  geometry.setIndex(
+    new THREE.BufferAttribute(Uint32Array.from(stepMesh.index.array), 1),
+  );
+  geometry.computeBoundingSphere();
+  const [red = 0.44, green = 0.31, blue = 0.22] = stepMesh.color || [];
+  const material = new THREE.MeshStandardMaterial({
+    color: ROBOT_SHELL_COLOR,
+    roughness: 0.62,
+    metalness: 0.12,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.userData.isGripperFinger =
+    new THREE.Color(red, green, blue).getHex() === GRIPPER_FINGER_SOURCE_COLOR;
+  return mesh;
+}
+
+async function loadSharedGripper() {
+  if (gripperVisual.group) return gripperVisual.group;
+  if (gripperVisual.loadPromise) return gripperVisual.loadPromise;
+  gripperVisual.loadPromise = (async () => {
+    if (typeof window === "undefined" || typeof window.occtimportjs !== "function") {
+      throw new Error("STEP importer (occt-import-js) is not available");
+    }
+    const response = await fetch(`${GRIPPER_BASE}${GRIPPER_FILE}`);
+    if (!response.ok) {
+      throw new Error(`Unable to load gripper STEP (HTTP ${response.status})`);
+    }
+    const occt = await window.occtimportjs();
+    const result = occt.ReadStepFile(
+      new Uint8Array(await response.arrayBuffer()),
+      {
+        linearUnit: "millimeter",
+        linearDeflectionType: "bounding_box_ratio",
+        linearDeflection: 0.001,
+        angularDeflection: 0.5,
+      },
+    );
+    if (!result.success || !result.meshes?.length) {
+      throw new Error("The gripper STEP file has no valid geometry");
+    }
+    const gripper = new THREE.Group();
+    gripper.name = "parallel_gripper";
+    gripper.userData.robotVisualRole = "shared-gripper";
+    gripperVisual.fingers = [];
+    result.meshes.forEach((stepMesh) => {
+      const mesh = buildStepMesh(stepMesh);
+      if (mesh.userData.isGripperFinger) {
+        const bounds = new THREE.Box3().setFromBufferAttribute(
+          mesh.geometry.getAttribute("position"),
+        );
+        gripperVisual.fingers.push({
+          mesh,
+          openPosition: mesh.position.clone(),
+          direction: bounds.getCenter(new THREE.Vector3()).x < 40 ? 1 : -1,
+        });
+      }
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      gripper.add(mesh);
+    });
+    gripperVisual.group = gripper;
+    return gripper;
+  })().catch((error) => {
+    gripperVisual.loadPromise = null;
+    throw error;
+  });
+  return gripperVisual.loadPromise;
+}
+
+function setGripperClosed(closed) {
+  if (!gripperVisual.fingers.length || gripperVisual.closed === closed) {
+    return Promise.resolve();
+  }
+  if (gripperVisual.animation) return gripperVisual.animation;
+  const fingers = gripperVisual.fingers.map(
+    ({ mesh, openPosition, direction }) => ({
+      mesh,
+      from: mesh.position.clone(),
+      to: openPosition
+        .clone()
+        .addScaledVector(
+          new THREE.Vector3(1, 0, 0),
+          closed ? direction * GRIPPER_FINGER_TRAVEL : 0,
+        ),
+    }),
+  );
+  gripperVisual.animation = new Promise((resolve) => {
+    const startedAt = performance.now();
+    const tick = (now) => {
+      const progress = Math.min(Math.max((now - startedAt) / GRIPPER_ANIMATION_MS, 0), 1);
+      const eased = progress * progress * (3 - 2 * progress);
+      fingers.forEach(({ mesh, from, to }) =>
+        mesh.position.lerpVectors(from, to, eased),
+      );
+      if (progress < 1) {
+        requestAnimationFrame(tick);
+        return;
+      }
+      gripperVisual.closed = closed;
+      gripperVisual.animation = null;
+      resolve();
+    };
+    requestAnimationFrame(tick);
+  });
+  return gripperVisual.animation;
+}
+
 export function buildProceduralGripper(profile) {
   if (!profile) {
     throw new Error("Virtual gripper profile is required to build procedural gripper");
@@ -292,10 +479,31 @@ export async function buildRobotArm(profile, gripperProfile) {
       parent = rotator;
     }
 
-    // Attach procedural gripper to flange (wrist3 rotator)
-    const gripper = buildProceduralGripper(gripperProfile);
-    parent.add(gripper.group);
-    candidate.gripper = gripper;
+    // Mount the CAD gripper if available, otherwise fallback to procedural gripper
+    let armGripper = null;
+    try {
+      const loadedGripper = await loadSharedGripper();
+      if (loadedGripper.parent) loadedGripper.parent.remove(loadedGripper);
+      const j6ToolMount = new THREE.Group();
+      j6ToolMount.name = `${profile.id}-j6-tool-mount`;
+      j6ToolMount.userData.robotVisualRole = "j6-tool-mount";
+      j6ToolMount.position.fromArray(gripperMountOffset(profile.id));
+      j6ToolMount.quaternion.copy(gripperMountQuaternion(profile.id));
+      j6ToolMount.scale.setScalar(GRIPPER_SCALE);
+      j6ToolMount.add(loadedGripper);
+      parent.add(j6ToolMount);
+      armGripper = {
+        group: j6ToolMount,
+        setClosed: (isClosed) => setGripperClosed(Boolean(isClosed)),
+        update: () => {},
+      };
+    } catch (err) {
+      console.warn("[VIEWER] Using procedural gripper fallback:", err.message);
+      const proceduralGripper = buildProceduralGripper(gripperProfile);
+      parent.add(proceduralGripper.group);
+      armGripper = proceduralGripper;
+    }
+    candidate.gripper = armGripper;
 
     // Dynamic canonical root transformation from virtual_fr3_scene.json:
     // Maps robot base frame (Z-up, -X facing board, +Y lateral)
@@ -344,6 +552,9 @@ async function switchRobotProfile(profileId) {
   state.robotProfileId = profile.id;
   const next = await buildRobotArm(profile, state.gripperProfile);
   if (state.currentArm) {
+    if (gripperVisual.group?.parent) {
+      gripperVisual.group.parent.remove(gripperVisual.group);
+    }
     scene.remove(state.currentArm.group);
     disposeRobotArm(state.currentArm);
   }

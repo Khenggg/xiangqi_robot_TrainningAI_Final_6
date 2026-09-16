@@ -23,6 +23,7 @@ const types = {
   ".json": "application/json; charset=utf-8",
   ".urdf": "application/xml; charset=utf-8",
   ".stl": "application/sla",
+  ".stp": "model/step",
 };
 
 http
