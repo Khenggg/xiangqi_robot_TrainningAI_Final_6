@@ -46,7 +46,7 @@
           </div>
           <div class="panel-tabs">
             <button id="tabJointsBtn" class="tab-btn active">🎮 Góc Khớp J1..J6</button>
-            <button id="tabReachBtn" class="tab-btn">🎯 Chạm Ô Cờ & Ràng Buộc J4</button>
+            <button id="tabReachBtn" class="tab-btn">🎯 Chạm Ô Cờ (90 Ô)</button>
           </div>
           <div id="jointsTabContent" class="tab-content active">
             <div class="panel-actions">
@@ -56,17 +56,6 @@
             <div class="joints-container" id="jointControlsList"></div>
           </div>
           <div id="reachTabContent" class="tab-content">
-            <div class="mode-selector">
-              <label class="mode-radio">
-                <input type="radio" name="reachMode" value="optimal" checked />
-                <span>✅ Tối Ưu IK (Thẳng đứng 90° - Không tuột)</span>
-              </label>
-              <label class="mode-radio">
-                <input type="radio" name="reachMode" value="constrained_j4" />
-                <span>⚠️ Ràng Buộc J4 [-100° .. -80°]</span>
-              </label>
-            </div>
-
             <div class="cell-inputs-row">
               <label>Hàng (Row):
                 <select id="cellRowSelect">

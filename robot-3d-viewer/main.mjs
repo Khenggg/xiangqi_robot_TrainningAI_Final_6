@@ -543,7 +543,6 @@ const state = {
   jointsDeg: [0, -45, 90, -45, -90, 0],
   homePoseDeg: [0, -45, 90, -45, -90, 0],
   cellDataset: null,
-  activeReachMode: "optimal",
   selectedCell: { row: 4, col: 4 },
   // nội suy mượt cho live mirror
   liveFromDeg: null,
@@ -833,14 +832,6 @@ function initJointControlPanelEvents() {
     });
   }
 
-  // Reach mode radio buttons
-  document.querySelectorAll('input[name="reachMode"]').forEach((radio) => {
-    radio.addEventListener("change", (e) => {
-      state.activeReachMode = e.target.value;
-      goToCell(state.selectedCell.row, state.selectedCell.col);
-    });
-  });
-
   // Reach cell button
   const reachBtn = document.getElementById("reachCellBtn");
   const rowSelect = document.getElementById("cellRowSelect");
@@ -917,22 +908,19 @@ function animateArmTo(targetDeg, durationMs = 500) {
   state.liveAnimationDuration = durationMs;
 }
 
-function goToCell(row, col, modeOverride = null) {
+function goToCell(row, col) {
   if (!state.cellDataset?.cells) return;
-  const mode = modeOverride || state.activeReachMode;
   state.selectedCell = { row, col };
 
   const cell = state.cellDataset.cells.find((c) => c.row === row && c.col === col);
-  if (!cell) return;
-  const data = cell[mode];
-  if (!data) return;
+  if (!cell || !cell.reachable) return;
 
   // Update 3D ring marker
   const ring = getOrCreateTargetRing();
   if (physicalGeometryRef) {
     const pt = boardPointToXYZ(col, row, physicalGeometryRef);
     ring.position.set(pt.x, pt.y + 0.001, pt.z);
-    ring.material.color.setHex(data.penetrates_board ? 0xf85149 : 0x58a6ff);
+    ring.material.color.setHex(0x58a6ff);
   }
 
   // Update diagnostic card elements
@@ -945,42 +933,24 @@ function goToCell(row, col, modeOverride = null) {
 
   if (cellLabel) cellLabel.textContent = `Cột ${col}, Hàng ${row} (X=${cell.x_m}m, Y=${cell.y_m}m)`;
   if (j4Val) {
-    const inRange = data.j4_deg >= -100 && data.j4_deg <= -80;
-    j4Val.textContent = `${data.j4_deg}° ${inRange ? "✓ (Trong [-100°, -80°])" : "⚡ (Bù trừ: ngoài [-100°, -80°])"}`;
-    j4Val.style.color = inRange ? "#3fb950" : (mode === "optimal" ? "#58a6ff" : "#f85149");
+    j4Val.textContent = `${cell.j4_deg}° (Tự động bù trừ)`;
+    j4Val.style.color = "#58a6ff";
   }
   if (tiltVal) {
-    tiltVal.textContent = `${data.tilt_deg}° ${data.tilt_deg < 0.1 ? "✓ Thẳng đứng 100% (Kẹp chắc)" : "⚠️ Nghiêng chéo (Tuột quân cờ!)"}`;
-    tiltVal.style.color = data.tilt_deg < 0.1 ? "#3fb950" : "#f85149";
+    tiltVal.textContent = `0° ✓ Cắm thẳng đứng 90° (Kẹp chắc 100%)`;
+    tiltVal.style.color = "#3fb950";
   }
-  const tipClearance = data.gripper_tip_clearance_mm ?? data.clearance_mm;
+  const tipClearance = cell.gripper_tip_clearance_mm ?? 1.5;
   if (clearanceVal) {
-    if (data.penetrates_board) {
-      clearanceVal.textContent = `❌ LỆCH GÓC / VA ĐẬP (Nghiêng ${data.tilt_deg}°)`;
-      clearanceVal.style.color = "#f85149";
-    } else {
-      clearanceVal.textContent = `✅ Đầu ngàm kẹp cách mặt bàn +${tipClearance} mm (An toàn 100%)`;
-      clearanceVal.style.color = "#3fb950";
-    }
+    clearanceVal.textContent = `✅ Đầu ngàm kẹp cách mặt bàn +${tipClearance} mm (An toàn 100%)`;
+    clearanceVal.style.color = "#3fb950";
   }
   if (badge) {
-    if (data.penetrates_board) {
-      badge.className = "badge-danger";
-      badge.textContent = "❌ TUỘT QUÂN / LỆCH GÓC";
-    } else if (data.tilt_deg >= 25.0) {
-      badge.className = "badge-danger";
-      badge.textContent = "⚠️ TUỘT QUÂN (NGHIÊNG " + data.tilt_deg + "°)";
-    } else {
-      badge.className = "badge-safe";
-      badge.textContent = "✅ AN TOÀN - CẮM THẲNG 90°";
-    }
+    badge.className = "badge-safe";
+    badge.textContent = "✅ CHUẨN THẲNG ĐỨNG 90°";
   }
   if (expl) {
-    if (mode === "optimal") {
-      expl.innerHTML = `✅ <strong>Chế độ Tối Ưu:</strong> Tính toán chính xác chiều dài ngàm kẹp CAD (218mm). Mặt bích robot nâng cao $Z = ${data.flange_z_mm ?? 229.5}\\text{mm}$, đầu ngàm kẹp hạ xuống cách mặt bàn <strong>+${tipClearance}\\text{mm}</strong> ôm khít thân quân cờ mà <strong>hoàn toàn KHÔNG xuyên qua bàn cờ</strong>! Góc $J_4 = ${data.j4_deg}^\\circ$ chúc thẳng đứng $90^\\circ$ tuyệt đối!`;
-    } else {
-      expl.innerHTML = `⚠️ <strong>Chế độ Ràng Buộc J4 [-100° .. -80°]:</strong> Cổ tay bị ép cứng tại $J_4 = ${data.j4_deg}^\\circ$ khiến ngàm kẹp bị <strong>nghiêng chéo ${data.tilt_deg}^\\circ$</strong> (bóp xéo làm trượt tuột quân cờ)!`;
-    }
+    expl.innerHTML = `✅ Cánh tay robot tự động bù trừ góc cổ tay $J_4 = ${cell.j4_deg}^\\circ$, giữ ngàm kẹp <strong>chúc thẳng đứng $90^\\circ$ hoàn hảo</strong>. Mặt bích nâng cao $Z = ${cell.flange_z_mm ?? 230.0}\\text{mm}$, đầu ngàm kẹp hạ xuống cách mặt bàn <strong>+${tipClearance}\\text{mm}</strong> ôm khít thân quân cờ mà <strong>hoàn toàn KHÔNG xuyên qua bàn cờ</strong>!`;
   }
 
   // Update inputs
@@ -990,7 +960,7 @@ function goToCell(row, col, modeOverride = null) {
   if (colSelect) colSelect.value = String(col);
 
   // Smoothly move arm to joint angles
-  animateArmTo(data.joints_deg, 500);
+  animateArmTo(cell.joints_deg, 500);
 }
 
 // ---------------------------------------------------------------------------

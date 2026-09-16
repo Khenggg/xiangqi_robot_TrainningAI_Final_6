@@ -89,57 +89,6 @@ class J4ConstraintAndPenetrationTests(unittest.TestCase):
         self.assertLess(max(tilts), 0.05, "Maximum gripper tilt exceeded 0.05 deg")
         self.assertGreaterEqual(min(min_clearances), 1.0, "Detected gripper tip penetration or clearance < 1mm")
 
-    def test_constrained_j4_fails_or_penetrates_board(self):
-        """Verify that restricting J4 to [-100, -80] deg cannot reach perpendicular pose or penetrates board."""
-        kin_c = FR3Kinematics()
-        kin_c.chain.lower_limits[3] = np.radians(-100.0)
-        kin_c.chain.upper_limits[3] = np.radians(-80.0)
-
-        # 1. Full 6-DOF target: With J4 in [-100, -80], perpendicular pose cannot converge on any of the 90 cells
-        perpendicular_success = 0
-        for r in range(self.num_rows):
-            x = self.x0 - r * self.row_spacing
-            for c in range(self.num_cols):
-                y = self.y0 + c * self.col_spacing
-                T_target = np.eye(4)
-                T_target[:3, :3] = self.R_target
-                T_target[:3, 3] = [x, y, self.z_flange]
-                res = kin_c.inverse_kinematics(T_target, seed_joints=None, allow_multi_seed=True, max_iterations=60)
-                if res.success and np.radians(-100.0) <= res.joints_rad[3] <= np.radians(-80.0):
-                    perpendicular_success += 1
-
-        self.assertEqual(
-            perpendicular_success,
-            0,
-            f"Expected 0/90 cells to reach perpendicular pose with J4 in [-100, -80], got {perpendicular_success}",
-        )
-
-        # 2. Position-only target: If forced to touch the cells, gripper tilt is severe across all 90 cells
-        tilts = []
-        for r in range(self.num_rows):
-            x = self.x0 - r * self.row_spacing
-            for c in range(self.num_cols):
-                y = self.y0 + c * self.col_spacing
-                target_pos = np.array([x, y, self.z_flange])
-                q_c = np.array([0.0, -0.5, 1.0, -1.57, -1.57, 0.0])
-                for it in range(80):
-                    T_c = kin_c.forward_kinematics(q_c).as_matrix()
-                    err_c = target_pos - T_c[:3, 3]
-                    if np.linalg.norm(err_c) < 0.001:
-                        break
-                    J_c = kin_c.geometric_jacobian(q_c)[:3, :]
-                    dq_c = J_c.T @ np.linalg.inv(J_c @ J_c.T + 0.001 * np.eye(3)) @ err_c
-                    q_c = np.clip(q_c + dq_c, kin_c.chain.lower_limits, kin_c.chain.upper_limits)
-
-                T_actual = kin_c.forward_kinematics(q_c).as_matrix()
-                tool_z = T_actual[:3, 2]
-                tilt = float(np.degrees(np.arccos(np.clip(np.dot(tool_z, [0, 0, -1]), -1.0, 1.0))))
-                tilts.append(tilt)
-
-        # In constrained mode, 100% of cells have severe tilt (> 10 deg, up to 36 deg)
-        self.assertGreaterEqual(min(tilts), 10.0, f"Expected all cells to have severe tilt > 10 deg, got min={min(tilts)}")
-        self.assertGreaterEqual(max(tilts), 35.0, f"Expected max tilt > 35 deg, got max={max(tilts)}")
-
     def test_links_remain_strictly_rigid_with_zero_deformation(self):
         """Verify that link lengths are strictly invariant (delta < 1 um) across all 90 cell configurations.
         Guarantees the algorithm NEVER stretches, deforms, or scales any robot link.
@@ -154,23 +103,22 @@ class J4ConstraintAndPenetrationTests(unittest.TestCase):
         L5_expected = 0.102   # Wrist2 to Flange (102mm)
 
         for cell in dataset["cells"]:
-            for mode in ["optimal", "constrained_j4"]:
-                q = np.radians(cell[mode]["joints_deg"])
-                chain = self.kin.chain.forward_kinematics_chain(q)
+            q = np.radians(cell["joints_deg"])
+            chain = self.kin.chain.forward_kinematics_chain(q)
 
-                p0, p1, p2, p3, p4, p5 = [frame[:3, 3] for frame in chain[:6]]
-                L1 = float(np.linalg.norm(p1 - p0))
-                L2 = float(np.linalg.norm(p2 - p1))
-                L3 = float(np.linalg.norm(p3 - p2))
-                L4 = float(np.linalg.norm(p4 - p3))
-                L5 = float(np.linalg.norm(p5 - p4))
+            p0, p1, p2, p3, p4, p5 = [frame[:3, 3] for frame in chain[:6]]
+            L1 = float(np.linalg.norm(p1 - p0))
+            L2 = float(np.linalg.norm(p2 - p1))
+            L3 = float(np.linalg.norm(p3 - p2))
+            L4 = float(np.linalg.norm(p4 - p3))
+            L5 = float(np.linalg.norm(p5 - p4))
 
-                # Tolerance 1e-6 meters (1 micron)
-                self.assertAlmostEqual(L1, L1_expected, places=5, msg=f"Link 1 deformed at ({cell['row']},{cell['col']})")
-                self.assertAlmostEqual(L2, L2_expected, places=5, msg=f"Link 2 deformed at ({cell['row']},{cell['col']})")
-                self.assertAlmostEqual(L3, L3_expected, places=5, msg=f"Link 3 deformed at ({cell['row']},{cell['col']})")
-                self.assertAlmostEqual(L4, L4_expected, places=5, msg=f"Link 4 deformed at ({cell['row']},{cell['col']})")
-                self.assertAlmostEqual(L5, L5_expected, places=5, msg=f"Link 5 deformed at ({cell['row']},{cell['col']})")
+            # Tolerance 1e-6 meters (1 micron)
+            self.assertAlmostEqual(L1, L1_expected, places=5, msg=f"Link 1 deformed at ({cell['row']},{cell['col']})")
+            self.assertAlmostEqual(L2, L2_expected, places=5, msg=f"Link 2 deformed at ({cell['row']},{cell['col']})")
+            self.assertAlmostEqual(L3, L3_expected, places=5, msg=f"Link 3 deformed at ({cell['row']},{cell['col']})")
+            self.assertAlmostEqual(L4, L4_expected, places=5, msg=f"Link 4 deformed at ({cell['row']},{cell['col']})")
+            self.assertAlmostEqual(L5, L5_expected, places=5, msg=f"Link 5 deformed at ({cell['row']},{cell['col']})")
 
 
 if __name__ == "__main__":
