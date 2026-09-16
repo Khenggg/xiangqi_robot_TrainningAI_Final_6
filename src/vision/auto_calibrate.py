@@ -97,7 +97,11 @@ class AutoCalibrator:
 
         h, w = frame.shape[:2]
         try:
-            results = self.model.predict(frame, conf=0.3, verbose=False)
+            # Thêm border padding 60px để xử lý trường hợp bàn cờ bị chụp/crop sát mép ảnh (tránh mất receptive field của CNN)
+            pad = 60
+            padded_frame = cv2.copyMakeBorder(frame, pad, pad, pad, pad, cv2.BORDER_REFLECT)
+            
+            results = self.model.predict(padded_frame, conf=0.25, verbose=False)
             if not results or len(results) == 0 or results[0].keypoints is None:
                 return None, 0.0
 
@@ -105,12 +109,15 @@ class AutoCalibrator:
             if len(kpts_obj) == 0:
                 return None, 0.0
 
-            kpts_xy = kpts_obj[0].xy[0].cpu().numpy()  # (4, 2)
+            kpts_padded = kpts_obj[0].xy[0].cpu().numpy()  # (4, 2)
             kpts_conf = (
                 kpts_obj[0].conf[0].cpu().numpy()
                 if kpts_obj[0].conf is not None
                 else np.array([1.0, 1.0, 1.0, 1.0])
             )
+            
+            # Trừ lại padding để đưa về hệ tọa độ của frame gốc
+            kpts_xy = kpts_padded - np.array([pad, pad], dtype=np.float32)
 
             # Cải tiến: Dùng Adaptive Confidence (Trung bình >= 0.65 VÀ điểm thấp nhất >= 0.40)
             mean_conf = float(np.mean(kpts_conf))
