@@ -83,7 +83,8 @@ class HardwareManager:
             self._calibrate_robot()
 
     def _init_qr_camera(self):
-        from src.vision.qr_calibration import BoardGeometry, QRCalibrator
+        from src.vision.qr_calibration import (BoardGeometry, QRCalibrator, YoloPoseCalibrator,
+                                               HandGuard, HybridQRCalibrator)
         from src.vision.xiangqi_recognizer import XiangqiRecognizer
         from src.vision.qr_board_monitor import QRBoardMonitor
         from src.vision.visual_correction import VisualCorrector
@@ -93,7 +94,25 @@ class HardwareManager:
         geometry = BoardGeometry.load(self.config.QR_LAYOUT_PATH)
         recognizer = XiangqiRecognizer(self.config.CCHESS_MODEL_PATH,
                                        self.config.CCHESS_MIN_CONFIDENCE)
-        calibrator = QRCalibrator(geometry)
+        qr_calibrator = QRCalibrator(geometry)
+        pose_calibrator = None
+        hand_guard = None
+        if getattr(self.config, "POSE_FALLBACK_ENABLED", True):
+            pose_path = Path(self.config.BOARD_POSE_MODEL_PATH)
+            if pose_path.is_file():
+                pose_calibrator = YoloPoseCalibrator(
+                    pose_path, getattr(self.config, "POSE_MIN_KEYPOINT_CONFIDENCE", .65))
+                print("[INIT] Board-pose fallback ready (QR remains primary).")
+            else:
+                print(f"[INIT] Board-pose fallback disabled: missing {pose_path}")
+        if getattr(self.config, "HAND_GUARD_ENABLED", True):
+            hand_path = Path(self.config.HAND_MODEL_PATH)
+            if hand_path.is_file():
+                hand_guard = HandGuard(hand_path, getattr(self.config, "HAND_GUARD_CONFIDENCE", .50))
+                print("[INIT] Hand guard ready.")
+            else:
+                print(f"[INIT] Hand guard disabled: missing {hand_path}")
+        calibrator = HybridQRCalibrator(qr_calibrator, pose_calibrator, hand_guard)
         # A reference is mandatory for physical motion; never use old teaching
         # XY as a fallback when the QR board may have moved.
         reference_path = self.config.ROBOT_CAMERA_REFERENCE_PATH
@@ -124,7 +143,7 @@ class HardwareManager:
                     raise RuntimeError(f"YOLO visual correction is required for FR5: {exc}") from exc
                 print(f"[INIT] YOLO visual correction unavailable; circle fallback only: {exc}")
         if not self.dry_run:
-            mapping = BoardRobotMapping.load(reference_path, self.board_monitor.require_calibration)
+            mapping = BoardRobotMapping.load(reference_path, self.board_monitor.require_qr_calibration)
             if (mapping.reference["robot_user"] != self.robot.user_num
                     or mapping.reference["robot_tool"] != self.robot.tool_num):
                 raise ValueError("Robot reference user/tool differs from the FR5 motion frame")

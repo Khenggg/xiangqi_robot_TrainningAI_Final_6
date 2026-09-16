@@ -10,6 +10,15 @@ QR_LAYOUT_PATH = ROOT / "config" / "qr_board.json"
 ROBOT_CAMERA_REFERENCE_PATH = ROOT / "config" / "robot_reference.json"
 CCHESS_MODEL_PATH = ROOT / "models" / "cchess_nano_v3.onnx"
 CCHESS_MIN_CONFIDENCE = 0.80
+# QR remains the authoritative source for physical robot motion.  The two YOLO
+# models below merely keep the camera pipeline usable while a marker is briefly
+# unreadable and prevent calibration through a player's hand.
+POSE_FALLBACK_ENABLED = True
+BOARD_POSE_MODEL_PATH = ROOT / "models" / "board_pose.pt"
+POSE_MIN_KEYPOINT_CONFIDENCE = .65
+HAND_GUARD_ENABLED = True
+HAND_MODEL_PATH = ROOT / "models" / "hand_best_egohands.pt"
+HAND_GUARD_CONFIDENCE = .50
 ENGINE_TYPE = "LOCAL"
 MOONFISH_EXE = str(ROOT / "moonfish" / "moonfish_ucci.py")
 MOONFISH_NNUE = None

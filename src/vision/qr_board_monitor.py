@@ -79,6 +79,14 @@ class QRBoardMonitor:
                 raise RuntimeError(self.error if value is None else "QR/camera measurement expired")
             return value
 
+    def require_qr_calibration(self):
+        """Physical motion never accepts pose-only fallback calibration."""
+        with self._lock:
+            value = self.require_calibration()
+            if not hasattr(self.calibrator, "require_qr_current"):
+                return value
+            return self.calibrator.require_qr_current(time.monotonic())
+
     def require_board(self):
         with self._lock:
             calibration = self.require_calibration()

@@ -157,6 +157,122 @@ class QRCalibrator:
         return self.current
 
 
+class YoloPoseCalibrator:
+    """Conservative four-corner fallback for frames where QR decoding fails."""
+
+    def __init__(self, model_path, min_keypoint_confidence=.65, stable_frames=3,
+                 tolerance_px=2.0, max_age=2.0):
+        from ultralytics import YOLO
+        self.model = YOLO(str(model_path))
+        self.min_keypoint_confidence = float(min_keypoint_confidence)
+        self.stable_frames, self.tolerance_px, self.max_age = stable_frames, tolerance_px, max_age
+        self.current = None
+        self.reason = "Waiting for board-pose corners"
+        self._anchor = self._last_corners = None
+        self._count = self._generation = 0
+
+    def invalidate(self, reason):
+        self.current = self._anchor = None
+        self._count = 0
+        self.reason = reason
+        return None
+
+    def update(self, frame, timestamp=None):
+        if frame is None:
+            return self.invalidate("No camera frame for board-pose")
+        stamp = time.monotonic() if timestamp is None else timestamp
+        try:
+            result = self.model.predict(frame, conf=.4, verbose=False)[0]
+            keypoints = result.keypoints
+            if keypoints is None or len(keypoints) != 1:
+                return self.invalidate("Board-pose must find exactly one board")
+            corners = keypoints.xy[0].cpu().numpy().astype(np.float32)
+            confidence = keypoints.conf[0].cpu().numpy() if keypoints.conf is not None else np.ones(4)
+            h, w = frame.shape[:2]
+            if (corners.shape != (4, 2) or np.any(confidence < self.min_keypoint_confidence)
+                    or not np.isfinite(corners).all() or not cv2.isContourConvex(corners)
+                    or (corners < 0).any() or (corners[:, 0] >= w).any() or (corners[:, 1] >= h).any()):
+                return self.invalidate("Invalid/low-confidence board-pose geometry")
+            # Model training order: TL, TR, BR, BL (the same order as CORNER_GRID).
+            matrix = cv2.getPerspectiveTransform(corners, CORNER_GRID)
+            inverse = np.linalg.inv(matrix)
+        except (cv2.error, ValueError, np.linalg.LinAlgError, IndexError) as exc:
+            return self.invalidate(f"Board-pose failed: {exc}")
+        if self._anchor is None or np.max(np.linalg.norm(corners - self._anchor, axis=1)) > self.tolerance_px:
+            self._anchor, self._count, self.current = corners.copy(), 1, None
+        else:
+            self._count += 1
+        if self._count < self.stable_frames:
+            self.reason = f"Board-pose settling ({self._count}/{self.stable_frames})"
+            return None
+        if self._last_corners is None or np.max(np.linalg.norm(corners - self._last_corners, axis=1)) > self.tolerance_px:
+            self._generation += 1
+            self._last_corners = corners.copy()
+        self.current = Calibration(matrix, inverse, corners, stamp, self._generation, (w, h))
+        self.reason = "Board-pose fallback ready"
+        return self.current
+
+
+class HandGuard:
+    """Reject calibration frames containing a hand, which can hide QR corners."""
+
+    def __init__(self, model_path, confidence=.50):
+        from ultralytics import YOLO
+        self.model, self.confidence = YOLO(str(model_path)), float(confidence)
+
+    def hand_present(self, frame):
+        result = self.model.predict(frame, conf=self.confidence, verbose=False)[0]
+        return result.boxes is not None and len(result.boxes) > 0
+
+
+class HybridQRCalibrator:
+    """QR-first calibration; pose fallback is explicitly non-authoritative."""
+
+    def __init__(self, qr_calibrator, pose_calibrator=None, hand_guard=None):
+        self.qr, self.pose, self.hand_guard = qr_calibrator, pose_calibrator, hand_guard
+        self.current, self.source = None, None
+        self.reason, self.max_age = qr_calibrator.reason, qr_calibrator.max_age
+
+    def invalidate(self, reason):
+        self.current = self.source = None
+        self.qr.invalidate(reason)
+        if self.pose:
+            self.pose.invalidate(reason)
+        self.reason = reason
+        return None
+
+    def update(self, frame, timestamp=None):
+        try:
+            if self.hand_guard and self.hand_guard.hand_present(frame):
+                return self.invalidate("Hand detected: calibration paused")
+        except Exception as exc:
+            return self.invalidate(f"Hand guard failed: {exc}")
+        calibration = self.qr.update(frame, timestamp)
+        if calibration is not None:
+            self.current, self.source, self.reason = calibration, "qr", self.qr.reason
+            return calibration
+        if self.pose:
+            calibration = self.pose.update(frame, timestamp)
+            if calibration is not None:
+                self.current, self.source, self.reason = calibration, "pose", self.pose.reason
+                return calibration
+        self.current, self.source = None, None
+        self.reason = self.pose.reason if self.pose else self.qr.reason
+        return None
+
+    def require_current(self, now=None):
+        now = time.monotonic() if now is None else now
+        if self.current is None or not 0 <= now - self.current.timestamp <= self.max_age:
+            raise RuntimeError(self.reason if self.current is None else "Camera measurement is stale")
+        return self.current
+
+    def require_qr_current(self, now=None):
+        calibration = self.require_current(now)
+        if self.source != "qr":
+            raise RuntimeError("QR calibration is required before physical robot motion")
+        return calibration
+
+
 def warp_for_recognizer(frame, calibration):
     """Match upstream 450x500 warp -> centre crop 400x450 -> resize 280x315.
 
