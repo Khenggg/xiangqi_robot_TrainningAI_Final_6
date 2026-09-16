@@ -14,7 +14,7 @@ import json
 import math
 from pathlib import Path
 import time
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pybullet as p
 
@@ -27,26 +27,37 @@ from src.simulation.physics.state import (
     PiecePhysicalState,
     WorldStateSnapshot,
 )
+from src.simulation.physics.transforms import (
+    continuous_board_coord,
+    nearest_intersection_metrics,
+    quat_to_rot_matrix,
+    tilt_angle_deg,
+)
+from src.simulation.physics.validation import (
+    validate_physics_config,
+    validate_start_layout,
+)
 
 
 class VirtualPhysicalWorld:
     """
-    Authoritative headless rigid-body simulation running natively in robot_base frame.
+    Headless PyBullet rigid-body world for Virtual FAIRINO FR3 Xiangqi simulation.
+    Operates strictly in the robot_base frame (Z-up, -X facing board, +Y lateral).
     """
 
     def __init__(
         self,
         physics_config_path: Optional[Union[str, Path]] = None,
         scene_config_path: Optional[Union[str, Path]] = None,
-        start_layout_path: Optional[Union[str, Path]] = None,
         gripper_profile_path: Optional[Union[str, Path]] = None,
+        start_layout_path: Optional[Union[str, Path]] = None,
         enable_gui: bool = False,
     ):
-        repo_root = Path(__file__).resolve().parent.parent.parent.parent
-        self.physics_config_path = Path(physics_config_path or (repo_root / "shared" / "virtual_physics.json"))
-        self.scene_config_path = Path(scene_config_path or (repo_root / "shared" / "virtual_fr3_scene.json"))
-        self.start_layout_path = Path(start_layout_path or (repo_root / "shared" / "xiangqi_start_layout.json"))
-        self.gripper_profile_path = Path(gripper_profile_path or (repo_root / "shared" / "virtual_gripper_profile.json"))
+        shared_dir = Path(__file__).resolve().parent.parent.parent.parent / "shared"
+        self.physics_config_path = Path(physics_config_path or (shared_dir / "virtual_physics.json"))
+        self.scene_config_path = Path(scene_config_path or (shared_dir / "virtual_fr3_scene.json"))
+        self.gripper_profile_path = Path(gripper_profile_path or (shared_dir / "virtual_gripper_profile.json"))
+        self.start_layout_path = Path(start_layout_path or (shared_dir / "xiangqi_start_layout.json"))
 
         # Load configurations
         with open(self.physics_config_path, "r", encoding="utf-8-sig") as f:
@@ -58,50 +69,70 @@ class VirtualPhysicalWorld:
         with open(self.start_layout_path, "r", encoding="utf-8-sig") as f:
             self.layout_cfg = json.load(f)
 
+        # Strict fail-fast validation before creating PyBullet client
+        validate_physics_config(self.physics_cfg)
+        validate_start_layout(self.layout_cfg)
+
         self.geom = get_physical_geometry()
         self.board_cfg = self.scene_cfg["virtual_board_placement"]
 
-        # Physics client initialization
-        connection_mode = p.GUI if enable_gui else p.DIRECT
-        self.client_id = p.connect(connection_mode)
-        if self.client_id < 0:
-            raise RuntimeError(f"Failed to connect to PyBullet in mode {connection_mode}")
+        self.client_id = -1
+        try:
+            # Physics client initialization
+            connection_mode = p.GUI if enable_gui else p.DIRECT
+            self.client_id = p.connect(connection_mode)
+            if self.client_id < 0:
+                raise RuntimeError(f"Failed to connect to PyBullet in mode {connection_mode}")
 
-        # Set environment parameters
-        gravity = self.physics_cfg.get("gravity_m_s2", [0.0, 0.0, -9.81])
-        p.setGravity(gravity[0], gravity[1], gravity[2], physicsClientId=self.client_id)
+            # Set environment parameters
+            gravity = self.physics_cfg["gravity_m_s2"]
+            p.setGravity(gravity[0], gravity[1], gravity[2], physicsClientId=self.client_id)
 
-        self.timestep_s = float(self.physics_cfg.get("fixed_timestep_s", 1.0 / 240.0))
-        p.setTimeStep(self.timestep_s, physicsClientId=self.client_id)
+            self.timestep_s = float(self.physics_cfg["fixed_timestep_s"])
+            p.setTimeStep(self.timestep_s, physicsClientId=self.client_id)
 
-        iterations = int(self.physics_cfg.get("solver_iterations", 50))
-        p.setPhysicsEngineParameter(
-            numSolverIterations=iterations,
-            physicsClientId=self.client_id,
-        )
+            iterations = int(self.physics_cfg["solver_iterations"])
+            p.setPhysicsEngineParameter(
+                numSolverIterations=iterations,
+                physicsClientId=self.client_id,
+            )
 
-        self.sim_time = 0.0
-        self.board_body_id = -1
-        self.pieces: Dict[str, XiangqiPieceBody] = {}
+            self.sim_time = 0.0
+            self.board_body_id = -1
+            self.pieces: Dict[str, XiangqiPieceBody] = {}
 
-        # Settle thresholds
-        settle_cfg = self.physics_cfg.get("settling", {})
-        self.max_settle_steps = int(settle_cfg.get("max_settle_steps", 1200))
-        self.lin_vel_thresh = float(settle_cfg.get("linear_velocity_threshold_m_s", 0.005))
-        self.ang_vel_thresh = float(settle_cfg.get("angular_velocity_threshold_rad_s", 0.05))
-        self.required_settled_steps = int(settle_cfg.get("consecutive_settled_steps", 20))
+            # Settle thresholds
+            settle_cfg = self.physics_cfg["settling"]
+            self.max_settle_steps = int(settle_cfg["max_settle_steps"])
+            self.lin_vel_thresh = float(settle_cfg["linear_velocity_threshold_m_s"])
+            self.ang_vel_thresh = float(settle_cfg["angular_velocity_threshold_rad_s"])
+            self.required_settled_steps = int(settle_cfg["consecutive_settled_steps"])
 
-        # Out of bounds config
-        oob_cfg = self.physics_cfg.get("out_of_bounds", {})
-        self.z_min_oob = float(oob_cfg.get("z_min_m", -0.20))
-        self.xy_margin_oob = float(oob_cfg.get("xy_boundary_margin_m", 0.15))
+            # Out of bounds config
+            oob_cfg = self.physics_cfg["out_of_bounds"]
+            self.z_min_oob = float(oob_cfg["z_min_m"])
+            self.xy_margin_oob = float(oob_cfg["xy_boundary_margin_m"])
 
-        # Build world
-        self._spawn_board()
-        self._spawn_pieces()
+            # Build world
+            self._spawn_board()
+            self._spawn_pieces()
 
-        # Gripper proxy
-        self.gripper = VirtualGripper(profile_path=self.gripper_profile_path)
+            # Gripper proxy and PyBullet collision bodies
+            self.gripper = VirtualGripper(profile_path=self.gripper_profile_path)
+            self._spawn_gripper_proxies()
+        except Exception:
+            if self.client_id >= 0:
+                try:
+                    p.disconnect(physicsClientId=self.client_id)
+                except Exception:
+                    pass
+                self.client_id = -1
+            raise
+
+    def _spawn_gripper_proxies(self) -> None:
+        """Spawn PyBullet collision representations for gripper if supported."""
+        if hasattr(self.gripper, "spawn_proxies"):
+            self.gripper.spawn_proxies(self.client_id)
 
     def _spawn_board(self) -> None:
         """Create finite static board box collider."""
@@ -328,10 +359,12 @@ class VirtualPhysicalWorld:
 
     def release_attached_piece(self) -> Optional[XiangqiPieceBody]:
         """Release attached piece. It inherits current motion velocity."""
+        self.gripper.set_gripper_state(False)
         return self.gripper.detach_piece()
 
     def force_drop_attached_piece(self) -> Optional[XiangqiPieceBody]:
         """Failure-injection drop primitive: detaches piece regardless of gripper state."""
+        self.gripper.set_gripper_state(False)
         return self.gripper.detach_piece()
 
     def get_attached_piece(self) -> Optional[XiangqiPieceBody]:
@@ -347,8 +380,42 @@ class VirtualPhysicalWorld:
             pieces=piece_snapshots,
         )
 
+    def get_gripper_piece_contacts(self) -> List[Dict[str, Any]]:
+        """
+        Query contact points between gripper collision proxy bodies and any pieces.
+        Useful for diagnostic contact inspection.
+        """
+        contacts = []
+        body_names = {
+            self.gripper.palm_body_id: "palm",
+            self.gripper.left_jaw_body_id: "left_jaw",
+            self.gripper.right_jaw_body_id: "right_jaw",
+        }
+        for gb, name in body_names.items():
+            if gb < 0:
+                continue
+            for pid, piece in self.pieces.items():
+                pts = p.getContactPoints(
+                    bodyA=gb,
+                    bodyB=piece.body_id,
+                    physicsClientId=self.client_id,
+                )
+                for pt in pts:
+                    contacts.append({
+                        "gripper_body": name,
+                        "piece_id": pid,
+                        "contact_distance": pt[8],
+                        "normal_force": pt[9],
+                    })
+        return contacts
+
     def close(self) -> None:
-        """Disconnect PyBullet simulation client."""
+        """Disconnect PyBullet simulation client and clean up proxy bodies."""
+        if hasattr(self, "gripper") and self.gripper is not None:
+            self.gripper.remove_proxies()
         if self.client_id >= 0:
-            p.disconnect(self.client_id)
+            try:
+                p.disconnect(self.client_id)
+            except Exception:
+                pass
             self.client_id = -1

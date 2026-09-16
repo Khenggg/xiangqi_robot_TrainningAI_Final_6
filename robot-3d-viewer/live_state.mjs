@@ -42,7 +42,14 @@ export function validateWorldStatePacket(payload) {
       return { ok: false, reason: `piece ${piece.id} has non-finite 3D coordinates` };
     }
   }
-  return { ok: true, pieces: payload.pieces, gripper: payload.gripper || null };
+  let gripper = null;
+  if (payload.gripper && typeof payload.gripper === "object") {
+    const closed = payload.gripper.closed !== undefined
+      ? Boolean(payload.gripper.closed)
+      : Boolean(payload.gripper.is_closed);
+    gripper = { ...payload.gripper, closed, is_closed: closed };
+  }
+  return { ok: true, pieces: payload.pieces, gripper };
 }
 
 export function liveControlsLocked({ socketOpen = false, live = false, connecting = false } = {}) {

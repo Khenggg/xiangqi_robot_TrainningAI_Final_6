@@ -6,15 +6,18 @@ from collections import deque
 import json
 import math
 from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 
+import pybullet as p
 from src.simulation.physics.piece import XiangqiPieceBody
 from src.simulation.physics.state import GraspResult, GraspStatus, PiecePhysicalState
 from src.simulation.physics.transforms import (
     quat_to_rot_matrix,
     rot_matrix_to_quat,
 )
+from src.simulation.physics.validation import validate_gripper_profile
 
 
 class VirtualGripper:
@@ -30,21 +33,40 @@ class VirtualGripper:
         if profile_path is None:
             profile_path = Path(__file__).resolve().parent.parent.parent.parent / "shared" / "virtual_gripper_profile.json"
 
+        profile_path = Path(profile_path)
+        if not profile_path.is_file():
+            raise FileNotFoundError(f"Gripper profile not found at {profile_path}")
+
         with open(profile_path, "r", encoding="utf-8-sig") as f:
             self.profile = json.load(f)
 
-        self.model = self.profile.get("gripper_model", "PROCEDURAL_2JAW_V1")
+        validate_gripper_profile(self.profile)
+
+        self.model = self.profile["gripper_model"]
         self.tcp_to_grasp_center = np.array(
-            self.profile.get("tcp_to_grasp_center_m", [0.0, 0.0, 0.035]),
+            self.profile["tcp_to_grasp_center_m"],
             dtype=float,
         )
-        cap = self.profile.get("capture_volume", {})
-        self.capture_radius_xy = float(cap.get("xy_radius_m", 0.016))
-        self.capture_half_height_z = float(cap.get("z_half_height_m", 0.012))
+        cap = self.profile["capture_volume"]
+        self.capture_radius_xy = float(cap["xy_radius_m"])
+        self.capture_half_height_z = float(cap["z_half_height_m"])
 
-        stroke = self.profile.get("stroke", {})
-        self.open_width_m = float(stroke.get("open_width_m", 0.040))
-        self.closed_width_m = float(stroke.get("closed_width_m", 0.020))
+        stroke = self.profile["stroke"]
+        self.open_width_m = float(stroke["open_width_m"])
+        self.closed_width_m = float(stroke["closed_width_m"])
+        self.travel_axis = stroke.get("travel_axis", "X")
+
+        palm = self.profile["palm"]
+        self.palm_dimensions_m = np.array(palm["dimensions_m"], dtype=float)
+
+        jaw = self.profile["jaw"]
+        self.jaw_dimensions_m = np.array(jaw["dimensions_m"], dtype=float)
+
+        # PyBullet body IDs (managed by VirtualPhysicalWorld)
+        self.client_id: int = -1
+        self.palm_body_id: int = -1
+        self.left_jaw_body_id: int = -1
+        self.right_jaw_body_id: int = -1
 
         # Runtime state
         self.is_closed = False
@@ -65,13 +87,121 @@ class VirtualGripper:
         # Velocity estimation buffer: stores (timestamp, grasp_pos)
         self._history = deque(maxlen=10)
 
+    @property
+    def is_attached(self) -> bool:
+        return self.attached_piece is not None
+
+    @property
+    def attached_piece_id(self) -> Optional[str]:
+        return self.attached_piece.piece_id if self.attached_piece is not None else None
+
+    @property
+    def proxy_body_ids(self) -> List[int]:
+        return [b for b in (self.palm_body_id, self.left_jaw_body_id, self.right_jaw_body_id) if b >= 0]
+
+    def spawn_proxies(self, client_id: int) -> None:
+        """
+        Spawn kinematic PyBullet collision proxy bodies for palm, left jaw, and right jaw
+        using dimensions strictly loaded from shared/virtual_gripper_profile.json.
+        """
+        self.client_id = client_id
+        palm_half = (self.palm_dimensions_m / 2.0).tolist()
+        jaw_half = (self.jaw_dimensions_m / 2.0).tolist()
+
+        col_palm = p.createCollisionShape(
+            p.GEOM_BOX,
+            halfExtents=palm_half,
+            physicsClientId=client_id,
+        )
+        self.palm_body_id = p.createMultiBody(
+            baseMass=0.0,
+            baseCollisionShapeIndex=col_palm,
+            basePosition=[0.0, 0.0, -10.0],
+            physicsClientId=client_id,
+        )
+
+        col_jaw = p.createCollisionShape(
+            p.GEOM_BOX,
+            halfExtents=jaw_half,
+            physicsClientId=client_id,
+        )
+        self.left_jaw_body_id = p.createMultiBody(
+            baseMass=0.0,
+            baseCollisionShapeIndex=col_jaw,
+            basePosition=[0.0, 0.0, -10.0],
+            physicsClientId=client_id,
+        )
+        self.right_jaw_body_id = p.createMultiBody(
+            baseMass=0.0,
+            baseCollisionShapeIndex=col_jaw,
+            basePosition=[0.0, 0.0, -10.0],
+            physicsClientId=client_id,
+        )
+        self._update_proxy_poses()
+
+    def remove_proxies(self) -> None:
+        """Safely remove proxy bodies from PyBullet."""
+        if self.client_id >= 0:
+            for b in (self.palm_body_id, self.left_jaw_body_id, self.right_jaw_body_id):
+                if b >= 0:
+                    try:
+                        p.removeBody(b, physicsClientId=self.client_id)
+                    except Exception:
+                        pass
+        self.palm_body_id = -1
+        self.left_jaw_body_id = -1
+        self.right_jaw_body_id = -1
+
+    def _update_proxy_poses(self) -> None:
+        """Synchronize kinematic PyBullet proxy bodies to current TCP pose and jaw width."""
+        if self.client_id < 0 or self.palm_body_id < 0:
+            return
+
+        R_tcp = quat_to_rot_matrix(self.tcp_quat)
+        p_tcp = self.tcp_pos
+
+        palm_dz = float(self.palm_dimensions_m[2])
+        jaw_dz = float(self.jaw_dimensions_m[2])
+        half_w = float(self.jaw_width_m) / 2.0
+
+        p_palm = p_tcp + R_tcp @ np.array([0.0, 0.0, palm_dz / 2.0])
+        p.resetBasePositionAndOrientation(
+            self.palm_body_id,
+            p_palm.tolist(),
+            list(self.tcp_quat),
+            physicsClientId=self.client_id,
+        )
+
+        if self.travel_axis == "Y":
+            left_loc = np.array([0.0, -half_w, palm_dz + jaw_dz / 2.0])
+            right_loc = np.array([0.0, half_w, palm_dz + jaw_dz / 2.0])
+        else:
+            left_loc = np.array([-half_w, 0.0, palm_dz + jaw_dz / 2.0])
+            right_loc = np.array([half_w, 0.0, palm_dz + jaw_dz / 2.0])
+
+        p_left = p_tcp + R_tcp @ left_loc
+        p_right = p_tcp + R_tcp @ right_loc
+
+        p.resetBasePositionAndOrientation(
+            self.left_jaw_body_id,
+            p_left.tolist(),
+            list(self.tcp_quat),
+            physicsClientId=self.client_id,
+        )
+        p.resetBasePositionAndOrientation(
+            self.right_jaw_body_id,
+            p_right.tolist(),
+            list(self.tcp_quat),
+            physicsClientId=self.client_id,
+        )
+
     def set_tcp_pose(
         self,
         pos_m: Sequence[float],
         quat: Sequence[float],
-        timestamp: float,
+        timestamp: Optional[float] = None,
     ) -> None:
-        """Update kinematic TCP pose and derive grasp center."""
+        """Update kinematic TCP pose, update collision proxies, and derive grasp center."""
         self.tcp_pos = np.asarray(pos_m, dtype=float)
         self.tcp_quat = np.asarray(quat, dtype=float)
 
@@ -80,7 +210,9 @@ class VirtualGripper:
         self.grasp_pos = self.tcp_pos + R_tcp @ self.tcp_to_grasp_center
         self.grasp_quat = self.tcp_quat.copy()
 
-        self._history.append((float(timestamp), self.grasp_pos.copy()))
+        ts = float(timestamp) if timestamp is not None else time.time()
+        self._history.append((ts, self.grasp_pos.copy()))
+        self._update_proxy_poses()
 
         # If a piece is attached, deterministically update its pose
         if self.attached_piece is not None and self.T_gripper_piece is not None:
@@ -98,9 +230,10 @@ class VirtualGripper:
             self.attached_piece.set_velocity(lin_vel, [0.0, 0.0, 0.0])
 
     def set_gripper_state(self, closed: bool) -> None:
-        """Set gripper jaw open/closed state."""
+        """Set gripper jaw open/closed state and update proxy bodies."""
         self.is_closed = bool(closed)
         self.jaw_width_m = self.closed_width_m if self.is_closed else self.open_width_m
+        self._update_proxy_poses()
 
     def estimate_velocity(self) -> Tuple[np.ndarray, np.ndarray]:
         """Estimate grasp center linear and angular velocity from recent history."""
@@ -108,14 +241,14 @@ class VirtualGripper:
             return np.zeros(3, dtype=float), np.zeros(3, dtype=float)
 
         t_now, p_now = self._history[-1]
-        t_prev, p_prev = self._history[-2]
-        dt = t_now - t_prev
-        if dt <= 1e-6:
-            return np.zeros(3, dtype=float), np.zeros(3, dtype=float)
+        for i in range(len(self._history) - 2, -1, -1):
+            t_prev, p_prev = self._history[i]
+            dt = t_now - t_prev
+            if dt > 1e-6:
+                lin_vel = (p_now - p_prev) / dt
+                return lin_vel, np.zeros(3, dtype=float)
 
-        lin_vel = (p_now - p_prev) / dt
-        ang_vel = np.zeros(3, dtype=float)
-        return lin_vel, ang_vel
+        return np.zeros(3, dtype=float), np.zeros(3, dtype=float)
 
     def evaluate_grasp_eligibility(
         self,
@@ -210,6 +343,18 @@ class VirtualGripper:
         T_gripper_inv[:3, 3] = p_inv
 
         self.T_gripper_piece = T_gripper_inv @ T_piece
+
+        # Disable collision between attached piece and gripper collision proxies
+        if self.client_id >= 0:
+            for gb in self.proxy_body_ids:
+                p.setCollisionFilterPair(
+                    piece.body_id,
+                    gb,
+                    -1,
+                    -1,
+                    enableCollision=0,
+                    physicsClientId=self.client_id,
+                )
         return True
 
     def detach_piece(self) -> Optional[XiangqiPieceBody]:
@@ -227,6 +372,18 @@ class VirtualGripper:
         piece.attached_to_gripper = False
         piece.physical_state = PiecePhysicalState.FALLING
 
+        # Re-enable collision between piece and gripper collision proxies
+        if self.client_id >= 0:
+            for gb in self.proxy_body_ids:
+                p.setCollisionFilterPair(
+                    piece.body_id,
+                    gb,
+                    -1,
+                    -1,
+                    enableCollision=1,
+                    physicsClientId=self.client_id,
+                )
+
         # Inherit velocity
         lin_vel, ang_vel = self.estimate_velocity()
         piece.set_velocity(lin_vel, ang_vel)
@@ -236,6 +393,7 @@ class VirtualGripper:
     def to_state_dict(self) -> Dict[str, Any]:
         """Telemetry state dictionary."""
         return {
+            "closed": self.is_closed,
             "is_closed": self.is_closed,
             "jaw_width_m": round(self.jaw_width_m, 4),
             "attached_piece_id": self.attached_piece.piece_id if self.attached_piece else None,

@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 import threading
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 
 from src.hardware.backends.base import RobotStateSnapshot
@@ -24,7 +24,8 @@ from src.simulation.physics.transforms import (
     continuous_board_coord,
     rpy_deg_to_quat,
 )
-from src.simulation.physics.state import GraspResult, GraspStatus, WorldStateSnapshot
+from src.simulation.physics.piece import XiangqiPieceBody
+from src.simulation.physics.state import DropEvent, GraspResult, GraspStatus, WorldStateSnapshot
 from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.virtual_fr3_backend import VirtualFR3Backend
 from src.domain.geometry import get_physical_geometry
@@ -63,6 +64,10 @@ class VirtualXiangqiSimulation:
         self._last_time = time.time()
         self._last_flange_pos_m = np.array(self.backend.get_state_snapshot().flange_pose_mm_deg[:3]) / 1000.0
         self._last_gripper_closed = self.backend.get_state_snapshot().gripper_closed
+
+        # Scheduled mid-motion force drop state
+        self._scheduled_drop: Optional[Dict[str, Any]] = None
+        self.last_drop_event: Optional[DropEvent] = None
 
         # Register listener with backend
         self.backend.add_state_listener(self._on_robot_state_update)
@@ -106,6 +111,36 @@ class VirtualXiangqiSimulation:
             else:
                 self.world.release_attached_piece()
             self._last_gripper_closed = snapshot.gripper_closed
+
+        # Mid-motion scheduled force drop check (must trigger while robot is in MOVING state)
+        if (
+            self._scheduled_drop is not None
+            and not self._scheduled_drop["triggered"]
+            and snapshot.motion_state == "MOVING"
+        ):
+            piece = self.world.get_attached_piece()
+            if piece is not None:
+                tgt_id = self._scheduled_drop.get("target_piece_id")
+                if tgt_id is None or tgt_id == piece.piece_id:
+                    curr_p = np.array(snapshot.flange_pose_mm_deg[:3], dtype=float) / 1000.0
+                    if self._scheduled_drop.get("start_tcp_m") is None:
+                        self._scheduled_drop["start_tcp_m"] = curr_p.copy()
+
+                    start_p = self._scheduled_drop["start_tcp_m"]
+                    target_p = self._scheduled_drop.get("target_xyz_m")
+
+                    if target_p is not None:
+                        total_dist = float(np.linalg.norm(target_p - start_p))
+                        curr_dist = float(np.linalg.norm(curr_p - start_p))
+                        progress = (curr_dist / max(total_dist, 1e-4)) if total_dist > 1e-4 else 1.0
+                    else:
+                        step_cnt = self._scheduled_drop.get("step_count", 0) + 1
+                        self._scheduled_drop["step_count"] = step_cnt
+                        expected_steps = self._scheduled_drop.get("expected_steps", 20)
+                        progress = min(1.0, step_cnt / float(expected_steps))
+
+                    if progress >= self._scheduled_drop["progress_threshold"]:
+                        self._trigger_scheduled_drop(snapshot, piece, progress)
 
         # Step physics to advance any dynamics or attachments
         self.world.step(1)
@@ -261,10 +296,135 @@ class VirtualXiangqiSimulation:
         self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
         return True
 
-    def force_drop(self) -> Optional[str]:
-        """Trigger dynamic force-drop release."""
-        dropped = self.world.force_drop_attached_piece()
+    def schedule_force_drop(
+        self,
+        progress_threshold: float = 0.5,
+        target_xyz_m: Optional[Sequence[float]] = None,
+        target_piece_id: Optional[str] = None,
+        expected_steps: int = 20,
+    ) -> None:
+        """
+        Schedule an automatic force-drop to trigger mid-motion when
+        trajectory progress >= progress_threshold and motion_state == 'MOVING'.
+        """
+        self._scheduled_drop = {
+            "progress_threshold": float(progress_threshold),
+            "target_xyz_m": np.asarray(target_xyz_m, dtype=float) if target_xyz_m is not None else None,
+            "target_piece_id": target_piece_id,
+            "expected_steps": int(expected_steps),
+            "step_count": 0,
+            "triggered": False,
+            "start_tcp_m": None,
+        }
+        self.last_drop_event = None
+
+    def _trigger_scheduled_drop(
+        self,
+        snapshot: RobotStateSnapshot,
+        piece: XiangqiPieceBody,
+        progress: float,
+    ) -> DropEvent:
+        pos_robot, _ = piece.get_pose_robot_base()
+        lin_vel, ang_vel = self.world.gripper.estimate_velocity()
+
+        # Detach piece mid-flight from gripper
+        self.backend.set_gripper(False)
+        self.world.force_drop_attached_piece()
+        speed = float(np.linalg.norm(lin_vel))
+
+        event = DropEvent(
+            triggered=True,
+            timestamp=time.time(),
+            sim_time=self.world.sim_time,
+            robot_motion_state=snapshot.motion_state,  # Authoritatively "MOVING"
+            release_position=pos_robot.tolist(),
+            release_linear_velocity=lin_vel.tolist(),
+            release_angular_velocity=ang_vel.tolist(),
+            attached_piece_id=piece.piece_id,
+            trajectory_progress=float(progress),
+            release_speed=speed,
+        )
+        self.last_drop_event = event
+        self._scheduled_drop["triggered"] = True
+
         if self.telemetry and self.auto_sync_telemetry:
             self.telemetry.update_world_state(self.world.get_snapshot())
-        return dropped.piece_id if dropped else None
+
+        return event
+
+    def move_cartesian(
+        self,
+        target_pose_or_xyz: Sequence[float],
+        target_rpy_deg: Optional[Union[Sequence[float], float]] = None,
+        speed_factor: Optional[float] = None,
+        samples: int = 20,
+    ) -> bool:
+        """Execute linear motion, automatically seeding target_xyz_m for any scheduled drop."""
+        if len(target_pose_or_xyz) == 3 and target_rpy_deg is not None and hasattr(target_rpy_deg, "__len__") and len(target_rpy_deg) == 3:
+            scale = 1000.0 if max(abs(v) for v in target_pose_or_xyz) < 5.0 else 1.0
+            target_pose_mm_deg = [
+                float(target_pose_or_xyz[0]) * scale,
+                float(target_pose_or_xyz[1]) * scale,
+                float(target_pose_or_xyz[2]) * scale,
+                float(target_rpy_deg[0]),
+                float(target_rpy_deg[1]),
+                float(target_rpy_deg[2]),
+            ]
+        elif len(target_pose_or_xyz) == 6:
+            target_pose_mm_deg = list(target_pose_or_xyz)
+            if speed_factor is None and isinstance(target_rpy_deg, (int, float)):
+                speed_factor = float(target_rpy_deg)
+        else:
+            raise ValueError("target_pose must be 6 elements [x,y,z,rx,ry,rz] or (xyz, rpy)")
+
+        if self._scheduled_drop is not None and not self._scheduled_drop.get("triggered", False):
+            if self._scheduled_drop.get("target_xyz_m") is None:
+                self._scheduled_drop["target_xyz_m"] = np.array(target_pose_mm_deg[:3], dtype=float) / 1000.0
+            self._scheduled_drop["expected_steps"] = samples
+
+        return self.backend.move_cartesian(target_pose_mm_deg, speed_factor=speed_factor, samples=samples)
+
+    def force_drop(self) -> Optional[DropEvent]:
+        """Trigger dynamic force-drop release immediately and record a DropEvent."""
+        attached = self.world.get_attached_piece()
+        if attached is None:
+            return None
+
+        snap = self.backend.get_state_snapshot()
+        pos, _ = attached.get_pose_robot_base()
+        lin_vel, ang_vel = self.world.gripper.estimate_velocity()
+        self.backend.set_gripper(False)
+        dropped = self.world.force_drop_attached_piece()
+
+        event = DropEvent(
+            triggered=True,
+            timestamp=time.time(),
+            sim_time=self.world.sim_time,
+            robot_motion_state=snap.motion_state,
+            release_position=pos.tolist(),
+            release_linear_velocity=lin_vel.tolist(),
+            release_angular_velocity=ang_vel.tolist(),
+            attached_piece_id=attached.piece_id,
+            trajectory_progress=1.0,
+            release_speed=float(np.linalg.norm(lin_vel)),
+        )
+        self.last_drop_event = event
+
+        if self.telemetry and self.auto_sync_telemetry:
+            self.telemetry.update_world_state(self.world.get_snapshot())
+
+        return event
+
+    def start(self) -> None:
+        """Start or initialize simulation coordinator (idempotent)."""
+        pass
+
+    def stop(self) -> None:
+        """Stop simulation coordinator and clean up resources."""
+        pass
+
+
+# Backward-compatibility alias
+SimulationRuntime = VirtualXiangqiSimulation
+
 

@@ -82,19 +82,30 @@ def run_drop_scenario(sim: VirtualXiangqiSimulation, speed_factor: float = 50.0)
         print(f"[-] Pick failed: {res.reason}")
         return False
 
-    print("[2] Moving horizontally across the board...")
+    print("[2] Scheduling mid-motion force drop at 50% trajectory progress...")
+    sim.schedule_force_drop(progress_threshold=0.5, target_piece_id=piece_id)
+
+    print("[3] Executing horizontal Cartesian transport across the board...")
     # Move towards (col=3, row=2)
     tx, ty, tz = sim.cell_to_robot_xyz(3, 2, z_height_m=0.10)
     rx, ry, rz = sim.target_tool_euler_deg
-    sim.backend.move_cartesian([tx * 1000, ty * 1000, tz * 1000, rx, ry, rz], speed_factor=speed_factor)
+    sim.move_cartesian([tx * 1000, ty * 1000, tz * 1000, rx, ry, rz], speed_factor=speed_factor)
 
-    print("[3] Injecting mid-flight failure: force drop!")
-    dropped_id = sim.force_drop()
-    print(f"[+] Dropped piece: {dropped_id}")
+    evt = sim.last_drop_event
+    if evt is None or not evt.triggered:
+        print("[-] Force drop was not triggered during motion!")
+        return False
 
-    v_lin, _ = piece.get_velocity()
-    speed = float(np.linalg.norm(v_lin))
-    print(f"[+] Piece ballistic velocity at release: {speed:.3f} m/s")
+    print(f"[+] Robot state at drop: {evt.robot_motion_state}")
+    print(f"[+] Drop progress: {evt.trajectory_progress * 100:.1f}%")
+    print(f"[+] Release linear velocity: {evt.release_speed:.3f} m/s")
+    print(f"[+] Release velocity vector: {[round(v, 4) for v in evt.release_linear_velocity]}")
+    print(f"[+] Piece detached: {'YES' if not piece.attached_to_gripper else 'NO'}")
+
+    # Validate mid-motion criteria
+    motion_ok = (evt.robot_motion_state == "MOVING")
+    speed_ok = (evt.release_speed > 0.02)
+    detached_ok = not piece.attached_to_gripper
 
     print("[4] Stepping physics until piece settles on board...")
     steps = sim.world.step_until_settled(max_steps=120)
@@ -102,7 +113,8 @@ def run_drop_scenario(sim: VirtualXiangqiSimulation, speed_factor: float = 50.0)
     c_settle, r_settle, dist = piece.get_nearest_intersection()
     print(f"[+] Settled location: near (col={c_settle}, row={r_settle}), tilt={piece.tilt_angle_deg:.2f} deg")
 
-    success = piece.physical_state in (PiecePhysicalState.RESTING, PiecePhysicalState.ON_BOARD)
+    settled_ok = piece.physical_state in (PiecePhysicalState.RESTING, PiecePhysicalState.ON_BOARD)
+    success = (motion_ok and speed_ok and detached_ok and settled_ok)
     print(f"--> Result: {'SUCCESS' if success else 'FAILED'}")
     return success
 

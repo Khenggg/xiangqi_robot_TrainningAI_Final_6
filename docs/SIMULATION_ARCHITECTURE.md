@@ -786,3 +786,52 @@ Tại Phase P3, hệ thống mô phỏng nâng cấp từ cơ cấu hiển thị
 - Khi robot chuyển động, listener đồng bộ cập nhật vị trí flange và các quân cờ đang được gắp.
 - `TelemetryPublisher` phát gói tin `world_state` song song với `robot_state` qua WebSocket, cho phép 3D viewer render mượt mà chuyển động đóng mở ngàm và di chuyển của từng quân cờ.
 
+---
+
+## 25. PHASE P3.1 ARCHITECTURE ADDITIONS: PHYSICS HARDENING & CANONICALIZATION
+
+Tại Phase P3.1, kiến trúc mô phỏng vật lý và đồng bộ Digital Twin được chuẩn hóa toàn diện theo các nguyên tắc kỹ thuật khắt khe:
+
+### 25.1. True Mid-Motion Dynamic Drop & Chẩn Đoán Chi Tiết (`DropEvent`)
+- **Ngữ nghĩa Mid-Motion thực sự:** Thả rơi được kích hoạt thông qua `schedule_force_drop(progress_threshold=0.5)` trong `SimulationRuntime` khi robot đang chuyển động với vận tốc lớn (`motion_state == "MOVING"`).
+- **Kế thừa động lượng:** Quân cờ kế thừa đầy đủ vận tốc tuyến tính tức thời ($\|\mathbf{v}_{\text{release}}\| > 0.02\text{ m/s}$) và vận tốc góc tại thời điểm nhả.
+- **Tách biệt độc lập:** Sau khi thả, quân cờ bay theo quỹ đạo đường đạn trong trọng lực và tự ổn định (settle) vào trạng thái `RESTING` hoặc `OUT_OF_BOUNDS`, trong khi robot tiếp tục di chuyển độc lập để hoàn thành quỹ đạo tới đích.
+- **Cấu trúc dữ liệu `DropEvent`:** Ghi nhận toàn diện các thông số chẩn đoán:
+  - `piece_id`, `drop_time`
+  - `release_position_m`, `release_velocity_mps`, `release_speed`
+  - `robot_motion_state` (bắt buộc `"MOVING"`)
+  - `settle_position_m`, `settle_time_s`, `flight_duration_s`
+  - `settled_on_board` (boolean)
+
+### 25.2. PyBullet Gripper Collision Proxies & Quản Lý Va Chạm
+- **Kinematic Collision Bodies:** Khởi tạo 3 khối va chạm PyBullet (palm plate, left jaw, right jaw) gắn vào `VirtualGripper`, kích thước trích xuất trực tiếp từ `shared/virtual_gripper_profile.json`.
+- **Dịch chuyển ngàm động học:** Khi kẹp đóng/mở, các ngàm trượt tịnh tiến dọc trục $Y$ của flange tương ứng với `jaw_opening_m` ($0.040\text{ m}$ khi mở, $0.020\text{ m}$ khi đóng).
+- **Bộ lọc va chạm thông minh (`p.setCollisionFilterPair`):**
+  - Khi quân cờ được gắp (`ATTACHED`), va chạm giữa quân cờ và 3 proxy ngàm kẹp tạm thời bị vô hiệu hóa để ngăn ngừa xung lực phản hồi và bất ổn định số học.
+  - Ngay khi nhả kẹp hoặc thả rơi (`RELEASED` / `DROPPED`), va chạm vật lý giữa quân cờ và các ngàm kẹp lập tức được tái kích hoạt.
+  - Khi mở ngàm trong `release_attached_piece()` và `force_drop_attached_piece()`, hàm `set_gripper_state(False)` được kích hoạt tự động để mở rộng khoảng hở ngàm, bảo đảm quân cờ rơi tự do thuần túy dưới trọng lực.
+
+### 25.3. Nguồn Chân Lý Đơn Nhất (Single Sources of Truth)
+- **Viewer Gripper Profile (`gripper_profile.mjs`):** Three.js viewer nạp động trực tiếp cấu hình từ `/shared/virtual_gripper_profile.json`, triệt tiêu hoàn toàn các kích thước hộp và mã màu hardcode trong Three.js.
+- **Viewer Start Layout (`layout.mjs`):** Nạp động 32 quân cờ chuẩn tắc từ `/shared/xiangqi_start_layout.json`, xóa bỏ mảng đối tượng `START_LAYOUT` thủ công.
+- **Scene Transform Orthonormality (`transforms.py`):** Nạp trực tiếp ma trận chân đế robot từ `/shared/virtual_fr3_scene.json`. Lớp `SceneTransform` thực hiện kiểm tra nghiêm ngặt trong `__post_init__`:
+  - Ma trận xoay trực giao: $\|R^T R - I\|_\infty < 10^{-4}$
+  - Tính định hướng (Chirality): $\det(R) \approx +1.0$ (bảo đảm hệ trục quay phải chuẩn)
+  - Ma trận và vector tịnh tiến không chứa giá trị NaN hoặc Inf.
+
+### 25.4. Đồng Thời & An Toàn Khóa Luồng (Backend Concurrency)
+- Trong `VirtualFR3Backend`, trường `_state_lock` được chuyển đổi thành `threading.RLock()` (Reentrant Lock).
+- Ngăn ngừa hiện tượng deadlock luồng khi hàm lắng nghe trạng thái (`state_listener`) gọi ngược lại các phương thức backend (như `set_gripper(False)`) trong khi backend đang giữ khóa đồng bộ telemetry.
+- Bổ sung khối bắt ngoại lệ với log cảnh báo (`logger.warning`) khi các listener hoặc WebSocket client gặp lỗi.
+
+### 25.5. Kiểm Tra Cấu Hình Nghiêm Ngặt & Giải Phóng Tài Nguyên PyBullet
+- Module `src/simulation/physics/validation.py` cung cấp các validator fail-fast: `validate_physics_config`, `validate_gripper_profile`, `validate_start_layout`.
+- Phát hiện và từ chối các giá trị không hợp lệ (trọng lực, ma sát, độ mở ngàm, số lượng quân cờ).
+- Trong hàm khởi tạo `VirtualPhysicalWorld.__init__`, nếu có bất kỳ lỗi xác thực cấu hình nào, hàm sẽ giải phóng kết nối PyBullet (`p.disconnect(physicsClientId=...)`) trong khối `except` trước khi ném ngoại lệ, ngăn ngừa rò rỉ socket/bộ nhớ physics client.
+
+### 25.6. Chuẩn Hóa Schema Gói Tin `world_state`
+- Thuộc tính trạng thái kẹp trong `world_state` được chuẩn hóa thành `closed: bool`.
+- Bổ sung thuộc tính tương thích ngược `is_closed: bool` và trường `jaw_opening_m: float`.
+- 3D viewer trong `live_state.mjs` hỗ trợ tự động chuẩn hóa cả hai trường `closed` và `is_closed`.
+
+

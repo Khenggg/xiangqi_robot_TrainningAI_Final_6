@@ -22,8 +22,8 @@ Giao diện mô phỏng 3D Web-based và Digital Twin Mirror cho cánh tay robot
 - **Đồng Bộ Quân Cờ 3D Thời Gian Thực (Phase P3):**
   - Đồng bộ vị trí ($X, Y, Z$) và quaternion xoay của 32 quân cờ từ PyBullet rigid-body world qua gói tin `world_state`.
   - Hỗ trợ mô phỏng gắp nhả, thả rơi tự do, va chạm quân cờ và phát hiện quân cờ rơi khỏi mép bàn cờ (`OUT_OF_BOUNDS`).
-- **Ngàm Gắp 3D Động (Procedural Animated Gripper - Phase P3):**
-  - Tự động dựng mô hình ngàm kẹp 2 ngón Three.js dựa trên `shared/virtual_gripper_profile.json`, gắn trực tiếp vào `flange` link của robot FR3.
+- **Ngàm Gắp 3D Động (Procedural Animated Gripper - Phase P3 & P3.1):**
+  - Tự động dựng mô hình ngàm kẹp 2 ngón Three.js dựa trên `gripper_profile.mjs` nạp động trực tiếp `/shared/virtual_gripper_profile.json`, gắn trực tiếp vào `flange` link của robot FR3.
   - Hoạt họa chuyển động trượt mượt mà của 2 ngàm kẹp khi đóng/mở theo tín hiệu `gripper` và độ mở `jaw_opening_m`.
 - **WebSocket Live Mirroring:**
   - Đồng bộ góc khớp thời gian thực với robot thật hoặc Virtual FR3 Backend thông qua luồng WebSocket telemetry 30 FPS (`robot_state` và `world_state`).
@@ -37,17 +37,18 @@ Giao diện mô phỏng 3D Web-based và Digital Twin Mirror cho cánh tay robot
 
 ```
 robot-3d-viewer/
-├── index.html        # Giao diện chính: Canvas Three.js + bảng điều khiển kết nối/profile (mặc định FR3)
-├── styles.css        # Giao diện tối hiện đại, responsive
-├── main.mjs          # Entrypoint Three.js: Quản lý Scene, Lights, Loop, Robot kinematics, Scene extrinsics
-├── geometry.mjs      # Module tải & validate hình học vật lý từ shared/physical_geometry.json
-├── layout.mjs        # Khởi tạo vị trí ban đầu 32 quân cờ (Black row 0..4, Red row 5..9)
-├── board.mjs         # Dựng mesh bàn cờ, lưới ô cờ, quân cờ và hàm map tọa độ boardPointToXYZ theo scene
-├── live_state.mjs    # Bộ lọc và validate gói tin telemetry WebSocket
-├── serve.mjs         # Static HTTP server local có bảo vệ traversal và whitelist
+├── index.html            # Giao diện chính: Canvas Three.js + bảng điều khiển kết nối/profile (mặc định FR3)
+├── styles.css            # Giao diện tối hiện đại, responsive
+├── main.mjs              # Entrypoint Three.js: Quản lý Scene, Lights, Loop, Robot kinematics, Scene extrinsics
+├── geometry.mjs          # Module tải & validate hình học vật lý từ shared/physical_geometry.json
+├── layout.mjs            # Nạp động 32 quân cờ từ shared/xiangqi_start_layout.json (Black row 0..4, Red row 5..9)
+├── gripper_profile.mjs   # Module tải & validate thông số ngàm kẹp từ shared/virtual_gripper_profile.json
+├── board.mjs             # Dựng mesh bàn cờ, lưới ô cờ, quân cờ và hàm map tọa độ boardPointToXYZ theo scene
+├── live_state.mjs        # Bộ lọc và validate gói tin telemetry WebSocket (robot_state, world_state)
+├── serve.mjs             # Static HTTP server local có bảo vệ traversal và whitelist
 └── assets/
-    ├── fr3_v6/       # Mesh STL và URDF của FAIRINO FR3
-    └── fr5_v6/       # Mesh STL và URDF của FAIRINO FR5
+    ├── fr3_v6/           # Mesh STL và URDF của FAIRINO FR3
+    └── fr5_v6/           # Mesh STL và URDF của FAIRINO FR5
 ```
 
 ---

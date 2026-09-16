@@ -110,6 +110,30 @@ class BoardLayoutConventionTests(unittest.TestCase):
             self.assertEqual(p[1], 6)
             self.assertIn(p[0], [0, 2, 4, 6, 8])
 
+    def test_fetch_start_layout_async(self):
+        node_bin = shutil.which("node")
+        js_code = """
+        import('./robot-3d-viewer/layout.mjs')
+            .then(m => m.fetchStartLayout())
+            .then(pieces => console.log(JSON.stringify(pieces)))
+            .catch(err => { console.error(err); process.exit(1); });
+        """
+        proc = subprocess.run(
+            [node_bin, "--input-type=module", "-e", js_code],
+            capture_output=True,
+            text=True,
+            cwd=_PROJECT_ROOT,
+        )
+        self.assertEqual(proc.returncode, 0, f"fetchStartLayout failed: {proc.stderr}")
+        pieces = json.loads(proc.stdout.strip())
+        self.assertEqual(len(pieces), 32)
+        piece_ids = [p["id"] for p in pieces]
+        self.assertEqual(len(piece_ids), 32)
+        self.assertEqual(len(set(piece_ids)), 32, "Canonical piece IDs must be unique")
+        self.assertIn("black_king_0", piece_ids)
+        self.assertIn("red_king_0", piece_ids)
+
 
 if __name__ == "__main__":
     unittest.main()
+

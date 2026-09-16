@@ -37,7 +37,7 @@ These values have been chosen conservatively for numerical stability in PyBullet
 - Rolling Friction: $0.001$
 - Spinning Friction: $0.001$
 - Restitution: $0.05$ (low bounciness for stable settling)
-- Physics Timestep: $1/240\text{ s}$ ($4.167\text{ ms}$) with 4 solver iterations per step.
+- Physics Timestep: $1/240\text{ s}$ ($4.167\text{ ms}$) with 50 solver iterations per step (matching `shared/virtual_physics.json`).
 
 ---
 
@@ -106,39 +106,60 @@ Each piece is modeled in PyBullet as a `GEOM_CYLINDER` collision shape with cyli
 The gripper is managed by `VirtualGripper` configured via `shared/virtual_gripper_profile.json`.
 
 ### 5.1. Capture Volume
-To initiate a physical grasp, the gripper must be positioned such that a target piece falls strictly within its geometric capture cylinder centered at `tcp_to_grasp_center` ($[0, 0, 0.035]\text{ m}$ in tool frame):
-- Horizontal Capture Tolerance: $\Delta_{xy} \le 12.0\text{ mm}$ ($0.012\text{ m}$)
-- Vertical Capture Tolerance: $|\Delta z| \le 8.0\text{ mm}$ ($0.008\text{ m}$)
-- Jaw Opening Threshold: $\text{jaw\_opening} \le 0.025\text{ m}$ ($25.0\text{ mm}$)
+To initiate a physical grasp, the gripper must be positioned such that a target piece falls strictly within its geometric capture cylinder centered at `tcp_to_grasp_center` ($[0, 0, 0.035]\text{ m}$ in tool frame), defined strictly in `shared/virtual_gripper_profile.json`:
+- Horizontal Capture Radius: $r_{xy} \le 16.0\text{ mm}$ ($0.016\text{ m}$)
+- Vertical Half-Height: $|\Delta z| \le 12.0\text{ mm}$ ($0.012\text{ m}$)
+- Stroke Limits: $\text{open\_width\_m} = 0.040\text{ m}$ ($40.0\text{ mm}$), $\text{closed\_width\_m} = 0.020\text{ m}$ ($20.0\text{ mm}$)
+- Grasp Eligibility Check: Requires $\text{is\_closed} = \text{True}$.
 
 ### 5.2. Ambiguity Rejection
 If more than one candidate piece falls within the capture volume simultaneously, the grasp fails with `GraspStatus.AMBIGUOUS`. This prevents non-deterministic multi-piece attachments.
 
 ### 5.3. Relative-Transform Invariant Attachment
-When a grasp succeeds, physical simulation of the piece in PyBullet is temporarily suspended (zero mass, disabled collision), and the piece is attached rigidly to the robot flange via relative transform $T_{\text{gripper\_piece}}$:
-$$T_{\text{flange\_piece}} = T_{\text{flange}}^{-1} \cdot T_{\text{piece}}$$
-For any subsequent flange pose $T_{\text{flange}}(t)$ during arm trajectory execution, the world pose of the piece is evaluated analytically:
-$$T_{\text{piece}}(t) = T_{\text{flange}}(t) \cdot T_{\text{flange\_piece}}$$
+When a grasp succeeds, physical simulation of the piece in PyBullet is temporarily slaved (mass = 0, collision filtered against gripper proxies), and the piece is attached rigidly to the gripper grasp frame via relative transform $T_{\text{gripper\_piece}}$:
+$$T_{\text{gripper\_piece}} = T_{\text{gripper}}^{-1} \cdot T_{\text{piece}}$$
+For any subsequent gripper pose $T_{\text{gripper}}(t)$ during arm trajectory execution, the world pose of the piece is evaluated analytically:
+$$T_{\text{piece}}(t) = T_{\text{gripper}}(t) \cdot T_{\text{gripper\_piece}}$$
 This guarantees zero slip, zero numerical drift, and exact preservation of relative offset regardless of arbitrary 6-DOF translation and rotation.
+
+### 5.4. PyBullet Gripper Collision Proxies (Phase P3.1)
+The gripper instantiates 3 kinematic PyBullet collision proxies driven directly by `shared/virtual_gripper_profile.json`:
+- **Palm proxy:** Box shape ($60 \times 40 \times 30\text{ mm}$), positioned at $[0, 0, \text{palm\_dz}/2]$ from TCP.
+- **Left jaw proxy:** Box shape ($8 \times 25 \times 35\text{ mm}$), translating along `travel_axis` ($X$) to $-w/2$.
+- **Right jaw proxy:** Box shape ($8 \times 25 \times 35\text{ mm}$), translating along `travel_axis` ($X$) to $+w/2$.
+
+**Attachment Collision Filtering Policy:**
+- While attached: PyBullet collision pairs between the attached piece body and all 3 gripper proxy bodies are disabled via `p.setCollisionFilterPair(..., enableCollision=0)`. This prevents internal constraint fighting and solver explosion.
+- Upon release / force-drop: Collision pairs between the piece and proxy bodies are immediately re-enabled via `p.setCollisionFilterPair(..., enableCollision=1)`.
 
 ---
 
-## 6. Dynamic Release and Force Drop Mechanics
+## 6. Dynamic Release and Mid-Motion Force Drop Mechanics
 
-When the gripper is commanded to release or when an emergency force drop occurs:
-1. The instantaneous linear velocity $\mathbf{v}_{\text{flange}}$ and angular velocity $\boldsymbol{\omega}_{\text{flange}}$ of the gripper flange are estimated from finite differences over time step $\Delta t$:
+### 6.1. True Mid-Motion Force Drop (Phase P3.1)
+Phase P3.1 implements authoritative mid-motion force drop evaluated synchronously within the robot state update listener (`_on_robot_state_update`):
+1. **Trigger Condition:** Evaluated while `snapshot.motion_state == "MOVING"` and trajectory progress exceeds `progress_threshold` (e.g. 50%).
+2. **Velocity Inheritance:** Velocity is estimated from backwards finite differences over historical trajectory steps where $\Delta t > 10^{-6}\text{ s}$:
    $$\mathbf{v} = \frac{\mathbf{p}(t) - \mathbf{p}(t - \Delta t)}{\Delta t}$$
-2. Collision and mass are restored to the piece in PyBullet.
-3. The piece is injected into the rigid-body solver with initial velocities:
-   $$\mathbf{v}_{\text{piece}} = \mathbf{v}_{\text{flange}}, \quad \boldsymbol{\omega}_{\text{piece}} = \boldsymbol{\omega}_{\text{flange}}$$
-4. The piece enters physical ballistic flight and settles under gravity and contact friction.
+   Guarantees non-zero release velocity ($> 0.02\text{ m/s}$, typically $0.5 - 1.5\text{ m/s}$ in fast moves).
+3. **Independent Ballistic Flight:** The piece is detached and injected into PyBullet with inherited linear and angular velocities. The piece tumbles and settles on the board under gravity and friction while the robot arm independently continues along its trajectory to completion.
+4. **`DropEvent` Diagnostics:** Captures full telemetry diagnostics:
+   - `triggered: bool`
+   - `sim_time: float`
+   - `robot_motion_state: str` ("MOVING")
+   - `release_position: List[float]`
+   - `release_linear_velocity: List[float]`
+   - `release_angular_velocity: List[float]`
+   - `attached_piece_id: str`
+   - `trajectory_progress: float`
+   - `release_speed: float` (> 0.02 m/s)
 
-### 6.1. Settling Criteria
+### 6.2. Settling Criteria
 A dropped or placed piece transitions from `FALLING` / `MOVING` to `RESTING` when its velocities remain below threshold for 20 consecutive simulation steps ($0.083\text{ s}$):
 - $\|\mathbf{v}\| < 0.005\text{ m/s}$
 - $\|\boldsymbol{\omega}\| < 0.050\text{ rad/s}$
 
-### 6.2. Out-of-Bounds Detection
+### 6.3. Out-of-Bounds Detection
 If a piece is dropped outside the finite board collider or knocked over the edge, it falls past the spatial boundary thresholds:
 - $Z < -0.200\text{ m}$ (below table level), OR
 - $|X - X_{\text{center}}| > \frac{L}{2} + 0.15\text{ m}$, OR

@@ -103,3 +103,23 @@
 - **Impact:** Nếu vô tình chạy tự động các file này trong môi trường có kết nối mạng tới robot thật, tay máy sẽ lập tức chuyển động vật lý, vi phạm nghiêm trọng quy chuẩn an toàn.
 - **Resolution in P1:** Di chuyển toàn bộ script gọi robot thật vào `tools/hardware_tests/`. Thiết lập thư mục cô lập an toàn `tests/unit/` chỉ chứa unit tests thuần túy. Cấu hình `pytest.ini` với `testpaths = tests/unit` và `norecursedirs = tools/hardware_tests`, đảm bảo lệnh `pytest` tự động KHÔNG BAO GIỜ chạm vào robot thật.
 
+---
+
+### SIM-GAP-010: Thiếu Va Chạm Vật Lý Đầu Gắp Trong PyBullet & Thả Rơi Giữa Chừng Chưa Thật Sự Mid-Motion
+- **Severity:** **CRITICAL**
+- **Status:** **RESOLVED IN P3.1**
+- **Evidence:** 
+  1. Trong P3, đầu gắp chỉ là một biến đổi hình học thuần túy (`set_tcp_pose()`), không tạo các rigid bodies va chạm trong PyBullet world. Quân cờ không thể va quệt vật lý với các ngàm kẹp khi rơi hoặc di chuyển.
+  2. Kịch bản thả rơi quân cờ (drop) trong P3 trước đó thực hiện sau khi robot đã dừng lại (`RESTING`), dẫn đến vận tốc nhả $\approx 0$, không phản ánh đúng động học ném/văng quán tính khi mất điện kẹp giữa hành trình.
+  3. Viewer Three.js còn hardcode mảng `START_LAYOUT` và kích thước ngàm kẹp thủ tục, tách rời nguồn chân lý JSON.
+- **Impact:** Thiếu độ chân thực vật lý của Digital Twin, tiềm ẩn nguy cơ sai lệch trạng thái kẹp và phân rã các nguồn cấu hình chuẩn.
+- **Resolution in P3.1:**
+  - **PyBullet Gripper Proxies:** Tạo 3 kinematic collision bodies trong PyBullet (palm plate, left jaw, right jaw) với kích thước từ `shared/virtual_gripper_profile.json`. Ngàm di chuyển trượt dọc trục $Y$ theo trạng thái đóng/mở. Quản lý `p.setCollisionFilterPair` linh hoạt: tắt va chạm ngàm-quân khi đang kẹp, tự động bật lại va chạm vật lý ngay khi nhả/rơi.
+  - **True Mid-Motion Drop:** Triển khai `schedule_force_drop()` trong `SimulationRuntime` kích hoạt chính xác tại thời điểm robot đang chuyển động tốc độ cao (`motion_state == "MOVING"`). Kế thừa vận tốc tuyến tính $> 0.02\text{ m/s}$, ghi nhận đầy đủ chẩn đoán trong `DropEvent` (tọa độ, vận tốc, trạng thái robot, thời gian bay, vị trí ổn định cuối cùng), trong khi robot tiếp tục hoàn tất quỹ đạo độc lập.
+  - **Single Sources of Truth:**
+    - Viewer nạp động `layout.mjs` từ `/shared/xiangqi_start_layout.json` (32 quân cờ chuẩn tắc).
+    - Tạo `gripper_profile.mjs` nạp động `/shared/virtual_gripper_profile.json` cho Three.js viewer.
+    - `transforms.py` nạp ma trận chân đế robot từ `/shared/virtual_fr3_scene.json` kèm kiểm tra trực giao ($R^T R = I$) và định thức chirality ($\det(R) \approx +1.0$).
+  - **Concurrency & Validation:** Đổi lock backend sang `threading.RLock()` triệt tiêu hoàn toàn nguy cơ deadlock reentrant khi listener kích hoạt `set_gripper(False)`. Bổ sung module `validation.py` kiểm tra cấu hình nghiêm ngặt với cơ chế giải phóng tài nguyên PyBullet an toàn khi có ngoại lệ.
+
+

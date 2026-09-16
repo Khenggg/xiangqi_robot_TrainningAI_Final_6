@@ -119,3 +119,24 @@ class WorldStateSnapshot:
             "gripper": self.gripper,
             "pieces": [p.to_dict() for p in self.pieces],
         }
+
+
+@dataclass(frozen=True)
+class DropEvent:
+    """
+    Evidence record for a force-drop event during simulation.
+    Captures exact robot motion state, release position, release velocity, and progress.
+    """
+    triggered: bool
+    timestamp: float
+    sim_time: float
+    robot_motion_state: str
+    release_position: List[float]
+    release_linear_velocity: List[float]
+    release_angular_velocity: List[float]
+    attached_piece_id: Optional[str]
+    trajectory_progress: float
+    release_speed: float
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)

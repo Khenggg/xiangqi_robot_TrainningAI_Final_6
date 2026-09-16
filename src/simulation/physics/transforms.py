@@ -9,18 +9,106 @@ and 3d_world (Three.js visualization frame) using the canonical extrinsics:
 All quaternions follow the PyBullet / Three.js convention: [x, y, z, w].
 """
 
+from dataclasses import dataclass
+import json
 import math
-from typing import Optional, Sequence, Tuple
+from pathlib import Path
+from typing import Optional, Sequence, Tuple, Union
 import numpy as np
 
-# Canonical rotation matrix from shared/virtual_fr3_scene.json
-DEFAULT_R_ROBOT_TO_WORLD = np.array([
-    [0.0, -1.0, 0.0],
-    [0.0, 0.0, 1.0],
-    [-1.0, 0.0, 0.0],
-], dtype=float)
 
-DEFAULT_TRANSLATION_ROBOT_TO_WORLD = np.array([0.0, 0.0, 0.0], dtype=float)
+@dataclass(frozen=True)
+class SceneTransform:
+    """Canonical spatial transformation between robot_base and 3d_world."""
+    rotation_matrix: np.ndarray  # 3x3 float
+    translation_m: np.ndarray    # (3,) float
+
+    def __post_init__(self):
+        R = np.asarray(self.rotation_matrix, dtype=float)
+        t = np.asarray(self.translation_m, dtype=float)
+        if R.shape != (3, 3) or not np.all(np.isfinite(R)):
+            raise ValueError(f"Invalid rotation_matrix shape {R.shape} or non-finite values")
+        if t.shape != (3,) or not np.all(np.isfinite(t)):
+            raise ValueError(f"Invalid translation_m shape {t.shape} or non-finite values")
+        identity_error = float(np.max(np.abs(R.T @ R - np.eye(3))))
+        if identity_error > 1e-4:
+            raise ValueError(f"Rotation matrix is not orthonormal: max |R^T R - I| = {identity_error:.4e}")
+        det = float(np.linalg.det(R))
+        if abs(det - 1.0) > 1e-3:
+            raise ValueError(f"Rotation matrix determinant {det:.4f} != +1.0 (chirality violation)")
+        object.__setattr__(self, "rotation_matrix", R)
+        object.__setattr__(self, "translation_m", t)
+
+
+_CACHED_SCENE_TRANSFORM: Optional[SceneTransform] = None
+
+
+def get_canonical_scene_transform(
+    scene_config_path: Optional[Union[str, Path]] = None,
+    force_reload: bool = False,
+) -> SceneTransform:
+    """
+    Load and strictly validate the canonical robot_base -> 3d_world transformation
+    from shared/virtual_fr3_scene.json. Fails fast if file is missing or malformed.
+    """
+    global _CACHED_SCENE_TRANSFORM
+    if _CACHED_SCENE_TRANSFORM is not None and not force_reload and scene_config_path is None:
+        return _CACHED_SCENE_TRANSFORM
+
+    if scene_config_path is None:
+        scene_config_path = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "shared"
+            / "virtual_fr3_scene.json"
+        )
+    scene_path = Path(scene_config_path)
+    if not scene_path.is_file():
+        raise FileNotFoundError(f"Canonical scene configuration not found at {scene_path}")
+
+    with open(scene_path, "r", encoding="utf-8-sig") as f:
+        cfg = json.load(f)
+
+    if "robot_base_to_3d_world" not in cfg:
+        raise ValueError(f"Missing 'robot_base_to_3d_world' block in {scene_path}")
+
+    trans_cfg = cfg["robot_base_to_3d_world"]
+    if "rotation_matrix" not in trans_cfg:
+        raise ValueError(f"Missing 'rotation_matrix' in robot_base_to_3d_world from {scene_path}")
+    if "translation_m" not in trans_cfg:
+        raise ValueError(f"Missing 'translation_m' in robot_base_to_3d_world from {scene_path}")
+
+    R = np.array(trans_cfg["rotation_matrix"], dtype=float)
+    t = np.array(trans_cfg["translation_m"], dtype=float)
+
+    if R.shape != (3, 3) or not np.all(np.isfinite(R)):
+        raise ValueError(f"Invalid rotation_matrix shape {R.shape} or non-finite values in {scene_path}")
+
+    if t.shape != (3,) or not np.all(np.isfinite(t)):
+        raise ValueError(f"Invalid translation_m shape {t.shape} or non-finite values in {scene_path}")
+
+    # Orthonormality check: R.T @ R == I
+    identity_error = float(np.max(np.abs(R.T @ R - np.eye(3))))
+    if identity_error > 1e-4:
+        raise ValueError(f"Rotation matrix in {scene_path} is not orthonormal: max |R^T R - I| = {identity_error}")
+
+    # Determinant check: det(R) ≈ +1 (proper rotation, preserves handedness)
+    det = float(np.linalg.det(R))
+    if abs(det - 1.0) > 1e-3:
+        raise ValueError(f"Rotation matrix in {scene_path} determinant {det:.4f} != +1.0 (chirality violation)")
+
+    transform = SceneTransform(rotation_matrix=R, translation_m=t)
+    if scene_config_path is None:
+        _CACHED_SCENE_TRANSFORM = transform
+
+    return transform
+
+
+# Explicit loader alias
+load_scene_transform = get_canonical_scene_transform
+
+# Canonical dynamic aliases populated from canonical scene configuration
+DEFAULT_R_ROBOT_TO_WORLD = get_canonical_scene_transform().rotation_matrix
+DEFAULT_TRANSLATION_ROBOT_TO_WORLD = get_canonical_scene_transform().translation_m
 
 
 def quat_to_rot_matrix(q: Sequence[float]) -> np.ndarray:
@@ -107,8 +195,13 @@ def transform_point_robot_to_world(
     Transform 3D position from robot_base to 3d_world.
     P_world = R * P_robot + t
     """
-    rot = DEFAULT_R_ROBOT_TO_WORLD if R is None else np.asarray(R, dtype=float)
-    trans = DEFAULT_TRANSLATION_ROBOT_TO_WORLD if t is None else np.asarray(t, dtype=float)
+    if R is None or t is None:
+        trans_cfg = get_canonical_scene_transform()
+        rot = trans_cfg.rotation_matrix if R is None else np.asarray(R, dtype=float)
+        trans = trans_cfg.translation_m if t is None else np.asarray(t, dtype=float)
+    else:
+        rot = np.asarray(R, dtype=float)
+        trans = np.asarray(t, dtype=float)
     return rot @ np.asarray(p_robot, dtype=float) + trans
 
 
@@ -120,7 +213,7 @@ def transform_quat_robot_to_world(
     Transform orientation quaternion [x, y, z, w] from robot_base to 3d_world.
     R_world = R * R_robot
     """
-    rot = DEFAULT_R_ROBOT_TO_WORLD if R is None else np.asarray(R, dtype=float)
+    rot = get_canonical_scene_transform().rotation_matrix if R is None else np.asarray(R, dtype=float)
     M_robot = quat_to_rot_matrix(q_robot)
     M_world = rot @ M_robot
     return rot_matrix_to_quat(M_world)

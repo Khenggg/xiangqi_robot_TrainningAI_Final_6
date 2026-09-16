@@ -1,10 +1,11 @@
-﻿"""
+"""
 Virtual physical simulation package for Xiangqi Robot.
 """
 
 from src.simulation.physics.state import (
     GraspResult,
     GraspStatus,
+    DropEvent,
     PiecePhysicalState,
     PieceSnapshot,
     WorldStateSnapshot,
@@ -29,6 +30,7 @@ __all__ = [
     "PiecePhysicalState",
     "GraspStatus",
     "GraspResult",
+    "DropEvent",
     "PieceSnapshot",
     "WorldStateSnapshot",
     "continuous_board_coord",

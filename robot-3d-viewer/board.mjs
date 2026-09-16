@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { fetchPhysicalGeometry, parsePhysicalGeometry } from "./geometry.mjs";
-import { START_LAYOUT, LABEL_RED, LABEL_BLACK, PIECE_TYPE_NAMES } from "./layout.mjs";
+import { fetchStartLayout, parseStartLayout, START_LAYOUT, LABEL_RED, LABEL_BLACK, PIECE_TYPE_NAMES } from "./layout.mjs";
 
 // Re-export layout for convenience
-export { START_LAYOUT, LABEL_RED, LABEL_BLACK, PIECE_TYPE_NAMES };
+export { fetchStartLayout, parseStartLayout, START_LAYOUT, LABEL_RED, LABEL_BLACK, PIECE_TYPE_NAMES };
 
 // ---------------------------------------------------------------------------
 // SIMULATION SCENE PLACEMENT (NOT INTRINSIC PHYSICAL GEOMETRY)
@@ -270,7 +270,7 @@ function makePieceMaterials(label, side) {
   return [woodSideMaterial, topMaterial, woodSideMaterial];
 }
 
-export function buildPieces(geometry = null, layout = START_LAYOUT) {
+export function buildPieces(geometry = null, layoutOrPieces = START_LAYOUT) {
   const geo = geometry || getActiveGeometry();
   const group = new THREE.Group();
   group.name = "xiangqi-pieces";
@@ -283,7 +283,26 @@ export function buildPieces(geometry = null, layout = START_LAYOUT) {
   cylinderGeometry.rotateX(Math.PI / 2);
 
   const counts = {};
-  layout.forEach(([col, row, type, side], index) => {
+  const list = layoutOrPieces || [];
+
+  list.forEach((item, index) => {
+    let col, row, type, side, canonicalId;
+    if (Array.isArray(item)) {
+      [col, row, type, side] = item;
+      const sideName = side === "r" ? "red" : "black";
+      const typeName = PIECE_TYPE_NAMES[type] || type;
+      const key = `${sideName}_${typeName}`;
+      const countIdx = counts[key] || 0;
+      counts[key] = countIdx + 1;
+      canonicalId = `${key}_${countIdx}`;
+    } else {
+      col = item.col;
+      row = item.row;
+      type = item.type;
+      side = item.side;
+      canonicalId = item.id;
+    }
+
     const label = side === "r" ? LABEL_RED[type] : LABEL_BLACK[type];
     const mesh = new THREE.Mesh(cylinderGeometry, makePieceMaterials(label, side));
     const pos = boardPointToXYZ(col, row, geo);
@@ -294,13 +313,6 @@ export function buildPieces(geometry = null, layout = START_LAYOUT) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
-    const sideName = side === "r" ? "red" : "black";
-    const typeName = PIECE_TYPE_NAMES[type] || type;
-    const key = `${sideName}_${typeName}`;
-    const countIdx = counts[key] || 0;
-    counts[key] = countIdx + 1;
-
-    const canonicalId = `${key}_${countIdx}`;
     mesh.name = canonicalId;
     mesh.userData = { col, row, type, side, id: canonicalId };
     pieces[canonicalId] = mesh;

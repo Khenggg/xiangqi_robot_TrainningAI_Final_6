@@ -96,6 +96,8 @@ class PieceDropTests(unittest.TestCase):
 
         # Force drop
         self.world.force_drop_attached_piece()
+        # Retract gripper upward so it does not obstruct the falling piece
+        self.gripper.set_tcp_pose(np.array(off_board_pos) + [0, 0, 0.05], [0, 0, 0, 1], time.time())
 
         # Step simulation as piece falls into the abyss
         for _ in range(150):

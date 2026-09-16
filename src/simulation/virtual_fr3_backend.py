@@ -8,12 +8,15 @@ Implements the RobotBackend interface for headless digital-twin simulation.
 - Thread-safe state access with fast-execution support for unit tests
 """
 
+import logging
 import math
 from pathlib import Path
 import threading
 import time
 from typing import Callable, Dict, List, Optional, Sequence, Union
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from src.hardware.backends.base import RobotBackend, RobotStateSnapshot
 from src.simulation.kinematics.fr3 import FR3Kinematics, IKResult, IKStatus
@@ -39,7 +42,7 @@ class VirtualFR3Backend(RobotBackend):
         self.default_speed_factor = max(0.01, float(default_speed_factor))
         self.scene_config_path = scene_config_path
 
-        self._state_lock = threading.Lock()
+        self._state_lock = threading.RLock()
         self._connected = False
         self._motion_state = "DISCONNECTED"
         self._gripper_closed = False
@@ -143,7 +146,7 @@ class VirtualFR3Backend(RobotBackend):
             try:
                 listener(snapshot)
             except Exception as e:
-                pass
+                logger.warning("Robot state listener %r raised exception: %s", listener, e)
 
     def set_gripper(self, closed: bool) -> bool:
         """Set gripper virtual actuator state."""

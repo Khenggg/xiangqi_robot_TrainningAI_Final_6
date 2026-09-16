@@ -1,11 +1,10 @@
-// Canonical Xiangqi Start Layout
+﻿// robot-3d-viewer/layout.mjs
+// Single source of truth loader for start layout in 3D viewer.
+// Canonical source: shared/xiangqi_start_layout.json
+//
 // Project convention:
 //   Black (Robot): row 0..4  (row 0 is Black backline)
 //   Red (Human):   row 5..9  (row 9 is Red backline)
-//
-// Format: [col, row, piece_type, side]
-// piece_type: 'k'=King, 'a'=Advisor, 'b'=Elephant (Bishop), 'n'=Knight, 'r'=Rook, 'c'=Cannon, 'p'=Pawn
-// side: 'b'=Black, 'r'=Red
 
 export const LABEL_RED = Object.freeze({
   k: "帥",
@@ -37,18 +36,105 @@ export const PIECE_TYPE_NAMES = Object.freeze({
   p: "pawn",
 });
 
-export const START_LAYOUT = Object.freeze([
-  // Black pieces (row 0 to 4) - Robot side
-  [0, 0, "r", "b"], [1, 0, "n", "b"], [2, 0, "b", "b"], [3, 0, "a", "b"],
-  [4, 0, "k", "b"], [5, 0, "a", "b"], [6, 0, "b", "b"], [7, 0, "n", "b"],
-  [8, 0, "r", "b"],
-  [1, 2, "c", "b"], [7, 2, "c", "b"],
-  [0, 3, "p", "b"], [2, 3, "p", "b"], [4, 3, "p", "b"], [6, 3, "p", "b"], [8, 3, "p", "b"],
+export function parseStartLayout(data) {
+  if (!data || typeof data !== "object") {
+    throw new Error("Invalid start layout payload: must be an object");
+  }
+  const version = Number(data.schema_version);
+  if (!Number.isInteger(version) || version < 1) {
+    throw new Error(`Invalid schema_version: must be an integer >= 1, got ${data.schema_version}`);
+  }
+  if (!Array.isArray(data.pieces) || data.pieces.length !== 32) {
+    throw new Error(`Start layout must contain exactly 32 pieces, got ${data.pieces?.length}`);
+  }
 
-  // Red pieces (row 5 to 9) - Human side
-  [0, 6, "p", "r"], [2, 6, "p", "r"], [4, 6, "p", "r"], [6, 6, "p", "r"], [8, 6, "p", "r"],
-  [1, 7, "c", "r"], [7, 7, "c", "r"],
-  [0, 9, "r", "r"], [1, 9, "n", "r"], [2, 9, "b", "r"], [3, 9, "a", "r"],
-  [4, 9, "k", "r"], [5, 9, "a", "r"], [6, 9, "b", "r"], [7, 9, "n", "r"],
-  [8, 9, "r", "r"],
-]);
+  const pieces = [];
+  const tupleLayout = [];
+  const seenIds = new Set();
+  const seenPositions = new Set();
+
+  for (const p of data.pieces) {
+    if (!p || typeof p.id !== "string" || !p.id.trim()) {
+      throw new Error(`Piece missing valid id: ${JSON.stringify(p)}`);
+    }
+    if (seenIds.has(p.id)) {
+      throw new Error(`Duplicate piece ID: ${p.id}`);
+    }
+    seenIds.add(p.id);
+
+    if (p.side !== "b" && p.side !== "r") {
+      throw new Error(`Piece ${p.id} has invalid side '${p.side}', expected 'b' or 'r'`);
+    }
+    if (!LABEL_RED[p.type] && !LABEL_BLACK[p.type]) {
+      throw new Error(`Piece ${p.id} has invalid type '${p.type}'`);
+    }
+
+    const col = Number(p.col);
+    const row = Number(p.row);
+    if (!Number.isInteger(col) || col < 0 || col > 8) {
+      throw new Error(`Piece ${p.id} col out of range [0, 8]: ${p.col}`);
+    }
+    if (!Number.isInteger(row) || row < 0 || row > 9) {
+      throw new Error(`Piece ${p.id} row out of range [0, 9]: ${p.row}`);
+    }
+
+    const posKey = `${col},${row}`;
+    if (seenPositions.has(posKey)) {
+      throw new Error(`Duplicate piece position at (${col}, ${row}) for ${p.id}`);
+    }
+    seenPositions.add(posKey);
+
+    pieces.push(Object.freeze({
+      id: p.id,
+      side: p.side,
+      type: p.type,
+      col,
+      row,
+    }));
+    tupleLayout.push(Object.freeze([col, row, p.type, p.side]));
+  }
+
+  Object.defineProperty(pieces, "tupleLayout", {
+    value: Object.freeze(tupleLayout),
+    enumerable: false,
+  });
+
+  return Object.freeze(pieces);
+}
+
+export async function fetchStartLayout(url = "/shared/xiangqi_start_layout.json") {
+  if (typeof window !== "undefined" && window.fetch) {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${url}: HTTP ${response.status} ${response.statusText}`);
+    }
+    const data = await response.json();
+    return parseStartLayout(data);
+  } else {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    const filePath = path.resolve(dir, "../shared/xiangqi_start_layout.json");
+    const raw = fs.readFileSync(filePath, "utf-8");
+    return parseStartLayout(JSON.parse(raw));
+  }
+}
+
+// In Node.js environments (such as unit test test_board_layout.py), dynamically load
+// START_LAYOUT from shared/xiangqi_start_layout.json without hardcoding it in this file.
+let _nodeLayout = null;
+if (typeof window === "undefined") {
+  try {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    const filePath = path.resolve(dir, "../shared/xiangqi_start_layout.json");
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const parsed = parseStartLayout(JSON.parse(raw));
+    _nodeLayout = parsed.tupleLayout;
+  } catch {}
+}
+
+export const START_LAYOUT = _nodeLayout;

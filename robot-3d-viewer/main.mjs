@@ -3,6 +3,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget } from "./live_state.mjs";
 import { fetchPhysicalGeometry } from "./geometry.mjs";
+import { fetchVirtualGripperProfile } from "./gripper_profile.mjs";
+import { fetchStartLayout } from "./layout.mjs";
 import {
   buildBoardGrid,
   buildPieces,
@@ -160,45 +162,55 @@ function disposeRobotArm(candidate) {
   });
 }
 
-function buildProceduralGripper() {
+function buildProceduralGripper(profile = null) {
   const gripperGroup = new THREE.Group();
   gripperGroup.name = "virtual-gripper";
 
+  const palmDims = profile?.palmDimensionsM || [0.060, 0.040, 0.030];
+  const jawDims = profile?.jawDimensionsM || [0.008, 0.025, 0.035];
+  const palmColor = profile?.colorHex ? new THREE.Color(profile.colorHex) : new THREE.Color(0x556070);
+  const jawColor = profile?.jawColorHex ? new THREE.Color(profile.jawColorHex) : new THREE.Color(0x2a3240);
+  const openW = profile?.openWidthM ?? 0.040;
+  const closedW = profile?.closedWidthM ?? 0.020;
+
   const palmMtl = new THREE.MeshStandardMaterial({
-    color: 0x556070,
+    color: palmColor,
     roughness: 0.5,
     metalness: 0.3,
   });
   const jawMtl = new THREE.MeshStandardMaterial({
-    color: 0x2a3240,
+    color: jawColor,
     roughness: 0.4,
     metalness: 0.6,
   });
 
-  // Palm dimensions: 60mm x 40mm x 30mm
-  const palmGeom = new THREE.BoxGeometry(0.060, 0.040, 0.030);
+  // Palm dimensions: palmDims[0] x palmDims[1] x palmDims[2]
+  const palmGeom = new THREE.BoxGeometry(palmDims[0], palmDims[1], palmDims[2]);
   const palmMesh = new THREE.Mesh(palmGeom, palmMtl);
-  palmMesh.position.set(0, 0, 0.015);
+  palmMesh.position.set(0, 0, palmDims[2] / 2.0);
   palmMesh.castShadow = true;
   gripperGroup.add(palmMesh);
 
-  // Two jaws extending along +Z from Z = 0.030 to 0.065
-  const jawGeom = new THREE.BoxGeometry(0.008, 0.025, 0.035);
+  // Two jaws extending along +Z from palmDims[2] to palmDims[2] + jawDims[2]
+  const jawGeom = new THREE.BoxGeometry(jawDims[0], jawDims[1], jawDims[2]);
+  const jawCenterZ = palmDims[2] + jawDims[2] / 2.0;
+  const halfOpen = openW / 2.0;
+
   const leftJaw = new THREE.Mesh(jawGeom, jawMtl);
-  leftJaw.position.set(-0.020, 0, 0.0475);
+  leftJaw.position.set(-halfOpen, 0, jawCenterZ);
   leftJaw.castShadow = true;
   gripperGroup.add(leftJaw);
 
   const rightJaw = new THREE.Mesh(jawGeom, jawMtl);
-  rightJaw.position.set(0.020, 0, 0.0475);
+  rightJaw.position.set(halfOpen, 0, jawCenterZ);
   rightJaw.castShadow = true;
   gripperGroup.add(rightJaw);
 
-  let currentWidth = 0.040;
-  let targetWidth = 0.040;
+  let currentWidth = openW;
+  let targetWidth = openW;
 
   function setClosed(isClosed) {
-    targetWidth = isClosed ? 0.020 : 0.040;
+    targetWidth = isClosed ? closedW : openW;
   }
 
   function setWidth(w) {
@@ -258,7 +270,7 @@ async function buildRobotArm(profile) {
     }
 
     // Attach procedural gripper to flange (wrist3 rotator)
-    const gripper = buildProceduralGripper();
+    const gripper = buildProceduralGripper(gripperProfile);
     parent.add(gripper.group);
     candidate.gripper = gripper;
 
@@ -293,6 +305,7 @@ function applyJointsDeg(candidate, jointsDeg) {
 // ---------------------------------------------------------------------------
 const state = {
   robotProfileId: "fr3",
+  gripperProfile: null,
   currentArm: null,
   jointsDeg: [0, 0, 0, 0, 0, 0],
   // nội suy mượt cho live mirror
@@ -306,7 +319,7 @@ const state = {
 async function switchRobotProfile(profileId) {
   const profile = getRobotProfile(profileId);
   state.robotProfileId = profile.id;
-  const next = await buildRobotArm(profile);
+  const next = await buildRobotArm(profile, state.gripperProfile);
   if (state.currentArm) {
     scene.remove(state.currentArm.group);
     disposeRobotArm(state.currentArm);
@@ -438,8 +451,12 @@ async function initApp() {
     setBoardGeometry(physicalGeometry);
     await fetchScenePlacement();
 
+    const startLayout = await fetchStartLayout();
+    const gripperProfile = await fetchVirtualGripperProfile();
+    state.gripperProfile = gripperProfile;
+
     scene.add(buildBoardGrid(physicalGeometry));
-    const { group: piecesGroup, pieces } = buildPieces(physicalGeometry);
+    const { group: piecesGroup, pieces } = buildPieces(physicalGeometry, startLayout);
     xiangqiPieces = pieces;
     piecesGroupRef = piecesGroup;
     scene.add(piecesGroup);

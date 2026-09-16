@@ -277,7 +277,7 @@ class TelemetryPublisher:
             except websockets.exceptions.ConnectionClosed:
                 pass
             except Exception as e:
-                pass
+                print(f"[TELEMETRY WARN] Failed to send world_state packet to client: {e}")
 
     def _broadcast_sync(self):
         """Broadcast latest packet to all connected clients."""
