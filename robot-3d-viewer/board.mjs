@@ -11,7 +11,7 @@ export { fetchStartLayout, parseStartLayout, START_LAYOUT, LABEL_RED, LABEL_BLAC
 // ---------------------------------------------------------------------------
 let _activeScenePlacement = {
   boardCenterX: 0.0,
-  boardSurfaceY: 0.05,
+  boardSurfaceY: 0.0105,
   boardCenterZ: 0.36,
 };
 
@@ -184,7 +184,8 @@ export function buildBoardGrid(geometry = null) {
 
   const boardWidth = geo.boardWidthM;
   const boardDepth = geo.boardDepthM;
-  const boardThickness = 0.02;
+  // Chiều cao bàn cờ 1.05cm (0.0105m) tính từ mặt sàn (Y=0), không dùng bệ nâng phụ
+  const boardThickness = 0.0105;
 
   const boardMaterial = new THREE.MeshLambertMaterial({
     map: createBoardTexture(geo),
@@ -198,13 +199,13 @@ export function buildBoardGrid(geometry = null) {
 
   // 1. Khung viền ngoài
   const outerFrame = new THREE.Mesh(
-    new THREE.BoxGeometry(boardWidth + 0.02, boardThickness - 0.002, boardDepth + 0.02),
+    new THREE.BoxGeometry(boardWidth + 0.02, boardThickness - 0.001, boardDepth + 0.02),
     frameMaterial
   );
-  outerFrame.position.set(center.x, center.y - boardThickness / 2 - 0.001, center.z);
+  outerFrame.position.set(center.x, center.y - boardThickness / 2 - 0.0005, center.z);
   group.add(outerFrame);
 
-  // 2. Mặt bàn cờ chính
+  // 2. Mặt bàn cờ chính (đáy chạm đúng mặt sàn Y = 0.0, mặt trên ở Y = 0.0105)
   const boardTop = new THREE.Mesh(
     new THREE.BoxGeometry(boardWidth, boardThickness, boardDepth),
     boardMaterial
@@ -213,47 +214,13 @@ export function buildBoardGrid(geometry = null) {
   boardTop.receiveShadow = true;
   group.add(boardTop);
 
-  // 3. Khối bệ đỡ bàn cờ (Visual Table Support) từ mặt sàn Y=0 lên đáy bàn cờ
-  const boardSupport = buildBoardSupport(geo);
-  group.add(boardSupport);
-
   return group;
 }
 
-export function buildBoardSupport(geometry = null) {
-  const geo = geometry || getActiveGeometry();
-  const placement = getScenePlacement();
-  const center = boardPointToXYZ(4, 4.5, geo);
-
-  const boardWidth = geo.boardWidthM;
-  const boardDepth = geo.boardDepthM;
-  const boardThickness = 0.02;
-
-  // Đáy bàn cờ ở độ cao Y = boardSurfaceY - boardThickness (0.05 - 0.02 = 0.03m)
-  // Mặt sàn tham chiếu GridHelper ở Y = 0.0m
-  const boardUndersideY = placement.boardSurfaceY - boardThickness;
-  const groundY = 0.0;
-  const supportHeight = Math.max(0.001, boardUndersideY - groundY);
-
-  const supportWidth = boardWidth + 0.04;
-  const supportDepth = boardDepth + 0.04;
-
+export function buildBoardSupport() {
+  // Không dựng bệ đỡ nhân tạo, bàn cờ nằm sát sàn 1.05cm
   const supportGroup = new THREE.Group();
   supportGroup.name = "xiangqi-board-support";
-
-  const tableMaterial = new THREE.MeshLambertMaterial({
-    color: 0x2b1d14,
-  });
-
-  const supportMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(supportWidth, supportHeight, supportDepth),
-    tableMaterial
-  );
-  supportMesh.position.set(center.x, groundY + supportHeight / 2.0, center.z);
-  supportMesh.receiveShadow = true;
-  supportMesh.castShadow = true;
-  supportGroup.add(supportMesh);
-
   return supportGroup;
 }
 

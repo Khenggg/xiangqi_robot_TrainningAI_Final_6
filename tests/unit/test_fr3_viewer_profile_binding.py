@@ -72,17 +72,17 @@ class ViewerProfileBindingTests(unittest.TestCase):
         center_world = placement.get("board_center_in_3d_world_m")
         self.assertIsInstance(center_world, list)
         self.assertEqual(len(center_world), 3)
-        self.assertEqual(center_world, [0.0, 0.05, 0.36])
+        self.assertEqual(center_world, [0.0, 0.0105, 0.36])
 
         grid_robot = placement.get("grid_origin_in_robot_base_m")
         self.assertIsInstance(grid_robot, list)
         self.assertEqual(len(grid_robot), 3)
-        self.assertEqual(grid_robot, [-0.18, -0.16, 0.05])
+        self.assertEqual(grid_robot, [-0.18, -0.16, 0.0105])
 
         grid_world = placement.get("grid_origin_in_3d_world_m")
         self.assertIsInstance(grid_world, list)
         self.assertEqual(len(grid_world), 3)
-        self.assertEqual(grid_world, [0.16, 0.05, 0.18])
+        self.assertEqual(grid_world, [0.16, 0.0105, 0.18])
 
         # Mathematical transformation consistency: R * p_robot_origin + t == p_world_origin
         import numpy as np

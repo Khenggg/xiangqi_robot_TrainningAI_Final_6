@@ -76,21 +76,21 @@ assert.ok(
   Array.isArray(boardCenterWorld) && boardCenterWorld.length === 3 && boardCenterWorld.every(Number.isFinite),
   "board_center_in_3d_world_m must be array of 3 finite numbers"
 );
-assert.deepEqual(boardCenterWorld, [0.0, 0.05, 0.36]);
+assert.deepEqual(boardCenterWorld, [0.0, 0.0105, 0.36]);
 
 const gridOriginRobot = sceneData?.virtual_board_placement?.grid_origin_in_robot_base_m;
 assert.ok(
   Array.isArray(gridOriginRobot) && gridOriginRobot.length === 3 && gridOriginRobot.every(Number.isFinite),
   "grid_origin_in_robot_base_m must be array of 3 finite numbers"
 );
-assert.deepEqual(gridOriginRobot, [-0.18, -0.16, 0.05]);
+assert.deepEqual(gridOriginRobot, [-0.18, -0.16, 0.0105]);
 
 const gridOriginWorld = sceneData?.virtual_board_placement?.grid_origin_in_3d_world_m;
 assert.ok(
   Array.isArray(gridOriginWorld) && gridOriginWorld.length === 3 && gridOriginWorld.every(Number.isFinite),
   "grid_origin_in_3d_world_m must be array of 3 finite numbers"
 );
-assert.deepEqual(gridOriginWorld, [0.16, 0.05, 0.18]);
+assert.deepEqual(gridOriginWorld, [0.16, 0.0105, 0.18]);
 
 // Verify mathematical transformation identity: R * p_robot_origin + t == p_world_origin
 const trans = sceneData?.robot_base_to_3d_world?.translation_m || [0.0, 0.0, 0.0];
