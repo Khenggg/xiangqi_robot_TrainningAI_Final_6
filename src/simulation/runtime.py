@@ -280,12 +280,12 @@ class VirtualXiangqiSimulation:
 
         hover_pose = [px * 1000.0, py * 1000.0, (pz + hover_height_m) * 1000.0, rx, ry, rz]
         if cell_info and "approach_joints_deg" in cell_info:
-            self.backend.move_joint(cell_info["approach_joints_deg"], speed_factor=speed_factor)
+            self.backend.move_joint_with_lift_recovery(cell_info["approach_joints_deg"], speed_factor=speed_factor)
             self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
         else:
             ik = self.backend.solve_tcp_ik(hover_pose, allow_multi_seed=True)
             if ik.success:
-                self.backend.move_joint(np.degrees(ik.joints_rad), speed_factor=speed_factor)
+                self.backend.move_joint_with_lift_recovery(np.degrees(ik.joints_rad), speed_factor=speed_factor)
             else:
                 return GraspResult(success=False, status=None, reason="Hover pose unreachable")
 
@@ -337,7 +337,7 @@ class VirtualXiangqiSimulation:
         if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
             ik = self.backend.solve_tcp_ik(hover_pose, allow_multi_seed=True)
             if ik.success:
-                self.backend.move_joint(np.degrees(ik.joints_rad), speed_factor=speed_factor)
+                self.backend.move_joint_with_lift_recovery(np.degrees(ik.joints_rad), speed_factor=speed_factor)
             else:
                 return False
 
@@ -628,9 +628,13 @@ class VirtualXiangqiSimulation:
                     retract_joints[1] = -65.0
                     self.backend.move_joint(retract_joints, speed_factor=speed_factor)
 
-                # Move to approach pose (safe transit height), then descend to grasp
+                # Move to approach pose (safe transit height), using lift-first recovery if needed
                 if src_info and "approach_joints_deg" in src_info:
-                    ok_app = self.backend.move_joint(src_info["approach_joints_deg"], speed_factor=speed_factor)
+                    ok_app = self.backend.move_joint_with_lift_recovery(
+                        src_info["approach_joints_deg"],
+                        speed_factor=speed_factor,
+                        min_safe_z_m=z_transit,
+                    )
                 else:
                     ik_res = self.backend.solve_tcp_ik(src_app_pose_mm, allow_multi_seed=True)
                     if not ik_res.success:
@@ -639,7 +643,11 @@ class VirtualXiangqiSimulation:
                         self.backend.set_trajectory_stage("IDLE")
                         self.backend.set_allowed_grasp_piece_id(None)
                         return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg}
-                    ok_app = self.backend.move_joint(np.degrees(ik_res.joints_rad).tolist(), speed_factor=speed_factor)
+                    ok_app = self.backend.move_joint_with_lift_recovery(
+                        np.degrees(ik_res.joints_rad).tolist(),
+                        speed_factor=speed_factor,
+                        min_safe_z_m=z_transit,
+                    )
 
                 if not ok_app:
                     err_msg = self.backend._last_error or f"Preposition approach to {src_cell} failed"

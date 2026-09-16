@@ -986,6 +986,15 @@ function handleBackendTrajectoryStage(stage, payload) {
     if (expl) {
       expl.innerHTML = `✅ <strong>Đã hoàn thành quỹ đạo 3 giai đoạn:</strong> Robot đã thực thi Lift (+70mm) ➔ Transit ➔ Land bởi backend runtime có thẩm quyền. Trạng thái: <strong>COLLISION-FREE</strong>.`;
     }
+  } else if (stage === "RECOVERY_LIFT") {
+    updateStepperUI(null, []);
+    if (badge) {
+      badge.className = "badge-warn";
+      badge.textContent = "🧗 TRÁNH VA CHẠM: ĐANG TỰ ĐỘNG NHẤC TAY";
+    }
+    if (expl) {
+      expl.innerHTML = `🧗 <strong>Tự động tránh va chạm (Lift-First Recovery):</strong> Phát hiện vật cản/quân cờ trên đường đi, robot tự động nhấc thẳng đứng cánh tay lên cao độ an toàn (+Z) trước khi xoay chỉnh khớp tới điểm đích.`;
+    }
   } else if (stage === "IDLE") {
     if (payload && (payload.last_error || payload.motion_state === "COLLISION_REJECTED")) {
       handleBackendError(payload.last_error || "Chuyển động bị từ chối bởi Collision Guard");

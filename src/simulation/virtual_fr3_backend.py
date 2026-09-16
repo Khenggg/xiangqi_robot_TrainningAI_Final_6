@@ -345,6 +345,76 @@ class VirtualFR3Backend(RobotBackend):
 
         return True
 
+    def move_joint_with_lift_recovery(
+        self,
+        target_joints_deg: Sequence[float],
+        speed_factor: Optional[float] = None,
+        min_safe_z_m: float = 0.0805,
+        lift_delta_m: float = 0.065,
+    ) -> bool:
+        """
+        Execute joint motion with reactive lift-first escape on collision detection:
+        If direct motion is rejected due to obstacle/piece collision risk, automatically
+        elevates the arm vertically into safe free space above obstacles, then re-adjusts
+        to target joint configuration from the safe clearance altitude.
+        """
+        # 1. Attempt direct joint motion
+        if self.move_joint(target_joints_deg, speed_factor=speed_factor):
+            return True
+
+        if self._motion_state != "COLLISION_REJECTED":
+            return False
+
+        logger.info("[COLLISION RECOVERY] Direct move rejected. Initiating vertical lift-first escape...")
+        orig_stage = self._trajectory_stage
+        self.set_trajectory_stage("RECOVERY_LIFT")
+
+        # Snapshot current safe position
+        curr_snap = self.get_state_snapshot()
+        curr_tcp = list(curr_snap.tcp_pose_mm_deg)
+        curr_z_m = curr_tcp[2] / 1000.0
+
+        lift_success = False
+
+        # Strategy A: Vertical Cartesian lift if tool is over board / downward oriented
+        target_lift_z_m = max(curr_z_m + lift_delta_m, min_safe_z_m)
+        lift_tcp_mm = list(curr_tcp)
+        lift_tcp_mm[2] = target_lift_z_m * 1000.0
+
+        if self.move_cartesian(lift_tcp_mm, speed_factor=speed_factor, samples=15):
+            lift_success = True
+        else:
+            ik_lift = self.solve_tcp_ik(lift_tcp_mm, allow_multi_seed=True)
+            if ik_lift.success:
+                q_lift_deg = [round(math.degrees(v), 3) for v in ik_lift.joints_rad]
+                if self.move_joint(q_lift_deg, speed_factor=speed_factor):
+                    lift_success = True
+
+        # Strategy B: Joint shoulder-elevation escape (especially useful when starting near Home)
+        if not lift_success:
+            curr_deg = curr_snap.joints_deg
+            q_elevate = list(curr_deg)
+            q_elevate[1] = min(q_elevate[1] - 20.0, -65.0)
+            if self.move_joint(q_elevate, speed_factor=speed_factor):
+                lift_success = True
+
+        if not lift_success:
+            logger.warning("[COLLISION RECOVERY] Vertical lift escape failed. Restoring stage.")
+            self.set_trajectory_stage(orig_stage or "IDLE")
+            return False
+
+        # 2. Adjust pose to target from safe elevated clearance
+        logger.info("[COLLISION RECOVERY] Arm successfully lifted. Adjusting pose to target from safe altitude...")
+        target_ok = self.move_joint(target_joints_deg, speed_factor=speed_factor)
+        self.set_trajectory_stage(orig_stage or "IDLE")
+
+        if target_ok:
+            logger.info("[COLLISION RECOVERY] Lift-first recovery succeeded! Target pose reached.")
+            return True
+        else:
+            logger.warning("[COLLISION RECOVERY] Move to target from elevated pose failed.")
+            return False
+
     def move_cartesian(
         self,
         target_pose_mm_deg: Sequence[float],
