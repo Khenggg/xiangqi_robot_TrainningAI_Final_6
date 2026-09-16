@@ -14,6 +14,7 @@ from src.vision.camera_monitor import CameraMonitor
 from src.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetector
 from src.vision.visual_pick_estimator import VisualPickEstimator
 from src.vision.calibrate_camera import calibrate_perspective_camera
+from src.vision.auto_calibrate import run_calibration_flow
 
 try:
     from ultralytics import YOLO
@@ -171,10 +172,8 @@ class HardwareManager:
         print("\n" + "=" * 60)
         print("  📐  CAMERA CALIBRATION — BẮT BUỘC KHI KHỞI ĐỘNG")
         print("=" * 60)
-        if os.path.exists(str(self.perspective_path)):
-            print(f"⚠️  Đã có file cũ: {self.perspective_path}")
-            print("   Bấm 'S' để dùng lại hoặc calibrate lại bằng cách click 4 góc.")
-        calibrate_perspective_camera(self.cap, str(self.perspective_path))
+        pose_model_path = Path(self.project_dir) / "models" / "board_pose.pt"
+        run_calibration_flow(self.cap, str(self.perspective_path), pose_model_path=pose_model_path)
         
         if not os.path.exists(str(self.perspective_path)):
             print("❌ Chưa có perspective.npy! Không thể detect nước đi.")
