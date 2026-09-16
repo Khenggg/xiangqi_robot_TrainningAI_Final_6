@@ -26,6 +26,7 @@ class RobotStateSnapshot:
     timestamp: float                    # Unix timestamp
     last_error: Optional[str] = None
     trajectory_stage: Optional[str] = None  # "PREPOSITION", "LIFT", "TRANSIT", "LAND", "COMPLETE", etc.
+    placement_version: int = 1
 
 
 class RobotBackend(ABC):

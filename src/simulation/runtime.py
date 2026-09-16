@@ -30,6 +30,7 @@ from src.simulation.physics.transforms import (
 from src.simulation.physics.piece import XiangqiPieceBody
 from src.simulation.physics.state import DropEvent, GraspResult, GraspStatus, PiecePhysicalState, WorldStateSnapshot
 from src.simulation.physics.world import VirtualPhysicalWorld
+from src.simulation.placement import BoardPlacementAnalyzer, BoardPlacementState, canonical_cell_to_robot_xyz_m
 from src.simulation.virtual_fr3_backend import VirtualFR3Backend
 from src.domain.geometry import get_physical_geometry
 
@@ -125,6 +126,19 @@ class VirtualXiangqiSimulation:
                     }
             except Exception:
                 pass
+
+        # Authoritative dynamic placement state and analyzer
+        self.placement_state = BoardPlacementState.compute(
+            forward_shift_mm=0.0,
+            safe_transit_height_mm=70.0,
+            board_height_offset_mm=0.0,
+            nominal_grid_origin_m=self.grid_origin_robot,
+            placement_version=1,
+        )
+        self.placement_analyzer = BoardPlacementAnalyzer(
+            kinematics=self.backend.kinematics,
+            board_surface_nominal_m=self.board_surface_z,
+        )
 
     def find_nearest_cell(self, pos_robot_m: Sequence[float]) -> Tuple[int, int]:
         """Map a 3D position in robot_base to nearest board grid (row, col)."""
@@ -484,12 +498,157 @@ class VirtualXiangqiSimulation:
 
     def cell_to_robot_xyz_m(self, row: int, col: int, z_m: float) -> List[float]:
         """Convert board cell (row, col) and altitude z_m to robot base XYZ coordinates."""
-        x0, y0, _ = self.grid_origin_robot
-        row_spacing = self.geom.grid_cell_length_mm / 1000.0
-        col_spacing = self.geom.grid_cell_width_mm / 1000.0
-        x = x0 - row * row_spacing
-        y = y0 + col * col_spacing
-        return [round(x, 5), round(y, 5), round(z_m, 5)]
+        d = self.placement_state.forward_shift_mm
+        r_sp = self.geom.grid_cell_length_mm / 1000.0
+        c_sp = self.geom.grid_cell_width_mm / 1000.0
+        x, y, z = canonical_cell_to_robot_xyz_m(
+            row=row,
+            col=col,
+            forward_shift_mm=d,
+            z_m=z_m,
+            nominal_x0=-0.180,
+            nominal_y0=-0.160,
+            row_spacing_m=r_sp,
+            col_spacing_m=c_sp,
+        )
+        return [round(x, 5), round(y, 5), round(z, 5)]
+
+    def set_board_placement(
+        self,
+        forward_shift_mm: float,
+        safe_transit_height_mm: Optional[float] = None,
+        board_height_offset_mm: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Authoritatively relocate board placement.
+        Rejects if robot is moving, active in a trajectory stage, or holding a piece.
+        """
+        with self._command_lock:
+            snap = self.backend.get_state_snapshot()
+            if snap.motion_state == "MOVING":
+                err = "Cannot change board placement while robot is MOVING"
+                return {"success": False, "error": err}
+            if snap.trajectory_stage not in (None, "IDLE", "COMPLETE"):
+                err = f"Cannot change board placement during active trajectory ({snap.trajectory_stage})"
+                return {"success": False, "error": err}
+            if self.world.get_attached_piece() is not None:
+                err = "Cannot change board placement while a piece is attached to gripper"
+                return {"success": False, "error": err}
+
+            cur_h = self.placement_state.safe_transit_height_mm if safe_transit_height_mm is None else float(safe_transit_height_mm)
+            cur_z_off = self.placement_state.board_height_offset_mm if board_height_offset_mm is None else float(board_height_offset_mm)
+
+            new_version = self.placement_state.placement_version + 1
+            new_state = BoardPlacementState.compute(
+                forward_shift_mm=float(forward_shift_mm),
+                safe_transit_height_mm=cur_h,
+                board_height_offset_mm=cur_z_off,
+                placement_version=new_version,
+            )
+
+            # Relocate in PyBullet world
+            self.world.relocate_board(
+                forward_shift_m=new_state.forward_shift_mm / 1000.0,
+                height_offset_m=new_state.board_height_offset_mm / 1000.0,
+            )
+
+            self.placement_state = new_state
+            self.grid_origin_robot = list(new_state.grid_origin_robot_m)
+            self.board_surface_z = new_state.grid_origin_robot_m[2]
+            self.backend.set_placement_version(new_version)
+
+            packet = new_state.to_dict()
+            if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+                self.telemetry.broadcast_custom(packet)
+                self.telemetry.update_world_state(self.world.get_snapshot())
+
+            return {"success": True, "placement": packet}
+
+    def reset_board_placement(self) -> Dict[str, Any]:
+        """Reset board placement to nominal scene configuration."""
+        return self.set_board_placement(forward_shift_mm=0.0, safe_transit_height_mm=70.0, board_height_offset_mm=0.0)
+
+    def validate_board_placement(self) -> Dict[str, Any]:
+        """
+        Full placement validation testing all 90 cells at runtime.
+        Evaluates grasp IK, approach IK, joint limits, and collision clearances.
+        """
+        d = self.placement_state.forward_shift_mm
+        H = self.placement_state.safe_transit_height_mm
+        board_z = self.board_surface_z
+        piece_h = self.geom.piece_height_mm / 1000.0
+        z_grasp = board_z + piece_h / 2.0
+        z_app = board_z + H / 1000.0
+
+        grasp_ik_ok = 0
+        app_ik_ok = 0
+        grasp_col_free = 0
+        app_col_free = 0
+        failed_cells = []
+
+        for r in range(10):
+            for c in range(9):
+                pos_gr = self.cell_to_robot_xyz_m(r, c, z_grasp)
+                pos_ap = self.cell_to_robot_xyz_m(r, c, z_app)
+                pose_gr_mm = [v * 1000.0 for v in pos_gr] + list(self.target_tool_euler_deg)
+                pose_ap_mm = [v * 1000.0 for v in pos_ap] + list(self.target_tool_euler_deg)
+
+                seed_info = self.reachability_dataset.get((r, c))
+                seed_app = np.deg2rad(seed_info["approach_joints_deg"]) if seed_info and "approach_joints_deg" in seed_info else None
+                seed_gr = np.deg2rad(seed_info["grasp_joints_deg"]) if seed_info and "grasp_joints_deg" in seed_info else None
+
+                ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
+                ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
+
+                ap_safe = False
+                gr_safe = False
+                reason = None
+
+                if ik_ap.success:
+                    app_ik_ok += 1
+                    col_ap = self.collision_guard.validate_configuration(ik_ap.joints_rad)
+                    if col_ap.safe:
+                        app_col_free += 1
+                        ap_safe = True
+                    else:
+                        reason = f"Approach: {col_ap.failure_reason}"
+                else:
+                    reason = "Approach IK failed"
+
+                if ik_gr.success:
+                    grasp_ik_ok += 1
+                    col_gr = self.collision_guard.validate_configuration(ik_gr.joints_rad, allowed_grasp_piece_id="*")
+                    if col_gr.safe:
+                        grasp_col_free += 1
+                        gr_safe = True
+                    else:
+                        reason = (reason + " | " if reason else "") + f"Grasp: {col_gr.failure_reason}"
+                else:
+                    reason = (reason + " | " if reason else "") + "Grasp IK failed"
+
+                if not (ap_safe and gr_safe):
+                    failed_cells.append({
+                        "row": r,
+                        "col": c,
+                        "reason": reason,
+                    })
+
+        res = {
+            "type": "placement_validation_result",
+            "placement_version": self.placement_state.placement_version,
+            "forward_shift_mm": d,
+            "safe_transit_height_mm": H,
+            "grasp_ik_count": grasp_ik_ok,
+            "approach_ik_count": app_ik_ok,
+            "grasp_collision_free_count": grasp_col_free,
+            "approach_collision_free_count": app_col_free,
+            "total_cells": 90,
+            "all_passed": (grasp_col_free == 90 and app_col_free == 90),
+            "failed_cells": failed_cells,
+        }
+        if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+            self.telemetry.broadcast_custom(res)
+        return res
 
     def set_telemetry(self, telemetry: TelemetryPublisher) -> None:
         """Attach telemetry publisher and register incoming command callback."""
@@ -498,6 +657,9 @@ class VirtualXiangqiSimulation:
             self.backend.telemetry_publisher = telemetry
         if self.telemetry is not None:
             self.telemetry.register_command_handler(self._handle_client_command)
+            # Broadcast initial authoritative board placement
+            if hasattr(self.telemetry, "broadcast_custom"):
+                self.telemetry.broadcast_custom(self.placement_state.to_dict())
 
     def _handle_client_command(self, cmd: Dict[str, Any]) -> None:
         """Handle incoming command from viewer or external WebSocket client."""
@@ -509,10 +671,11 @@ class VirtualXiangqiSimulation:
         if action == "EXECUTE_3STAGE":
             src = cmd.get("src")
             dst = cmd.get("dst")
+            p_ver = cmd.get("placement_version")
             if src is not None and dst is not None and len(src) == 2 and len(dst) == 2:
                 threading.Thread(
                     target=self._run_trajectory_async,
-                    args=((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1]))),
+                    args=((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1])), p_ver),
                     daemon=True,
                 ).start()
         elif action == "SET_GRIPPER":
@@ -522,18 +685,37 @@ class VirtualXiangqiSimulation:
             self.backend.reset_to_home()
         elif action == "STOP":
             self.backend.stop()
+        elif action == "SET_BOARD_PLACEMENT":
+            d = float(cmd.get("forward_shift_mm", 0.0))
+            h = float(cmd.get("safe_transit_height_mm", self.placement_state.safe_transit_height_mm))
+            z_off = float(cmd.get("board_height_offset_mm", self.placement_state.board_height_offset_mm))
+            res = self.set_board_placement(forward_shift_mm=d, safe_transit_height_mm=h, board_height_offset_mm=z_off)
+            if not res.get("success") and self.telemetry and hasattr(self.telemetry, "broadcast_custom"):
+                self.telemetry.broadcast_custom({
+                    "type": "error",
+                    "message": res.get("error"),
+                })
+        elif action == "RESET_BOARD_PLACEMENT":
+            self.reset_board_placement()
+        elif action == "VALIDATE_BOARD_PLACEMENT":
+            threading.Thread(target=self.validate_board_placement, daemon=True).start()
+        elif action == "MOVE_JOINT":
+            joints_deg = cmd.get("joints_deg")
+            speed = cmd.get("speed_factor", self.backend.default_speed_factor)
+            if joints_deg and len(joints_deg) == 6:
+                threading.Thread(target=self.backend.move_joint, args=(joints_deg, speed), daemon=True).start()
         elif action == "SET_COLLISION_GUARD":
             enabled = bool(cmd.get("enabled", True))
             self.backend.set_collision_guard_enabled(enabled)
             if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
                 self.telemetry.broadcast_custom({
                     "type": "collision_guard_status",
-                    "enabled": enabled,
+                    "enabled": self.backend.collision_guard_enabled,
                 })
 
-    def _run_trajectory_async(self, src: Tuple[int, int], dst: Tuple[int, int]) -> None:
+    def _run_trajectory_async(self, src: Tuple[int, int], dst: Tuple[int, int], planned_version: Optional[int] = None) -> None:
         """Execute trajectory asynchronously and broadcast authoritative completion packet."""
-        res = self.execute_3stage_trajectory(src, dst)
+        res = self.execute_3stage_trajectory(src, dst, planned_placement_version=planned_version)
         if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
             self.telemetry.broadcast_custom({
                 "type": "trajectory_result",
@@ -542,6 +724,7 @@ class VirtualXiangqiSimulation:
                 "error": res.get("error"),
                 "src": list(src),
                 "dst": list(dst),
+                "placement_version": res.get("placement_version", self.placement_state.placement_version),
             })
 
     def execute_3stage_trajectory(
@@ -550,6 +733,7 @@ class VirtualXiangqiSimulation:
         dst_cell: Tuple[int, int],
         speed_factor: Optional[float] = None,
         samples_per_stage: int = 20,
+        planned_placement_version: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Execute authoritative 3-stage Pick & Place Cartesian trajectory:
@@ -559,17 +743,32 @@ class VirtualXiangqiSimulation:
         3. LAND: Cartesian MoveL (same target X/Y, decreasing Z from transit to target grasp)
 
         Uses downward tool orientation [180.0, 0.0, 90.0] deg.
-        Pre-validates collision guard and publishes authoritative telemetry.
+        Pre-validates collision guard, enforces placement version consistency,
+        solves on-demand IK, and guarantees allowed_grasp_piece_id cleanup.
         """
         with self._command_lock:
+            current_ver = self.placement_state.placement_version
+            if planned_placement_version is not None and planned_placement_version != current_ver:
+                err_msg = (
+                    f"Trajectory rejected: Stale placement version "
+                    f"(planned={planned_placement_version}, current={current_ver})"
+                )
+                self.backend._last_error = err_msg
+                return {
+                    "success": False,
+                    "failed_stage": "PRECHECK",
+                    "error": err_msg,
+                    "placement_version": current_ver,
+                }
+
             r_src, c_src = int(src_cell[0]), int(src_cell[1])
             r_dst, c_dst = int(dst_cell[0]), int(dst_cell[1])
 
-            # Canonical heights
-            board_z = self.board_surface_z  # 0.0105 m
-            piece_h = self.geom.piece_height_mm / 1000.0  # 0.00943 m
-            z_grasp = board_z + piece_h / 2.0  # 0.015215 m (piece center)
-            z_transit = board_z + 0.070        # 0.0805 m (canonical +70mm safe clearance)
+            # Canonical heights derived from authoritative BoardPlacementState
+            board_z = self.board_surface_z
+            piece_h = self.geom.piece_height_mm / 1000.0
+            z_grasp = board_z + piece_h / 2.0
+            z_transit = board_z + (self.placement_state.safe_transit_height_mm / 1000.0)
             tool_rpy = list(self.target_tool_euler_deg)
 
             src_grasp_m = self.cell_to_robot_xyz_m(r_src, c_src, z_grasp)
@@ -579,135 +778,132 @@ class VirtualXiangqiSimulation:
 
             to_mm_deg = lambda p_m: [p_m[0] * 1000.0, p_m[1] * 1000.0, p_m[2] * 1000.0] + tool_rpy
 
-            # Ensure samples_per_stage >= 10 for true trajectory evidence
             samples_per_stage = max(10, int(samples_per_stage))
 
-            # --- Stage 0: PREPOSITION (Fail-fast reachability check before lift) ---
-            self.backend.set_trajectory_stage("PREPOSITION")
+            # On-demand IK validation with seed warm-start from dataset if available
+            src_seed_info = self.reachability_dataset.get((r_src, c_src))
+            dst_seed_info = self.reachability_dataset.get((r_dst, c_dst))
+            seed_src_app = np.deg2rad(src_seed_info["approach_joints_deg"]) if (src_seed_info and "approach_joints_deg" in src_seed_info) else None
+            seed_src_gr = np.deg2rad(src_seed_info["grasp_joints_deg"]) if (src_seed_info and "grasp_joints_deg" in src_seed_info) else None
+            seed_dst_app = np.deg2rad(dst_seed_info["approach_joints_deg"]) if (dst_seed_info and "approach_joints_deg" in dst_seed_info) else None
+            seed_dst_gr = np.deg2rad(dst_seed_info["grasp_joints_deg"]) if (dst_seed_info and "grasp_joints_deg" in dst_seed_info) else None
+
             src_grasp_pose_mm = to_mm_deg(src_grasp_m)
             src_app_pose_mm = to_mm_deg(src_app_m)
-            src_info = self.reachability_dataset.get((r_src, c_src))
-
-            # Validate destination reachability fail-fast
             dst_grasp_pose_mm = to_mm_deg(dst_grasp_m)
-            dst_info = self.reachability_dataset.get((r_dst, c_dst))
-            if not dst_info and not self.backend.solve_tcp_ik(dst_grasp_pose_mm, allow_multi_seed=True).success:
-                err_msg = f"Preposition rejected: Destination cell {dst_cell} is unreachable"
+            dst_app_pose_mm = to_mm_deg(dst_app_m)
+
+            self.backend.set_trajectory_stage("PREPOSITION")
+
+            ik_src_app = self.backend.solve_tcp_ik(src_app_pose_mm, seed_joints=seed_src_app, allow_multi_seed=True)
+            ik_src_gr = self.backend.solve_tcp_ik(src_grasp_pose_mm, seed_joints=seed_src_gr, allow_multi_seed=True)
+            ik_dst_app = self.backend.solve_tcp_ik(dst_app_pose_mm, seed_joints=seed_dst_app, allow_multi_seed=True)
+            ik_dst_gr = self.backend.solve_tcp_ik(dst_grasp_pose_mm, seed_joints=seed_dst_gr, allow_multi_seed=True)
+
+            if not ik_src_gr.success or not ik_src_app.success:
+                err_msg = f"Preposition rejected: Source cell {src_cell} is unreachable at current board placement"
                 self.backend._last_error = err_msg
                 self.backend.set_trajectory_stage("IDLE")
-                return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg}
+                return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg, "placement_version": current_ver}
 
-            # Check if source cell is reachable
-            if not src_info and not self.backend.solve_tcp_ik(src_grasp_pose_mm, allow_multi_seed=True).success:
-                err_msg = f"Preposition rejected: Source cell {src_cell} is unreachable"
+            if not ik_dst_gr.success or not ik_dst_app.success:
+                err_msg = f"Preposition rejected: Destination cell {dst_cell} is unreachable at current board placement"
                 self.backend._last_error = err_msg
                 self.backend.set_trajectory_stage("IDLE")
-                return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg}
+                return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg, "placement_version": current_ver}
 
-            # Detect if there is a piece at src_cell to allow grasp without proxy collision
-            piece_at_src = None
-            if hasattr(self.world, "pieces"):
-                for p_id, p_body in self.world.pieces.items():
-                    if p_body.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
-                        continue
-                    c_p, r_p, d_p = p_body.get_nearest_intersection()
-                    if (r_p, c_p) == (r_src, c_src) and d_p < 0.025:
-                        piece_at_src = p_id
-                        break
-            if piece_at_src:
-                self.backend.set_allowed_grasp_piece_id(piece_at_src)
+            try:
+                # Detect if there is a piece at src_cell to allow grasp without proxy collision
+                piece_at_src = None
+                if hasattr(self.world, "pieces"):
+                    for p_id, p_body in self.world.pieces.items():
+                        if p_body.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
+                            continue
+                        c_p, r_p, d_p = p_body.get_nearest_intersection()
+                        if (r_p, c_p) == (r_src, c_src) and d_p < 0.025:
+                            piece_at_src = p_id
+                            break
+                if piece_at_src:
+                    self.backend.set_allowed_grasp_piece_id(piece_at_src)
 
-            # Check if robot is already at or near src_grasp_m
-            curr_snap = self.backend.get_state_snapshot()
-            curr_p_m = np.array(curr_snap.tcp_pose_mm_deg[:3]) / 1000.0
-            dist_to_src_grasp = float(np.linalg.norm(curr_p_m - np.array(src_grasp_m)))
+                # Check if robot is already at or near src_grasp_m
+                curr_snap = self.backend.get_state_snapshot()
+                curr_p_m = np.array(curr_snap.tcp_pose_mm_deg[:3]) / 1000.0
+                dist_to_src_grasp = float(np.linalg.norm(curr_p_m - np.array(src_grasp_m)))
 
-            if dist_to_src_grasp > 0.005:
-                # Preposition safely:
-                # If departing from near Home pose, elevate / retract j2 first to avoid sweeping low over pieces
-                curr_deg = curr_snap.joints_deg
-                is_near_home = (
-                    abs(curr_deg[0]) < 10.0 and
-                    curr_deg[1] > -55.0 and
-                    abs(curr_deg[2] - 90.0) < 20.0
-                )
-                if is_near_home:
-                    retract_joints = list(curr_deg)
-                    retract_joints[1] = -65.0
-                    self.backend.move_joint(retract_joints, speed_factor=speed_factor)
+                if dist_to_src_grasp > 0.005:
+                    # Preposition safely:
+                    # If departing from near Home pose, elevate / retract j2 first to avoid sweeping low over pieces
+                    curr_deg = curr_snap.joints_deg
+                    is_near_home = (
+                        abs(curr_deg[0]) < 10.0 and
+                        curr_deg[1] > -55.0 and
+                        abs(curr_deg[2] - 90.0) < 20.0
+                    )
+                    if is_near_home:
+                        retract_joints = list(curr_deg)
+                        retract_joints[1] = -65.0
+                        self.backend.move_joint(retract_joints, speed_factor=speed_factor)
 
-                # Move to approach pose (safe transit height), using lift-first recovery if needed
-                if src_info and "approach_joints_deg" in src_info:
+                    # Move to approach pose (safe transit height)
+                    target_app_deg = np.degrees(ik_src_app.joints_rad).tolist()
                     ok_app = self.backend.move_joint_with_lift_recovery(
-                        src_info["approach_joints_deg"],
+                        target_app_deg,
                         speed_factor=speed_factor,
                         min_safe_z_m=z_transit,
                     )
-                else:
-                    ik_res = self.backend.solve_tcp_ik(src_app_pose_mm, allow_multi_seed=True)
-                    if not ik_res.success:
-                        err_msg = f"Preposition rejected: Source cell {src_cell} approach is unreachable"
-                        self.backend._last_error = err_msg
+                    if not ok_app:
+                        err_msg = self.backend._last_error or f"Preposition approach to {src_cell} failed"
                         self.backend.set_trajectory_stage("IDLE")
-                        self.backend.set_allowed_grasp_piece_id(None)
-                        return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg}
-                    ok_app = self.backend.move_joint_with_lift_recovery(
-                        np.degrees(ik_res.joints_rad).tolist(),
-                        speed_factor=speed_factor,
-                        min_safe_z_m=z_transit,
-                    )
+                        return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg, "placement_version": current_ver}
 
-                if not ok_app:
-                    err_msg = self.backend._last_error or f"Preposition approach to {src_cell} failed"
+                    # Descend vertically to src grasp
+                    ok_descend = self.backend.move_cartesian(src_grasp_pose_mm, speed_factor=speed_factor, samples=samples_per_stage)
+                    if not ok_descend:
+                        err_msg = self.backend._last_error or f"Preposition descent to {src_cell} grasp failed"
+                        self.backend.set_trajectory_stage("IDLE")
+                        return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg, "placement_version": current_ver}
+
+                # --- Stage 1: LIFT (vertical MoveL from grasp to safe transit height) ---
+                self.backend.set_trajectory_stage("LIFT")
+                ok1 = self.move_cartesian(to_mm_deg(src_app_m), speed_factor=speed_factor, samples=samples_per_stage)
+                if not ok1:
+                    err_msg = self.backend._last_error or "LIFT stage failed"
                     self.backend.set_trajectory_stage("IDLE")
-                    self.backend.set_allowed_grasp_piece_id(None)
-                    return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg}
+                    return {"success": False, "failed_stage": "LIFT", "error": err_msg, "placement_version": current_ver}
 
-                # Descend vertically to src grasp
-                ok_descend = self.backend.move_cartesian(src_grasp_pose_mm, speed_factor=speed_factor, samples=samples_per_stage)
-                if not ok_descend:
-                    err_msg = self.backend._last_error or f"Preposition descent to {src_cell} grasp failed"
+                # --- Stage 2: TRANSIT (horizontal MoveL across safe transit plane) ---
+                self.backend.set_trajectory_stage("TRANSIT")
+                ok2 = self.move_cartesian(to_mm_deg(dst_app_m), speed_factor=speed_factor, samples=samples_per_stage)
+                if not ok2:
+                    err_msg = self.backend._last_error or "TRANSIT stage failed"
                     self.backend.set_trajectory_stage("IDLE")
-                    self.backend.set_allowed_grasp_piece_id(None)
-                    return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg}
+                    return {"success": False, "failed_stage": "TRANSIT", "error": err_msg, "placement_version": current_ver}
 
-            # --- Stage 1: LIFT (vertical MoveL from grasp to safe transit height) ---
-            self.backend.set_trajectory_stage("LIFT")
-            ok1 = self.move_cartesian(to_mm_deg(src_app_m), speed_factor=speed_factor, samples=samples_per_stage)
-            if not ok1:
-                err_msg = self.backend._last_error or "LIFT stage failed"
+                # --- Stage 3: LAND (vertical MoveL from safe transit height down to grasp target) ---
+                self.backend.set_trajectory_stage("LAND")
+                ok3 = self.move_cartesian(to_mm_deg(dst_grasp_m), speed_factor=speed_factor, samples=samples_per_stage)
+                if not ok3:
+                    err_msg = self.backend._last_error or "LAND stage failed"
+                    self.backend.set_trajectory_stage("IDLE")
+                    return {"success": False, "failed_stage": "LAND", "error": err_msg, "placement_version": current_ver}
+
+                # --- COMPLETE ---
+                self.backend.set_trajectory_stage("COMPLETE")
+                time.sleep(0.05)
                 self.backend.set_trajectory_stage("IDLE")
-                return {"success": False, "failed_stage": "LIFT", "error": err_msg}
 
-            # --- Stage 2: TRANSIT (horizontal MoveL across safe transit plane) ---
-            self.backend.set_trajectory_stage("TRANSIT")
-            ok2 = self.move_cartesian(to_mm_deg(dst_app_m), speed_factor=speed_factor, samples=samples_per_stage)
-            if not ok2:
-                err_msg = self.backend._last_error or "TRANSIT stage failed"
-                self.backend.set_trajectory_stage("IDLE")
-                return {"success": False, "failed_stage": "TRANSIT", "error": err_msg}
-
-            # --- Stage 3: LAND (vertical MoveL from safe transit height down to grasp target) ---
-            self.backend.set_trajectory_stage("LAND")
-            ok3 = self.move_cartesian(to_mm_deg(dst_grasp_m), speed_factor=speed_factor, samples=samples_per_stage)
-            if not ok3:
-                err_msg = self.backend._last_error or "LAND stage failed"
-                self.backend.set_trajectory_stage("IDLE")
-                return {"success": False, "failed_stage": "LAND", "error": err_msg}
-
-            # --- COMPLETE ---
-            self.backend.set_trajectory_stage("COMPLETE")
-            time.sleep(0.05)
-            self.backend.set_trajectory_stage("IDLE")
-
-            return {
-                "success": True,
-                "stages": ["PREPOSITION", "LIFT", "TRANSIT", "LAND", "COMPLETE"],
-                "src": src_cell,
-                "dst": dst_cell,
-                "z_grasp_m": z_grasp,
-                "z_transit_m": z_transit,
-            }
+                return {
+                    "success": True,
+                    "stages": ["PREPOSITION", "LIFT", "TRANSIT", "LAND", "COMPLETE"],
+                    "src": src_cell,
+                    "dst": dst_cell,
+                    "z_grasp_m": z_grasp,
+                    "z_transit_m": z_transit,
+                    "placement_version": current_ver,
+                }
+            finally:
+                self.backend.set_allowed_grasp_piece_id(None)
 
     def start(self) -> None:
         """Start or initialize simulation coordinator (idempotent)."""

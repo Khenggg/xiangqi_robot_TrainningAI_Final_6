@@ -1,4 +1,4 @@
-﻿// tests/unit/test_viewer_single_motion_authority.mjs
+// tests/unit/test_viewer_single_motion_authority.mjs
 // Verifies:
 // 1. Viewer code contains NO client-side trajectory planners or timers (Single Motion Authority).
 // 2. Outgoing client WebSocket command contract { command: "EXECUTE_3STAGE", src: [r, c], dst: [r, c] }.
@@ -92,4 +92,54 @@ assert.ok(
 );
 
 console.log("  [PASS] UI displays truthful metadata and contains no stale +1.5mm references.");
-console.log("ALL VIEWER SINGLE MOTION AUTHORITY TESTS PASSED SUCCESSFULLY!");
+
+// 5. Test Collision Guard is locked ON in normal viewer (no disable checkbox)
+assert.ok(
+  !indexContent.includes('id="chk-collision-guard"'),
+  "index.html must NOT have a checkbox allowing users to disable Collision Guard in normal mode"
+);
+assert.ok(
+  indexContent.includes("ALWAYS ACTIVE") || indexContent.includes("LUÔN BẬT"),
+  "index.html must indicate Collision Guard is ALWAYS ACTIVE"
+);
+console.log("  [PASS] Collision Guard toggle disabled/locked ON in normal viewer.");
+
+// 6. Test Joint Slider Single Authority
+assert.ok(
+  mainMjsContent.includes('"MOVE_JOINT"'),
+  "main.mjs must dispatch authoritative 'MOVE_JOINT' command to backend when sliders move"
+);
+console.log("  [PASS] Joint sliders dispatch MOVE_JOINT command; no local simulation authority.");
+
+// 7. Test Dynamic Board Placement Commands and Telemetry
+assert.ok(
+  mainMjsContent.includes('"SET_BOARD_PLACEMENT"'),
+  "main.mjs must support SET_BOARD_PLACEMENT command"
+);
+assert.ok(
+  mainMjsContent.includes('"RESET_BOARD_PLACEMENT"'),
+  "main.mjs must support RESET_BOARD_PLACEMENT command"
+);
+assert.ok(
+  mainMjsContent.includes('"VALIDATE_BOARD_PLACEMENT"'),
+  "main.mjs must support VALIDATE_BOARD_PLACEMENT command"
+);
+assert.ok(
+  mainMjsContent.includes('"board_placement"'),
+  "main.mjs must handle authoritative board_placement telemetry packets"
+);
+
+// 8. Test board.mjs visual mesh updates from authoritative placement
+const boardMjsPath = path.resolve(repoRoot, "robot-3d-viewer", "board.mjs");
+const boardMjsContent = fs.readFileSync(boardMjsPath, "utf-8");
+assert.ok(
+  boardMjsContent.includes("setScenePlacement"),
+  "board.mjs must expose setScenePlacement"
+);
+assert.ok(
+  boardMjsContent.includes("_activeBoardGroup"),
+  "board.mjs must maintain _activeBoardGroup to move board visuals consistently"
+);
+
+console.log("  [PASS] Dynamic Board Placement commands and authoritative telemetry updates verified.");
+console.log("ALL VIEWER SINGLE MOTION AUTHORITY & DYNAMIC PLACEMENT TESTS PASSED SUCCESSFULLY!");

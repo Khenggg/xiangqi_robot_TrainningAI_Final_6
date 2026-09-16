@@ -37,10 +37,13 @@ class VirtualFR3Backend(RobotBackend):
         telemetry_publisher=None,
         default_speed_factor: float = 1.0,
         scene_config_path: Optional[Union[str, Path]] = None,
+        allow_unsafe_diagnostics: bool = False,
     ):
         self.kinematics = kinematics or FR3Kinematics()
         self.telemetry_publisher = telemetry_publisher
         self.default_speed_factor = max(0.01, float(default_speed_factor))
+        self.allow_unsafe_diagnostics = bool(allow_unsafe_diagnostics)
+        self.placement_version: int = 1
 
         repo_root = Path(__file__).resolve().parent.parent.parent
         self.scene_config_path = Path(scene_config_path) if scene_config_path else (
@@ -115,12 +118,45 @@ class VirtualFR3Backend(RobotBackend):
 
     def set_collision_guard_enabled(self, enabled: bool) -> None:
         """Dynamically enable or disable collision guard checking."""
+        if not enabled and not self.allow_unsafe_diagnostics:
+            logger.warning("[BACKEND] Disabling collision guard is blocked in normal mode (requires allow_unsafe_diagnostics=True)")
+            self.collision_guard_enabled = True
+            return
         self.collision_guard_enabled = bool(enabled)
         logger.info(f"[BACKEND] Collision guard enabled set to: {self.collision_guard_enabled}")
+
+    def set_placement_version(self, version: int) -> None:
+        """Set authoritative placement version."""
+        with self._state_lock:
+            self.placement_version = int(version)
+            self._sync_telemetry()
 
     def set_allowed_grasp_piece_id(self, piece_id: Optional[str]) -> None:
         """Set or clear the allowed target piece during grasp."""
         self._allowed_grasp_piece_id = piece_id
+
+    @property
+    def allowed_grasp_piece_id(self) -> Optional[str]:
+        return self._allowed_grasp_piece_id
+
+    def set_authoritative_joints(self, joints_deg_or_rad: Sequence[float], is_deg: bool = True) -> None:
+        """Directly set authoritative robot joints without motion (for testing/setup)."""
+        if is_deg:
+            q_deg = [round(float(v), 3) for v in joints_deg_or_rad]
+            q_rad = np.radians(q_deg)
+        else:
+            q_rad = np.array(joints_deg_or_rad, dtype=float)
+            q_deg = [round(math.degrees(v), 3) for v in q_rad]
+        flange = self._compute_flange_pose_mm_deg(q_rad)
+        tcp = self._compute_tcp_pose_mm_deg(q_rad)
+        with self._state_lock:
+            self._current_joints_rad = q_rad.copy()
+            self._current_joints_deg = q_deg
+            self._flange_pose_mm_deg = flange
+            self._tcp_pose_mm_deg = tcp
+            self._motion_state = "IDLE"
+            self._last_error = None
+            self._sync_telemetry()
 
     def _compute_flange_pose_mm_deg(self, joints_rad: np.ndarray) -> List[float]:
         pose = self.kinematics.forward_kinematics(joints_rad)
@@ -192,6 +228,7 @@ class VirtualFR3Backend(RobotBackend):
                 timestamp=time.time(),
                 last_error=self._last_error,
                 trajectory_stage=self._trajectory_stage,
+                placement_version=self.placement_version,
             )
 
     def _sync_telemetry(self):
@@ -207,6 +244,7 @@ class VirtualFR3Backend(RobotBackend):
             timestamp=time.time(),
             last_error=self._last_error,
             trajectory_stage=self._trajectory_stage,
+            placement_version=self.placement_version,
         )
 
         if self.telemetry_publisher is not None:
@@ -587,6 +625,7 @@ class VirtualFR3Backend(RobotBackend):
     def stop(self) -> bool:
         """Halt motion immediately across threads."""
         self._stop_event.set()
+        self.set_allowed_grasp_piece_id(None)
         with self._state_lock:
             if self._motion_state == "MOVING":
                 self._motion_state = "IDLE"

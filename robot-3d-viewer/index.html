@@ -49,6 +49,7 @@
           <div class="panel-tabs">
             <button id="tabJointsBtn" class="tab-btn active">🎮 Góc Khớp J1..J6</button>
             <button id="tabReachBtn" class="tab-btn">🎯 Chạm Ô Cờ (90 Ô)</button>
+            <button id="tabPlacementBtn" class="tab-btn">📐 Vị Trí Bàn Cờ</button>
           </div>
           <div id="jointsTabContent" class="tab-content active">
             <div class="panel-actions">
@@ -89,11 +90,9 @@
               <button id="reachCellBtn" class="action-btn primary-action">🚀 Đi Tới</button>
             </div>
 
-            <div style="margin: 8px 0 12px 0; padding: 6px 10px; background: rgba(238, 108, 77, 0.1); border: 1px solid rgba(238, 108, 77, 0.3); border-radius: 6px;">
-              <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:#f0883e; cursor:pointer; font-weight:500; user-select:none;">
-                <input type="checkbox" id="chkDisableCollisionGuard" />
-                <span>⚠️ Tắt Collision Guard (Cho phép ép chuyển động)</span>
-              </label>
+            <div class="safety-guard-badge" style="margin: 8px 0 12px 0; padding: 6px 10px; background: rgba(46, 160, 67, 0.15); border: 1px solid rgba(46, 160, 67, 0.4); border-radius: 6px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #3fb950; font-weight: 600;">
+              <span>🛡️ Collision Guard: <strong>ALWAYS ACTIVE</strong></span>
+              <span style="font-size: 10px; opacity: 0.8; margin-left: auto;">(0 colliding poses permitted)</span>
             </div>
 
             <div class="quick-cells-label">Điểm then chốt (Quick Targets):</div>
@@ -157,6 +156,194 @@
               </div>
               <div id="diagExplanation" class="diag-note">
                 💡 Bấm <strong>"Đi Tới"</strong> hoặc click trực tiếp vào bàn cờ để robot di chuyển theo quy trình 3 giai đoạn được điều phối độc quyền bởi backend (Nhấc lên ➔ Bay ngang ➔ Hạ cánh).
+              </div>
+            </div>
+          </div>
+          <div id="placementTabContent" class="tab-content">
+            <div class="panel-section-header">
+              <strong>📐 THIẾT LẬP VỊ TRÍ BÀN CỜ (DYNAMIC PLACEMENT)</strong>
+            </div>
+
+            <!-- Forward Shift d -->
+            <div class="joint-item">
+              <div class="joint-row" style="grid-template-columns: 140px minmax(0, 1fr) 60px;">
+                <label for="boardShiftSlider">Tịnh tiến (<em>d</em> mm):</label>
+                <input
+                  type="range"
+                  id="boardShiftSlider"
+                  class="range"
+                  min="-20"
+                  max="60"
+                  step="1"
+                  value="0"
+                />
+                <input
+                  type="number"
+                  id="boardShiftNum"
+                  class="number"
+                  min="-20"
+                  max="60"
+                  step="1"
+                  value="0"
+                />
+              </div>
+              <div style="font-size: 10px; color: #8b949e; display: flex; flex-direction: column; gap: 2px;">
+                <span>+ = Xa robot hơn (Robot <strong>-X</strong>, Viewer <strong>+Z</strong>)</span>
+                <span style="color: #d29922;">Preliminary candidate region: ~25–30 mm (PRELIMINARY / NOT YET VERIFIED)</span>
+              </div>
+            </div>
+
+            <!-- Safe Transit Height H -->
+            <div class="joint-item">
+              <div class="joint-row" style="grid-template-columns: 140px minmax(0, 1fr) 60px;">
+                <label for="safeTransitSlider">Độ cao an toàn (<em>H</em> mm):</label>
+                <input
+                  type="range"
+                  id="safeTransitSlider"
+                  class="range"
+                  min="20"
+                  max="80"
+                  step="1"
+                  value="70"
+                />
+                <input
+                  type="number"
+                  id="safeTransitNum"
+                  class="number"
+                  min="20"
+                  max="80"
+                  step="1"
+                  value="70"
+                />
+              </div>
+              <div style="font-size: 10px; color: #8b949e;">
+                <span>Độ cao bay ngang trên mặt bàn (20..80 mm)</span>
+              </div>
+            </div>
+
+            <!-- Optional Height Offset -->
+            <div class="joint-item">
+              <div class="joint-row" style="grid-template-columns: 140px minmax(0, 1fr) 60px;">
+                <label for="boardZOffsetNum">Độ lệch cao trình (Z):</label>
+                <div></div>
+                <input
+                  type="number"
+                  id="boardZOffsetNum"
+                  class="number"
+                  min="-10"
+                  max="20"
+                  step="1"
+                  value="0"
+                />
+              </div>
+            </div>
+
+            <div class="panel-actions" style="margin-top: 4px;">
+              <button id="btnApplyPlacement" class="action-btn primary-action">🚀 Áp Dụng Vị Trí</button>
+              <button id="btnResetPlacement" class="action-btn">🔄 Reset Nominal</button>
+            </div>
+            <button id="btnValidatePlacement" class="action-btn" style="width: 100%; margin-top: 2px; background: #238636; border-color: #2ea043; color: white;">
+              🔍 VALIDATE CURRENT PLACEMENT (90 Ô)
+            </button>
+
+            <!-- Analysis & Diagnostics Panel -->
+            <div class="diagnostic-card" style="margin-top: 8px;">
+              <div class="diag-header">
+                <strong>📊 PHÂN TÍCH HÌNH HỌC (CURRENT PLACEMENT)</strong>
+                <span id="placementVersionBadge" class="badge-safe">VER: 1</span>
+              </div>
+              <div class="diag-row">
+                <span>Forward shift (d):</span>
+                <strong id="readoutShiftD" style="color: #38bdf8">0.0 mm</strong>
+              </div>
+              <div class="diag-row">
+                <span>Robot frame / Viewer:</span>
+                <strong style="color: #a78bfa">-X_robot / +Z_viewer</strong>
+              </div>
+              <div class="diag-row">
+                <span>Row-0 center distance:</span>
+                <strong id="readoutRow0Dist">180.0 mm</strong>
+              </div>
+              <div class="diag-row">
+                <span>Far row (Row 9) distance:</span>
+                <strong id="readoutRow9Dist">540.0 mm</strong>
+              </div>
+              <div class="diag-row">
+                <span>Mép bàn gần (Near edge):</span>
+                <strong id="readoutNearEdgeDist">155.0 mm</strong>
+              </div>
+              <div class="diag-row">
+                <span>Tâm bàn cờ (Center distance):</span>
+                <strong id="readoutCenterDist">360.0 mm</strong>
+              </div>
+              <div class="diag-row">
+                <span>Mép bàn xa (Far edge):</span>
+                <strong id="readoutFarEdgeDist">565.0 mm</strong>
+              </div>
+              <div class="diag-divider" style="height: 1px; background: rgba(240, 246, 252, 0.1); margin: 6px 0;"></div>
+              <div class="diag-row">
+                <span>Safe Transit (H):</span>
+                <strong id="readoutHVal" style="color: #58a6ff">70.0 mm</strong>
+              </div>
+              <div class="diag-divider" style="height: 1px; background: rgba(240, 246, 252, 0.1); margin: 6px 0;"></div>
+              <div class="diag-header" style="margin-top: 4px;">
+                <strong>📐 GEOMETRIC PRECHECK (R = 650 mm)</strong>
+                <span id="geomPrecheckBadge" class="badge-safe">PASS</span>
+              </div>
+              <div class="diag-row">
+                <span>Far grasp distance (D_grasp):</span>
+                <strong id="readoutFarGraspDist">-- mm</strong>
+              </div>
+              <div class="diag-row">
+                <span>Far approach distance (D_app):</span>
+                <strong id="readoutFarAppDist">-- mm</strong>
+              </div>
+              <div class="diag-row">
+                <span>Grasp reach margin:</span>
+                <strong id="readoutGraspMargin">-- mm</strong>
+              </div>
+              <div class="diag-row">
+                <span>Approach reach margin:</span>
+                <strong id="readoutAppMargin">-- mm</strong>
+              </div>
+              <div class="diag-row">
+                <span>d_max (for current H):</span>
+                <strong id="readoutDMax">-- mm</strong>
+              </div>
+              <div class="diag-row">
+                <span>H_max (for current d):</span>
+                <strong id="readoutHMax">-- mm</strong>
+              </div>
+              <div class="diag-note" style="margin-top: 6px; font-size: 11px; color: #8b949e;">
+                ⚠️ <em>PRECHECK ONLY — Không được coi là FULLY SAFE cho tới khi vượt qua kiểm định IK và Collision Guard!</em>
+              </div>
+            </div>
+
+            <!-- Full Validation Result Card -->
+            <div class="diagnostic-card" id="validationSummaryCard" style="margin-top: 8px;">
+              <div class="diag-header">
+                <strong>🛡️ KẾT QUẢ KIỂM ĐỊNH RUNTIME (90 Ô)</strong>
+                <span id="valResultBadge" class="badge-safe" style="background: #30363d; color: #8b949e;">CHƯA KIỂM ĐỊNH</span>
+              </div>
+              <div class="diag-row">
+                <span>Grasp IK Success:</span>
+                <strong id="valGraspIkCount">-- / 90</strong>
+              </div>
+              <div class="diag-row">
+                <span>Approach IK Success:</span>
+                <strong id="valAppIkCount">-- / 90</strong>
+              </div>
+              <div class="diag-row">
+                <span>Grasp Collision-Free:</span>
+                <strong id="valGraspColCount">-- / 90</strong>
+              </div>
+              <div class="diag-row">
+                <span>Approach Collision-Free:</span>
+                <strong id="valAppColCount">-- / 90</strong>
+              </div>
+              <div id="valFailuresContainer" style="display: none; margin-top: 6px; font-size: 11px; color: #f85149;">
+                <div style="font-weight: 600;">Ô thất bại:</div>
+                <div id="valFailuresList" style="max-height: 80px; overflow-y: auto; font-family: monospace;"></div>
               </div>
             </div>
           </div>

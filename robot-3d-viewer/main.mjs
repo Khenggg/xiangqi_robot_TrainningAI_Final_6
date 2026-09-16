@@ -554,6 +554,10 @@ const state = {
   trajectoryStage: "IDLE",
   gripperClosed: false,
   liveSocket: null,
+  placementVersion: 1,
+  forwardShiftMm: 0.0,
+  safeTransitHeightMm: 70.0,
+  boardHeightOffsetMm: 0.0,
 };
 window.__state = state;
 
@@ -639,6 +643,11 @@ function connectLive() {
         if (data.gripper !== undefined && state.currentArm?.gripper) {
           state.currentArm.gripper.setClosed(Boolean(data.gripper));
         }
+        if (data.placement_version !== undefined) {
+          state.placementVersion = Number(data.placement_version);
+          const verBadge = document.getElementById("placementVersionBadge");
+          if (verBadge) verBadge.textContent = `VER: ${data.placement_version}`;
+        }
       } else if (data.type === "world_state") {
         const val = validateWorldStatePacket(data);
         if (val.ok) {
@@ -649,10 +658,29 @@ function connectLive() {
             state.currentArm.gripper.setClosed(Boolean(val.gripper.closed));
           }
         }
+      } else if (data.type === "board_placement") {
+        // Authoritative runtime placement packet from Python backend
+        setScenePlacement(data);
+        if (coordinateRulerGroup?.updateBoardPlacement) {
+          coordinateRulerGroup.updateBoardPlacement(data.board_center_world_m?.[2], data.board_center_world_m?.[1]);
+        }
+        state.placementVersion = Number(data.placement_version ?? state.placementVersion);
+        state.forwardShiftMm = Number(data.forward_shift_mm ?? state.forwardShiftMm);
+        state.safeTransitHeightMm = Number(data.safe_transit_height_mm ?? state.safeTransitHeightMm);
+        syncPlacementUIFromAuthoritative(data);
+      } else if (data.type === "placement_validation_result") {
+        updatePlacementValidationResultUI(data);
       } else if (data.type === "trajectory_result") {
+        if (data.placement_version !== undefined) {
+          state.placementVersion = Number(data.placement_version);
+          const verBadge = document.getElementById("placementVersionBadge");
+          if (verBadge) verBadge.textContent = `VER: ${data.placement_version}`;
+        }
         if (!data.success) {
           handleBackendError(data.error || `Quỹ đạo thất bại ở giai đoạn ${data.failed_stage}`);
         }
+      } else if (data.type === "error") {
+        handleBackendError(data.message || "Lỗi backend");
       }
     } catch (error) {
       console.warn("Live message error:", error.message);
@@ -739,21 +767,32 @@ function renderJointControls() {
 function updateSingleJoint(index, val) {
   const def = JOINT_DEFINITIONS[index];
   const clamped = Math.max(def.min, Math.min(def.max, Number(val) || 0));
-  state.jointsDeg[index] = clamped;
-
-  state.currentCell = null;
-  updateStepperUI(null, []);
 
   const slider = document.getElementById(`joint-slider-${index}`);
   const num = document.getElementById(`joint-num-${index}`);
   if (slider) slider.value = clamped;
   if (num) num.value = clamped.toFixed(1);
 
-  if (jointsReadoutEl) {
-    jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ");
-  }
-  if (state.currentArm) {
-    applyJointsDeg(state.currentArm, state.jointsDeg);
+  if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+    // Single Motion Authority: slider input dispatches intent to backend
+    // Backend validates, collision-checks, moves physics, and returns authoritative telemetry
+    const targetJoints = [...state.jointsDeg];
+    targetJoints[index] = clamped;
+    state.liveSocket.send(JSON.stringify({
+      command: "MOVE_JOINT",
+      joints_deg: targetJoints,
+    }));
+  } else {
+    // Non-authoritative offline preview
+    state.jointsDeg[index] = clamped;
+    state.currentCell = null;
+    updateStepperUI(null, []);
+    if (jointsReadoutEl) {
+      jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ") + " (PREVIEW)";
+    }
+    if (state.currentArm) {
+      applyJointsDeg(state.currentArm, state.jointsDeg);
+    }
   }
 }
 
@@ -767,6 +806,230 @@ function syncAllJointSliders() {
   if (jointsReadoutEl) {
     jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ");
   }
+}
+
+// ---------------------------------------------------------------------------
+// 5.6) PHÂN TÍCH & ĐIỀU KHIỂN VỊ TRÍ BÀN CỜ ĐỘNG (DYNAMIC BOARD PLACEMENT)
+// ---------------------------------------------------------------------------
+function computeGeometricPrecheck(d_mm, H_mm, z_board_mm = 10.5) {
+  const R = 650.0;
+  const L_tool = 218.0;
+  const piece_h = 9.43;
+  const z_tcp_grasp = z_board_mm + piece_h / 2.0; // 15.215 mm
+  const z_flange_grasp = z_tcp_grasp + L_tool;    // 233.215 mm
+  const z_flange_app = z_board_mm + H_mm + L_tool; // 228.5 + H mm
+
+  const X_far = 540.0 + d_mm;
+  const Y_far = 160.0;
+
+  const D_far_grasp = Math.hypot(X_far, Y_far, z_flange_grasp);
+  const D_far_app = Math.hypot(X_far, Y_far, z_flange_app);
+
+  // d_max(H)
+  const rad_d = R * R - Y_far * Y_far - z_flange_app * z_flange_app;
+  const d_max = rad_d >= 0 ? Math.sqrt(rad_d) - 540.0 : null;
+
+  // H_max(d)
+  const rad_h = R * R - Y_far * Y_far - X_far * X_far;
+  const H_max = rad_h >= 0 ? Math.sqrt(rad_h) - z_board_mm - L_tool : null;
+
+  const pass = D_far_grasp <= R && D_far_app <= R;
+  return {
+    D_far_grasp,
+    D_far_app,
+    grasp_margin: R - D_far_grasp,
+    app_margin: R - D_far_app,
+    d_max,
+    H_max,
+    pass,
+  };
+}
+
+function updateGeometricPrecheckUI(d_mm, H_mm) {
+  const res = computeGeometricPrecheck(d_mm, H_mm);
+  const elD = document.getElementById("readoutShiftD");
+  const elRow0 = document.getElementById("readoutRow0Dist");
+  const elRow9 = document.getElementById("readoutRow9Dist");
+  const elNear = document.getElementById("readoutNearEdgeDist");
+  const elCenter = document.getElementById("readoutCenterDist");
+  const elFar = document.getElementById("readoutFarEdgeDist");
+  const elH = document.getElementById("readoutHVal");
+  const elFarGrasp = document.getElementById("readoutFarGraspDist");
+  const elFarApp = document.getElementById("readoutFarAppDist");
+  const elGraspMargin = document.getElementById("readoutGraspMargin");
+  const elAppMargin = document.getElementById("readoutAppMargin");
+  const elDMax = document.getElementById("readoutDMax");
+  const elHMax = document.getElementById("readoutHMax");
+  const badge = document.getElementById("geomPrecheckBadge");
+
+  if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
+  if (elRow0) elRow0.textContent = `${(180.0 + d_mm).toFixed(1)} mm`;
+  if (elRow9) elRow9.textContent = `${(540.0 + d_mm).toFixed(1)} mm`;
+  if (elNear) elNear.textContent = `${(180.0 + d_mm - 25.0).toFixed(1)} mm`;
+  if (elCenter) elCenter.textContent = `${(360.0 + d_mm).toFixed(1)} mm`;
+  if (elFar) elFar.textContent = `${(540.0 + d_mm + 25.0).toFixed(1)} mm`;
+  if (elH) elH.textContent = `${H_mm.toFixed(1)} mm`;
+
+  if (elFarGrasp) elFarGrasp.textContent = `${res.D_far_grasp.toFixed(1)} mm`;
+  if (elFarApp) elFarApp.textContent = `${res.D_far_app.toFixed(1)} mm`;
+  if (elGraspMargin) elGraspMargin.textContent = `${res.grasp_margin.toFixed(1)} mm`;
+  if (elAppMargin) elAppMargin.textContent = `${res.app_margin.toFixed(1)} mm`;
+  if (elDMax) elDMax.textContent = res.d_max !== null ? `${res.d_max.toFixed(1)} mm` : "VÔ NGHIỆM";
+  if (elHMax) elHMax.textContent = res.H_max !== null ? `${res.H_max.toFixed(1)} mm` : "VÔ NGHIỆM";
+
+  if (badge) {
+    badge.className = res.pass ? "badge-safe" : "badge-warn";
+    badge.textContent = res.pass ? "GEOMETRIC PASS" : "GEOMETRIC FAIL";
+  }
+}
+
+function syncPlacementUIFromAuthoritative(data) {
+  const d = Number(data.forward_shift_mm ?? 0);
+  const h = Number(data.safe_transit_height_mm ?? 70);
+  const zOff = Number(data.board_height_offset_mm ?? 0);
+  const ver = data.placement_version ?? 1;
+
+  const shiftSlider = document.getElementById("boardShiftSlider");
+  const shiftNum = document.getElementById("boardShiftNum");
+  const transitSlider = document.getElementById("safeTransitSlider");
+  const transitNum = document.getElementById("safeTransitNum");
+  const zOffsetNum = document.getElementById("boardZOffsetNum");
+  const verBadge = document.getElementById("placementVersionBadge");
+
+  if (shiftSlider) shiftSlider.value = String(d);
+  if (shiftNum) shiftNum.value = String(d);
+  if (transitSlider) transitSlider.value = String(h);
+  if (transitNum) transitNum.value = String(h);
+  if (zOffsetNum) zOffsetNum.value = String(zOff);
+  if (verBadge) verBadge.textContent = `VER: ${ver}`;
+
+  updateGeometricPrecheckUI(d, h);
+
+  const valBadge = document.getElementById("valResultBadge");
+  if (valBadge && valBadge.textContent !== "ĐANG KIỂM ĐỊNH 90 Ô...") {
+    if (d !== 0.0) {
+      valBadge.className = "badge-warn";
+      valBadge.textContent = `CHƯA KIỂM ĐỊNH CHO VỊ TRÍ d=${d.toFixed(1)}mm`;
+    }
+  }
+}
+
+function updatePlacementValidationResultUI(res) {
+  const valBadge = document.getElementById("valResultBadge");
+  const elGraspIk = document.getElementById("valGraspIkCount");
+  const elAppIk = document.getElementById("valAppIkCount");
+  const elGraspCol = document.getElementById("valGraspColCount");
+  const elAppCol = document.getElementById("valAppColCount");
+  const failContainer = document.getElementById("valFailuresContainer");
+  const failList = document.getElementById("valFailuresList");
+
+  if (elGraspIk) elGraspIk.textContent = `${res.grasp_ik_count} / ${res.total_cells}`;
+  if (elAppIk) elAppIk.textContent = `${res.approach_ik_count} / ${res.total_cells}`;
+  if (elGraspCol) elGraspCol.textContent = `${res.grasp_collision_free_count} / ${res.total_cells}`;
+  if (elAppCol) elAppCol.textContent = `${res.approach_collision_free_count} / ${res.total_cells}`;
+
+  if (res.all_passed) {
+    if (valBadge) {
+      valBadge.className = "badge-safe";
+      valBadge.textContent = "90/90 TOÀN BỘ AN TOÀN (ALL PASSED)";
+    }
+    if (failContainer) failContainer.style.display = "none";
+  } else {
+    if (valBadge) {
+      valBadge.className = "badge-warn";
+      valBadge.textContent = `PHÁT HIỆN ${res.failed_cells?.length || 0} Ô VA CHẠM / LỖI`;
+    }
+    if (failContainer && failList && res.failed_cells?.length) {
+      failContainer.style.display = "block";
+      failList.innerHTML = res.failed_cells.slice(0, 10).map((f) => `<div>• Hàng ${f.row}, Cột ${f.col}: ${f.reason}</div>`).join("");
+      if (res.failed_cells.length > 10) {
+        failList.innerHTML += `<div>...và ${res.failed_cells.length - 10} ô khác</div>`;
+      }
+    }
+  }
+}
+
+function initPlacementPanelEvents() {
+  const shiftSlider = document.getElementById("boardShiftSlider");
+  const shiftNum = document.getElementById("boardShiftNum");
+  const transitSlider = document.getElementById("safeTransitSlider");
+  const transitNum = document.getElementById("safeTransitNum");
+  const zOffsetNum = document.getElementById("boardZOffsetNum");
+  const btnApply = document.getElementById("btnApplyPlacement");
+  const btnReset = document.getElementById("btnResetPlacement");
+  const btnValidate = document.getElementById("btnValidatePlacement");
+
+  const syncPrecheckFromInputs = () => {
+    const d = Number(shiftNum?.value ?? 0);
+    const h = Number(transitNum?.value ?? 70);
+    updateGeometricPrecheckUI(d, h);
+  };
+
+  shiftSlider?.addEventListener("input", (e) => {
+    if (shiftNum) shiftNum.value = e.target.value;
+    syncPrecheckFromInputs();
+  });
+  shiftNum?.addEventListener("change", (e) => {
+    if (shiftSlider) shiftSlider.value = e.target.value;
+    syncPrecheckFromInputs();
+  });
+
+  transitSlider?.addEventListener("input", (e) => {
+    if (transitNum) transitNum.value = e.target.value;
+    syncPrecheckFromInputs();
+  });
+  transitNum?.addEventListener("change", (e) => {
+    if (transitSlider) transitSlider.value = e.target.value;
+    syncPrecheckFromInputs();
+  });
+
+  btnApply?.addEventListener("click", () => {
+    if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+      const d = Number(shiftNum?.value ?? 0);
+      const h = Number(transitNum?.value ?? 70);
+      const zOff = Number(zOffsetNum?.value ?? 0);
+      state.liveSocket.send(JSON.stringify({
+        command: "SET_BOARD_PLACEMENT",
+        forward_shift_mm: d,
+        safe_transit_height_mm: h,
+        board_height_offset_mm: zOff,
+      }));
+    } else {
+      handleBackendError("Chưa kết nối Backend: Bấm Connect live để thay đổi vị trí bàn cờ có thẩm quyền");
+    }
+  });
+
+  btnReset?.addEventListener("click", () => {
+    if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+      state.liveSocket.send(JSON.stringify({
+        command: "RESET_BOARD_PLACEMENT",
+      }));
+    } else {
+      if (shiftSlider) shiftSlider.value = "0";
+      if (shiftNum) shiftNum.value = "0";
+      if (transitSlider) transitSlider.value = "70";
+      if (transitNum) transitNum.value = "70";
+      if (zOffsetNum) zOffsetNum.value = "0";
+      syncPrecheckFromInputs();
+    }
+  });
+
+  btnValidate?.addEventListener("click", () => {
+    if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+      state.liveSocket.send(JSON.stringify({
+        command: "VALIDATE_BOARD_PLACEMENT",
+      }));
+      const valBadge = document.getElementById("valResultBadge");
+      if (valBadge) {
+        valBadge.className = "badge-warn";
+        valBadge.textContent = "ĐANG KIỂM ĐỊNH 90 Ô...";
+      }
+    } else {
+      handleBackendError("Chưa kết nối Backend: Cần kết nối live để kiểm định 90 ô");
+    }
+  });
+
+  syncPrecheckFromInputs();
 }
 
 function initJointControlPanelEvents() {
@@ -821,25 +1084,24 @@ function initJointControlPanelEvents() {
     });
   }
 
-  // Tabs switching
+  // Tabs switching: J1..J6 | Reach Cells | Board Placement
   const tabJointsBtn = document.getElementById("tabJointsBtn");
   const tabReachBtn = document.getElementById("tabReachBtn");
+  const tabPlacementBtn = document.getElementById("tabPlacementBtn");
   const jointsContent = document.getElementById("jointsTabContent");
   const reachContent = document.getElementById("reachTabContent");
-  if (tabJointsBtn && tabReachBtn) {
-    tabJointsBtn.addEventListener("click", () => {
-      tabJointsBtn.classList.add("active");
-      tabReachBtn.classList.remove("active");
-      jointsContent?.classList.add("active");
-      reachContent?.classList.remove("active");
-    });
-    tabReachBtn.addEventListener("click", () => {
-      tabReachBtn.classList.add("active");
-      tabJointsBtn.classList.remove("active");
-      reachContent?.classList.add("active");
-      jointsContent?.classList.remove("active");
-    });
+  const placementContent = document.getElementById("placementTabContent");
+
+  function switchTab(activeTab, activeContent) {
+    [tabJointsBtn, tabReachBtn, tabPlacementBtn].forEach((b) => b?.classList.remove("active"));
+    [jointsContent, reachContent, placementContent].forEach((c) => c?.classList.remove("active"));
+    activeTab?.classList.add("active");
+    activeContent?.classList.add("active");
   }
+
+  tabJointsBtn?.addEventListener("click", () => switchTab(tabJointsBtn, jointsContent));
+  tabReachBtn?.addEventListener("click", () => switchTab(tabReachBtn, reachContent));
+  tabPlacementBtn?.addEventListener("click", () => switchTab(tabPlacementBtn, placementContent));
 
   // Reach cell button
   const reachBtn = document.getElementById("reachCellBtn");
@@ -851,38 +1113,8 @@ function initJointControlPanelEvents() {
     });
   }
 
-  // Toggle collision guard
-  const chkDisableGuard = document.getElementById("chkDisableCollisionGuard");
-  if (chkDisableGuard) {
-    chkDisableGuard.addEventListener("change", (e) => {
-      const disabled = e.target.checked;
-      if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
-        state.liveSocket.send(JSON.stringify({
-          command: "SET_COLLISION_GUARD",
-          enabled: !disabled,
-        }));
-      }
-      const badge = document.getElementById("diagStatusBadge");
-      const expl = document.getElementById("diagExplanation");
-      if (disabled) {
-        if (badge) {
-          badge.className = "badge-warn";
-          badge.textContent = "⚠️ COLLISION GUARD: OFF (ÉP CHUYỂN ĐỘNG)";
-        }
-        if (expl) {
-          expl.innerHTML = `<span style="color:#f0883e">⚠️ <strong>Đã tắt Collision Guard:</strong> Robot sẽ thực thi chuyển động ép buộc kể cả khi các đốt cánh tay hoặc ngàm kẹp cấn chạm. Bạn có thể zoom gần vào các đốt vai (Link 1) và cẳng tay (Link 3) để quan sát va chạm hình học.</span>`;
-        }
-      } else {
-        if (badge) {
-          badge.className = "badge-safe";
-          badge.textContent = "🛡️ COLLISION GUARD: ON";
-        }
-        if (expl) {
-          expl.innerHTML = `🛡️ <strong>Collision Guard đang BẬT:</strong> Robot sẽ tự động từ chối hoặc kích hoạt Lift Recovery nếu phát hiện nguy cơ va chạm.`;
-        }
-      }
-    });
-  }
+  // Setup dynamic board placement panel handlers
+  initPlacementPanelEvents();
 
   // Quick cell buttons
   document.querySelectorAll(".quick-cell-btn").forEach((btn) => {
@@ -1154,11 +1386,12 @@ function handleBackendError(errMsg) {
 }
 
 function goToCell(row, col) {
-  if (!state.cellDataset?.cells) return;
   state.selectedCell = { row, col };
 
-  const cell = state.cellDataset.cells.find((c) => c.row === row && c.col === col);
-  if (!cell || !cell.reachable) return;
+  const d_mm = Number(state.forwardShiftMm || 0.0);
+  const robX = -0.180 - (d_mm / 1000.0) - (row * 0.040);
+  const robY = -0.160 + (col * 0.040);
+  const cell = { row, col, x_m: robX, y_m: robY };
 
   // Update 3D ring marker & coordinates
   const ring = getOrCreateTargetRing();
@@ -1171,9 +1404,9 @@ function goToCell(row, col) {
     const worldY_mm = (pt.y * 1000).toFixed(1);
     const worldZ_mm = (pt.z * 1000).toFixed(1);
 
-    const robX_mm = (cell.x_m * 1000).toFixed(1);
-    const robY_mm = (cell.y_m * 1000).toFixed(1);
-    const robZ_mm = (0.0105 * 1000).toFixed(1);
+    const robX_mm = (robX * 1000).toFixed(1);
+    const robY_mm = (robY * 1000).toFixed(1);
+    const robZ_mm = ((state.boardHeightOffsetMm ? 0.0105 + state.boardHeightOffsetMm / 1000.0 : 0.0105) * 1000).toFixed(1);
 
     const coordReadoutEl = document.getElementById("coordReadout");
     if (coordReadoutEl) {
@@ -1212,7 +1445,7 @@ function goToCell(row, col) {
   if (colSelect) colSelect.value = String(col);
 
   const cellLabel = document.getElementById("diagCellLabel");
-  if (cellLabel) cellLabel.textContent = `Cột ${col}, Hàng ${row} (X=${cell.x_m}m, Y=${cell.y_m}m)`;
+  if (cellLabel) cellLabel.textContent = `Cột ${col}, Hàng ${row} (X=${cell.x_m.toFixed(3)}m, Y=${cell.y_m.toFixed(3)}m)`;
 
   state.targetDestinationCell = cell;
 
@@ -1224,6 +1457,7 @@ function goToCell(row, col) {
       command: "EXECUTE_3STAGE",
       src: [srcRow, srcCol],
       dst: [row, col],
+      placement_version: state.placementVersion || 1,
     };
     state.liveSocket.send(JSON.stringify(cmd));
     const badge = document.getElementById("diagStatusBadge");

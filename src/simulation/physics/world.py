@@ -232,11 +232,75 @@ class VirtualPhysicalWorld:
         )
 
         # Store board bounding box for out-of-bounds check
+        self._nominal_board_center = list(board_center)
+        self._nominal_surface_height = surface_height
+        self._board_half_x = half_x
+        self._board_half_y = half_y
+        self._board_half_z = half_z
+        self.current_forward_shift_m = 0.0
+        self.current_height_offset_m = 0.0
+
         self.board_x_min = board_center[0] - half_x
         self.board_x_max = board_center[0] + half_x
         self.board_y_min = board_center[1] - half_y
         self.board_y_max = board_center[1] + half_y
         self.board_surface_z = surface_height
+
+    def relocate_board(self, forward_shift_m: float, height_offset_m: float = 0.0) -> bool:
+        """
+        Reposition PyBullet board collider and consistently translate all pieces ON_BOARD.
+        d > 0 means board moves farther from robot along -X_robot.
+        """
+        shift_m = float(forward_shift_m)
+        h_off_m = float(height_offset_m)
+
+        # Delta translation from current placement
+        delta_x = -(shift_m - self.current_forward_shift_m)
+        delta_y = 0.0
+        delta_z = h_off_m - self.current_height_offset_m
+        delta = np.array([delta_x, delta_y, delta_z], dtype=float)
+
+        # New board center and surface Z
+        new_cx = self._nominal_board_center[0] - shift_m
+        new_cy = self._nominal_board_center[1]
+        new_surface_z = self._nominal_surface_height + h_off_m
+        new_box_cz = new_surface_z - self._board_half_z
+
+        if self.board_body_id >= 0 and self.client_id >= 0:
+            p.resetBasePositionAndOrientation(
+                self.board_body_id,
+                [new_cx, new_cy, new_box_cz],
+                [0.0, 0.0, 0.0, 1.0],
+                physicsClientId=self.client_id,
+            )
+
+        self.board_x_min = new_cx - self._board_half_x
+        self.board_x_max = new_cx + self._board_half_x
+        self.board_y_min = new_cy - self._board_half_y
+        self.board_y_max = new_cy + self._board_half_y
+        self.board_surface_z = new_surface_z
+
+        # Relocate resting/on-board pieces
+        nom_origin = self.board_cfg.get("grid_origin_in_robot_base_m", [-0.180, -0.160, 0.0105])
+        new_origin = (nom_origin[0] - shift_m, nom_origin[1], new_surface_z)
+
+        for p_body in self.pieces.values():
+            if p_body.physical_state in (PiecePhysicalState.ON_BOARD, PiecePhysicalState.SETTLING, PiecePhysicalState.RESTING):
+                pos, orn = p_body.get_pose_robot_base()
+                new_pos = pos + delta
+                p_body.set_pose_robot_base(new_pos, orn)
+                p_body.grid_origin_robot = new_origin
+
+        self.current_forward_shift_m = shift_m
+        self.current_height_offset_m = h_off_m
+        return True
+
+    def get_board_pose(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Return (position, quaternion) of board body in PyBullet base frame."""
+        if self.board_body_id >= 0 and self.client_id >= 0:
+            pos, orn = p.getBasePositionAndOrientation(self.board_body_id, physicsClientId=self.client_id)
+            return np.array(pos), np.array(orn)
+        return np.array([self._nominal_board_center[0] - self.current_forward_shift_m, self._nominal_board_center[1], self.board_surface_z - self._board_half_z]), np.array([0.0, 0.0, 0.0, 1.0])
 
     def _spawn_pieces(self) -> None:
         """Spawn 32 Xiangqi pieces as cylinder rigid bodies at initial intersections."""

@@ -498,6 +498,10 @@ export function buildCoordinateRulerGroup(options = {}) {
   // 5. HIT PROXIES CHO 4 CẠNH BÀN CỜ (BOARD EDGES)
   // -------------------------------------------------------------------------
   // Bàn cờ đặt tại tâm (0, 0.0105, 0.36), kích thước: 0.367m x 0.410m
+  const boardEdgesGroup = new THREE.Group();
+  boardEdgesGroup.name = "board-edges-group";
+  group.add(boardEdgesGroup);
+
   const boardCenterZ = 0.36;
   const boardHalfW = 0.367 / 2; // 0.1835m
   const boardHalfL = 0.410 / 2; // 0.205m
@@ -507,7 +511,7 @@ export function buildCoordinateRulerGroup(options = {}) {
     mesh.position.set(x, y, z);
     mesh.name = `hit-proxy-edge-${edgeName}`;
     mesh.userData = { isRulerProxy: true, axis: "BOARD", edge: edgeName };
-    group.add(mesh);
+    boardEdgesGroup.add(mesh);
   };
 
   // Cạnh trước (Near - Hàng 0)
@@ -577,6 +581,22 @@ export function buildCoordinateRulerGroup(options = {}) {
 
   group.isAnyLabelsVisible = function () {
     return labelsX.visible || labelsY.visible || labelsZ.visible || labelsBoard.visible;
+  };
+
+  /**
+   * Cập nhật vị trí các hit proxies cạnh bàn cờ theo authoritative runtime placement.
+   */
+  group.updateBoardPlacement = function (boardCenterZ, boardSurfaceY) {
+    if (boardCenterZ !== undefined && boardCenterZ !== null) {
+      const dz = Number(boardCenterZ) - 0.36;
+      boardEdgesGroup.position.z = dz;
+      labelsBoard.position.z = dz;
+    }
+    if (boardSurfaceY !== undefined && boardSurfaceY !== null) {
+      const dy = Number(boardSurfaceY) - 0.0105;
+      boardEdgesGroup.position.y = dy;
+      labelsBoard.position.y = dy;
+    }
   };
 
   /**

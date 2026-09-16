@@ -34,13 +34,36 @@ export async function fetchScenePlacement(url = "/shared/virtual_fr3_scene.json"
   return placement;
 }
 
+let _activeBoardGroup = null;
+
 export function setScenePlacement(placement) {
   if (!placement) throw new Error("placement cannot be null or undefined");
+  const centerWorld = placement.board_center_world_m || [
+    placement.boardCenterX ?? 0.0,
+    placement.boardSurfaceY ?? 0.0105,
+    placement.boardCenterZ ?? 0.36
+  ];
   _activeScenePlacement = {
-    boardCenterX: Number(placement.boardCenterX),
-    boardSurfaceY: Number(placement.boardSurfaceY),
-    boardCenterZ: Number(placement.boardCenterZ),
+    boardCenterX: Number(centerWorld[0]),
+    boardSurfaceY: Number(centerWorld[1]),
+    boardCenterZ: Number(centerWorld[2]),
+    forwardShiftMm: Number(placement.forward_shift_mm ?? 0.0),
+    safeTransitHeightMm: Number(placement.safe_transit_height_mm ?? 70.0),
+    boardHeightOffsetMm: Number(placement.board_height_offset_mm ?? 0.0),
+    placementVersion: Number(placement.placement_version ?? 1),
   };
+
+  if (_activeBoardGroup) {
+    _activeBoardGroup.position.set(
+      _activeScenePlacement.boardCenterX,
+      _activeScenePlacement.boardSurfaceY,
+      _activeScenePlacement.boardCenterZ
+    );
+  }
+}
+
+export function getActiveBoardGroup() {
+  return _activeBoardGroup;
 }
 
 export function getScenePlacement() {
@@ -287,23 +310,25 @@ export function buildBoardGrid(geometry = null) {
 
   const center = boardPointToXYZ(4, 4.5, geo);
 
-  // 1. Khung viền ngoài
+  // 1. Khung viền ngoài (tọa độ local tương đối với tâm group)
   const outerFrame = new THREE.Mesh(
     new THREE.BoxGeometry(boardWidth + 0.02, boardThickness - 0.001, boardDepth + 0.02),
     frameMaterial
   );
-  outerFrame.position.set(center.x, center.y - boardThickness / 2 - 0.0005, center.z);
+  outerFrame.position.set(0, -boardThickness / 2 - 0.0005, 0);
   group.add(outerFrame);
 
-  // 2. Mặt bàn cờ chính (đáy chạm đúng mặt sàn Y = 0.0, mặt trên ở Y = 0.0105)
+  // 2. Mặt bàn cờ chính (tọa độ local tương đối với tâm group)
   const boardTop = new THREE.Mesh(
     new THREE.BoxGeometry(boardWidth, boardThickness, boardDepth),
     boardMaterial
   );
-  boardTop.position.set(center.x, center.y - boardThickness / 2, center.z);
+  boardTop.position.set(0, -boardThickness / 2, 0);
   boardTop.receiveShadow = true;
   group.add(boardTop);
 
+  group.position.set(center.x, center.y, center.z);
+  _activeBoardGroup = group;
   return group;
 }
 
