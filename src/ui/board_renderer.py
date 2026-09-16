@@ -3,6 +3,7 @@
 # === Hiển thị bàn cờ Tướng ảo trên Pygame ===
 # =============================================================================
 import time
+import unicodedata
 import pygame
 from src.core import xiangqi
 
@@ -34,14 +35,37 @@ PIECE_DISPLAY_NAMES = {
 }
 
 
+def _ui_safe_text(text):
+    """Return text that can be drawn consistently by a single Pygame font.
+
+    Pygame/SDL_ttf does not perform the Windows font fallback used by normal
+    desktop controls.  In particular, colour emoji such as ``⌨️`` and ``🤖``
+    show up as an empty box when rendered with Arial.  UI messages should use
+    words (and their colour) to convey state; retain letters, numbers and
+    punctuation, but omit emoji/symbol glyphs Pygame cannot reliably render.
+    """
+    text = str(text).replace("⌨️", "[SPACE]")
+    return "".join(
+        char for char in text
+        if not unicodedata.category(char).startswith("So")
+        and char not in {"\ufe0e", "\ufe0f"}
+    )
+
+
 class BoardRenderer:
     """Quản lý hiển thị bàn cờ Tướng trên Pygame."""
 
     def __init__(self, screen):
         self.screen = screen
+        # SimSun contains the Chinese Xiangqi characters; Segoe UI has solid
+        # Vietnamese/Latin coverage on supported Windows installations.
         self.piece_font = pygame.font.SysFont("simsun", 20, bold=True)
         self.game_font = pygame.font.SysFont("times new roman", 36, bold=True)
-        self.ui_font = pygame.font.SysFont("arial", 16, bold=True)
+        self.ui_font = pygame.font.SysFont("segoe ui", 16, bold=True)
+
+    def _render_ui_text(self, text, color):
+        """Render UI copy after removing glyphs without a reliable fallback."""
+        return self.ui_font.render(_ui_safe_text(text), True, color)
 
     # --- Chuyển đổi tọa độ ---
     @staticmethod
@@ -67,26 +91,26 @@ class BoardRenderer:
         if not game_state.get("game_over"):
             # Nút SURRENDER
             pygame.draw.rect(self.screen, BTN_COLOR, BTN_SURRENDER_RECT, border_radius=8)
-            txt = self.ui_font.render("SURRENDER", True, (255, 255, 255))
+            txt = self._render_ui_text("SURRENDER", (255, 255, 255))
             self.screen.blit(txt, txt.get_rect(center=BTN_SURRENDER_RECT.center))
 
             # Nút NEW GAME
             pygame.draw.rect(self.screen, BTN_NEW_GAME_COLOR, BTN_NEW_GAME_RECT, border_radius=8)
-            txt_new = self.ui_font.render("NEW GAME", True, (255, 255, 255))
+            txt_new = self._render_ui_text("NEW GAME", (255, 255, 255))
             self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
 
             # Mode indicator
             mode_str = "MOUSE (DRY RUN)" if game_state.get("allow_mouse") else "CAMERA AI"
-            mode_txt = self.ui_font.render(f"MODE: {mode_str}", True, (0, 0, 255))
+            mode_txt = self._render_ui_text(f"MODE: {mode_str}", (0, 0, 255))
             self.screen.blit(mode_txt, (10, 10))
 
             # Hướng dẫn SPACE
             if game_state.get("turn") == "r" and not game_state.get("allow_mouse"):
-                hint = self.ui_font.render("⌨️ Bấm SPACE sau khi đi xong", True, (0, 100, 0))
+                hint = self._render_ui_text("[SPACE] Bấm SPACE sau khi đi xong", (0, 100, 0))
                 self.screen.blit(hint, (SCREEN_WIDTH - 280, 10))
         else:
             pygame.draw.rect(self.screen, BTN_NEW_GAME_COLOR, BTN_NEW_GAME_RECT, border_radius=8)
-            txt_new = self.ui_font.render("NEW GAME", True, (255, 255, 255))
+            txt_new = self._render_ui_text("NEW GAME", (255, 255, 255))
             self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
 
         # --- Vẽ lưới bàn cờ ---
@@ -111,9 +135,11 @@ class BoardRenderer:
 
         # --- Status message ---
         msg = game_state.get("status_message", "")
-        if msg and time.time() < game_state.get("status_expiry", 0):
+        # The winner banner owns the top area once a game has ended.
+        if (not game_state.get("game_over") and msg
+                and time.time() < game_state.get("status_expiry", 0)):
             color = game_state.get("status_color", (200, 0, 0))
-            msg_surf = self.ui_font.render(msg, True, (255, 255, 255))
+            msg_surf = self._render_ui_text(msg, (255, 255, 255))
             padding = 8
             bg_rect = msg_surf.get_rect(centerx=SCREEN_WIDTH // 2, top=32)
             bg_rect.inflate_ip(padding * 2, padding * 2)
@@ -128,7 +154,7 @@ class BoardRenderer:
             dots = "." * (int(time.time() - start) % 4)
             elapsed = time.time() - start
             think_msg = f"🤖  AI is thinking{dots}  ({elapsed:.1f}s)"
-            think_surf = self.ui_font.render(think_msg, True, (255, 255, 255))
+            think_surf = self._render_ui_text(think_msg, (255, 255, 255))
             padding = 10
             bg_rect = think_surf.get_rect(centerx=SCREEN_WIDTH // 2, top=8)
             bg_rect.inflate_ip(padding * 2, padding * 2)
@@ -171,8 +197,13 @@ class BoardRenderer:
             pygame.draw.circle(self.screen, (220, 0, 0), (fx, fy), PIECE_RADIUS + 6, 4)
 
     def draw_game_over(self, winner):
-        """Vẽ thông báo kết thúc game."""
-        msg = "AI WINS (SAVED)" if winner == "b" else "YOU WIN (NOT SAVED)"
+        """Draw the end-of-game banner above the board."""
+        msg = "AI WINS" if winner == "b" else "HUMAN WINS"
         color = (0, 255, 0) if winner == "b" else (255, 0, 0)
         txt = self.game_font.render(msg, True, color)
-        self.screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)))
+        padding_x, padding_y = 16, 6
+        banner = txt.get_rect(centerx=SCREEN_WIDTH // 2, top=30)
+        background = banner.inflate(padding_x * 2, padding_y * 2)
+        pygame.draw.rect(self.screen, (255, 255, 255), background, border_radius=8)
+        pygame.draw.rect(self.screen, color, background, width=2, border_radius=8)
+        self.screen.blit(txt, banner)
