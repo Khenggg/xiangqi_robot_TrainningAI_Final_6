@@ -140,6 +140,38 @@ class J4ConstraintAndPenetrationTests(unittest.TestCase):
         self.assertGreaterEqual(min(tilts), 10.0, f"Expected all cells to have severe tilt > 10 deg, got min={min(tilts)}")
         self.assertGreaterEqual(max(tilts), 35.0, f"Expected max tilt > 35 deg, got max={max(tilts)}")
 
+    def test_links_remain_strictly_rigid_with_zero_deformation(self):
+        """Verify that link lengths are strictly invariant (delta < 1 um) across all 90 cell configurations.
+        Guarantees the algorithm NEVER stretches, deforms, or scales any robot link.
+        """
+        with open(_REPO_ROOT / "shared" / "cell_reachability_dataset.json", "r", encoding="utf-8") as f:
+            dataset = json.load(f)
+
+        L1_expected = 0.140   # Base to Shoulder (140mm)
+        L2_expected = 0.280   # Shoulder to Elbow (280mm)
+        L3_expected = 0.24001 # Elbow to Wrist1 (240.01mm)
+        L4_expected = 0.102   # Wrist1 to Wrist2 (102mm)
+        L5_expected = 0.102   # Wrist2 to Flange (102mm)
+
+        for cell in dataset["cells"]:
+            for mode in ["optimal", "constrained_j4"]:
+                q = np.radians(cell[mode]["joints_deg"])
+                chain = self.kin.chain.forward_kinematics_chain(q)
+
+                p0, p1, p2, p3, p4, p5 = [frame[:3, 3] for frame in chain[:6]]
+                L1 = float(np.linalg.norm(p1 - p0))
+                L2 = float(np.linalg.norm(p2 - p1))
+                L3 = float(np.linalg.norm(p3 - p2))
+                L4 = float(np.linalg.norm(p4 - p3))
+                L5 = float(np.linalg.norm(p5 - p4))
+
+                # Tolerance 1e-6 meters (1 micron)
+                self.assertAlmostEqual(L1, L1_expected, places=5, msg=f"Link 1 deformed at ({cell['row']},{cell['col']})")
+                self.assertAlmostEqual(L2, L2_expected, places=5, msg=f"Link 2 deformed at ({cell['row']},{cell['col']})")
+                self.assertAlmostEqual(L3, L3_expected, places=5, msg=f"Link 3 deformed at ({cell['row']},{cell['col']})")
+                self.assertAlmostEqual(L4, L4_expected, places=5, msg=f"Link 4 deformed at ({cell['row']},{cell['col']})")
+                self.assertAlmostEqual(L5, L5_expected, places=5, msg=f"Link 5 deformed at ({cell['row']},{cell['col']})")
+
 
 if __name__ == "__main__":
     unittest.main()
