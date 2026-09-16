@@ -12,6 +12,7 @@ import {
   updatePiecesFromWorldState,
   setBoardGeometry,
   fetchScenePlacement,
+  boardPointToXYZ,
 } from "./board.mjs";
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,14 @@ async function fetchSceneConfig() {
   const res = await fetch("/shared/virtual_fr3_scene.json");
   if (!res.ok) {
     throw new Error(`Failed to load /shared/virtual_fr3_scene.json: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+async function fetchCellReachabilityDataset() {
+  const res = await fetch("/shared/cell_reachability_dataset.json");
+  if (!res.ok) {
+    throw new Error(`Failed to load /shared/cell_reachability_dataset.json: HTTP ${res.status}`);
   }
   return await res.json();
 }
@@ -532,6 +541,9 @@ const state = {
   currentArm: null,
   jointsDeg: [0, -45, 90, -45, -90, 0],
   homePoseDeg: [0, -45, 90, -45, -90, 0],
+  cellDataset: null,
+  activeReachMode: "optimal",
+  selectedCell: { row: 4, col: 4 },
   // nội suy mượt cho live mirror
   liveFromDeg: null,
   liveTargetDeg: null,
@@ -798,6 +810,184 @@ function initJointControlPanelEvents() {
       panelEl.classList.add("collapsed");
     });
   }
+
+  // Tabs switching
+  const tabJointsBtn = document.getElementById("tabJointsBtn");
+  const tabReachBtn = document.getElementById("tabReachBtn");
+  const jointsContent = document.getElementById("jointsTabContent");
+  const reachContent = document.getElementById("reachTabContent");
+  if (tabJointsBtn && tabReachBtn) {
+    tabJointsBtn.addEventListener("click", () => {
+      tabJointsBtn.classList.add("active");
+      tabReachBtn.classList.remove("active");
+      jointsContent?.classList.add("active");
+      reachContent?.classList.remove("active");
+    });
+    tabReachBtn.addEventListener("click", () => {
+      tabReachBtn.classList.add("active");
+      tabJointsBtn.classList.remove("active");
+      reachContent?.classList.add("active");
+      jointsContent?.classList.remove("active");
+    });
+  }
+
+  // Reach mode radio buttons
+  document.querySelectorAll('input[name="reachMode"]').forEach((radio) => {
+    radio.addEventListener("change", (e) => {
+      state.activeReachMode = e.target.value;
+      goToCell(state.selectedCell.row, state.selectedCell.col);
+    });
+  });
+
+  // Reach cell button
+  const reachBtn = document.getElementById("reachCellBtn");
+  const rowSelect = document.getElementById("cellRowSelect");
+  const colSelect = document.getElementById("cellColSelect");
+  if (reachBtn && rowSelect && colSelect) {
+    reachBtn.addEventListener("click", () => {
+      goToCell(Number(rowSelect.value), Number(colSelect.value));
+    });
+  }
+
+  // Quick cell buttons
+  document.querySelectorAll(".quick-cell-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const r = Number(btn.dataset.row);
+      const c = Number(btn.dataset.col);
+      goToCell(r, c);
+    });
+  });
+
+  // Raycaster for clicking directly on 3D board
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  let pointerDownTime = 0;
+  let pointerDownPos = { x: 0, y: 0 };
+  canvas.addEventListener("pointerdown", (e) => {
+    pointerDownTime = performance.now();
+    pointerDownPos = { x: e.clientX, y: e.clientY };
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    const dt = performance.now() - pointerDownTime;
+    const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+    if (dt > 300 || dist > 5) return;
+
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+
+    const hits = raycaster.intersectObjects(scene.children, true);
+    for (const hit of hits) {
+      let obj = hit.object;
+      while (obj && !obj.userData?.id && obj !== scene) {
+        obj = obj.parent;
+      }
+      if (obj?.userData && obj.userData.col !== undefined && obj.userData.row !== undefined) {
+        goToCell(obj.userData.row, obj.userData.col);
+        const tabReachBtnEl = document.getElementById("tabReachBtn");
+        tabReachBtnEl?.click();
+        break;
+      }
+    }
+  });
+}
+
+let physicalGeometryRef = null;
+let cellTargetRing = null;
+
+function getOrCreateTargetRing() {
+  if (!cellTargetRing) {
+    const geo = new THREE.RingGeometry(0.011, 0.014, 32);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x58a6ff, side: THREE.DoubleSide });
+    cellTargetRing = new THREE.Mesh(geo, mat);
+    cellTargetRing.position.set(0, -10, 0);
+    scene.add(cellTargetRing);
+  }
+  return cellTargetRing;
+}
+
+function animateArmTo(targetDeg, durationMs = 500) {
+  state.liveFromDeg = [...state.jointsDeg];
+  state.liveTargetDeg = [...targetDeg];
+  state.liveAnimationStart = performance.now();
+  state.liveAnimationDuration = durationMs;
+}
+
+function goToCell(row, col, modeOverride = null) {
+  if (!state.cellDataset?.cells) return;
+  const mode = modeOverride || state.activeReachMode;
+  state.selectedCell = { row, col };
+
+  const cell = state.cellDataset.cells.find((c) => c.row === row && c.col === col);
+  if (!cell) return;
+  const data = cell[mode];
+  if (!data) return;
+
+  // Update 3D ring marker
+  const ring = getOrCreateTargetRing();
+  if (physicalGeometryRef) {
+    const pt = boardPointToXYZ(col, row, physicalGeometryRef);
+    ring.position.set(pt.x, pt.y + 0.001, pt.z);
+    ring.material.color.setHex(data.penetrates_board ? 0xf85149 : 0x58a6ff);
+  }
+
+  // Update diagnostic card elements
+  const cellLabel = document.getElementById("diagCellLabel");
+  const j4Val = document.getElementById("diagJ4Val");
+  const tiltVal = document.getElementById("diagTiltVal");
+  const clearanceVal = document.getElementById("diagClearanceVal");
+  const badge = document.getElementById("diagStatusBadge");
+  const expl = document.getElementById("diagExplanation");
+
+  if (cellLabel) cellLabel.textContent = `Cột ${col}, Hàng ${row} (X=${cell.x_m}m, Y=${cell.y_m}m)`;
+  if (j4Val) {
+    const inRange = data.j4_deg >= -100 && data.j4_deg <= -80;
+    j4Val.textContent = `${data.j4_deg}° ${inRange ? "✓ (Trong [-100°, -80°])" : "⚡ (Bù trừ: ngoài [-100°, -80°])"}`;
+    j4Val.style.color = inRange ? "#3fb950" : (mode === "optimal" ? "#58a6ff" : "#f85149");
+  }
+  if (tiltVal) {
+    tiltVal.textContent = `${data.tilt_deg}° ${data.tilt_deg < 0.1 ? "✓ Thẳng đứng 100% (Kẹp chắc)" : "⚠️ Nghiêng chéo (Tuột quân cờ!)"}`;
+    tiltVal.style.color = data.tilt_deg < 0.1 ? "#3fb950" : "#f85149";
+  }
+  if (clearanceVal) {
+    if (data.penetrates_board) {
+      clearanceVal.textContent = `❌ XUYÊN BÀN ${Math.abs(data.clearance_mm)} mm!`;
+      clearanceVal.style.color = "#f85149";
+    } else {
+      clearanceVal.textContent = `✅ Cách mặt bàn +${data.clearance_mm} mm (An toàn)`;
+      clearanceVal.style.color = "#3fb950";
+    }
+  }
+  if (badge) {
+    if (data.penetrates_board) {
+      badge.className = "badge-danger";
+      badge.textContent = "❌ XUYÊN BÀN / TUỘT QUÂN";
+    } else if (data.tilt_deg >= 30.0) {
+      badge.className = "badge-danger";
+      badge.textContent = "⚠️ TUỘT QUÂN (NGHIÊNG " + data.tilt_deg + "°)";
+    } else {
+      badge.className = "badge-safe";
+      badge.textContent = "✅ AN TOÀN - CẮM THẲNG 90°";
+    }
+  }
+  if (expl) {
+    if (mode === "optimal") {
+      expl.innerHTML = `✅ <strong>Chế độ Tối Ưu:</strong> $J_4 = ${data.j4_deg}^\\circ$ tự động bù trừ góc cho cẳng tay, giữ ngàm kẹp <strong>chúc thẳng đứng $90^\\circ$ hoàn hảo</strong> (nghiêng $\\approx ${data.tilt_deg}^\\circ$). Toàn bộ thân tay cách mặt bàn <strong>+${data.clearance_mm}mm</strong>, kẹp quân chuẩn xác không thể tuột!`;
+    } else {
+      expl.innerHTML = `⚠️ <strong>Chế độ Ràng Buộc J4 [-100° .. -80°]:</strong> Cổ tay bị ép ở $J_4 = ${data.j4_deg}^\\circ$ khiến ngàm kẹp bị <strong>nghiêng ${data.tilt_deg}^\\circ$</strong> (bóp xéo làm tuột quân), đồng thời hạ thấp đâm xuyên mặt bàn <strong>${data.clearance_mm}mm</strong>!`;
+    }
+  }
+
+  // Update inputs
+  const rowSelect = document.getElementById("cellRowSelect");
+  const colSelect = document.getElementById("cellColSelect");
+  if (rowSelect) rowSelect.value = String(row);
+  if (colSelect) colSelect.value = String(col);
+
+  // Smoothly move arm to joint angles
+  animateArmTo(data.joints_deg, 500);
 }
 
 // ---------------------------------------------------------------------------
@@ -819,8 +1009,12 @@ resizeRenderer();
 async function initApp() {
   try {
     const physicalGeometry = await fetchPhysicalGeometry();
+    physicalGeometryRef = physicalGeometry;
     setBoardGeometry(physicalGeometry);
     await fetchScenePlacement();
+
+    const cellDataset = await fetchCellReachabilityDataset();
+    state.cellDataset = cellDataset;
 
     const sceneConfig = await fetchSceneConfig();
     if (

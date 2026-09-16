@@ -13,6 +13,7 @@ const sharedFilesWhitelist = {
   "/shared/virtual_gripper_profile.json": path.resolve(repoRoot, "shared", "virtual_gripper_profile.json"),
   "/shared/gripper_visual_asset.json": path.resolve(repoRoot, "shared", "gripper_visual_asset.json"),
   "/shared/xiangqi_start_layout.json": path.resolve(repoRoot, "shared", "xiangqi_start_layout.json"),
+  "/shared/cell_reachability_dataset.json": path.resolve(repoRoot, "shared", "cell_reachability_dataset.json"),
 };
 
 const port = Number(process.argv[2] || 8080);

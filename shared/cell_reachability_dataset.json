@@ -1,0 +1,3254 @@
+{
+  "metadata": {
+    "total_cells": 90,
+    "board_dimensions_m": {
+      "width": 0.367,
+      "length": 0.41,
+      "height": 0.0105
+    },
+    "grid_step_m": 0.04,
+    "description": "Kinematic reachability across all 90 cells comparing optimal IK vs constrained J4 [-100 deg, -80 deg]"
+  },
+  "cells": [
+    {
+      "row": 0,
+      "col": 0,
+      "x_m": -0.18,
+      "y_m": -0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          16.51,
+          -10.25,
+          142.11,
+          -221.86,
+          -89.99,
+          16.51
+        ],
+        "j4_deg": -221.86,
+        "tilt_deg": 0.007,
+        "clearance_mm": 0.6,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          16.58,
+          -48.55,
+          136.04,
+          -100.0,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -100.0,
+        "tilt_deg": 77.5,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 0,
+      "col": 1,
+      "x_m": -0.18,
+      "y_m": -0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          5.63,
+          -3.37,
+          145.94,
+          -232.57,
+          -90.0,
+          5.63
+        ],
+        "j4_deg": -232.57,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          5.52,
+          -49.12,
+          140.79,
+          -99.6,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -99.6,
+        "tilt_deg": 82.1,
+        "clearance_mm": 0.3,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 0,
+      "col": 2,
+      "x_m": -0.18,
+      "y_m": -0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -7.09,
+          3.73,
+          148.67,
+          -242.4,
+          -90.0,
+          -7.09
+        ],
+        "j4_deg": -242.4,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -7.23,
+          -49.09,
+          143.78,
+          -97.37,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -97.37,
+        "tilt_deg": 87.3,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 0,
+      "col": 3,
+      "x_m": -0.18,
+      "y_m": -0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -20.94,
+          9.26,
+          150.15,
+          -249.4,
+          -90.0,
+          -20.94
+        ],
+        "j4_deg": -249.4,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -21.06,
+          -48.85,
+          145.64,
+          -95.52,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -95.52,
+        "tilt_deg": 91.3,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 0,
+      "col": 4,
+      "x_m": -0.18,
+      "y_m": 0.0,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -34.49,
+          11.38,
+          150.6,
+          -251.97,
+          -90.0,
+          -34.49
+        ],
+        "j4_deg": -251.97,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -34.52,
+          -48.74,
+          146.11,
+          -94.21,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -94.21,
+        "tilt_deg": 93.2,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 0,
+      "col": 5,
+      "x_m": -0.18,
+      "y_m": 0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -46.13,
+          9.32,
+          150.16,
+          -249.48,
+          -90.0,
+          -46.13
+        ],
+        "j4_deg": -249.48,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -46.18,
+          -48.98,
+          145.12,
+          -93.44,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -93.44,
+        "tilt_deg": 92.7,
+        "clearance_mm": 0.2,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 0,
+      "col": 6,
+      "x_m": -0.18,
+      "y_m": 0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -55.38,
+          4.12,
+          148.83,
+          -242.95,
+          -90.0,
+          -55.38
+        ],
+        "j4_deg": -242.95,
+        "tilt_deg": 0.002,
+        "clearance_mm": 0.2,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -55.16,
+          -49.25,
+          142.57,
+          -93.09,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -93.09,
+        "tilt_deg": 90.2,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 0,
+      "col": 7,
+      "x_m": -0.18,
+      "y_m": 0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -62.02,
+          -3.2,
+          146.13,
+          -232.93,
+          -90.0,
+          -62.02
+        ],
+        "j4_deg": -232.93,
+        "tilt_deg": 0.002,
+        "clearance_mm": 0.5,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -61.83,
+          -49.31,
+          139.0,
+          -93.53,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -93.53,
+        "tilt_deg": 86.2,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 0,
+      "col": 8,
+      "x_m": -0.18,
+      "y_m": 0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -66.83,
+          -10.33,
+          142.05,
+          -221.72,
+          -90.0,
+          -66.83
+        ],
+        "j4_deg": -221.72,
+        "tilt_deg": 0.003,
+        "clearance_mm": 0.6,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -66.62,
+          -48.89,
+          134.98,
+          -95.76,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -95.76,
+        "tilt_deg": 80.3,
+        "clearance_mm": 0.5,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 1,
+      "col": 0,
+      "x_m": -0.22,
+      "y_m": -0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          14.0,
+          -16.46,
+          136.04,
+          -209.58,
+          -90.0,
+          14.0
+        ],
+        "j4_deg": -209.58,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          14.01,
+          -47.28,
+          129.75,
+          -100.0,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -100.0,
+        "tilt_deg": 72.5,
+        "clearance_mm": -0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 1,
+      "col": 1,
+      "x_m": -0.22,
+      "y_m": -0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          4.6,
+          -12.51,
+          140.11,
+          -217.6,
+          -90.0,
+          4.6
+        ],
+        "j4_deg": -217.6,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          4.59,
+          -48.33,
+          134.01,
+          -99.55,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -99.55,
+        "tilt_deg": 76.1,
+        "clearance_mm": 0.3,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 1,
+      "col": 2,
+      "x_m": -0.22,
+      "y_m": -0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -5.65,
+          -8.58,
+          143.15,
+          -224.56,
+          -90.0,
+          -5.65
+        ],
+        "j4_deg": -224.56,
+        "tilt_deg": 0.002,
+        "clearance_mm": 0.3,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -5.97,
+          -48.85,
+          137.05,
+          -98.4,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -98.4,
+        "tilt_deg": 79.8,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 1,
+      "col": 3,
+      "x_m": -0.22,
+      "y_m": -0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -16.72,
+          -5.47,
+          144.91,
+          -229.43,
+          -90.0,
+          -16.72
+        ],
+        "j4_deg": -229.43,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -16.84,
+          -49.08,
+          138.71,
+          -97.53,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -97.53,
+        "tilt_deg": 82.1,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 1,
+      "col": 4,
+      "x_m": -0.22,
+      "y_m": 0.0,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -27.63,
+          -4.28,
+          145.48,
+          -231.19,
+          -90.0,
+          -27.63
+        ],
+        "j4_deg": -231.19,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -27.63,
+          -49.19,
+          139.27,
+          -96.93,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -96.93,
+        "tilt_deg": 83.2,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 1,
+      "col": 5,
+      "x_m": -0.22,
+      "y_m": 0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -37.52,
+          -5.43,
+          144.9,
+          -229.47,
+          -90.0,
+          -37.52
+        ],
+        "j4_deg": -229.47,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -37.42,
+          -49.27,
+          138.57,
+          -96.71,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -96.71,
+        "tilt_deg": 82.6,
+        "clearance_mm": 0.5,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 1,
+      "col": 6,
+      "x_m": -0.22,
+      "y_m": 0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -45.9,
+          -8.48,
+          143.15,
+          -224.67,
+          -90.0,
+          -45.9
+        ],
+        "j4_deg": -224.67,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -45.81,
+          -48.9,
+          136.51,
+          -96.99,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -96.99,
+        "tilt_deg": 80.6,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 1,
+      "col": 7,
+      "x_m": -0.22,
+      "y_m": 0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -52.7,
+          -12.49,
+          140.2,
+          -217.72,
+          -90.0,
+          -52.7
+        ],
+        "j4_deg": -217.72,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.2,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -52.62,
+          -48.35,
+          133.51,
+          -97.9,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -97.9,
+        "tilt_deg": 77.3,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 1,
+      "col": 8,
+      "x_m": -0.22,
+      "y_m": 0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -58.1,
+          -16.47,
+          136.07,
+          -209.61,
+          -90.0,
+          -58.1
+        ],
+        "j4_deg": -209.61,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.2,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -58.05,
+          -47.3,
+          129.66,
+          -99.71,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -99.71,
+        "tilt_deg": 72.7,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 2,
+      "col": 0,
+      "x_m": -0.26,
+      "y_m": -0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          12.1,
+          -20.5,
+          129.14,
+          -198.63,
+          -90.0,
+          12.1
+        ],
+        "j4_deg": -198.63,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          12.09,
+          -45.58,
+          120.67,
+          -92.15,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -92.15,
+        "tilt_deg": 72.9,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 2,
+      "col": 1,
+      "x_m": -0.26,
+      "y_m": -0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          3.99,
+          -18.49,
+          133.14,
+          -204.65,
+          -90.0,
+          3.99
+        ],
+        "j4_deg": -204.65,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.2,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          3.9,
+          -46.77,
+          124.6,
+          -92.1,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -92.1,
+        "tilt_deg": 75.7,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 2,
+      "col": 2,
+      "x_m": -0.26,
+      "y_m": -0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -4.85,
+          -16.44,
+          136.06,
+          -209.62,
+          -90.0,
+          -4.85
+        ],
+        "j4_deg": -209.62,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -4.92,
+          -47.56,
+          127.66,
+          -92.47,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -92.47,
+        "tilt_deg": 77.6,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 2,
+      "col": 3,
+      "x_m": -0.26,
+      "y_m": -0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -14.03,
+          -14.9,
+          137.82,
+          -212.92,
+          -90.0,
+          -14.03
+        ],
+        "j4_deg": -212.92,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -14.09,
+          -47.99,
+          129.77,
+          -93.33,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -93.33,
+        "tilt_deg": 78.4,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 2,
+      "col": 4,
+      "x_m": -0.26,
+      "y_m": 0.0,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -23.1,
+          -14.32,
+          138.41,
+          -214.09,
+          -90.0,
+          -23.1
+        ],
+        "j4_deg": -214.09,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -23.1,
+          -48.07,
+          130.75,
+          -94.82,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -94.82,
+        "tilt_deg": 77.9,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 2,
+      "col": 5,
+      "x_m": -0.26,
+      "y_m": 0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -31.59,
+          -14.9,
+          137.81,
+          -212.92,
+          -90.0,
+          -31.59
+        ],
+        "j4_deg": -212.92,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -31.55,
+          -47.89,
+          130.77,
+          -96.99,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -96.99,
+        "tilt_deg": 75.9,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 2,
+      "col": 6,
+      "x_m": -0.26,
+      "y_m": 0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -39.15,
+          -16.43,
+          136.05,
+          -209.62,
+          -90.0,
+          -39.15
+        ],
+        "j4_deg": -209.62,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -39.12,
+          -47.35,
+          129.4,
+          -98.72,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -98.72,
+        "tilt_deg": 73.3,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 2,
+      "col": 7,
+      "x_m": -0.26,
+      "y_m": 0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -45.67,
+          -18.46,
+          133.13,
+          -204.67,
+          -90.0,
+          -45.66
+        ],
+        "j4_deg": -204.67,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -45.64,
+          -46.53,
+          126.76,
+          -99.77,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -99.77,
+        "tilt_deg": 70.5,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 2,
+      "col": 8,
+      "x_m": -0.26,
+      "y_m": 0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -51.14,
+          -20.49,
+          129.12,
+          -198.63,
+          -90.0,
+          -51.14
+        ],
+        "j4_deg": -198.63,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -51.15,
+          -45.36,
+          123.0,
+          -100.0,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -100.0,
+        "tilt_deg": 67.6,
+        "clearance_mm": -0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 3,
+      "col": 0,
+      "x_m": -0.3,
+      "y_m": -0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          10.64,
+          -22.67,
+          121.36,
+          -188.69,
+          -90.0,
+          10.63
+        ],
+        "j4_deg": -188.69,
+        "tilt_deg": 0.001,
+        "clearance_mm": 0.2,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          10.55,
+          -43.13,
+          112.37,
+          -88.81,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -88.81,
+        "tilt_deg": 70.4,
+        "clearance_mm": 0.4,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 3,
+      "col": 1,
+      "x_m": -0.3,
+      "y_m": -0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          3.43,
+          -21.82,
+          125.18,
+          -193.36,
+          -90.0,
+          3.43
+        ],
+        "j4_deg": -193.36,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          3.39,
+          -44.46,
+          115.96,
+          -88.56,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -88.56,
+        "tilt_deg": 72.9,
+        "clearance_mm": 0.5,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 3,
+      "col": 2,
+      "x_m": -0.3,
+      "y_m": -0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -4.22,
+          -20.92,
+          127.98,
+          -197.07,
+          -90.0,
+          -4.22
+        ],
+        "j4_deg": -197.07,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -4.25,
+          -45.22,
+          118.53,
+          -88.69,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -88.69,
+        "tilt_deg": 74.6,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 3,
+      "col": 3,
+      "x_m": -0.3,
+      "y_m": -0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -12.09,
+          -20.23,
+          129.68,
+          -199.46,
+          -90.0,
+          -12.09
+        ],
+        "j4_deg": -199.46,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -12.1,
+          -45.76,
+          120.32,
+          -89.12,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -89.12,
+        "tilt_deg": 75.4,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 3,
+      "col": 4,
+      "x_m": -0.3,
+      "y_m": 0.0,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -19.88,
+          -19.97,
+          130.25,
+          -200.28,
+          -90.0,
+          -19.88
+        ],
+        "j4_deg": -200.28,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -19.88,
+          -45.94,
+          121.13,
+          -89.93,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -89.93,
+        "tilt_deg": 75.3,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 3,
+      "col": 5,
+      "x_m": -0.3,
+      "y_m": 0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -27.3,
+          -20.23,
+          129.68,
+          -199.45,
+          -90.0,
+          -27.3
+        ],
+        "j4_deg": -199.45,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -27.31,
+          -45.78,
+          120.96,
+          -91.12,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -91.12,
+        "tilt_deg": 74.1,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 3,
+      "col": 6,
+      "x_m": -0.3,
+      "y_m": 0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -34.12,
+          -20.92,
+          127.97,
+          -197.05,
+          -90.0,
+          -34.12
+        ],
+        "j4_deg": -197.05,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -34.21,
+          -45.27,
+          119.89,
+          -92.71,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -92.71,
+        "tilt_deg": 71.9,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 3,
+      "col": 7,
+      "x_m": -0.3,
+      "y_m": 0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -40.21,
+          -21.82,
+          125.17,
+          -193.35,
+          -90.0,
+          -40.21
+        ],
+        "j4_deg": -193.35,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -40.21,
+          -44.26,
+          117.62,
+          -94.79,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -94.79,
+        "tilt_deg": 68.6,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 3,
+      "col": 8,
+      "x_m": -0.3,
+      "y_m": 0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -45.53,
+          -22.65,
+          121.3,
+          -188.66,
+          -90.0,
+          -45.53
+        ],
+        "j4_deg": -188.66,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -45.52,
+          -42.9,
+          114.66,
+          -97.25,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -97.25,
+        "tilt_deg": 64.5,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 4,
+      "col": 0,
+      "x_m": -0.34,
+      "y_m": -0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          9.45,
+          -23.25,
+          112.69,
+          -179.44,
+          -90.0,
+          9.45
+        ],
+        "j4_deg": -179.44,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          9.43,
+          -39.89,
+          103.52,
+          -86.71,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -86.71,
+        "tilt_deg": 66.9,
+        "clearance_mm": 0.2,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 4,
+      "col": 1,
+      "x_m": -0.34,
+      "y_m": -0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          3.02,
+          -23.16,
+          116.42,
+          -183.26,
+          -90.0,
+          3.02
+        ],
+        "j4_deg": -183.26,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          3.0,
+          -41.27,
+          106.92,
+          -86.45,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -86.45,
+        "tilt_deg": 69.2,
+        "clearance_mm": 0.2,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 4,
+      "col": 2,
+      "x_m": -0.34,
+      "y_m": -0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -3.73,
+          -22.94,
+          119.12,
+          -186.19,
+          -90.0,
+          -3.73
+        ],
+        "j4_deg": -186.19,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -3.73,
+          -42.27,
+          109.48,
+          -86.49,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -86.49,
+        "tilt_deg": 70.7,
+        "clearance_mm": 0.3,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 4,
+      "col": 3,
+      "x_m": -0.34,
+      "y_m": -0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -10.62,
+          -22.72,
+          120.76,
+          -188.03,
+          -90.0,
+          -10.62
+        ],
+        "j4_deg": -188.03,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -10.58,
+          -42.9,
+          111.17,
+          -86.84,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -86.84,
+        "tilt_deg": 71.4,
+        "clearance_mm": 0.4,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 4,
+      "col": 4,
+      "x_m": -0.34,
+      "y_m": 0.0,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -17.46,
+          -22.64,
+          121.3,
+          -188.66,
+          -90.0,
+          -17.46
+        ],
+        "j4_deg": -188.66,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -17.46,
+          -42.98,
+          111.8,
+          -87.56,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -87.56,
+        "tilt_deg": 71.3,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 4,
+      "col": 5,
+      "x_m": -0.34,
+      "y_m": 0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -24.05,
+          -22.73,
+          120.75,
+          -188.03,
+          -90.0,
+          -24.05
+        ],
+        "j4_deg": -188.03,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -24.04,
+          -42.81,
+          111.6,
+          -88.58,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -88.58,
+        "tilt_deg": 70.2,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 4,
+      "col": 6,
+      "x_m": -0.34,
+      "y_m": 0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -30.22,
+          -22.94,
+          119.12,
+          -186.18,
+          -90.0,
+          -30.22
+        ],
+        "j4_deg": -186.18,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -30.22,
+          -42.24,
+          110.48,
+          -89.92,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -89.92,
+        "tilt_deg": 68.3,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 4,
+      "col": 7,
+      "x_m": -0.34,
+      "y_m": 0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -35.87,
+          -23.16,
+          116.42,
+          -183.26,
+          -90.0,
+          -35.88
+        ],
+        "j4_deg": -183.26,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -35.89,
+          -41.27,
+          108.47,
+          -91.59,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -91.59,
+        "tilt_deg": 65.6,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 4,
+      "col": 8,
+      "x_m": -0.34,
+      "y_m": 0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -40.95,
+          -23.25,
+          112.69,
+          -179.44,
+          -90.0,
+          -40.95
+        ],
+        "j4_deg": -179.44,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -40.99,
+          -39.89,
+          105.61,
+          -93.56,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -93.56,
+        "tilt_deg": 62.2,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 5,
+      "col": 0,
+      "x_m": -0.38,
+      "y_m": -0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          8.51,
+          -22.55,
+          103.23,
+          -170.69,
+          -90.0,
+          8.51
+        ],
+        "j4_deg": -170.69,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          8.51,
+          -36.14,
+          94.22,
+          -85.09,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -85.09,
+        "tilt_deg": 63.0,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 5,
+      "col": 1,
+      "x_m": -0.38,
+      "y_m": -0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          2.7,
+          -22.95,
+          106.88,
+          -173.94,
+          -90.0,
+          2.7
+        ],
+        "j4_deg": -173.94,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          2.69,
+          -37.59,
+          97.51,
+          -84.84,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -84.84,
+        "tilt_deg": 65.1,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 5,
+      "col": 2,
+      "x_m": -0.38,
+      "y_m": -0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -3.34,
+          -23.14,
+          109.51,
+          -176.37,
+          -90.0,
+          -3.34
+        ],
+        "j4_deg": -176.37,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -3.34,
+          -38.61,
+          99.96,
+          -84.88,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -84.88,
+        "tilt_deg": 66.5,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 5,
+      "col": 3,
+      "x_m": -0.38,
+      "y_m": -0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -9.47,
+          -23.21,
+          111.09,
+          -177.88,
+          -90.0,
+          -9.47
+        ],
+        "j4_deg": -177.88,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -9.47,
+          -39.24,
+          101.56,
+          -85.22,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -85.22,
+        "tilt_deg": 67.1,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 5,
+      "col": 4,
+      "x_m": -0.38,
+      "y_m": 0.0,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -15.57,
+          -23.23,
+          111.62,
+          -178.4,
+          -90.0,
+          -15.57
+        ],
+        "j4_deg": -178.4,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -15.55,
+          -39.49,
+          102.28,
+          -85.87,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -85.87,
+        "tilt_deg": 66.9,
+        "clearance_mm": 0.3,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 5,
+      "col": 5,
+      "x_m": -0.38,
+      "y_m": 0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -21.49,
+          -23.21,
+          111.09,
+          -177.88,
+          -90.0,
+          -21.49
+        ],
+        "j4_deg": -177.88,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -21.44,
+          -39.36,
+          102.15,
+          -86.81,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -86.81,
+        "tilt_deg": 66.0,
+        "clearance_mm": 0.4,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 5,
+      "col": 6,
+      "x_m": -0.38,
+      "y_m": 0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -27.12,
+          -23.14,
+          109.51,
+          -176.37,
+          -90.0,
+          -27.12
+        ],
+        "j4_deg": -176.37,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -27.12,
+          -38.64,
+          100.95,
+          -88.12,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -88.12,
+        "tilt_deg": 64.2,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 5,
+      "col": 7,
+      "x_m": -0.38,
+      "y_m": 0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -32.36,
+          -22.95,
+          106.89,
+          -173.94,
+          -90.0,
+          -32.36
+        ],
+        "j4_deg": -173.94,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -32.36,
+          -37.63,
+          98.99,
+          -89.68,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -89.68,
+        "tilt_deg": 61.7,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 5,
+      "col": 8,
+      "x_m": -0.38,
+      "y_m": 0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -37.16,
+          -22.55,
+          103.23,
+          -170.68,
+          -90.0,
+          -37.16
+        ],
+        "j4_deg": -170.68,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -37.16,
+          -36.18,
+          96.17,
+          -91.53,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -91.53,
+        "tilt_deg": 58.5,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 6,
+      "col": 0,
+      "x_m": -0.42,
+      "y_m": -0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          7.75,
+          -20.72,
+          92.86,
+          -162.14,
+          -90.0,
+          7.74
+        ],
+        "j4_deg": -162.14,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          7.73,
+          -31.83,
+          84.2,
+          -83.82,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -83.82,
+        "tilt_deg": 58.6,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 6,
+      "col": 1,
+      "x_m": -0.42,
+      "y_m": -0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          2.44,
+          -21.44,
+          96.45,
+          -165.01,
+          -90.0,
+          2.44
+        ],
+        "j4_deg": -165.01,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          2.44,
+          -33.34,
+          87.47,
+          -83.55,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -83.55,
+        "tilt_deg": 60.6,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 6,
+      "col": 2,
+      "x_m": -0.42,
+      "y_m": -0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -3.02,
+          -21.91,
+          99.06,
+          -167.14,
+          -90.0,
+          -3.02
+        ],
+        "j4_deg": -167.14,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -3.02,
+          -34.41,
+          89.88,
+          -83.6,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -83.6,
+        "tilt_deg": 61.9,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 6,
+      "col": 3,
+      "x_m": -0.42,
+      "y_m": -0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -8.55,
+          -22.17,
+          100.62,
+          -168.45,
+          -90.0,
+          -8.55
+        ],
+        "j4_deg": -168.45,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -8.55,
+          -35.06,
+          91.44,
+          -83.94,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -83.94,
+        "tilt_deg": 62.4,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 6,
+      "col": 4,
+      "x_m": -0.42,
+      "y_m": 0.0,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -14.06,
+          -22.25,
+          101.14,
+          -168.89,
+          -90.0,
+          -14.06
+        ],
+        "j4_deg": -168.89,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -14.05,
+          -35.3,
+          92.14,
+          -84.59,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -84.59,
+        "tilt_deg": 62.3,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 6,
+      "col": 5,
+      "x_m": -0.42,
+      "y_m": 0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -19.43,
+          -22.17,
+          100.62,
+          -168.45,
+          -90.0,
+          -19.43
+        ],
+        "j4_deg": -168.45,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -19.42,
+          -35.13,
+          91.99,
+          -85.53,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -85.53,
+        "tilt_deg": 61.3,
+        "clearance_mm": 0.2,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 6,
+      "col": 6,
+      "x_m": -0.42,
+      "y_m": 0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -24.59,
+          -21.91,
+          99.06,
+          -167.14,
+          -90.0,
+          -24.59
+        ],
+        "j4_deg": -167.14,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -24.56,
+          -34.56,
+          90.99,
+          -86.76,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -86.76,
+        "tilt_deg": 59.7,
+        "clearance_mm": 0.3,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 6,
+      "col": 7,
+      "x_m": -0.42,
+      "y_m": 0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -29.45,
+          -21.44,
+          96.45,
+          -165.01,
+          -90.0,
+          -29.45
+        ],
+        "j4_deg": -165.01,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -29.4,
+          -33.57,
+          89.15,
+          -88.26,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -88.26,
+        "tilt_deg": 57.3,
+        "clearance_mm": 0.5,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 6,
+      "col": 8,
+      "x_m": -0.42,
+      "y_m": 0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -33.97,
+          -20.69,
+          92.8,
+          -162.11,
+          -90.0,
+          -33.97
+        ],
+        "j4_deg": -162.11,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -33.97,
+          -31.9,
+          86.16,
+          -90.13,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -90.13,
+        "tilt_deg": 54.1,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 7,
+      "col": 0,
+      "x_m": -0.46,
+      "y_m": -0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          7.09,
+          -17.7,
+          81.1,
+          -153.4,
+          -90.0,
+          7.09
+        ],
+        "j4_deg": -153.4,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          7.09,
+          -26.87,
+          74.01,
+          -85.37,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -85.37,
+        "tilt_deg": 51.8,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 7,
+      "col": 1,
+      "x_m": -0.46,
+      "y_m": -0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          2.23,
+          -18.75,
+          84.87,
+          -156.12,
+          -90.0,
+          2.23
+        ],
+        "j4_deg": -156.12,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          2.23,
+          -28.47,
+          77.14,
+          -84.44,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -84.44,
+        "tilt_deg": 54.2,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 7,
+      "col": 2,
+      "x_m": -0.46,
+      "y_m": -0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -2.75,
+          -19.44,
+          87.53,
+          -158.09,
+          -90.0,
+          -2.75
+        ],
+        "j4_deg": -158.09,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -2.75,
+          -29.6,
+          79.37,
+          -83.83,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -83.83,
+        "tilt_deg": 56.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 7,
+      "col": 3,
+      "x_m": -0.46,
+      "y_m": -0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -7.79,
+          -19.83,
+          89.12,
+          -159.28,
+          -90.0,
+          -7.79
+        ],
+        "j4_deg": -159.28,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -7.79,
+          -30.27,
+          80.73,
+          -83.53,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -83.53,
+        "tilt_deg": 56.9,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 7,
+      "col": 4,
+      "x_m": -0.46,
+      "y_m": 0.0,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -12.81,
+          -19.96,
+          89.64,
+          -159.68,
+          -90.0,
+          -12.81
+        ],
+        "j4_deg": -159.68,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -12.81,
+          -30.5,
+          81.26,
+          -83.63,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -83.63,
+        "tilt_deg": 57.1,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 7,
+      "col": 5,
+      "x_m": -0.46,
+      "y_m": 0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -17.73,
+          -19.83,
+          89.12,
+          -159.28,
+          -90.0,
+          -17.73
+        ],
+        "j4_deg": -159.28,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -17.73,
+          -30.31,
+          81.11,
+          -84.58,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -84.58,
+        "tilt_deg": 56.2,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 7,
+      "col": 6,
+      "x_m": -0.46,
+      "y_m": 0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -22.49,
+          -19.44,
+          87.53,
+          -158.09,
+          -90.0,
+          -22.49
+        ],
+        "j4_deg": -158.09,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -22.48,
+          -29.69,
+          80.09,
+          -85.83,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -85.83,
+        "tilt_deg": 54.6,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 7,
+      "col": 7,
+      "x_m": -0.46,
+      "y_m": 0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -27.01,
+          -18.75,
+          84.87,
+          -156.13,
+          -90.0,
+          -27.01
+        ],
+        "j4_deg": -156.13,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -27.0,
+          -28.62,
+          78.21,
+          -87.36,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -87.36,
+        "tilt_deg": 52.2,
+        "clearance_mm": 0.2,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 7,
+      "col": 8,
+      "x_m": -0.46,
+      "y_m": 0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -31.27,
+          -17.7,
+          81.11,
+          -153.41,
+          -90.0,
+          -31.27
+        ],
+        "j4_deg": -153.41,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -31.25,
+          -27.07,
+          75.43,
+          -89.17,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -89.17,
+        "tilt_deg": 49.2,
+        "clearance_mm": 0.3,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 8,
+      "col": 0,
+      "x_m": -0.5,
+      "y_m": -0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          6.55,
+          -13.5,
+          67.73,
+          -144.23,
+          -90.0,
+          6.55
+        ],
+        "j4_deg": -144.23,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          6.54,
+          -20.95,
+          62.68,
+          -88.48,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -88.48,
+        "tilt_deg": 43.2,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 8,
+      "col": 1,
+      "x_m": -0.5,
+      "y_m": -0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          2.05,
+          -14.79,
+          71.65,
+          -146.86,
+          -90.0,
+          2.05
+        ],
+        "j4_deg": -146.86,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          2.05,
+          -22.91,
+          66.32,
+          -87.4,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -87.4,
+        "tilt_deg": 46.0,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 8,
+      "col": 2,
+      "x_m": -0.5,
+      "y_m": -0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -2.53,
+          -15.7,
+          74.48,
+          -148.78,
+          -90.0,
+          -2.53
+        ],
+        "j4_deg": -148.78,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -2.55,
+          -24.15,
+          68.7,
+          -86.72,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -86.72,
+        "tilt_deg": 47.8,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 8,
+      "col": 3,
+      "x_m": -0.5,
+      "y_m": -0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -7.16,
+          -16.22,
+          76.16,
+          -149.94,
+          -90.0,
+          -7.16
+        ],
+        "j4_deg": -149.94,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -7.16,
+          -24.73,
+          69.84,
+          -86.45,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -86.45,
+        "tilt_deg": 48.7,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 8,
+      "col": 4,
+      "x_m": -0.5,
+      "y_m": 0.0,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -11.77,
+          -16.4,
+          76.72,
+          -150.32,
+          -90.0,
+          -11.77
+        ],
+        "j4_deg": -150.32,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -11.77,
+          -24.98,
+          70.35,
+          -86.42,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -86.42,
+        "tilt_deg": 49.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 8,
+      "col": 5,
+      "x_m": -0.5,
+      "y_m": 0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -16.31,
+          -16.23,
+          76.16,
+          -149.94,
+          -90.0,
+          -16.31
+        ],
+        "j4_deg": -149.94,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -16.31,
+          -24.76,
+          69.96,
+          -86.71,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -86.71,
+        "tilt_deg": 48.5,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 8,
+      "col": 6,
+      "x_m": -0.5,
+      "y_m": 0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -20.71,
+          -15.7,
+          74.49,
+          -148.79,
+          -90.0,
+          -20.71
+        ],
+        "j4_deg": -148.79,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -20.71,
+          -24.05,
+          68.66,
+          -87.32,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -87.32,
+        "tilt_deg": 47.3,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 8,
+      "col": 7,
+      "x_m": -0.5,
+      "y_m": 0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -24.94,
+          -14.79,
+          71.65,
+          -146.86,
+          -90.0,
+          -24.94
+        ],
+        "j4_deg": -146.86,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -24.94,
+          -22.85,
+          66.45,
+          -88.27,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -88.27,
+        "tilt_deg": 45.3,
+        "clearance_mm": 0.2,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 8,
+      "col": 8,
+      "x_m": -0.5,
+      "y_m": 0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -28.95,
+          -13.43,
+          67.58,
+          -144.15,
+          -90.0,
+          -28.95
+        ],
+        "j4_deg": -144.15,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -28.95,
+          -21.12,
+          63.28,
+          -89.54,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -89.54,
+        "tilt_deg": 42.6,
+        "clearance_mm": 0.3,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 9,
+      "col": 0,
+      "x_m": -0.54,
+      "y_m": -0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          6.07,
+          -7.4,
+          50.99,
+          -133.59,
+          -90.0,
+          6.07
+        ],
+        "j4_deg": -133.59,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.1,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          6.07,
+          -13.38,
+          48.74,
+          -92.45,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -92.45,
+        "tilt_deg": 32.9,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 9,
+      "col": 1,
+      "x_m": -0.54,
+      "y_m": -0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          1.9,
+          -9.17,
+          55.67,
+          -136.5,
+          -90.0,
+          1.9
+        ],
+        "j4_deg": -136.5,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          1.89,
+          -15.79,
+          53.07,
+          -91.21,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -91.21,
+        "tilt_deg": 36.1,
+        "clearance_mm": 0.3,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 9,
+      "col": 2,
+      "x_m": -0.54,
+      "y_m": -0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -2.34,
+          -10.38,
+          58.95,
+          -138.57,
+          -90.0,
+          -2.34
+        ],
+        "j4_deg": -138.57,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -2.35,
+          -17.25,
+          55.76,
+          -90.43,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -90.43,
+        "tilt_deg": 38.1,
+        "clearance_mm": 0.2,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 9,
+      "col": 3,
+      "x_m": -0.54,
+      "y_m": -0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -6.62,
+          -11.08,
+          60.87,
+          -139.79,
+          -90.0,
+          -6.62
+        ],
+        "j4_deg": -139.79,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -6.62,
+          -17.95,
+          57.09,
+          -90.07,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -90.07,
+        "tilt_deg": 39.1,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 9,
+      "col": 4,
+      "x_m": -0.54,
+      "y_m": 0.0,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -10.89,
+          -11.3,
+          61.5,
+          -140.19,
+          -90.0,
+          -10.89
+        ],
+        "j4_deg": -140.19,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -10.89,
+          -18.24,
+          57.64,
+          -89.97,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -89.97,
+        "tilt_deg": 39.4,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 9,
+      "col": 5,
+      "x_m": -0.54,
+      "y_m": 0.04,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -15.1,
+          -11.08,
+          60.87,
+          -139.79,
+          -90.0,
+          -15.1
+        ],
+        "j4_deg": -139.79,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -15.1,
+          -17.98,
+          57.18,
+          -90.21,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -90.21,
+        "tilt_deg": 39.0,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 9,
+      "col": 6,
+      "x_m": -0.54,
+      "y_m": 0.08,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -19.2,
+          -10.39,
+          58.96,
+          -138.57,
+          -90.0,
+          -19.2
+        ],
+        "j4_deg": -138.57,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -19.2,
+          -17.15,
+          55.69,
+          -90.8,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -90.8,
+        "tilt_deg": 37.7,
+        "clearance_mm": 0.1,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 9,
+      "col": 7,
+      "x_m": -0.54,
+      "y_m": 0.12,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -23.16,
+          -9.17,
+          55.68,
+          -136.51,
+          -90.0,
+          -23.16
+        ],
+        "j4_deg": -136.51,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -23.16,
+          -15.73,
+          53.14,
+          -91.74,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -91.74,
+        "tilt_deg": 35.7,
+        "clearance_mm": 0.2,
+        "penetrates_board": true
+      }
+    },
+    {
+      "row": 9,
+      "col": 8,
+      "x_m": -0.54,
+      "y_m": 0.16,
+      "optimal": {
+        "reachable": true,
+        "joints_deg": [
+          -26.94,
+          -7.34,
+          50.84,
+          -133.51,
+          -90.0,
+          -26.94
+        ],
+        "j4_deg": -133.51,
+        "tilt_deg": 0.0,
+        "clearance_mm": 0.0,
+        "penetrates_board": false
+      },
+      "constrained_j4": {
+        "reachable": true,
+        "joints_deg": [
+          -26.94,
+          -13.37,
+          48.93,
+          -93.17,
+          -89.95,
+          0.0
+        ],
+        "j4_deg": -93.17,
+        "tilt_deg": 32.4,
+        "clearance_mm": 0.0,
+        "penetrates_board": true
+      }
+    }
+  ]
+}

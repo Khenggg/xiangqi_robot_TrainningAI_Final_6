@@ -241,3 +241,199 @@ canvas#scene {
   text-align: right;
   margin-top: -2px;
 }
+
+/* Panel Tabs */
+.panel-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid rgba(240, 246, 252, 0.1);
+  margin-bottom: 12px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #8b949e;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+  color: #f0f6fc;
+}
+
+.tab-btn.active {
+  color: #58a6ff;
+  border-bottom-color: #58a6ff;
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Cell Inspector */
+.mode-selector {
+  background: rgba(13, 17, 23, 0.6);
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mode-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #e6edf3;
+  cursor: pointer;
+}
+
+.mode-radio input {
+  accent-color: #2f81f7;
+  cursor: pointer;
+}
+
+.cell-inputs-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.cell-inputs-row label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #8b949e;
+}
+
+.cell-inputs-row select {
+  background: #0d1117;
+  color: #f0f6fc;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.primary-action {
+  background: #238636 !important;
+  border-color: #2ea043 !important;
+  color: white !important;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.primary-action:hover {
+  background: #2ea043 !important;
+}
+
+.quick-cells-label {
+  font-size: 11px;
+  color: #8b949e;
+  margin-top: 4px;
+}
+
+.quick-cells-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.quick-cell-btn {
+  padding: 5px 2px;
+  font-size: 11px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.quick-cell-btn:hover {
+  background: #30363d;
+  color: #ffffff;
+  border-color: #8b949e;
+}
+
+/* Diagnostic Card */
+.diagnostic-card {
+  background: rgba(13, 17, 23, 0.8);
+  border: 1px solid rgba(48, 54, 61, 0.8);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.diag-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #30363d;
+  padding-bottom: 6px;
+}
+
+.badge-safe {
+  background: #1f8b4c;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.badge-danger {
+  background: #b5433a;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  animation: pulseDanger 1.5s infinite;
+}
+
+@keyframes pulseDanger {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.diag-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.diag-row span {
+  color: #8b949e;
+}
+
+.diag-note {
+  font-size: 11px;
+  color: #8b949e;
+  margin-top: 4px;
+  line-height: 1.4;
+  background: rgba(56, 139, 253, 0.1);
+  padding: 6px 8px;
+  border-radius: 6px;
+  border-left: 3px solid #58a6ff;
+}
+

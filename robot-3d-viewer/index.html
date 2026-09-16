@@ -44,11 +44,95 @@
             </div>
             <button id="closeControlsBtn" class="close-btn" title="Đóng panel">✕</button>
           </div>
-          <div class="panel-actions">
-            <button id="homeBtn" class="action-btn" title="Đưa robot về tư thế đứng chuẩn">🏠 Về Home</button>
-            <button id="gripperBtn" class="action-btn" title="Đóng hoặc mở ngàm kẹp CAD">🗜️ Kẹp / Nhả</button>
+          <div class="panel-tabs">
+            <button id="tabJointsBtn" class="tab-btn active">🎮 Góc Khớp J1..J6</button>
+            <button id="tabReachBtn" class="tab-btn">🎯 Chạm Ô Cờ & Ràng Buộc J4</button>
           </div>
-          <div class="joints-container" id="jointControlsList"></div>
+          <div id="jointsTabContent" class="tab-content active">
+            <div class="panel-actions">
+              <button id="homeBtn" class="action-btn" title="Đưa robot về tư thế đứng chuẩn">🏠 Về Home</button>
+              <button id="gripperBtn" class="action-btn" title="Đóng hoặc mở ngàm kẹp CAD">🗜️ Kẹp / Nhả</button>
+            </div>
+            <div class="joints-container" id="jointControlsList"></div>
+          </div>
+          <div id="reachTabContent" class="tab-content">
+            <div class="mode-selector">
+              <label class="mode-radio">
+                <input type="radio" name="reachMode" value="optimal" checked />
+                <span>✅ Tối Ưu IK (Thẳng đứng 90° - Không tuột)</span>
+              </label>
+              <label class="mode-radio">
+                <input type="radio" name="reachMode" value="constrained_j4" />
+                <span>⚠️ Ràng Buộc J4 [-100° .. -80°]</span>
+              </label>
+            </div>
+
+            <div class="cell-inputs-row">
+              <label>Hàng (Row):
+                <select id="cellRowSelect">
+                  <option value="0">0 (Sát robot)</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4" selected>4 (Bờ sông ta)</option>
+                  <option value="5">5 (Bờ sông bạn)</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8">8</option>
+                  <option value="9">9 (Xa nhất)</option>
+                </select>
+              </label>
+              <label>Cột (Col):
+                <select id="cellColSelect">
+                  <option value="0">0 (Biên trái)</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4" selected>4 (Trung lộ)</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8">8 (Biên phải)</option>
+                </select>
+              </label>
+              <button id="reachCellBtn" class="action-btn primary-action">🚀 Đi Tới</button>
+            </div>
+
+            <div class="quick-cells-label">Điểm then chốt (Quick Targets):</div>
+            <div class="quick-cells-grid">
+              <button class="quick-cell-btn" data-row="0" data-col="0">Góc (0,0)</button>
+              <button class="quick-cell-btn" data-row="0" data-col="8">Góc (0,8)</button>
+              <button class="quick-cell-btn" data-row="4" data-col="4">Tâm (4,4)</button>
+              <button class="quick-cell-btn" data-row="9" data-col="0">Góc (9,0)</button>
+              <button class="quick-cell-btn" data-row="9" data-col="8">Góc (9,8)</button>
+            </div>
+
+            <div class="diagnostic-card" id="reachDiagnosticCard">
+              <div class="diag-header">
+                <strong>📊 Kết Quả Chẩn Đoán</strong>
+                <span id="diagStatusBadge" class="badge-safe">CHƯA DI CHUYỂN</span>
+              </div>
+              <div class="diag-row">
+                <span>Ô mục tiêu:</span>
+                <strong id="diagCellLabel">Cột 4, Hàng 4</strong>
+              </div>
+              <div class="diag-row">
+                <span>Góc J4 thực tế:</span>
+                <strong id="diagJ4Val">--</strong>
+              </div>
+              <div class="diag-row">
+                <span>Độ nghiêng ngàm kẹp:</span>
+                <strong id="diagTiltVal">--</strong>
+              </div>
+              <div class="diag-row">
+                <span>Kiểm tra xuyên bàn:</span>
+                <strong id="diagClearanceVal">--</strong>
+              </div>
+              <div id="diagExplanation" class="diag-note">
+                💡 Bấm <strong>"Đi Tới"</strong> hoặc click trực tiếp vào bàn cờ để robot xoay góc tới ô đó.
+              </div>
+            </div>
+          </div>
         </aside>
       </div>
     </div>
