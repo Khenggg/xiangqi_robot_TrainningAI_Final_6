@@ -531,6 +531,7 @@ const state = {
   gripperProfile: null,
   currentArm: null,
   jointsDeg: [0, -45, 90, -45, -90, 0],
+  homePoseDeg: [0, -45, 90, -45, -90, 0],
   // nội suy mượt cho live mirror
   liveFromDeg: null,
   liveTargetDeg: null,
@@ -602,6 +603,7 @@ function advanceLiveInterpolation(now) {
   state.jointsDeg = state.liveFromDeg.map(
     (v, i) => v + (state.liveTargetDeg[i] - v) * eased,
   );
+  syncAllJointSliders();
 }
 
 function connectLive() {
@@ -656,6 +658,149 @@ document.getElementById("robotSelect").addEventListener("change", (event) => {
 });
 
 // ---------------------------------------------------------------------------
+// 5.5) ĐIỀU KHIỂN GÓC KHỚP THỦ CÔNG (JOINT SLIDERS J1...J6)
+// Tương thích phong cách điều khiển trực quan từ frnsimulation
+// ---------------------------------------------------------------------------
+const JOINT_DEFINITIONS = Object.freeze([
+  { name: "J1 (Base)", min: -175.0, max: 175.0 },
+  { name: "J2 (Shoulder)", min: -265.0, max: 85.0 },
+  { name: "J3 (Elbow)", min: -162.0, max: 162.0 },
+  { name: "J4 (Wrist 1)", min: -265.0, max: 85.0 },
+  { name: "J5 (Wrist 2)", min: -175.0, max: 175.0 },
+  { name: "J6 (Wrist 3)", min: -175.0, max: 175.0 },
+]);
+
+function renderJointControls() {
+  const listEl = document.getElementById("jointControlsList");
+  if (!listEl) return;
+  listEl.innerHTML = JOINT_DEFINITIONS.map(
+    (def, i) => `
+    <div class="joint-item">
+      <div class="joint-row">
+        <label for="joint-slider-${i}">${def.name}</label>
+        <input
+          id="joint-slider-${i}"
+          class="range"
+          type="range"
+          data-joint-idx="${i}"
+          min="${def.min}"
+          max="${def.max}"
+          step="0.1"
+          value="${(state.jointsDeg[i] ?? 0).toFixed(1)}"
+          aria-label="${def.name} slider"
+        />
+        <input
+          id="joint-num-${i}"
+          class="number"
+          type="number"
+          data-joint-idx="${i}"
+          min="${def.min}"
+          max="${def.max}"
+          step="0.1"
+          value="${(state.jointsDeg[i] ?? 0).toFixed(1)}"
+          aria-label="${def.name} degrees"
+        />
+      </div>
+      <div class="joint-limit-row">${def.min}° … ${def.max}°</div>
+    </div>
+  `,
+  ).join("");
+
+  listEl.querySelectorAll("input.range").forEach((slider) => {
+    slider.addEventListener("input", (e) => {
+      const idx = Number(e.target.dataset.jointIdx);
+      const val = Number(e.target.value);
+      updateSingleJoint(idx, val);
+    });
+  });
+
+  listEl.querySelectorAll("input.number").forEach((numInput) => {
+    numInput.addEventListener("change", (e) => {
+      const idx = Number(e.target.dataset.jointIdx);
+      const val = Number(e.target.value);
+      updateSingleJoint(idx, val);
+    });
+  });
+}
+
+function updateSingleJoint(index, val) {
+  const def = JOINT_DEFINITIONS[index];
+  const clamped = Math.max(def.min, Math.min(def.max, Number(val) || 0));
+  state.jointsDeg[index] = clamped;
+
+  // Hủy interpolation WebSocket nếu người dùng chủ động kéo slider
+  state.liveTargetDeg = null;
+  state.liveFromDeg = null;
+
+  const slider = document.getElementById(`joint-slider-${index}`);
+  const num = document.getElementById(`joint-num-${index}`);
+  if (slider) slider.value = clamped;
+  if (num) num.value = clamped.toFixed(1);
+
+  if (jointsReadoutEl) {
+    jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ");
+  }
+  if (state.currentArm) {
+    applyJointsDeg(state.currentArm, state.jointsDeg);
+  }
+}
+
+function syncAllJointSliders() {
+  state.jointsDeg.forEach((deg, i) => {
+    const slider = document.getElementById(`joint-slider-${i}`);
+    const num = document.getElementById(`joint-num-${i}`);
+    if (slider && document.activeElement !== slider) slider.value = deg;
+    if (num && document.activeElement !== num) num.value = deg.toFixed(1);
+  });
+  if (jointsReadoutEl) {
+    jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ");
+  }
+}
+
+function initJointControlPanelEvents() {
+  const homeBtn = document.getElementById("homeBtn");
+  if (homeBtn) {
+    homeBtn.addEventListener("click", () => {
+      const homeDeg = state.homePoseDeg || [0.0, -45.0, 90.0, -45.0, -90.0, 0.0];
+      state.jointsDeg = [...homeDeg];
+      state.liveTargetDeg = null;
+      state.liveFromDeg = null;
+      syncAllJointSliders();
+      if (state.currentArm) {
+        applyJointsDeg(state.currentArm, state.jointsDeg);
+      }
+    });
+  }
+
+  let _gripperClosed = false;
+  const gripperBtn = document.getElementById("gripperBtn");
+  if (gripperBtn) {
+    gripperBtn.addEventListener("click", () => {
+      _gripperClosed = !_gripperClosed;
+      if (state.currentArm?.gripper) {
+        state.currentArm.gripper.setClosed(_gripperClosed);
+      }
+      gripperBtn.textContent = _gripperClosed ? "🗜️ Đang Kẹp" : "🗜️ Kẹp / Nhả";
+      gripperBtn.style.color = _gripperClosed ? "#f0883e" : "#c9d1d9";
+    });
+  }
+
+  const panelEl = document.getElementById("jointControlPanel");
+  const toggleBtn = document.getElementById("toggleControlsBtn");
+  const closeBtn = document.getElementById("closeControlsBtn");
+  if (toggleBtn && panelEl) {
+    toggleBtn.addEventListener("click", () => {
+      panelEl.classList.toggle("collapsed");
+    });
+  }
+  if (closeBtn && panelEl) {
+    closeBtn.addEventListener("click", () => {
+      panelEl.classList.add("collapsed");
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 6) VÒNG LẶP RENDER
 // ---------------------------------------------------------------------------
 function loop(now) {
@@ -685,6 +830,7 @@ async function initApp() {
       sceneConfig.home_pose.joints_deg.every((v) => typeof v === "number" && Number.isFinite(v))
     ) {
       state.jointsDeg = [...sceneConfig.home_pose.joints_deg];
+      state.homePoseDeg = [...sceneConfig.home_pose.joints_deg];
     }
     if (jointsReadoutEl) {
       jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ");
@@ -701,6 +847,9 @@ async function initApp() {
     scene.add(piecesGroup);
 
     await switchRobotProfile(state.robotProfileId);
+    renderJointControls();
+    initJointControlPanelEvents();
+    syncAllJointSliders();
     loop(performance.now());
   } catch (err) {
     console.error("[VIEWER] ❌ Failed to initialize 3D viewer:", err);

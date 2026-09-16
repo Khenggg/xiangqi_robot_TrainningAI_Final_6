@@ -31,9 +31,26 @@
         </label>
         <button id="liveBtn">Connect live</button>
         <span id="liveState">OFFLINE</span>
+        <button id="toggleControlsBtn" class="hud-btn-secondary" title="Bật/tắt bảng điều khiển góc khớp">🎮 Điều khiển khớp</button>
         <span id="jointsReadout"></span>
       </header>
-      <canvas id="scene"></canvas>
+      <div id="canvasContainer">
+        <canvas id="scene"></canvas>
+        <aside id="jointControlPanel" class="control-panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="panel-icon">🦾</span>
+              <strong>Điều Khiển Góc Khớp</strong>
+            </div>
+            <button id="closeControlsBtn" class="close-btn" title="Đóng panel">✕</button>
+          </div>
+          <div class="panel-actions">
+            <button id="homeBtn" class="action-btn" title="Đưa robot về tư thế đứng chuẩn">🏠 Về Home</button>
+            <button id="gripperBtn" class="action-btn" title="Đóng hoặc mở ngàm kẹp CAD">🗜️ Kẹp / Nhả</button>
+          </div>
+          <div class="joints-container" id="jointControlsList"></div>
+        </aside>
+      </div>
     </div>
     <script type="module" src="./main.mjs"></script>
   </body>
