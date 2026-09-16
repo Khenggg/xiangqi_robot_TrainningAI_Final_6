@@ -546,13 +546,8 @@ const state = {
   selectedCell: { row: 4, col: 4 },
   currentCell: null,
   targetDestinationCell: null,
-  trajectoryQueue: [],
-  trajectoryActive: false,
-  // nội suy mượt cho live mirror
-  liveFromDeg: null,
-  liveTargetDeg: null,
-  liveAnimationStart: 0,
-  liveAnimationDuration: 120,
+  trajectoryStage: "IDLE",
+  gripperClosed: false,
   liveSocket: null,
 };
 window.__state = state;
@@ -593,44 +588,25 @@ function applyLiveState(payload) {
     console.warn("Live packet rejected:", validation.reason);
     return;
   }
-  const nextTarget = stabilizeJointTarget(
-    validation.joints,
-    state.liveTargetDeg,
-    LIVE_JOINT_DEADBAND_DEG,
-  );
-  const now = performance.now();
-  if (!state.liveTargetDeg) {
-    state.jointsDeg = [...nextTarget];
-    state.liveFromDeg = [...nextTarget];
-  } else {
-    state.liveFromDeg = [...state.jointsDeg];
-    state.liveAnimationStart = now;
-  }
-  state.liveTargetDeg = nextTarget;
-  jointsReadoutEl.textContent = nextTarget.map((v) => v.toFixed(1)).join(", ");
-}
-
-function advanceLiveInterpolation(now) {
-  if (!state.liveTargetDeg || !state.liveFromDeg) return;
-  const t = Math.min(
-    1,
-    (now - state.liveAnimationStart) / state.liveAnimationDuration,
-  );
-  const eased = t * t * (3 - 2 * t);
-  state.jointsDeg = state.liveFromDeg.map(
-    (v, i) => v + (state.liveTargetDeg[i] - v) * eased,
-  );
+  // Authoritative joints directly from backend telemetry
+  state.jointsDeg = [...validation.joints];
   syncAllJointSliders();
+  if (state.currentArm) {
+    applyJointsDeg(state.currentArm, state.jointsDeg);
+  }
+  if (jointsReadoutEl) {
+    jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ");
+  }
 
-  if (t >= 1) {
-    state.jointsDeg = [...state.liveTargetDeg];
-    state.liveTargetDeg = null;
-    state.liveFromDeg = null;
-    if (state.trajectoryQueue && state.trajectoryQueue.length > 0) {
-      runNextTrajectoryStep(now);
-    } else if (state.trajectoryActive) {
-      finishTrajectory();
-    }
+  // Authoritative trajectory stage directly from backend telemetry
+  if (payload.trajectory_stage) {
+    state.trajectoryStage = payload.trajectory_stage;
+    handleBackendTrajectoryStage(payload.trajectory_stage, payload);
+  }
+
+  // Backend error / collision rejection notification
+  if (payload.motion_state === "COLLISION_REJECTED" || payload.last_error) {
+    handleBackendError(payload.last_error || "Chuyển động bị từ chối bởi Collision Guard");
   }
 }
 
@@ -756,12 +732,7 @@ function updateSingleJoint(index, val) {
   const clamped = Math.max(def.min, Math.min(def.max, Number(val) || 0));
   state.jointsDeg[index] = clamped;
 
-  // Hủy trajectory nếu người dùng chủ động kéo slider
-  state.trajectoryQueue = [];
-  state.trajectoryActive = false;
   state.currentCell = null;
-  state.liveTargetDeg = null;
-  state.liveFromDeg = null;
   updateStepperUI(null, []);
 
   const slider = document.getElementById(`joint-slider-${index}`);
@@ -793,12 +764,16 @@ function initJointControlPanelEvents() {
   const homeBtn = document.getElementById("homeBtn");
   if (homeBtn) {
     homeBtn.addEventListener("click", () => {
-      const homeDeg = state.homePoseDeg || [0.0, -45.0, 90.0, -45.0, -90.0, 0.0];
-      state.jointsDeg = [...homeDeg];
-      state.liveTargetDeg = null;
-      state.liveFromDeg = null;
-      state.trajectoryQueue = [];
-      state.trajectoryActive = false;
+      if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+        state.liveSocket.send(JSON.stringify({ command: "RESET" }));
+      } else {
+        const homeDeg = state.homePoseDeg || [0.0, -45.0, 90.0, -45.0, -90.0, 0.0];
+        state.jointsDeg = [...homeDeg];
+        syncAllJointSliders();
+        if (state.currentArm) {
+          applyJointsDeg(state.currentArm, state.jointsDeg);
+        }
+      }
       state.currentCell = null;
       updateStepperUI(null, []);
       const badge = document.getElementById("diagStatusBadge");
@@ -806,23 +781,20 @@ function initJointControlPanelEvents() {
         badge.className = "badge-safe";
         badge.textContent = "ĐÃ VỀ HOME";
       }
-      syncAllJointSliders();
-      if (state.currentArm) {
-        applyJointsDeg(state.currentArm, state.jointsDeg);
-      }
     });
   }
 
-  let _gripperClosed = false;
   const gripperBtn = document.getElementById("gripperBtn");
   if (gripperBtn) {
     gripperBtn.addEventListener("click", () => {
-      _gripperClosed = !_gripperClosed;
-      if (state.currentArm?.gripper) {
-        state.currentArm.gripper.setClosed(_gripperClosed);
+      state.gripperClosed = !state.gripperClosed;
+      if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+        state.liveSocket.send(JSON.stringify({ command: "SET_GRIPPER", closed: state.gripperClosed }));
+      } else if (state.currentArm?.gripper) {
+        state.currentArm.gripper.setClosed(state.gripperClosed);
       }
-      gripperBtn.textContent = _gripperClosed ? "🗜️ Đang Kẹp" : "🗜️ Kẹp / Nhả";
-      gripperBtn.style.color = _gripperClosed ? "#f0883e" : "#c9d1d9";
+      gripperBtn.textContent = state.gripperClosed ? "🗜️ Đang Kẹp" : "🗜️ Kẹp / Nhả";
+      gripperBtn.style.color = state.gripperClosed ? "#f0883e" : "#c9d1d9";
     });
   }
 
@@ -943,150 +915,86 @@ function updateStepperUI(activeStepId, completedStepIds = []) {
   });
 }
 
-function runNextTrajectoryStep(now) {
-  if (!state.trajectoryQueue || state.trajectoryQueue.length === 0) return;
-  const step = state.trajectoryQueue.shift();
-  state.currentTrajectoryStep = step;
-
-  // Update Stepper UI
-  updateStepperUI(step.stepElId, step.completedStepIds || []);
-
-  // Update Badge
+function handleBackendTrajectoryStage(stage, payload) {
   const badge = document.getElementById("diagStatusBadge");
-  if (badge && step.badgeText) {
-    badge.className = step.badgeClass || "badge-transit";
-    badge.textContent = step.badgeText;
-  }
-
-  // Update Explanation
   const expl = document.getElementById("diagExplanation");
-  if (expl && step.explanation) {
-    expl.innerHTML = step.explanation;
-  }
-
-  // Set animation targets
-  state.liveFromDeg = [...state.jointsDeg];
-  state.liveTargetDeg = [...step.targetDeg];
-  state.liveAnimationStart = now || performance.now();
-  state.liveAnimationDuration = step.durationMs || 500;
-}
-
-function finishTrajectory() {
-  state.trajectoryActive = false;
-  state.currentTrajectoryStep = null;
-  const targetCell = state.targetDestinationCell;
-  if (!targetCell) return;
-
-  state.currentCell = targetCell;
-
-  // Mark all steps done
-  updateStepperUI(null, ["stepLift", "stepTransit", "stepLand"]);
-
-  const badge = document.getElementById("diagStatusBadge");
-  if (badge) {
-    badge.className = "badge-safe";
-    badge.textContent = "✅ TRAJECTORY COMPLETE (COLLISION-FREE)";
-  }
-
   const j4Val = document.getElementById("diagJ4Val");
   const tiltVal = document.getElementById("diagTiltVal");
   const clearanceVal = document.getElementById("diagClearanceVal");
-  const expl = document.getElementById("diagExplanation");
 
-  const j4Angle = targetCell.j4_grasp_deg ?? targetCell.j4_deg;
-  if (j4Val) {
-    j4Val.textContent = `${j4Angle}° (Authoritative IK)`;
-    j4Val.style.color = "#58a6ff";
-  }
-  if (tiltVal) {
-    tiltVal.textContent = `0.0° ✓ Cắm thẳng đứng 90° (DOWNWARD)`;
-    tiltVal.style.color = "#3fb950";
-  }
-  const tipClearance = targetCell.gripper_tip_grasp_clearance_mm ?? targetCell.gripper_tip_clearance_mm ?? 1.5;
-  if (clearanceVal) {
-    clearanceVal.textContent = `✅ Đầu ngàm kẹp cách mặt bàn +${tipClearance} mm (COLLISION-FREE)`;
-    clearanceVal.style.color = "#3fb950";
-  }
-  if (expl) {
-    expl.innerHTML = `✅ <strong>Đã hoàn thành quỹ đạo 3 giai đoạn:</strong> Robot đã thực thi Lift (+70mm) ➔ Transit ➔ Land tại ô (Cột ${targetCell.col}, Hàng ${targetCell.row}). Trạng thái: <strong>COLLISION-FREE</strong>.`;
+  if (stage === "PREPOSITION") {
+    updateStepperUI(null, []);
+    if (badge) {
+      badge.className = "badge-warn";
+      badge.textContent = "🛫 0. TIẾP CẬN NGUỒN (PREPOSITION)";
+    }
+    if (expl) {
+      expl.innerHTML = `🛫 <strong>Preposition (Tiếp cận nguồn):</strong> Robot di chuyển khớp tới vị trí ô xuất phát trước khi nhấc.`;
+    }
+  } else if (stage === "LIFT") {
+    updateStepperUI("stepLift", []);
+    if (badge) {
+      badge.className = "badge-warn";
+      badge.textContent = "🛫 1. ĐANG NHẤC LÊN (+70mm)";
+    }
+    if (expl) {
+      expl.innerHTML = `🛫 <strong>Giai đoạn 1 (Nhấc lên):</strong> Cánh tay nâng thẳng đứng ngàm kẹp lên cao độ an toàn <strong>+70mm</strong> ($Z = 0.0805\\text{m}$, $\\Delta XY \\le 1.0\\text{mm}$, tilt $\\le 0.5^\\circ$).`;
+    }
+  } else if (stage === "TRANSIT") {
+    updateStepperUI("stepTransit", ["stepLift"]);
+    if (badge) {
+      badge.className = "badge-transit";
+      badge.textContent = "✈️ 2. ĐANG BAY NGANG (+70mm)";
+    }
+    if (expl) {
+      expl.innerHTML = `✈️ <strong>Giai đoạn 2 (Bay ngang):</strong> Robot di chuyển ngang trên mặt phẳng an toàn $Z = 0.0805\\text{m}$ (dung sai $\\pm 1.0\\text{mm}$, tilt $\\le 0.5^\\circ$).`;
+    }
+  } else if (stage === "LAND") {
+    updateStepperUI("stepLand", ["stepLift", "stepTransit"]);
+    if (badge) {
+      badge.className = "badge-land";
+      badge.textContent = "🛬 3. ĐANG HẠ CÁNH (+4.715mm)";
+    }
+    if (expl) {
+      expl.innerHTML = `🛬 <strong>Giai đoạn 3 (Hạ cánh):</strong> Ngàm kẹp hạ cánh thẳng đứng xuống cao độ gắp $Z = 0.015215\\text{m}$ ($+4.715\\text{mm}$ tâm quân cờ, $\\Delta XY \\le 1.0\\text{mm}$, tilt $\\le 0.5^\\circ$).`;
+    }
+  } else if (stage === "COMPLETE") {
+    updateStepperUI(null, ["stepLift", "stepTransit", "stepLand"]);
+    if (badge) {
+      badge.className = "badge-safe";
+      badge.textContent = "✅ TRAJECTORY COMPLETE (COLLISION-FREE)";
+    }
+    if (state.targetDestinationCell) {
+      state.currentCell = state.targetDestinationCell;
+    }
+    if (j4Val && state.jointsDeg) {
+      j4Val.textContent = `${state.jointsDeg[3].toFixed(1)}° (Authoritative IK)`;
+      j4Val.style.color = "#58a6ff";
+    }
+    if (tiltVal) {
+      tiltVal.textContent = `0.0° ✓ Cắm thẳng đứng 90° (DOWNWARD)`;
+      tiltVal.style.color = "#3fb950";
+    }
+    if (clearanceVal) {
+      clearanceVal.textContent = `✅ Đầu ngàm kẹp cách mặt bàn +4.715 mm (Tâm quân cờ, COLLISION-FREE)`;
+      clearanceVal.style.color = "#3fb950";
+    }
+    if (expl) {
+      expl.innerHTML = `✅ <strong>Đã hoàn thành quỹ đạo 3 giai đoạn:</strong> Robot đã thực thi Lift (+70mm) ➔ Transit ➔ Land bởi backend runtime có thẩm quyền. Trạng thái: <strong>COLLISION-FREE</strong>.`;
+    }
   }
 }
 
-function executeSafeTrajectory(targetCell) {
-  state.targetDestinationCell = targetCell;
-  state.trajectoryQueue = [];
-  state.trajectoryActive = true;
-
-  const currentCell = state.currentCell;
-  const isSameCell = currentCell && currentCell.row === targetCell.row && currentCell.col === targetCell.col;
-  if (isSameCell) {
-    finishTrajectory();
-    return;
+function handleBackendError(errMsg) {
+  const badge = document.getElementById("diagStatusBadge");
+  const expl = document.getElementById("diagExplanation");
+  if (badge) {
+    badge.className = "badge-warn";
+    badge.textContent = "❌ LỖI / COLLISION REJECTED";
   }
-
-  const graspDeg = targetCell.grasp_joints_deg ?? targetCell.joints_deg;
-  const approachDeg = targetCell.approach_joints_deg ?? targetCell.grasp_joints_deg ?? targetCell.joints_deg;
-
-  if (currentCell) {
-    const curApproachDeg = currentCell.approach_joints_deg ?? currentCell.grasp_joints_deg ?? currentCell.joints_deg;
-    // 3-PHASE SAFE TRAJECTORY:
-    // 1. Lift vertically over current cell (+70mm)
-    state.trajectoryQueue.push({
-      stepElId: "stepLift",
-      completedStepIds: [],
-      badgeText: "🛫 1. ĐANG NHẤC LÊN (+70mm)",
-      badgeClass: "badge-warn",
-      targetDeg: curApproachDeg,
-      durationMs: 380,
-      explanation: `🛫 <strong>Giai đoạn 1 (Nhấc lên):</strong> Cánh tay nâng thẳng đứng ngàm kẹp lên cao độ an toàn <strong>+70mm</strong> (cách đỉnh quân cờ >60mm) để tránh va chạm với bất kỳ quân cờ nào xung quanh.`,
-    });
-
-    // 2. Transit horizontally across safe ceiling to target cell (+70mm)
-    state.trajectoryQueue.push({
-      stepElId: "stepTransit",
-      completedStepIds: ["stepLift"],
-      badgeText: "✈️ 2. ĐANG BAY NGANG (TRÊN CAO)",
-      badgeClass: "badge-transit",
-      targetDeg: approachDeg,
-      durationMs: 700,
-      explanation: `✈️ <strong>Giai đoạn 2 (Bay ngang):</strong> Robot lướt ngang trên mặt phẳng an toàn $Z = +70\\text{mm}$, bay qua các quân cờ mà không va chạm.`,
-    });
-
-    // 3. Land vertically into target cell grasp pose (+1.5mm)
-    state.trajectoryQueue.push({
-      stepElId: "stepLand",
-      completedStepIds: ["stepLift", "stepTransit"],
-      badgeText: "🛬 3. ĐANG HẠ CÁNH (+1.5mm)",
-      badgeClass: "badge-land",
-      targetDeg: graspDeg,
-      durationMs: 420,
-      explanation: `🛬 <strong>Giai đoạn 3 (Hạ cánh):</strong> Ngàm kẹp hạ cánh thẳng đứng $90^\\circ$ ôm trọn quân cờ ở cao độ cách mặt bàn <strong>+1.5mm</strong> (zero xuyên bàn).`,
-    });
-  } else {
-    // From Home pose or arbitrary elevated pose:
-    state.trajectoryQueue.push({
-      stepElId: "stepTransit",
-      completedStepIds: ["stepLift"],
-      badgeText: "✈️ 2. ĐANG BAY TỚI ĐỈNH Ô",
-      badgeClass: "badge-transit",
-      targetDeg: approachDeg,
-      durationMs: 700,
-      explanation: `✈️ <strong>Giai đoạn 2 (Bay tới đỉnh ô):</strong> Robot từ vị trí chờ bay đến không gian trên cao của ô mục tiêu (+70mm).`,
-    });
-
-    state.trajectoryQueue.push({
-      stepElId: "stepLand",
-      completedStepIds: ["stepLift", "stepTransit"],
-      badgeText: "🛬 3. ĐANG HẠ CÁNH (+1.5mm)",
-      badgeClass: "badge-land",
-      targetDeg: graspDeg,
-      durationMs: 420,
-      explanation: `🛬 <strong>Giai đoạn 3 (Hạ cánh):</strong> Ngàm kẹp hạ cánh thẳng đứng $90^\\circ$ ôm trọn quân cờ ở cao độ cách mặt bàn <strong>+1.5mm</strong>.`,
-    });
+  if (expl) {
+    expl.innerHTML = `<span style="color:#f85149">❌ <strong>Từ chối chuyển động:</strong> ${errMsg}</span>`;
   }
-
-  // Start first step immediately
-  runNextTrajectoryStep(performance.now());
 }
 
 function goToCell(row, col) {
@@ -1113,16 +1021,41 @@ function goToCell(row, col) {
   const cellLabel = document.getElementById("diagCellLabel");
   if (cellLabel) cellLabel.textContent = `Cột ${col}, Hàng ${row} (X=${cell.x_m}m, Y=${cell.y_m}m)`;
 
-  // Execute 3-phase safe trajectory (Lift -> Transit -> Land)
-  executeSafeTrajectory(cell);
+  state.targetDestinationCell = cell;
+
+  // Dispatch authoritative trajectory command to backend via WebSocket
+  if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+    const srcRow = state.currentCell ? state.currentCell.row : 4;
+    const srcCol = state.currentCell ? state.currentCell.col : 4;
+    const cmd = {
+      command: "EXECUTE_3STAGE",
+      src: [srcRow, srcCol],
+      dst: [row, col],
+    };
+    state.liveSocket.send(JSON.stringify(cmd));
+    const badge = document.getElementById("diagStatusBadge");
+    if (badge) {
+      badge.className = "badge-warn";
+      badge.textContent = "GỬI LỆNH TỚI BACKEND...";
+    }
+  } else {
+    const badge = document.getElementById("diagStatusBadge");
+    if (badge) {
+      badge.className = "badge-warn";
+      badge.textContent = "CHƯA KẾT NỐI WEBSOCKET";
+    }
+    const expl = document.getElementById("diagExplanation");
+    if (expl) {
+      expl.innerHTML = `<span style="color:#d29922">⚠️ <strong>Chưa kết nối Backend:</strong> Bấm nút <em>Connect live</em> để kết nối với WebSocket runtime (Single Motion Authority).</span>`;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
 // 6) VÒNG LẶP RENDER
 // ---------------------------------------------------------------------------
-function loop(now) {
+function loop() {
   requestAnimationFrame(loop);
-  advanceLiveInterpolation(now);
   if (state.currentArm) {
     applyJointsDeg(state.currentArm, state.jointsDeg);
     state.currentArm.gripper?.update();

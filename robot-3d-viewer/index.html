@@ -108,16 +108,24 @@
 
               <!-- 3-Phase Safe Trajectory Stepper -->
               <div class="traj-stepper-container">
-                <div class="traj-stepper-label">🛡️ Quỹ đạo 3 giai đoạn (Authoritative 3-Stage Trajectory):</div>
+                <div class="traj-stepper-label">🛡️ Quỹ đạo 3 giai đoạn (Authoritative Backend Trajectory):</div>
                 <div class="traj-stepper">
                   <div id="stepLift" class="traj-step"><span class="step-icon">🛫</span> 1. Nhấc lên<span class="step-sub">+70mm</span></div>
                   <div class="step-arrow">➔</div>
                   <div id="stepTransit" class="traj-step"><span class="step-icon">✈️</span> 2. Bay ngang<span class="step-sub">Safe Z</span></div>
                   <div class="step-arrow">➔</div>
-                  <div id="stepLand" class="traj-step"><span class="step-icon">🛬</span> 3. Hạ cánh<span class="step-sub">Grasp TCP</span></div>
+                  <div id="stepLand" class="traj-step"><span class="step-icon">🛬</span> 3. Hạ cánh<span class="step-sub">+4.715mm (Tâm cờ)</span></div>
                 </div>
               </div>
 
+              <div class="diag-row">
+                <span>Công cụ (Tool Offset):</span>
+                <strong id="diagToolOffset" style="color: #58a6ff">218mm [USER_MEASURED_CAD_REPORTED]</strong>
+              </div>
+              <div class="diag-row">
+                <span>Visual Asset:</span>
+                <strong id="diagVisualAsset" style="color: #8b949e">VISUAL_CALIBRATION_PROVISIONAL</strong>
+              </div>
               <div class="diag-row">
                 <span>Góc J4 thực tế:</span>
                 <strong id="diagJ4Val">--</strong>
@@ -131,7 +139,7 @@
                 <strong id="diagClearanceVal">--</strong>
               </div>
               <div id="diagExplanation" class="diag-note">
-                💡 Bấm <strong>"Đi Tới"</strong> hoặc click trực tiếp vào bàn cờ để robot di chuyển theo quy trình 3 giai đoạn (Nhấc lên ➔ Bay ngang ➔ Hạ cánh).
+                💡 Bấm <strong>"Đi Tới"</strong> hoặc click trực tiếp vào bàn cờ để robot di chuyển theo quy trình 3 giai đoạn được điều phối độc quyền bởi backend (Nhấc lên ➔ Bay ngang ➔ Hạ cánh).
               </div>
             </div>
           </div>

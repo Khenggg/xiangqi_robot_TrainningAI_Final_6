@@ -41,10 +41,12 @@
     "joints_deg": [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
   },
   "tool_transform": {
-    "status": "CAD_PARALLEL_GRIPPER_MEASURED",
+    "status": "USER_MEASURED_CAD_REPORTED",
     "type": "tcp_relative_to_flange",
     "flange_to_tcp_xyz_m": [0.0, 0.0, 0.218],
     "flange_to_tcp_rpy_deg": [0.0, 0.0, 0.0],
-    "description": "Measured distance from FR3 J6 flange origin to tips of parallel gripper fingers (218mm)."
+    "description": "Measured distance from FR3 J6 flange to fingertips on physical robot with custom adapter plate (218mm). Raw CAD STEP model measures 147.5mm along tool axis.",
+    "visual_asset_status": "VISUAL_CALIBRATION_PROVISIONAL",
+    "visual_asset_notes": "Finger meshes visual scale (0.0008) and origin approximation for 3D viewer rendering."
   }
 }

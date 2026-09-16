@@ -27,7 +27,7 @@ from src.simulation.physics.transforms import (
     rpy_deg_to_quat,
 )
 from src.simulation.physics.piece import XiangqiPieceBody
-from src.simulation.physics.state import DropEvent, GraspResult, GraspStatus, WorldStateSnapshot
+from src.simulation.physics.state import DropEvent, GraspResult, GraspStatus, PiecePhysicalState, WorldStateSnapshot
 from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.virtual_fr3_backend import VirtualFR3Backend
 from src.domain.geometry import get_physical_geometry
@@ -79,8 +79,14 @@ class VirtualXiangqiSimulation:
         self._scheduled_drop: Optional[Dict[str, Any]] = None
         self.last_drop_event: Optional[DropEvent] = None
 
+        self._command_lock = threading.Lock()
+
         # Register listener with backend
         self.backend.add_state_listener(self._on_robot_state_update)
+
+        # Register command handler with telemetry publisher if provided
+        if self.telemetry is not None:
+            self.telemetry.register_command_handler(self._handle_client_command)
 
         # Initial gripper sync to TCP
         self._sync_gripper_to_tcp(self.backend.get_state_snapshot())
@@ -475,6 +481,36 @@ class VirtualXiangqiSimulation:
         y = y0 + col * col_spacing
         return [round(x, 5), round(y, 5), round(z_m, 5)]
 
+    def set_telemetry(self, telemetry: TelemetryPublisher) -> None:
+        """Attach telemetry publisher and register incoming command callback."""
+        self.telemetry = telemetry
+        if self.telemetry is not None:
+            self.telemetry.register_command_handler(self._handle_client_command)
+
+    def _handle_client_command(self, cmd: Dict[str, Any]) -> None:
+        """Handle incoming command from viewer or external WebSocket client."""
+        action = cmd.get("command") or cmd.get("action")
+        if not action:
+            return
+
+        action = str(action).upper()
+        if action == "EXECUTE_3STAGE":
+            src = cmd.get("src")
+            dst = cmd.get("dst")
+            if src is not None and dst is not None and len(src) == 2 and len(dst) == 2:
+                threading.Thread(
+                    target=self.execute_3stage_trajectory,
+                    args=((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1]))),
+                    daemon=True,
+                ).start()
+        elif action == "SET_GRIPPER":
+            closed = bool(cmd.get("closed", False))
+            self.backend.set_gripper(closed)
+        elif action == "RESET":
+            self.backend.reset_to_home()
+        elif action == "STOP":
+            self.backend.stop()
+
     def execute_3stage_trajectory(
         self,
         src_cell: Tuple[int, int],
@@ -484,57 +520,140 @@ class VirtualXiangqiSimulation:
     ) -> Dict[str, Any]:
         """
         Execute authoritative 3-stage Pick & Place Cartesian trajectory:
-        1. LIFT: Cartesian MoveL (same X/Y, increasing Z from grasp to approach)
-        2. TRANSIT: Cartesian MoveL (source approach -> target approach at constant safe Z)
-        3. LAND: Cartesian MoveL (same target X/Y, decreasing Z from approach to grasp)
+        0. PREPOSITION: Move robot to source grasp pose (fail-fast validation before lift)
+        1. LIFT: Cartesian MoveL (same X/Y, increasing Z from grasp to transit height)
+        2. TRANSIT: Cartesian MoveL (source transit -> target transit at constant safe Z)
+        3. LAND: Cartesian MoveL (same target X/Y, decreasing Z from transit to target grasp)
 
-        Uses downward tool orientation [180.0, 0.0, -90.0] deg.
+        Uses downward tool orientation [180.0, 0.0, 90.0] deg.
         Pre-validates collision guard and publishes authoritative telemetry.
         """
-        r_src, c_src = src_cell
-        r_dst, c_dst = dst_cell
+        with self._command_lock:
+            r_src, c_src = int(src_cell[0]), int(src_cell[1])
+            r_dst, c_dst = int(dst_cell[0]), int(dst_cell[1])
 
-        # Canonical heights
-        board_z = self.board_surface_z  # 0.0105 m
-        piece_h = self.geom.piece_height_mm / 1000.0  # 0.00943 m
-        z_grasp = board_z + piece_h / 2.0  # 0.015215 m (piece center)
-        z_transit = board_z + 0.070        # 0.0805 m (canonical +70mm safe clearance)
-        tool_rpy = list(self.target_tool_euler_deg)
+            # Canonical heights
+            board_z = self.board_surface_z  # 0.0105 m
+            piece_h = self.geom.piece_height_mm / 1000.0  # 0.00943 m
+            z_grasp = board_z + piece_h / 2.0  # 0.015215 m (piece center)
+            z_transit = board_z + 0.070        # 0.0805 m (canonical +70mm safe clearance)
+            tool_rpy = list(self.target_tool_euler_deg)
 
-        src_app_m = self.cell_to_robot_xyz_m(r_src, c_src, z_transit)
-        dst_app_m = self.cell_to_robot_xyz_m(r_dst, c_dst, z_transit)
-        dst_grasp_m = self.cell_to_robot_xyz_m(r_dst, c_dst, z_grasp)
+            src_grasp_m = self.cell_to_robot_xyz_m(r_src, c_src, z_grasp)
+            src_app_m = self.cell_to_robot_xyz_m(r_src, c_src, z_transit)
+            dst_app_m = self.cell_to_robot_xyz_m(r_dst, c_dst, z_transit)
+            dst_grasp_m = self.cell_to_robot_xyz_m(r_dst, c_dst, z_grasp)
 
-        to_mm_deg = lambda p_m: [p_m[0] * 1000.0, p_m[1] * 1000.0, p_m[2] * 1000.0] + tool_rpy
+            to_mm_deg = lambda p_m: [p_m[0] * 1000.0, p_m[1] * 1000.0, p_m[2] * 1000.0] + tool_rpy
 
-        # Ensure robot is positioned at src grasp pose before starting Lift
-        src_info = self.reachability_dataset.get((r_src, c_src))
-        if src_info and "grasp_joints_deg" in src_info:
-            self.backend.move_joint(src_info["grasp_joints_deg"], speed_factor=speed_factor)
+            # Ensure samples_per_stage >= 10 for true trajectory evidence
+            samples_per_stage = max(10, int(samples_per_stage))
 
-        # Stage 1: LIFT (vertical MoveL from grasp to safe transit height)
-        ok1 = self.move_cartesian(to_mm_deg(src_app_m), speed_factor=speed_factor, samples=samples_per_stage)
-        if not ok1:
-            return {"success": False, "failed_stage": "LIFT", "error": self.backend._last_error}
+            # --- Stage 0: PREPOSITION (Fail-fast reachability check before lift) ---
+            self.backend.set_trajectory_stage("PREPOSITION")
+            src_grasp_pose_mm = to_mm_deg(src_grasp_m)
+            src_app_pose_mm = to_mm_deg(src_app_m)
+            src_info = self.reachability_dataset.get((r_src, c_src))
 
-        # Stage 2: TRANSIT (horizontal MoveL across safe transit plane)
-        ok2 = self.move_cartesian(to_mm_deg(dst_app_m), speed_factor=speed_factor, samples=samples_per_stage)
-        if not ok2:
-            return {"success": False, "failed_stage": "TRANSIT", "error": self.backend._last_error}
+            # Validate destination reachability fail-fast
+            dst_grasp_pose_mm = to_mm_deg(dst_grasp_m)
+            dst_info = self.reachability_dataset.get((r_dst, c_dst))
+            if not dst_info and not self.backend.solve_tcp_ik(dst_grasp_pose_mm, allow_multi_seed=True).success:
+                err_msg = f"Preposition rejected: Destination cell {dst_cell} is unreachable"
+                self.backend._last_error = err_msg
+                self.backend.set_trajectory_stage("IDLE")
+                return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg}
 
-        # Stage 3: LAND (vertical MoveL from safe transit height down to grasp target)
-        ok3 = self.move_cartesian(to_mm_deg(dst_grasp_m), speed_factor=speed_factor, samples=samples_per_stage)
-        if not ok3:
-            return {"success": False, "failed_stage": "LAND", "error": self.backend._last_error}
+            # Check if source cell is reachable
+            if not src_info and not self.backend.solve_tcp_ik(src_grasp_pose_mm, allow_multi_seed=True).success:
+                err_msg = f"Preposition rejected: Source cell {src_cell} is unreachable"
+                self.backend._last_error = err_msg
+                self.backend.set_trajectory_stage("IDLE")
+                return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg}
 
-        return {
-            "success": True,
-            "stages": ["LIFT", "TRANSIT", "LAND"],
-            "src": src_cell,
-            "dst": dst_cell,
-            "z_grasp_m": z_grasp,
-            "z_transit_m": z_transit,
-        }
+            # Detect if there is a piece at src_cell to allow grasp without proxy collision
+            piece_at_src = None
+            if hasattr(self.world, "pieces"):
+                for p_id, p_body in self.world.pieces.items():
+                    if p_body.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
+                        continue
+                    c_p, r_p, d_p = p_body.get_nearest_intersection()
+                    if (r_p, c_p) == (r_src, c_src) and d_p < 0.025:
+                        piece_at_src = p_id
+                        break
+            if piece_at_src:
+                self.backend.set_allowed_grasp_piece_id(piece_at_src)
+
+            # Check if robot is already at or near src_grasp_m
+            curr_snap = self.backend.get_state_snapshot()
+            curr_p_m = np.array(curr_snap.tcp_pose_mm_deg[:3]) / 1000.0
+            dist_to_src_grasp = float(np.linalg.norm(curr_p_m - np.array(src_grasp_m)))
+
+            if dist_to_src_grasp > 0.005:
+                # Preposition safely: first move to approach pose (safe transit height), then descend to grasp
+                if src_info and "approach_joints_deg" in src_info:
+                    ok_app = self.backend.move_joint(src_info["approach_joints_deg"], speed_factor=speed_factor)
+                else:
+                    ik_res = self.backend.solve_tcp_ik(src_app_pose_mm, allow_multi_seed=True)
+                    if not ik_res.success:
+                        err_msg = f"Preposition rejected: Source cell {src_cell} approach is unreachable"
+                        self.backend._last_error = err_msg
+                        self.backend.set_trajectory_stage("IDLE")
+                        self.backend.set_allowed_grasp_piece_id(None)
+                        return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg}
+                    ok_app = self.backend.move_joint(np.degrees(ik_res.joints_rad).tolist(), speed_factor=speed_factor)
+
+                if not ok_app:
+                    err_msg = self.backend._last_error or f"Preposition approach to {src_cell} failed"
+                    self.backend.set_trajectory_stage("IDLE")
+                    self.backend.set_allowed_grasp_piece_id(None)
+                    return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg}
+
+                # Descend vertically to src grasp
+                ok_descend = self.backend.move_cartesian(src_grasp_pose_mm, speed_factor=speed_factor, samples=samples_per_stage)
+                if not ok_descend:
+                    err_msg = self.backend._last_error or f"Preposition descent to {src_cell} grasp failed"
+                    self.backend.set_trajectory_stage("IDLE")
+                    self.backend.set_allowed_grasp_piece_id(None)
+                    return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg}
+
+            # --- Stage 1: LIFT (vertical MoveL from grasp to safe transit height) ---
+            self.backend.set_trajectory_stage("LIFT")
+            ok1 = self.move_cartesian(to_mm_deg(src_app_m), speed_factor=speed_factor, samples=samples_per_stage)
+            if not ok1:
+                err_msg = self.backend._last_error or "LIFT stage failed"
+                self.backend.set_trajectory_stage("IDLE")
+                return {"success": False, "failed_stage": "LIFT", "error": err_msg}
+
+            # --- Stage 2: TRANSIT (horizontal MoveL across safe transit plane) ---
+            self.backend.set_trajectory_stage("TRANSIT")
+            ok2 = self.move_cartesian(to_mm_deg(dst_app_m), speed_factor=speed_factor, samples=samples_per_stage)
+            if not ok2:
+                err_msg = self.backend._last_error or "TRANSIT stage failed"
+                self.backend.set_trajectory_stage("IDLE")
+                return {"success": False, "failed_stage": "TRANSIT", "error": err_msg}
+
+            # --- Stage 3: LAND (vertical MoveL from safe transit height down to grasp target) ---
+            self.backend.set_trajectory_stage("LAND")
+            ok3 = self.move_cartesian(to_mm_deg(dst_grasp_m), speed_factor=speed_factor, samples=samples_per_stage)
+            if not ok3:
+                err_msg = self.backend._last_error or "LAND stage failed"
+                self.backend.set_trajectory_stage("IDLE")
+                return {"success": False, "failed_stage": "LAND", "error": err_msg}
+
+            # --- COMPLETE ---
+            self.backend.set_trajectory_stage("COMPLETE")
+            time.sleep(0.05)
+            self.backend.set_trajectory_stage("IDLE")
+
+            return {
+                "success": True,
+                "stages": ["PREPOSITION", "LIFT", "TRANSIT", "LAND", "COMPLETE"],
+                "src": src_cell,
+                "dst": dst_cell,
+                "z_grasp_m": z_grasp,
+                "z_transit_m": z_transit,
+            }
 
     def start(self) -> None:
         """Start or initialize simulation coordinator (idempotent)."""

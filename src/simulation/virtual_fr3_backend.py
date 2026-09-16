@@ -54,6 +54,7 @@ class VirtualFR3Backend(RobotBackend):
         self._state_lock = threading.RLock()
         self._connected = False
         self._motion_state = "DISCONNECTED"
+        self._trajectory_stage: Optional[str] = None
         self._gripper_closed = False
         self._last_error = None
 
@@ -163,6 +164,12 @@ class VirtualFR3Backend(RobotBackend):
             pose_flange, seed_joints=seed_joints, allow_multi_seed=allow_multi_seed
         )
 
+    def set_trajectory_stage(self, stage: Optional[str]) -> None:
+        """Set current 3-stage trajectory phase (PREPOSITION, LIFT, TRANSIT, LAND, COMPLETE, FAILED, None)."""
+        with self._state_lock:
+            self._trajectory_stage = stage
+            self._sync_telemetry()
+
     def get_state_snapshot(self) -> RobotStateSnapshot:
         """Return immutable, thread-safe snapshot of current authoritative state."""
         with self._state_lock:
@@ -176,6 +183,7 @@ class VirtualFR3Backend(RobotBackend):
                 gripper_closed=self._gripper_closed,
                 timestamp=time.time(),
                 last_error=self._last_error,
+                trajectory_stage=self._trajectory_stage,
             )
 
     def _sync_telemetry(self):
@@ -190,6 +198,7 @@ class VirtualFR3Backend(RobotBackend):
             gripper_closed=self._gripper_closed,
             timestamp=time.time(),
             last_error=self._last_error,
+            trajectory_stage=self._trajectory_stage,
         )
 
         if self.telemetry_publisher is not None:
@@ -202,6 +211,9 @@ class VirtualFR3Backend(RobotBackend):
                         tcp_mm_deg=self._tcp_pose_mm_deg,
                         gripper=self._gripper_closed,
                         robot_model="FR3",
+                        motion_state=self._motion_state,
+                        trajectory_stage=self._trajectory_stage,
+                        last_error=self._last_error,
                     )
             except Exception as e:
                 self._last_error = f"Telemetry sync warning: {e}"
@@ -261,7 +273,7 @@ class VirtualFR3Backend(RobotBackend):
 
         # Pre-validate trajectory through collision guard if configured
         if self.collision_guard is not None:
-            max_joint_step_rad = math.radians(2.0)
+            max_joint_step_rad = math.radians(1.0)  # Bounded to <= 1.0 degree
             diff_rad = np.abs(target_rad - start_rad)
             n_sub = max(2, int(math.ceil(float(np.max(diff_rad)) / max_joint_step_rad)))
             q_samples = [start_rad + (float(k) / n_sub) * (target_rad - start_rad) for k in range(1, n_sub + 1)]
@@ -273,6 +285,12 @@ class VirtualFR3Backend(RobotBackend):
                 with self._state_lock:
                     self._last_error = f"MoveJ rejected by collision guard: {col_res.failure_reason}"
                     self._motion_state = "COLLISION_REJECTED"
+                    # Preserve last safe state strictly
+                    self._current_joints_rad = start_rad.copy()
+                    self._current_joints_deg = [round(math.degrees(float(val)), 3) for val in start_rad]
+                    self._flange_pose_mm_deg = self._compute_flange_pose_mm_deg(start_rad)
+                    self._tcp_pose_mm_deg = self._compute_tcp_pose_mm_deg(start_rad)
+                    self._sync_telemetry()
                 return False
 
         # Physical motion duration constrained by URDF maximum joint velocities:
@@ -368,7 +386,13 @@ class VirtualFR3Backend(RobotBackend):
             dtype=float,
         )
 
-        num_samples = max(2, samples)
+        # Derive sample count dynamically with bounded spatial/angular resolution (Anti-Tunneling):
+        # max translational step <= 3 mm, max rotational step <= 1.0 deg
+        dist_mm = float(np.linalg.norm(target_p - start_p))
+        n_trans = int(math.ceil(dist_mm / 3.0))
+        max_rot_deg = float(np.max(np.abs(rot_diff))) if len(rot_diff) > 0 else 0.0
+        n_rot = int(math.ceil(max_rot_deg / 1.0))
+        num_samples = max(n_trans, n_rot, samples, 10)
         joint_trajectory = []
         seed = start_joints_rad.copy()
 
@@ -405,6 +429,12 @@ class VirtualFR3Backend(RobotBackend):
                         f"Cartesian waypoint {i}/{num_samples} unreachable: {ik_res.failure_reason}"
                     )
                     self._motion_state = "ERROR"
+                    # Preserve last safe state strictly
+                    self._current_joints_rad = start_joints_rad.copy()
+                    self._current_joints_deg = [round(math.degrees(float(val)), 3) for val in start_joints_rad]
+                    self._flange_pose_mm_deg = self._compute_flange_pose_mm_deg(start_joints_rad)
+                    self._tcp_pose_mm_deg = list(start_pose_mm_deg)
+                    self._sync_telemetry()
                 return False
 
             joint_trajectory.append(ik_res.joints_rad)
@@ -420,6 +450,12 @@ class VirtualFR3Backend(RobotBackend):
                 with self._state_lock:
                     self._last_error = f"MoveCartesian rejected by collision guard: {col_res.failure_reason}"
                     self._motion_state = "COLLISION_REJECTED"
+                    # Preserve last safe state strictly
+                    self._current_joints_rad = start_joints_rad.copy()
+                    self._current_joints_deg = [round(math.degrees(float(val)), 3) for val in start_joints_rad]
+                    self._flange_pose_mm_deg = self._compute_flange_pose_mm_deg(start_joints_rad)
+                    self._tcp_pose_mm_deg = list(start_pose_mm_deg)
+                    self._sync_telemetry()
                 return False
 
         # Waypoints all validated: execute trajectory
@@ -476,3 +512,7 @@ class VirtualFR3Backend(RobotBackend):
                 self._motion_state = "IDLE"
             self._sync_telemetry()
         return True
+
+    def reset_to_home(self) -> bool:
+        """Move arm back to canonical home joint pose."""
+        return self.move_joint(self.DEFAULT_HOME_JOINTS_DEG)

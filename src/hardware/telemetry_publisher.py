@@ -153,12 +153,22 @@ class TelemetryPublisher:
             self.current_tcp = [420.0, 0.0, 280.0, 180.0, 0.0, 0.0]
             self.current_joints = FR5Kinematics.inverse_kinematics(self.current_tcp)
         self.is_gripper_active = False
+        self._motion_state = "IDLE"
+        self._trajectory_stage: Optional[str] = None
+        self._last_error: Optional[str] = None
+        self._command_handlers: List = []
         self._latest_world_state: Optional[dict] = None
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._server_thread: Optional[threading.Thread] = None
         self._heartbeat_thread: Optional[threading.Thread] = None
         self._running = False
+
+    def register_command_handler(self, handler):
+        """Register a callback to process incoming commands from WebSocket clients."""
+        with self._state_lock:
+            if handler not in self._command_handlers:
+                self._command_handlers.append(handler)
 
     def start(self):
         """Start WebSocket server in background daemon thread."""
@@ -192,9 +202,20 @@ class TelemetryPublisher:
                     ws_data = self._latest_world_state
                 if ws_data is not None:
                     await websocket.send(json.dumps(ws_data))
-                # Keep connection open until client disconnects
-                async for _ in websocket:
-                    pass
+                # Listen for incoming client commands
+                async for raw_msg in websocket:
+                    try:
+                        cmd_dict = json.loads(raw_msg)
+                        if isinstance(cmd_dict, dict):
+                            with self._state_lock:
+                                handlers = list(self._command_handlers)
+                            for ch in handlers:
+                                try:
+                                    ch(cmd_dict)
+                                except Exception as cmd_err:
+                                    print(f"[TELEMETRY WARN] Command execution error: {cmd_err}")
+                    except Exception as parse_err:
+                        print(f"[TELEMETRY WARN] Failed to parse client message: {parse_err}")
             except websockets.exceptions.ConnectionClosed:
                 pass
             except Exception as e:
@@ -222,6 +243,9 @@ class TelemetryPublisher:
                 "joints": list(self.current_joints),
                 "tcp": list(self.current_tcp),
                 "gripper": self.is_gripper_active,
+                "motion_state": self._motion_state,
+                "trajectory_stage": self._trajectory_stage,
+                "last_error": self._last_error,
             }
         return json.dumps(packet)
 
@@ -232,6 +256,9 @@ class TelemetryPublisher:
             self.current_joints = list(snapshot.joints_deg)
             self.current_tcp = list(snapshot.tcp_pose_mm_deg)
             self.is_gripper_active = bool(snapshot.gripper_closed)
+            self._motion_state = snapshot.motion_state
+            self._trajectory_stage = getattr(snapshot, "trajectory_stage", None)
+            self._last_error = snapshot.last_error
         self._broadcast_sync()
 
     def update_state(
@@ -240,6 +267,9 @@ class TelemetryPublisher:
         tcp_mm_deg: List[float],
         gripper: bool = False,
         robot_model: str = "FR3",
+        motion_state: str = "IDLE",
+        trajectory_stage: Optional[str] = None,
+        last_error: Optional[str] = None,
     ):
         """Update telemetry state with explicit values."""
         with self._state_lock:
@@ -247,6 +277,9 @@ class TelemetryPublisher:
             self.current_joints = list(joints_deg)
             self.current_tcp = list(tcp_mm_deg)
             self.is_gripper_active = bool(gripper)
+            self._motion_state = motion_state
+            self._trajectory_stage = trajectory_stage
+            self._last_error = last_error
         self._broadcast_sync()
 
     def update_world_state(self, world_state):

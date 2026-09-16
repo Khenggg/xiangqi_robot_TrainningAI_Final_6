@@ -235,13 +235,55 @@ class FR3CollisionGuard:
         q_samples: Sequence[Sequence[float]],
         allowed_grasp_piece_id: Optional[str] = None,
         safety_margin_m: Optional[float] = None,
+        max_subdivision_step_rad: float = 0.0174533,  # 1.0 degree max joint delta
     ) -> CollisionResult:
         """
-        Validate an entire trajectory sample-by-sample to prevent tunneling.
+        Validate an entire trajectory sample-by-sample with defensive intermediate
+        subdivision between consecutive waypoints to strictly eliminate collision tunneling.
         """
+        if not q_samples:
+            return CollisionResult(safe=True)
+
+        prev_q: Optional[np.ndarray] = None
+        global_step_idx = 0
+
         for idx, q_step in enumerate(q_samples):
+            curr_q = np.array(q_step, dtype=float)
+
+            # Defensive subdivision: if consecutive waypoints exceed max_subdivision_step_rad,
+            # interpolate and check all intermediate configurations.
+            if prev_q is not None:
+                max_diff = float(np.max(np.abs(curr_q - prev_q)))
+                if max_diff > max_subdivision_step_rad:
+                    n_sub = int(np.ceil(max_diff / max_subdivision_step_rad))
+                    for k in range(1, n_sub):
+                        alpha = float(k) / float(n_sub)
+                        q_interp = prev_q + alpha * (curr_q - prev_q)
+                        res = self.validate_configuration(
+                            q_interp,
+                            allowed_grasp_piece_id=allowed_grasp_piece_id,
+                            safety_margin_m=safety_margin_m,
+                        )
+                        if not res.safe:
+                            return CollisionResult(
+                                safe=False,
+                                colliding_body=res.colliding_body,
+                                robot_link=res.robot_link,
+                                obstacle=res.obstacle,
+                                distance_m=res.distance_m,
+                                penetration_m=res.penetration_m,
+                                sample_index=global_step_idx,
+                                q_failed=res.q_failed,
+                                failure_reason=(
+                                    f"Intermediate trajectory segment {idx-1}->{idx} (substep {k}/{n_sub}) "
+                                    f"failed collision check: {res.failure_reason}"
+                                ),
+                            )
+                        global_step_idx += 1
+
+            # Validate the waypoint itself
             res = self.validate_configuration(
-                q_step,
+                curr_q,
                 allowed_grasp_piece_id=allowed_grasp_piece_id,
                 safety_margin_m=safety_margin_m,
             )
@@ -253,8 +295,11 @@ class FR3CollisionGuard:
                     obstacle=res.obstacle,
                     distance_m=res.distance_m,
                     penetration_m=res.penetration_m,
-                    sample_index=idx,
+                    sample_index=global_step_idx,
                     q_failed=res.q_failed,
                     failure_reason=f"Waypoint {idx}/{len(q_samples)} failed collision check: {res.failure_reason}",
                 )
+            global_step_idx += 1
+            prev_q = curr_q
+
         return CollisionResult(safe=True)
