@@ -14,6 +14,7 @@ import {
   fetchScenePlacement,
   boardPointToXYZ,
 } from "./board.mjs";
+import { buildCoordinateRulerGroup, createDimensionTape } from "./ruler.mjs";
 
 // ---------------------------------------------------------------------------
 // 1) CẤU HÌNH ROBOT & KINEMATICS DYNAMIC LOADER
@@ -134,6 +135,8 @@ camera.position.set(0.75, 0.75, 0.75);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0.15, 0.25);
 controls.enableDamping = true;
+window.__camera = camera;
+window.__controls = controls;
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x1a1f27, 1.1));
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.4);
@@ -145,6 +148,8 @@ scene.add(grid);
 
 let xiangqiPieces = null;
 let piecesGroupRef = null;
+let coordinateRulerGroup = null;
+let activeDimensionTape = null;
 
 
 function resizeRenderer() {
@@ -908,6 +913,30 @@ function initJointControlPanelEvents() {
     raycaster.setFromCamera(mouse, camera);
 
     const hits = raycaster.intersectObjects(scene.children, true);
+
+    // 1. Kiểm tra click vào cạnh thước / trục tọa độ (Click-to-Show)
+    for (const hit of hits) {
+      if (hit.object?.userData?.isRulerProxy) {
+        const axis = hit.object.userData.axis;
+        if (coordinateRulerGroup?.toggleAxis) {
+          const isVis = coordinateRulerGroup.toggleAxis(axis, hit.point);
+          const coordReadoutEl = document.getElementById("coordReadout");
+          if (coordReadoutEl) {
+            const xMm = (hit.point.x * 1000).toFixed(0);
+            const yMm = (hit.point.y * 1000).toFixed(1);
+            const zMm = (hit.point.z * 1000).toFixed(0);
+            coordReadoutEl.textContent = `📍 Cạnh ${axis}: ${isVis ? "BẬT" : "TẮT"} (X:${xMm}mm Y:${yMm}mm Z:${zMm}mm)`;
+          }
+          const toggleRulerBtn = document.getElementById("toggleRulerBtn");
+          if (toggleRulerBtn && coordinateRulerGroup.isAnyLabelsVisible) {
+            toggleRulerBtn.classList.toggle("active", coordinateRulerGroup.isAnyLabelsVisible());
+          }
+        }
+        return;
+      }
+    }
+
+    // 2. Click vào quân cờ hoặc ô cờ
     for (const hit of hits) {
       let obj = hit.object;
       while (obj && !obj.userData?.id && obj !== scene) {
@@ -918,6 +947,80 @@ function initJointControlPanelEvents() {
         const tabReachBtnEl = document.getElementById("tabReachBtn");
         tabReachBtnEl?.click();
         break;
+      }
+    }
+  });
+
+  // Ruler toggle button (HUD)
+  const toggleRulerBtn = document.getElementById("toggleRulerBtn");
+  if (toggleRulerBtn) {
+    toggleRulerBtn.addEventListener("click", () => {
+      if (!coordinateRulerGroup) return;
+      const isVisible = coordinateRulerGroup.toggleAll();
+      if (activeDimensionTape) {
+        activeDimensionTape.visible = isVisible;
+      }
+      toggleRulerBtn.classList.toggle("active", isVisible);
+      const coordReadoutEl = document.getElementById("coordReadout");
+      if (coordReadoutEl) {
+        coordReadoutEl.textContent = isVisible
+          ? "Đang hiện toàn bộ thước đo (Click cạnh để bật/tắt từng trục)"
+          : "Đã ẩn thước đo (Click vào cạnh trục để hiện)";
+      }
+    });
+  }
+
+  // Keyboard shortcut 'R' to toggle coordinate ruler
+  window.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+    if (e.key === "r" || e.key === "R") {
+      if (toggleRulerBtn) toggleRulerBtn.click();
+    }
+  });
+
+  // Pointer move: update real-time hovered coordinates over board & ruler edges
+  canvas.addEventListener("pointermove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+
+    const hits = raycaster.intersectObjects(scene.children, true);
+    let isHoveringInteractive = false;
+
+    for (const hit of hits) {
+      if (hit.object?.userData?.isRulerProxy) {
+        isHoveringInteractive = true;
+        canvas.style.cursor = "pointer";
+        const axis = hit.object.userData.axis;
+        const x_mm = (hit.point.x * 1000).toFixed(0);
+        const y_mm = (hit.point.y * 1000).toFixed(1);
+        const z_mm = (hit.point.z * 1000).toFixed(0);
+        const coordReadoutEl = document.getElementById("coordReadout");
+        if (coordReadoutEl && !state.selectedCell) {
+          coordReadoutEl.textContent = `👆 Click cạnh ${axis} để hiện tọa độ (X:${x_mm} Y:${y_mm} Z:${z_mm})`;
+        }
+        break;
+      } else if (hit.object?.userData && (hit.object.userData.col !== undefined || hit.object.userData.row !== undefined)) {
+        isHoveringInteractive = true;
+        canvas.style.cursor = "pointer";
+        break;
+      }
+    }
+
+    if (!isHoveringInteractive) {
+      canvas.style.cursor = "default";
+      for (const hit of hits) {
+        if (hit.point && Math.abs(hit.point.y - 0.0105) < 0.03) {
+          const x_mm = (hit.point.x * 1000).toFixed(0);
+          const y_mm = (hit.point.y * 1000).toFixed(1);
+          const z_mm = (hit.point.z * 1000).toFixed(0);
+          const coordReadoutEl = document.getElementById("coordReadout");
+          if (coordReadoutEl && !state.selectedCell) {
+            coordReadoutEl.textContent = `Cursor: X:${x_mm}mm | Y:${y_mm}mm | Z:${z_mm}mm`;
+          }
+          break;
+        }
       }
     }
   });
@@ -1057,12 +1160,49 @@ function goToCell(row, col) {
   const cell = state.cellDataset.cells.find((c) => c.row === row && c.col === col);
   if (!cell || !cell.reachable) return;
 
-  // Update 3D ring marker
+  // Update 3D ring marker & coordinates
   const ring = getOrCreateTargetRing();
   if (physicalGeometryRef) {
     const pt = boardPointToXYZ(col, row, physicalGeometryRef);
     ring.position.set(pt.x, pt.y + 0.001, pt.z);
     ring.material.color.setHex(0x58a6ff);
+
+    const worldX_mm = (pt.x * 1000).toFixed(1);
+    const worldY_mm = (pt.y * 1000).toFixed(1);
+    const worldZ_mm = (pt.z * 1000).toFixed(1);
+
+    const robX_mm = (cell.x_m * 1000).toFixed(1);
+    const robY_mm = (cell.y_m * 1000).toFixed(1);
+    const robZ_mm = (0.0105 * 1000).toFixed(1);
+
+    const coordReadoutEl = document.getElementById("coordReadout");
+    if (coordReadoutEl) {
+      coordReadoutEl.textContent = `X: ${worldX_mm}mm | Y: ${worldY_mm}mm | Z: ${worldZ_mm}mm`;
+    }
+    const diagWorldCoord = document.getElementById("diagWorldCoord");
+    if (diagWorldCoord) {
+      diagWorldCoord.textContent = `X: ${worldX_mm}mm, Y: ${worldY_mm}mm, Z: ${worldZ_mm}mm`;
+    }
+    const diagRobotCoord = document.getElementById("diagRobotCoord");
+    if (diagRobotCoord) {
+      diagRobotCoord.textContent = `X: ${robX_mm}mm, Y: ${robY_mm}mm, Z: ${robZ_mm}mm`;
+    }
+
+    // Dynamic dimension line from origin to cell
+    if (activeDimensionTape) {
+      scene.remove(activeDimensionTape);
+      activeDimensionTape = null;
+    }
+    const distMm = (Math.hypot(pt.x, pt.z) * 1000).toFixed(0);
+    activeDimensionTape = createDimensionTape(
+      new THREE.Vector3(0, 0.002, 0),
+      new THREE.Vector3(pt.x, 0.002, pt.z),
+      `R = ${distMm}mm (Ô ${col},${row})`
+    );
+    if (coordinateRulerGroup) {
+      activeDimensionTape.visible = coordinateRulerGroup.visible;
+    }
+    scene.add(activeDimensionTape);
   }
 
   // Update inputs
@@ -1152,6 +1292,9 @@ async function initApp() {
     xiangqiPieces = pieces;
     piecesGroupRef = piecesGroup;
     scene.add(piecesGroup);
+
+    coordinateRulerGroup = buildCoordinateRulerGroup({ initialLabelsVisible: false });
+    scene.add(coordinateRulerGroup);
 
     await switchRobotProfile(state.robotProfileId);
     renderJointControls();

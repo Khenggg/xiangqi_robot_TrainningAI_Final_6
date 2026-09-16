@@ -169,6 +169,96 @@ function createBoardTexture(geometry = null) {
     canvas.height - paddingY * 2 + 24
   );
 
+  // 5. Thước đo chia vạch milimet (mm) trên lề bàn cờ
+  ctx.save();
+  ctx.strokeStyle = "#4a2e18";
+  ctx.fillStyle = "#3e2410";
+  ctx.font = "bold 13px 'Segoe UI', Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  const playableW = geo.playableWidthMm || 320;
+  const playableL = geo.playableLengthMm || 360;
+  const pxPerMmX = (canvas.width - paddingX * 2) / playableW;
+  const pxPerMmY = (canvas.height - paddingY * 2) / playableL;
+
+  // Thước ngang (biên trên & biên dưới): col 0 (x max) -> col 8 (x min)
+  for (let mm = 0; mm <= playableW; mm += 1) {
+    const x = (canvas.width - paddingX) - mm * pxPerMmX;
+    if (mm % 40 === 0) {
+      // Vạch cột chính (40mm)
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(x, paddingY - 12);
+      ctx.lineTo(x, paddingY - 26);
+      ctx.moveTo(x, canvas.height - paddingY + 12);
+      ctx.lineTo(x, canvas.height - paddingY + 26);
+      ctx.stroke();
+
+      // Số đo mm
+      ctx.fillText(`${mm}mm`, x, paddingY - 34);
+      ctx.fillText(`${mm}mm`, x, canvas.height - paddingY + 34);
+    } else if (mm % 10 === 0) {
+      // Vạch 10mm
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x, paddingY - 12);
+      ctx.lineTo(x, paddingY - 21);
+      ctx.moveTo(x, canvas.height - paddingY + 12);
+      ctx.lineTo(x, canvas.height - paddingY + 21);
+      ctx.stroke();
+    } else if (mm % 2 === 0) {
+      // Vạch 2mm
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(x, paddingY - 12);
+      ctx.lineTo(x, paddingY - 17);
+      ctx.moveTo(x, canvas.height - paddingY + 12);
+      ctx.lineTo(x, canvas.height - paddingY + 17);
+      ctx.stroke();
+    }
+  }
+
+  // Thước dọc (biên trái & biên phải): row 0 -> row 9
+  for (let mm = 0; mm <= playableL; mm += 1) {
+    const y = paddingY + mm * pxPerMmY;
+    if (mm % 40 === 0) {
+      // Vạch hàng chính (40mm)
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(paddingX - 12, y);
+      ctx.lineTo(paddingX - 26, y);
+      ctx.moveTo(canvas.width - paddingX + 12, y);
+      ctx.lineTo(canvas.width - paddingX + 26, y);
+      ctx.stroke();
+
+      // Số đo mm bên trái & phải
+      ctx.textAlign = "right";
+      ctx.fillText(`${mm}`, paddingX - 30, y);
+      ctx.textAlign = "left";
+      ctx.fillText(`${mm}`, canvas.width - paddingX + 30, y);
+    } else if (mm % 10 === 0) {
+      // Vạch 10mm
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(paddingX - 12, y);
+      ctx.lineTo(paddingX - 21, y);
+      ctx.moveTo(canvas.width - paddingX + 12, y);
+      ctx.lineTo(canvas.width - paddingX + 21, y);
+      ctx.stroke();
+    } else if (mm % 2 === 0) {
+      // Vạch 2mm
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(paddingX - 12, y);
+      ctx.lineTo(paddingX - 17, y);
+      ctx.moveTo(canvas.width - paddingX + 12, y);
+      ctx.lineTo(canvas.width - paddingX + 17, y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;

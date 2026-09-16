@@ -70,6 +70,22 @@ html, body {
   border-color: #8b949e !important;
   color: #ffffff !important;
 }
+.hud-btn-secondary.active {
+  background: #1f6feb !important;
+  border-color: #58a6ff !important;
+  color: #ffffff !important;
+}
+.hud-coord-readout {
+  font-size: 12px;
+  color: #58a6ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: #0d1117;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
 
 #canvasContainer {
   position: relative;

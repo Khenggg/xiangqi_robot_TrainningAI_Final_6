@@ -32,6 +32,8 @@
         <button id="liveBtn">Connect live</button>
         <span id="liveState">OFFLINE</span>
         <button id="toggleControlsBtn" class="hud-btn-secondary" title="Bật/tắt bảng điều khiển góc khớp">🎮 Điều khiển khớp</button>
+        <button id="toggleRulerBtn" class="hud-btn-secondary" title="Click trực tiếp vào cạnh trục/bàn cờ hoặc bấm nút này để hiện hệ số tọa độ (Phím R)">📏 Thước đo (Click cạnh)</button>
+        <span id="coordReadout" class="hud-coord-readout" title="Tọa độ mục tiêu / Click vào cạnh để xem tọa độ">Click cạnh để đo tọa độ mm</span>
         <span id="jointsReadout"></span>
       </header>
       <div id="canvasContainer">
@@ -111,6 +113,14 @@
               <div class="diag-row">
                 <span>Ô mục tiêu:</span>
                 <strong id="diagCellLabel">Cột 4, Hàng 4</strong>
+              </div>
+              <div class="diag-row">
+                <span>Tọa độ 3D (World):</span>
+                <strong id="diagWorldCoord" style="color: #38bdf8">X: 0.0mm, Y: 10.5mm, Z: 360.0mm</strong>
+              </div>
+              <div class="diag-row">
+                <span>Tọa độ Robot Base:</span>
+                <strong id="diagRobotCoord" style="color: #a78bfa">X: -360.0mm, Y: 0.0mm, Z: 10.5mm</strong>
               </div>
 
               <!-- 3-Phase Safe Trajectory Stepper -->
