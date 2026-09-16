@@ -1,0 +1,15 @@
+{
+  "ROBOT_IP": "",
+  "MOVE_SPEED": null,
+  "ROTATION": [null, null, null],
+  "PICK_Z": null,
+  "PLACE_Z": null,
+  "SAFE_Z": null,
+  "IDLE_X": null,
+  "IDLE_Y": null,
+  "IDLE_Z": null,
+  "CAPTURE_BIN_X": null,
+  "CAPTURE_BIN_Y": null,
+  "GRIPPER_OPEN": null,
+  "GRIPPER_CLOSE": null
+}

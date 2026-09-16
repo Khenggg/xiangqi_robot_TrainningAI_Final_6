@@ -1,0 +1,1007 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simulation Match API — Hướng dẫn tích hợp</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --card: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --heading: #f0f6fc;
+        --accent: #58a6ff;
+        --green: #3fb950;
+        --red: #f85149;
+        --orange: #d29922;
+        --purple: #bc8cff;
+        --code-bg: #0d1117;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.7;
+        padding: 20px;
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      h1 {
+        color: var(--heading);
+        font-size: 2em;
+        margin-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 12px;
+      }
+      h2 {
+        color: var(--heading);
+        font-size: 1.5em;
+        margin-top: 40px;
+        margin-bottom: 16px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 8px;
+      }
+      h3 {
+        color: var(--accent);
+        font-size: 1.15em;
+        margin-top: 28px;
+        margin-bottom: 10px;
+      }
+      p {
+        margin-bottom: 12px;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      strong {
+        color: var(--heading);
+      }
+      ul,
+      ol {
+        margin-bottom: 12px;
+        padding-left: 24px;
+      }
+      li {
+        margin: 4px 0;
+      }
+      code {
+        background: #1c2128;
+        color: #79c0ff;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.9em;
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+      pre {
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+        overflow-x: auto;
+        margin: 12px 0 16px;
+        font-size: 0.85em;
+        line-height: 1.5;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+        color: #e6edf3;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12px 0 20px;
+        font-size: 0.9em;
+      }
+      th {
+        background: #1c2128;
+        color: var(--heading);
+        padding: 10px 14px;
+        text-align: left;
+        border: 1px solid var(--border);
+        font-weight: 600;
+      }
+      td {
+        padding: 8px 14px;
+        border: 1px solid var(--border);
+        vertical-align: top;
+      }
+      tr:nth-child(even) td {
+        background: #161b22;
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.8em;
+        font-weight: 600;
+      }
+      .badge-post {
+        background: #1f6feb33;
+        color: #58a6ff;
+        border: 1px solid #1f6feb55;
+      }
+      .badge-get {
+        background: #23883e33;
+        color: #3fb950;
+        border: 1px solid #23883e55;
+      }
+      .alert {
+        border-left: 4px solid;
+        padding: 12px 16px;
+        margin: 16px 0;
+        border-radius: 0 8px 8px 0;
+        background: #1c2128;
+      }
+      .alert-important {
+        border-color: var(--purple);
+      }
+      .alert-important::before {
+        content: "⚠️ QUAN TRỌNG: ";
+        font-weight: 700;
+        color: var(--purple);
+      }
+      .alert-note {
+        border-color: var(--accent);
+      }
+      .alert-note::before {
+        content: "💡 ";
+      }
+      .alert-success {
+        border-color: var(--green);
+      }
+      .alert-success::before {
+        content: "✅ ";
+      }
+      .alert-warn {
+        border-color: var(--orange);
+      }
+      .alert-warn::before {
+        content: "🔄 ";
+      }
+      .meta-badges {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+      }
+      .meta-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-radius: 8px;
+        font-size: 0.85em;
+        font-weight: 500;
+      }
+      .meta-badge.server {
+        background: #1f6feb22;
+        color: var(--accent);
+        border: 1px solid #1f6feb44;
+      }
+      .meta-badge.version {
+        background: #23883e22;
+        color: var(--green);
+        border: 1px solid #23883e44;
+      }
+      .meta-badge.status {
+        background: #bc8cff22;
+        color: var(--purple);
+        border: 1px solid #bc8cff44;
+      }
+      .board-ascii {
+        font-family: "SFMono-Regular", Consolas, monospace;
+        background: #1a1e24;
+        padding: 16px 20px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        line-height: 1.6;
+        font-size: 0.82em;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      .toc {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px 24px;
+        margin: 20px 0;
+      }
+      .toc ol {
+        padding-left: 20px;
+      }
+      .toc li {
+        margin: 6px 0;
+      }
+      .step-card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        margin: 16px 0;
+      }
+      .step-card h4 {
+        color: var(--green);
+        margin-bottom: 8px;
+        font-size: 1em;
+      }
+      .step-result {
+        display: inline-block;
+        background: #23883e22;
+        color: var(--green);
+        padding: 4px 12px;
+        border-radius: 6px;
+        font-size: 0.85em;
+        margin-top: 8px;
+        border: 1px solid #23883e44;
+      }
+      .flow-diagram {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 24px;
+        margin: 16px 0;
+        text-align: left;
+        font-family: monospace;
+        line-height: 1.8;
+        font-size: 0.9em;
+        overflow-x: auto;
+        white-space: pre;
+        color: var(--text);
+      }
+      .fen-breakdown {
+        font-family: "SFMono-Regular", Consolas, monospace;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px;
+        margin: 12px 0;
+        line-height: 2;
+        font-size: 0.85em;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 32px 0;
+      }
+      @media (max-width: 640px) {
+        body {
+          padding: 12px;
+        }
+        h1 {
+          font-size: 1.4em;
+        }
+        pre {
+          font-size: 0.78em;
+          padding: 12px;
+        }
+        table {
+          font-size: 0.8em;
+        }
+        .board-ascii {
+          font-size: 0.72em;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🎮 Simulation Match API</h1>
+    <p style="font-size: 1.1em; margin-bottom: 16px">
+      Hướng dẫn tích hợp cho bên thứ 3
+    </p>
+    <div class="meta-badges">
+      <span class="meta-badge server">🌐 https://tuongkydaisu.com</span>
+      <span class="meta-badge version">📦 v1.0 — 10/03/2026</span>
+      <span class="meta-badge status">✅ Tested on Production</span>
+    </div>
+
+    <div class="toc">
+      <strong style="color: var(--heading)">Mục lục</strong>
+      <ol>
+        <li><a href="#overview">Tổng quan</a></li>
+        <li><a href="#auth">Xác thực</a></li>
+        <li><a href="#coord">Hệ tọa độ chuẩn &amp; FEN</a></li>
+        <li><a href="#api-list">Danh sách API</a></li>
+        <li><a href="#api-detail">Chi tiết từng API</a></li>
+        <li><a href="#flow">Flow mẫu hoàn chỉnh</a></li>
+        <li><a href="#websocket">WebSocket — Xem trực tiếp</a></li>
+        <li><a href="#errors">Mã lỗi</a></li>
+        <li><a href="#limits">Giới hạn &amp; Quy tắc</a></li>
+      </ol>
+    </div>
+
+    <hr />
+
+    <h2 id="overview">1. Tổng quan</h2>
+    <p>
+      API cho phép bên thứ 3 <strong>điều khiển hoàn toàn</strong> một trận đấu
+      Cờ Tướng qua REST API:
+    </p>
+    <div class="flow-diagram">
+      <span style="color: var(--accent); font-weight: bold">Bên thứ 3</span>
+      <span style="color: var(--accent); font-weight: bold">Server API</span>
+      <span style="color: var(--accent); font-weight: bold">WebSocket</span>
+      <span style="color: var(--accent); font-weight: bold">Người xem</span> │ │
+      │ │ │── POST /matches ────────▶│ │ │ │◀── roomId = "2511" ──────│ │ │ │ │
+      │ │ │ ┌───
+      <span style="color: var(--orange)">Mỗi nước đi</span>
+      ──────────────────────────────────────────────┐ │ │ │ POST /matches/ │ │ │
+      │ │──┤ {roomId}/fen ───────▶│──
+      <span style="color: var(--green)">Broadcast</span> ──────────▶│──
+      <span style="color: var(--green)">Cập nhật bàn cờ</span> ─▶│ │ │◀─┤
+      moveNumber, piece │ │ <span style="color: var(--green)">real-time</span> │
+      │ │ └───────────────────────────────────────────────────────────────────┘
+      │ │ │ │ │ │── POST /end ────────────▶│──
+      <span style="color: var(--green)">Broadcast kết quả</span>
+      ──▶│───────────────────▶│
+    </div>
+    <p>
+      <strong>Người dùng web</strong> vào "Xem Cờ Trực Tiếp" sẽ thấy trận đấu
+      real-time. Không cần bên thứ 3 xử lý WebSocket.
+    </p>
+
+    <hr />
+
+    <h2 id="auth">2. Xác thực</h2>
+    <p>Tất cả API yêu cầu header:</p>
+    <pre><code>Authorization: Bearer &lt;SIMULATION_TOKEN&gt;</code></pre>
+    <div class="alert alert-important">
+      Token có hiệu lực <strong>365 ngày</strong>. Liên hệ admin để được cấp.
+    </div>
+
+    <hr />
+
+    <!-- ══════════════════════════════════════════════ -->
+    <h2 id="coord">3. Hệ tọa độ chuẩn &amp; FEN</h2>
+
+    <div class="alert alert-important">
+      Tất cả FEN string gửi lên API sử dụng
+      <strong>hệ tọa độ chuẩn quốc tế Xiangqi</strong> (giống UCI / Pikafish
+      engine).
+    </div>
+
+    <h3>3.1. Bàn cờ — Tọa độ chuẩn</h3>
+    <div class="board-ascii">
+      <span style="color: var(--accent)">a b c d e f g h i</span> ← CỘT (a→i,
+      trái→phải) ┌───┬───┬───┬───┬───┬───┬───┬───┬───┐
+      <span style="color: var(--orange)">9</span> │
+      <span style="color: #f85149">r</span> │
+      <span style="color: #f85149">n</span> │
+      <span style="color: #f85149">b</span> │
+      <span style="color: #f85149">a</span> │
+      <span style="color: #f85149">k</span> │
+      <span style="color: #f85149">a</span> │
+      <span style="color: #f85149">b</span> │
+      <span style="color: #f85149">n</span> │
+      <span style="color: #f85149">r</span> │ ← Rank 9 (ĐEN)
+      ├───┼───┼───┼───╲───╱───┼───┼───┼───┤
+      <span style="color: var(--orange)">8</span> │ │ │ │ │ ╳ │ │ │ │ │
+      ├───┼───┼───┼───╱───╲───┼───┼───┼───┤
+      <span style="color: var(--orange)">7</span> │ │
+      <span style="color: #f85149">c</span> │ │ │ │ │ │
+      <span style="color: #f85149">c</span> │ │ ← Pháo đen
+      ├───┼───┼───┼───┼───┼───┼───┼───┼───┤
+      <span style="color: var(--orange)">6</span> │
+      <span style="color: #f85149">p</span> │ │
+      <span style="color: #f85149">p</span> │ │
+      <span style="color: #f85149">p</span> │ │
+      <span style="color: #f85149">p</span> │ │
+      <span style="color: #f85149">p</span> │ ← Tốt đen
+      ├───┼───┼───┼───┼───┼───┼───┼───┼───┤
+      <span style="color: var(--orange)">5</span> │<span style="color: #484f58"
+        >═══╪═══╪═══╪═══╪═══╪═══╪═══╪═══╪═══</span
+      >│ ← SÔNG ├───┼───┼───┼───┼───┼───┼───┼───┼───┤
+      <span style="color: var(--orange)">4</span> │<span style="color: #484f58"
+        >═══╪═══╪═══╪═══╪═══╪═══╪═══╪═══╪═══</span
+      >│ ← SÔNG ├───┼───┼───┼───┼───┼───┼───┼───┼───┤
+      <span style="color: var(--orange)">3</span> │
+      <span style="color: #3fb950">P</span> │ │
+      <span style="color: #3fb950">P</span> │ │
+      <span style="color: #3fb950">P</span> │ │
+      <span style="color: #3fb950">P</span> │ │
+      <span style="color: #3fb950">P</span> │ ← Tốt đỏ
+      ├───┼───┼───┼───┼───┼───┼───┼───┼───┤
+      <span style="color: var(--orange)">2</span> │ │
+      <span style="color: #3fb950">C</span> │ │ │ │ │ │
+      <span style="color: #3fb950">C</span> │ │ ← Pháo đỏ
+      ├───┼───┼───┼───╲───╱───┼───┼───┼───┤
+      <span style="color: var(--orange)">1</span> │ │ │ │ │ ╳ │ │ │ │ │
+      ├───┼───┼───┼───╱───╲───┼───┼───┼───┤
+      <span style="color: var(--orange)">0</span> │
+      <span style="color: #3fb950">R</span> │
+      <span style="color: #3fb950">N</span> │
+      <span style="color: #3fb950">B</span> │
+      <span style="color: #3fb950">A</span> │
+      <span style="color: #3fb950">K</span> │
+      <span style="color: #3fb950">A</span> │
+      <span style="color: #3fb950">B</span> │
+      <span style="color: #3fb950">N</span> │
+      <span style="color: #3fb950">R</span> │ ← Rank 0 (ĐỎ)
+      └───┴───┴───┴───┴───┴───┴───┴───┴───┘
+      <span style="color: var(--accent)">a i</span>
+
+      <span style="color: #3fb950; font-weight: bold"
+        >▲ RANK 0 = ĐỎ (dưới) ▼ RANK 9 = ĐEN (trên)</span
+      >
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Thứ</th>
+          <th>Giá trị</th>
+          <th>Mô tả</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Cột</strong></td>
+          <td><code>a</code> → <code>i</code></td>
+          <td>Trái → Phải (9 cột, a=0 ... i=8)</td>
+        </tr>
+        <tr>
+          <td><strong>Hàng (Rank)</strong></td>
+          <td><code>0</code> → <code>9</code></td>
+          <td>Dưới (ĐỎ) → Trên (ĐEN)</td>
+        </tr>
+        <tr>
+          <td><strong>Phe Đỏ</strong></td>
+          <td><code>RNBAKCP</code></td>
+          <td>Chữ IN HOA</td>
+        </tr>
+        <tr>
+          <td><strong>Phe Đen</strong></td>
+          <td><code>rnbakcp</code></td>
+          <td>Chữ thường</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>3.2. FEN String chuẩn (6 phần)</h3>
+    <div class="fen-breakdown">
+      rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR
+      <span style="color: #3fb950">w</span>
+      <span style="color: #484f58">-</span>
+      <span style="color: #484f58">-</span>
+      <span style="color: #bc8cff">0</span>
+      <span style="color: #d29922">1</span> ├─────────── Vị trí quân (rank 9→0)
+      ──────────────────────┤ │ │ │ │ │ │ │ │ │ └─
+      <span style="color: #d29922">Fullmove number</span> │ │ │ └───
+      <span style="color: #bc8cff">Halfmove clock</span> │ │ └─────
+      <span style="color: #484f58">Luôn "-"</span> │ └───────
+      <span style="color: #484f58">Luôn "-"</span> └─────────
+      <span style="color: #3fb950">w=Đỏ, b=Đen</span>
+    </div>
+
+    <div class="alert alert-note">
+      FEN viết tả bàn cờ <strong>từ trên xuống</strong> (rank 9 → rank 0). Phần
+      đầu <code>rnbakabnr</code> = hàng trên cùng (ĐEN), phần cuối
+      <code>RNBAKABNR</code> = hàng dưới cùng (ĐỎ).
+    </div>
+
+    <h3>3.3. Quân cờ</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Ký tự</th>
+          <th>Quân cờ</th>
+          <th>Bên</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>K</code> / <code>k</code></td>
+          <td>Tướng (King)</td>
+          <td>Đỏ / Đen</td>
+        </tr>
+        <tr>
+          <td><code>A</code> / <code>a</code></td>
+          <td>Sĩ (Advisor)</td>
+          <td>Đỏ / Đen</td>
+        </tr>
+        <tr>
+          <td><code>B</code> / <code>b</code></td>
+          <td>Tượng (Bishop)</td>
+          <td>Đỏ / Đen</td>
+        </tr>
+        <tr>
+          <td><code>N</code> / <code>n</code></td>
+          <td>Mã (Knight)</td>
+          <td>Đỏ / Đen</td>
+        </tr>
+        <tr>
+          <td><code>R</code> / <code>r</code></td>
+          <td>Xe (Rook)</td>
+          <td>Đỏ / Đen</td>
+        </tr>
+        <tr>
+          <td><code>C</code> / <code>c</code></td>
+          <td>Pháo (Cannon)</td>
+          <td>Đỏ / Đen</td>
+        </tr>
+        <tr>
+          <td><code>P</code> / <code>p</code></td>
+          <td>Tốt (Pawn)</td>
+          <td>Đỏ / Đen</td>
+        </tr>
+        <tr>
+          <td><code>1-9</code></td>
+          <td>Số ô trống liên tiếp</td>
+          <td>—</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>3.4. Cách tạo FEN sau mỗi nước đi</h3>
+    <ol>
+      <li>Lấy FEN hiện tại (từ response hoặc GET state)</li>
+      <li>Parse phần board (trước dấu cách đầu tiên)</li>
+      <li>Xóa quân ở vị trí cũ, đặt quân ở vị trí mới</li>
+      <li>Ghép lại: <code>{board} {w|b} - - {halfmove} {fullmove}</code></li>
+      <li>Gửi FEN chuẩn lên server</li>
+    </ol>
+
+    <p>
+      <strong>Ví dụ</strong>: Pháo đỏ ở <code>h2</code> di chuyển sang
+      <code>e2</code>:
+    </p>
+    <pre><code>Trước: .../1C5C1/...     → Rank 2: . C . . . . . C .    (h2 = Pháo đỏ)
+Sau:   .../1C2C4/...     → Rank 2: . C . . C . . . .    (e2 = Pháo đỏ)
+
+FEN gửi lên:
+rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR b - - 0 1
+                                                              ↑
+                                                   Đổi w→b vì đến lượt Đen</code></pre>
+
+    <hr />
+
+    <!-- ══════════════════════════════════════════════ -->
+    <h2 id="api-list">4. Danh sách API</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Method</th>
+          <th>Endpoint</th>
+          <th>Mô tả</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td><span class="badge badge-post">POST</span></td>
+          <td><code>/api/simulation/matches</code></td>
+          <td>Tạo trận đấu mới</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><span class="badge badge-post">POST</span></td>
+          <td><code>/api/simulation/matches/{roomId}/fen</code></td>
+          <td>Gửi nước đi (FEN chuẩn)</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><span class="badge badge-post">POST</span></td>
+          <td><code>/api/simulation/matches/{roomId}/end</code></td>
+          <td>Kết thúc trận đấu</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><span class="badge badge-get">GET</span></td>
+          <td><code>/api/simulation/matches</code></td>
+          <td>Liệt kê trận đang chạy</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td><span class="badge badge-get">GET</span></td>
+          <td><code>/api/simulation/matches/{roomId}</code></td>
+          <td>Xem trạng thái trận</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td><span class="badge badge-get">GET</span></td>
+          <td><code>/api/simulation/matches/{roomId}/moves</code></td>
+          <td>Lịch sử nước đi</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <hr />
+
+    <h2 id="api-detail">5. Chi tiết từng API</h2>
+
+    <h3>5.1. Tạo trận đấu</h3>
+    <p>
+      <span class="badge badge-post">POST</span>
+      <code>/api/simulation/matches</code>
+    </p>
+    <p><strong>Request Body:</strong></p>
+    <pre><code>{
+  "redPlayerName": "Wang Tianyi",
+  "blackPlayerName": "Zheng Weidong",
+  "redPlayerAvatar": "https://example.com/red.jpg",
+  "blackPlayerAvatar": "https://example.com/black.jpg"
+}</code></pre>
+    <table>
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th>Bắt buộc</th>
+          <th>Mô tả</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>redPlayerName</code></td>
+          <td>✅</td>
+          <td>Tên kỳ thủ bên Đỏ</td>
+        </tr>
+        <tr>
+          <td><code>blackPlayerName</code></td>
+          <td>✅</td>
+          <td>Tên kỳ thủ bên Đen</td>
+        </tr>
+        <tr>
+          <td><code>redPlayerAvatar</code></td>
+          <td>❌</td>
+          <td>URL ảnh đại diện (tự tạo nếu không gửi)</td>
+        </tr>
+        <tr>
+          <td><code>blackPlayerAvatar</code></td>
+          <td>❌</td>
+          <td>URL ảnh đại diện (tự tạo nếu không gửi)</td>
+        </tr>
+      </tbody>
+    </table>
+    <p><strong>Response (200):</strong></p>
+    <pre><code>{
+  "code": 200,
+  "success": true,
+  "message": "Simulation match created",
+  "data": {
+    "roomId": "2511",
+    "status": "PLAYING",
+    "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+    "currentTurn": "RED",
+    "redPlayerInfo": { "displayName": "Wang Tianyi", "avatar": "...", "elo": 0 },
+    "blackPlayerInfo": { "displayName": "Zheng Weidong", "avatar": "...", "elo": 0 }
+  }
+}</code></pre>
+    <div class="alert alert-note">
+      <strong>Lưu lại <code>roomId</code></strong> — dùng cho tất cả API tiếp
+      theo.
+    </div>
+
+    <h3>5.2. Gửi nước đi (Submit FEN)</h3>
+    <p>
+      <span class="badge badge-post">POST</span>
+      <code>/api/simulation/matches/{roomId}/fen</code>
+    </p>
+    <p><strong>Request Body:</strong></p>
+    <pre><code>{
+  "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR b - - 0 1"
+}</code></pre>
+    <div class="alert alert-note">
+      Gửi <strong>FEN chuẩn đầy đủ</strong> (6 phần) sau khi đi xong. Server tự
+      so sánh FEN cũ/mới để phát hiện nước đi.
+    </div>
+
+    <p><strong>Response (200):</strong></p>
+    <pre><code>{
+  "code": 200,
+  "success": true,
+  "data": {
+    "roomId": "2511",
+    "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR b - - 0 1",
+    "moveNumber": 1,
+    "currentTurn": "BLACK",
+    "move": {
+      "fromRow": 7, "fromCol": 7,
+      "toRow": 7,   "toCol": 4,
+      "piece": "C", "captured": null
+    }
+  }
+}</code></pre>
+
+    <div class="alert alert-warn">
+      <strong>Chuyển đổi tọa độ response:</strong>
+      <code>move.fromRow/toRow</code> dùng <strong>FEN-row order</strong> (row 0
+      = trên cùng = ĐEN).<br />
+      Để chuyển ra <strong>tọa độ chuẩn</strong>: <code>rank = 9 - row</code>,
+      <code>column = 'a' + col</code>.<br />
+      Ví dụ: <code>fromRow=7, fromCol=7</code> → <code>rank = 9-7 = 2</code>,
+      <code>col = 'a'+7 = 'h'</code> → ô <strong>h2</strong>.
+    </div>
+
+    <ul>
+      <li>
+        Server <strong>validate nước đi theo luật cờ tướng</strong> → nước đi
+        sai = lỗi <code>11004</code>
+      </li>
+      <li>Server <strong>tự chuyển lượt</strong> (RED → BLACK → RED...)</li>
+      <li>
+        Mỗi FEN gửi lên → <strong>broadcast real-time</strong> tới người xem
+      </li>
+    </ul>
+
+    <h3>5.3. Kết thúc trận đấu</h3>
+    <p>
+      <span class="badge badge-post">POST</span>
+      <code>/api/simulation/matches/{roomId}/end</code>
+    </p>
+    <pre><code>{ "winner": "RED", "reason": "CHECKMATE" }</code></pre>
+    <table>
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th>Bắt buộc</th>
+          <th>Giá trị</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>winner</code></td>
+          <td>✅</td>
+          <td>
+            <code>"RED"</code> / <code>"BLACK"</code> / <code>"DRAW"</code>
+          </td>
+        </tr>
+        <tr>
+          <td><code>reason</code></td>
+          <td>❌</td>
+          <td>
+            <code>"CHECKMATE"</code> / <code>"RESIGN"</code> /
+            <code>"TIMEOUT"</code> / <code>"OTHER"</code>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>5.4. Liệt kê trận đang chạy</h3>
+    <p>
+      <span class="badge badge-get">GET</span>
+      <code>/api/simulation/matches</code> — Trả về danh sách trận có
+      <code>status = PLAYING</code>.
+    </p>
+
+    <h3>5.5. Xem trạng thái trận</h3>
+    <p>
+      <span class="badge badge-get">GET</span>
+      <code>/api/simulation/matches/{roomId}</code> — Trả về toàn bộ MatchState.
+    </p>
+
+    <h3>5.6. Lịch sử nước đi + FEN</h3>
+    <p>
+      <span class="badge badge-get">GET</span>
+      <code>/api/simulation/matches/{roomId}/moves</code>
+    </p>
+    <pre><code>{
+  "code": 200,
+  "data": {
+    "roomId": "2511",
+    "currentFen": "r1bakabnr/9/1cn1c4/p1p1p1p1p/9/4P4/P1P3P1P/1C2C4/9/RNBAKABNR w - - 0 3",
+    "currentTurn": "RED",
+    "totalMoves": 4,
+    "moves": [
+      { "moveNumber": 1, "piece": "C", "fen": "...after move FEN..." },
+      { "moveNumber": 2, "...": "..." }
+    ]
+  }
+}</code></pre>
+
+    <hr />
+
+    <!-- ══════════════════════════════════════════════ -->
+    <h2 id="flow">6. Flow mẫu hoàn chỉnh</h2>
+    <div class="alert alert-success">
+      Flow này đã test thành công trên production <code>tuongkydaisu.com</code>
+    </div>
+
+    <p>
+      Thay <code>&lt;TOKEN&gt;</code> bằng token thực. Thay
+      <code>&lt;DOMAIN&gt;</code> bằng <code>tuongkydaisu.com</code>.
+    </p>
+
+    <div class="step-card">
+      <h4>Bước 1 — Tạo trận đấu</h4>
+      <pre><code>curl -s -X POST https://&lt;DOMAIN&gt;/api/simulation/matches \
+  -H "Authorization: Bearer &lt;TOKEN&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"redPlayerName":"Wang Tianyi","blackPlayerName":"Zheng Weidong"}'</code></pre>
+      <span class="step-result"
+        >→ Lưu <code>roomId</code>. Ví dụ: <code>ROOM=2511</code></span
+      >
+    </div>
+
+    <div class="step-card">
+      <h4>Bước 2 — Nước 1: Đỏ Pháo <code>h2→e2</code></h4>
+      <p>Pháo đỏ bên phải (ô h2) di chuyển ngang sang giữa (ô e2).</p>
+      <pre><code>curl -s -X POST https://&lt;DOMAIN&gt;/api/simulation/matches/$ROOM/fen \
+  -H "Authorization: Bearer &lt;TOKEN&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"fen":"rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR b - - 0 1"}'</code></pre>
+      <span class="step-result"
+        >→ moveNumber=1, piece="C", currentTurn="BLACK"</span
+      >
+    </div>
+
+    <div class="step-card">
+      <h4>Bước 3 — Nước 2: Đen Mã <code>b9→c7</code></h4>
+      <p>Mã đen bên trái (ô b9) nhảy xuống (ô c7).</p>
+      <pre><code>curl -s -X POST https://&lt;DOMAIN&gt;/api/simulation/matches/$ROOM/fen \
+  -H "Authorization: Bearer &lt;TOKEN&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"fen":"r1bakabnr/9/1cn4c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w - - 0 2"}'</code></pre>
+      <span class="step-result"
+        >→ moveNumber=2, piece="n", currentTurn="RED"</span
+      >
+    </div>
+
+    <div class="step-card">
+      <h4>Bước 4 — Nước 3: Đỏ Tốt <code>e3→e4</code></h4>
+      <p>Tốt giữa (ô e3) tiến lên 1 bước (ô e4).</p>
+      <pre><code>curl -s -X POST https://&lt;DOMAIN&gt;/api/simulation/matches/$ROOM/fen \
+  -H "Authorization: Bearer &lt;TOKEN&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"fen":"r1bakabnr/9/1cn4c1/p1p1p1p1p/9/4P4/P1P3P1P/1C2C4/9/RNBAKABNR b - - 0 2"}'</code></pre>
+      <span class="step-result"
+        >→ moveNumber=3, piece="P", currentTurn="BLACK"</span
+      >
+    </div>
+
+    <div class="step-card">
+      <h4>Bước 5 — Nước 4: Đen Pháo <code>h7→e7</code></h4>
+      <p>Pháo đen bên phải (ô h7) di chuyển ngang sang giữa (ô e7).</p>
+      <pre><code>curl -s -X POST https://&lt;DOMAIN&gt;/api/simulation/matches/$ROOM/fen \
+  -H "Authorization: Bearer &lt;TOKEN&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"fen":"r1bakabnr/9/1cn1c4/p1p1p1p1p/9/4P4/P1P3P1P/1C2C4/9/RNBAKABNR w - - 0 3"}'</code></pre>
+      <span class="step-result"
+        >→ moveNumber=4, piece="c", currentTurn="RED"</span
+      >
+    </div>
+
+    <div class="step-card">
+      <h4>Bước 6 — Kiểm tra lịch sử</h4>
+      <pre><code>curl -s -X GET https://&lt;DOMAIN&gt;/api/simulation/matches/$ROOM/moves \
+  -H "Authorization: Bearer &lt;TOKEN&gt;"</code></pre>
+      <span class="step-result">→ totalMoves=4, mỗi nước có FEN tương ứng</span>
+    </div>
+
+    <div class="step-card">
+      <h4>Bước 7 — Kết thúc trận</h4>
+      <pre><code>curl -s -X POST https://&lt;DOMAIN&gt;/api/simulation/matches/$ROOM/end \
+  -H "Authorization: Bearer &lt;TOKEN&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"winner":"RED","reason":"CHECKMATE"}'</code></pre>
+      <span class="step-result">→ status="FINISHED", winner="RED"</span>
+    </div>
+
+    <hr />
+
+    <h2 id="websocket">7. WebSocket — Xem trực tiếp</h2>
+    <pre><code>Topic: /topic/match/{roomId}</code></pre>
+    <p>
+      Mỗi khi bên thứ 3 gửi FEN mới → server broadcast <code>MatchState</code> →
+      bàn cờ cập nhật real-time.
+      <strong>Không cần bên thứ 3 xử lý gì thêm.</strong>
+    </p>
+
+    <hr />
+
+    <h2 id="errors">8. Mã lỗi</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>HTTP</th>
+          <th>Code</th>
+          <th>Message</th>
+          <th>Nguyên nhân</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>400</td>
+          <td><code>11001</code></td>
+          <td>Match not found</td>
+          <td>roomId sai hoặc trận đã kết thúc</td>
+        </tr>
+        <tr>
+          <td>400</td>
+          <td><code>11002</code></td>
+          <td>Invalid FEN format</td>
+          <td>FEN không đúng chuẩn</td>
+        </tr>
+        <tr>
+          <td>400</td>
+          <td><code>11003</code></td>
+          <td>No move detected</td>
+          <td>FEN mới = FEN cũ, hoặc &gt;1 quân thay đổi</td>
+        </tr>
+        <tr>
+          <td>400</td>
+          <td><code>11004</code></td>
+          <td>Illegal move</td>
+          <td>Vi phạm luật di chuyển quân</td>
+        </tr>
+        <tr>
+          <td>401</td>
+          <td>—</td>
+          <td>Unauthorized</td>
+          <td>Token hết hạn hoặc sai</td>
+        </tr>
+        <tr>
+          <td>403</td>
+          <td>—</td>
+          <td>Forbidden</td>
+          <td>Token không có role SIMULATION</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <hr />
+
+    <h2 id="limits">9. Giới hạn &amp; Quy tắc</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Quy tắc</th>
+          <th>Giá trị</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>TTL trận đấu</td>
+          <td><strong>3 giờ</strong> — tự kết thúc nếu quá hạn</td>
+        </tr>
+        <tr>
+          <td>Token validity</td>
+          <td><strong>365 ngày</strong></td>
+        </tr>
+        <tr>
+          <td>FEN format</td>
+          <td>Chuẩn 6 phần: <code>{board} {w|b} - - {half} {full}</code></td>
+        </tr>
+        <tr>
+          <td>Lượt đi</td>
+          <td>Server tự chuyển RED ↔ BLACK</td>
+        </tr>
+        <tr>
+          <td>Validate</td>
+          <td>✅ Luật di chuyển từng quân</td>
+        </tr>
+        <tr>
+          <td>Không validate</td>
+          <td>❌ Chiếu vĩnh viễn, đuổi vĩnh viễn, luật 60 nước hòa</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <hr />
+    <p
+      style="
+        text-align: center;
+        color: #484f58;
+        margin-top: 40px;
+        font-size: 0.85em;
+      ">
+      <strong>Liên hệ hỗ trợ</strong>: Nếu cần token mới hoặc có lỗi → liên hệ
+      admin.<br />
+      © 2026 Tướng Kỳ Đại Sư — Simulation Match API v1.0
+    </p>
+  </body>
+</html>

@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚙️ Engine API — Tài Liệu Cho Bên Dùng Engine</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --heading: #f0f6fc;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --orange: #d29922;
+      --purple: #bc8cff;
+      --code-bg: #0d1117;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      padding: 20px;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    h1 { color: var(--heading); font-size: 2em; margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+    h2 { color: var(--heading); font-size: 1.5em; margin-top: 40px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    h3 { color: var(--accent); font-size: 1.15em; margin-top: 28px; margin-bottom: 10px; }
+    p { margin-bottom: 12px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    strong { color: var(--heading); }
+    ul, ol { margin-bottom: 12px; padding-left: 24px; }
+    li { margin: 4px 0; }
+    code {
+      background: #1c2128;
+      color: #79c0ff;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+      margin: 12px 0 16px;
+      font-size: 0.85em;
+      line-height: 1.5;
+    }
+    pre code { background: none; padding: 0; color: #e6edf3; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 20px;
+      font-size: 0.9em;
+    }
+    th {
+      background: #1c2128;
+      color: var(--heading);
+      padding: 10px 14px;
+      text-align: left;
+      border: 1px solid var(--border);
+      font-weight: 600;
+    }
+    td {
+      padding: 8px 14px;
+      border: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tr:nth-child(even) td { background: #161b22; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.8em;
+      font-weight: 600;
+    }
+    .badge-post { background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb55; }
+    .badge-get { background: #23883e33; color: #3fb950; border: 1px solid #23883e55; }
+    .badge-free { background: #23883e33; color: #3fb950; border: 1px solid #23883e55; }
+    .alert {
+      border-left: 4px solid;
+      padding: 12px 16px;
+      margin: 16px 0;
+      border-radius: 0 8px 8px 0;
+      background: #1c2128;
+    }
+    .alert-important { border-color: var(--purple); }
+    .alert-important::before { content: "⚠️ QUAN TRỌNG: "; font-weight: 700; color: var(--purple); }
+    .alert-note { border-color: var(--accent); }
+    .alert-note::before { content: "💡 "; }
+    .alert-success { border-color: var(--green); }
+    .alert-success::before { content: "✅ "; }
+    .meta-badges {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    .meta-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 0.85em;
+      font-weight: 500;
+    }
+    .meta-badge.server { background: #1f6feb22; color: var(--accent); border: 1px solid #1f6feb44; }
+    .meta-badge.version { background: #23883e22; color: var(--green); border: 1px solid #23883e44; }
+    .meta-badge.free { background: #bc8cff22; color: var(--purple); border: 1px solid #bc8cff44; }
+    .board-ascii {
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      background: #1a1e24;
+      padding: 16px 20px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      line-height: 1.6;
+      font-size: 0.82em;
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .toc {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 20px 0;
+    }
+    .toc ol { padding-left: 20px; }
+    .toc li { margin: 6px 0; }
+    .fen-breakdown {
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin: 12px 0;
+      line-height: 2;
+      font-size: 0.85em;
+      overflow-x: auto;
+      white-space: pre;
+    }
+    hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+    @media (max-width: 640px) {
+      body { padding: 12px; }
+      h1 { font-size: 1.4em; }
+      pre { font-size: 0.78em; padding: 12px; }
+      table { font-size: 0.8em; }
+      .board-ascii { font-size: 0.72em; }
+    }
+  </style>
+</head>
+<body>
+
+<h1>⚙️ Engine API — Phân Tích Nước Đi</h1>
+<p style="font-size:1.1em; margin-bottom: 16px;">Tài liệu tích hợp cho bên sử dụng engine Pikafish</p>
+
+<div class="meta-badges">
+  <span class="meta-badge server">🌐 https://tuongkydaisu.com</span>
+  <span class="meta-badge version">📦 POST /api/engine/bestmove</span>
+  <span class="meta-badge free">🆓 Public API — Không cần token</span>
+</div>
+
+<div class="toc">
+  <strong style="color:var(--heading)">Mục lục</strong>
+  <ol>
+    <li><a href="#api">Gọi API</a></li>
+    <li><a href="#board">Bàn Cờ — Hệ Tọa Độ</a></li>
+    <li><a href="#fen">Chuỗi FEN — Giải Thích Chi Tiết</a></li>
+    <li><a href="#uci">bestMove — Format UCI</a></li>
+    <li><a href="#examples">Ví Dụ Code (Python / JavaScript)</a></li>
+    <li><a href="#notes">Lưu Ý</a></li>
+  </ol>
+</div>
+
+<hr>
+
+<!-- ═══════════════════════════════ -->
+<h2 id="api">1. Gọi API</h2>
+
+<h3>Request</h3>
+<p><span class="badge badge-post">POST</span> <code>/api/engine/bestmove</code></p>
+
+<pre><code>curl -X POST https://tuongkydaisu.com/api/engine/bestmove \
+  -H "Content-Type: application/json" \
+  -d '{"fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR <span style="color:#3fb950">w</span> <span style="color:#484f58">- - 0 1</span>"}'</code></pre>
+
+<h3>Response</h3>
+<pre><code>{
+  "success": true,
+  "data": {
+    "bestMove": "h2e2",
+    "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+    "nodes": 100000
+  }
+}</code></pre>
+
+<table>
+  <thead><tr><th>Field</th><th>Mô tả</th></tr></thead>
+  <tbody>
+    <tr><td><code>bestMove</code></td><td>Nước đi tốt nhất, format UCI (ví dụ <code>h2e2</code>)</td></tr>
+    <tr><td><code>fen</code></td><td>FEN gốc bạn gửi lên</td></tr>
+    <tr><td><code>nodes</code></td><td>Số node engine đã tính (100,000)</td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<!-- ═══════════════════════════════ -->
+<h2 id="board">2. Bàn Cờ Tướng — Hệ Tọa Độ</h2>
+
+<h3>Bàn cờ 9 cột × 10 hàng</h3>
+
+<div class="board-ascii">
+     <span style="color:var(--accent)">a   b   c   d   e   f   g   h   i</span>      ← CỘT (column)
+   ┌───┬───┬───┬───┬───┬───┬───┬───┬───┐
+ <span style="color:var(--orange)">9</span> │ <span style="color:#f85149">r</span> │ <span style="color:#f85149">n</span> │ <span style="color:#f85149">b</span> │ <span style="color:#f85149">a</span> │ <span style="color:#f85149">k</span> │ <span style="color:#f85149">a</span> │ <span style="color:#f85149">b</span> │ <span style="color:#f85149">n</span> │ <span style="color:#f85149">r</span> │    ← Hàng 9 (ĐEN xa nhất)
+   ├───┼───┼───┼───╲───╱───┼───┼───┼───┤
+ <span style="color:var(--orange)">8</span> │   │   │   │   │ ╳ │   │   │   │   │
+   ├───┼───┼───┼───╱───╲───┼───┼───┼───┤
+ <span style="color:var(--orange)">7</span> │   │ <span style="color:#f85149">c</span> │   │   │   │   │   │ <span style="color:#f85149">c</span> │   │    ← Pháo đen
+   ├───┼───┼───┼───┼───┼───┼───┼───┼───┤
+ <span style="color:var(--orange)">6</span> │ <span style="color:#f85149">p</span> │   │ <span style="color:#f85149">p</span> │   │ <span style="color:#f85149">p</span> │   │ <span style="color:#f85149">p</span> │   │ <span style="color:#f85149">p</span> │    ← Tốt đen
+   ├───┼───┼───┼───┼───┼───┼───┼───┼───┤
+ <span style="color:var(--orange)">5</span> │<span style="color:#484f58">═══╪═══╪═══╪═══╪═══╪═══╪═══╪═══╪═══</span>│    ← SÔNG
+   ├───┼───┼───┼───┼───┼───┼───┼───┼───┤
+ <span style="color:var(--orange)">4</span> │<span style="color:#484f58">═══╪═══╪═══╪═══╪═══╪═══╪═══╪═══╪═══</span>│    ← SÔNG
+   ├───┼───┼───┼───┼───┼───┼───┼───┼───┤
+ <span style="color:var(--orange)">3</span> │ <span style="color:#3fb950">P</span> │   │ <span style="color:#3fb950">P</span> │   │ <span style="color:#3fb950">P</span> │   │ <span style="color:#3fb950">P</span> │   │ <span style="color:#3fb950">P</span> │    ← Tốt đỏ
+   ├───┼───┼───┼───┼───┼───┼───┼───┼───┤
+ <span style="color:var(--orange)">2</span> │   │ <span style="color:#3fb950">C</span> │   │   │   │   │   │ <span style="color:#3fb950">C</span> │   │    ← Pháo đỏ
+   ├───┼───┼───┼───╲───╱───┼───┼───┼───┤
+ <span style="color:var(--orange)">1</span> │   │   │   │   │ ╳ │   │   │   │   │
+   ├───┼───┼───┼───╱───╲───┼───┼───┼───┤
+ <span style="color:var(--orange)">0</span> │ <span style="color:#3fb950">R</span> │ <span style="color:#3fb950">N</span> │ <span style="color:#3fb950">B</span> │ <span style="color:#3fb950">A</span> │ <span style="color:#3fb950">K</span> │ <span style="color:#3fb950">A</span> │ <span style="color:#3fb950">B</span> │ <span style="color:#3fb950">N</span> │ <span style="color:#3fb950">R</span> │    ← Hàng 0 (ĐỎ gần nhất)
+   └───┴───┴───┴───┴───┴───┴───┴───┴───┘
+     <span style="color:var(--accent)">a                               i</span>
+     ↑                               ↑
+   Cột a                          Cột i
+</div>
+
+<h3>Quy ước</h3>
+<table>
+  <thead><tr><th>Thứ</th><th>Giá trị</th><th>Mô tả</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Cột</strong></td><td><code>a</code> → <code>i</code></td><td>Trái → Phải (9 cột)</td></tr>
+    <tr><td><strong>Hàng</strong></td><td><code>0</code> → <code>9</code></td><td>Dưới (ĐỎ) → Trên (ĐEN) (10 hàng)</td></tr>
+    <tr><td><strong>Phe Đỏ</strong></td><td><code>RNBAKCP</code></td><td>Chữ IN HOA</td></tr>
+    <tr><td><strong>Phe Đen</strong></td><td><code>rnbakcp</code></td><td>Chữ thường</td></tr>
+  </tbody>
+</table>
+
+<h3>Tên quân cờ</h3>
+<table>
+  <thead><tr><th>Ký hiệu</th><th>Tên</th><th style="color:#3fb950">ĐỎ</th><th style="color:#f85149">ĐEN</th></tr></thead>
+  <tbody>
+    <tr><td>K/k</td><td><strong>Tướng</strong> (King)</td><td><code>K</code></td><td><code>k</code></td></tr>
+    <tr><td>A/a</td><td><strong>Sĩ</strong> (Advisor)</td><td><code>A</code></td><td><code>a</code></td></tr>
+    <tr><td>B/b</td><td><strong>Tượng</strong> (Bishop)</td><td><code>B</code></td><td><code>b</code></td></tr>
+    <tr><td>N/n</td><td><strong>Mã</strong> (Knight)</td><td><code>N</code></td><td><code>n</code></td></tr>
+    <tr><td>R/r</td><td><strong>Xe</strong> (Rook)</td><td><code>R</code></td><td><code>r</code></td></tr>
+    <tr><td>C/c</td><td><strong>Pháo</strong> (Cannon)</td><td><code>C</code></td><td><code>c</code></td></tr>
+    <tr><td>P/p</td><td><strong>Tốt</strong> (Pawn)</td><td><code>P</code></td><td><code>p</code></td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<!-- ═══════════════════════════════ -->
+<h2 id="fen">3. Chuỗi FEN — Giải Thích Chi Tiết</h2>
+
+<h3>Format chuẩn</h3>
+
+<div class="fen-breakdown">rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR <span style="color:#3fb950">w</span> <span style="color:#484f58">-</span> <span style="color:#484f58">-</span> <span style="color:#bc8cff">0</span> <span style="color:#d29922">1</span>
+│                                                              │ │ │ │ │
+│                                                              │ │ │ │ └─ <span style="color:#d29922">Số lượt đầy đủ (fullmove)</span>
+│                                                              │ │ │ └─── <span style="color:#bc8cff">Đếm nửa nước (halfmove)</span>
+│                                                              │ │ └───── <span style="color:#484f58">Không dùng (luôn "-")</span>
+│                                                              │ └─────── <span style="color:#484f58">Không dùng (luôn "-")</span>
+│                                                              └───────── <span style="color:#3fb950">Lượt đi: w=Đỏ, b=Đen</span>
+└──────────────────────────────────────────────────────────────────────── Vị trí quân cờ
+</div>
+
+<h3>Phần 1: Vị trí quân cờ</h3>
+<p>FEN mô tả bàn cờ <strong>từ trên xuống dưới</strong> (hàng 9 → hàng 0), mỗi hàng cách nhau bằng <code>/</code>.</p>
+
+<div class="fen-breakdown">rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR
+│         │ │       │         │ │ │         │       │ │
+│         │ │       │         │ │ │         │       │ └ Hàng 0: <span style="color:#3fb950">R N B A K A B N R</span> (ĐỎ)
+│         │ │       │         │ │ │         │       └── Hàng 1: 9 ô trống
+│         │ │       │         │ │ │         └────────── Hàng 2: <span style="color:#3fb950">_C_____C_</span> (Pháo ĐỎ)
+│         │ │       │         │ │ └──────────────────── Hàng 3: <span style="color:#3fb950">P_P_P_P_P</span> (Tốt ĐỎ)
+│         │ │       │         │ └────────────────────── Hàng 4: 9 ô trống (SÔNG)
+│         │ │       │         └──────────────────────── Hàng 5: 9 ô trống (SÔNG)
+│         │ │       └────────────────────────────────── Hàng 6: <span style="color:#f85149">p_p_p_p_p</span> (Tốt ĐEN)
+│         │ └────────────────────────────────────────── Hàng 7: <span style="color:#f85149">_c_____c_</span> (Pháo ĐEN)
+│         └──────────────────────────────────────────── Hàng 8: 9 ô trống
+└────────────────────────────────────────────────────── Hàng 9: <span style="color:#f85149">r n b a k a b n r</span> (ĐEN)
+</div>
+
+<p><strong>Quy tắc đọc:</strong></p>
+<ul>
+  <li>Chữ cái = quân cờ tại ô đó</li>
+  <li>Số = số ô trống liên tiếp (VD: <code>1c5c1</code> = 1 trống + pháo + 5 trống + pháo + 1 trống)</li>
+</ul>
+
+<h3>Phần 2: Lượt đi</h3>
+<ul>
+  <li><code>w</code> = <strong>White</strong> = phe Đỏ đi</li>
+  <li><code>b</code> = <strong>Black</strong> = phe Đen đi</li>
+</ul>
+
+<h3>Phần 3-6: Các trường bổ sung</h3>
+<table>
+  <thead><tr><th>Vị trí</th><th>Ý nghĩa</th><th>Giá trị</th></tr></thead>
+  <tbody>
+    <tr><td>3</td><td>Castling (nhập thành)</td><td>Luôn <code>-</code> (Cờ Tướng không có)</td></tr>
+    <tr><td>4</td><td>En passant (bắt tốt qua đường)</td><td>Luôn <code>-</code> (Cờ Tướng không có)</td></tr>
+    <tr><td>5</td><td>Halfmove clock</td><td>Số nước đi không ăn quân (cho luật 60 nước hòa)</td></tr>
+    <tr><td>6</td><td>Fullmove number</td><td>Bắt đầu từ 1, tăng sau mỗi nước Đen</td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<!-- ═══════════════════════════════ -->
+<h2 id="uci">4. bestMove — Format UCI</h2>
+
+<h3>Cấu trúc: <code>[cột_gốc][hàng_gốc][cột_đích][hàng_đích]</code></h3>
+
+<div class="fen-breakdown"><span style="color:#3fb950">h</span><span style="color:#d29922">2</span><span style="color:#58a6ff">e</span><span style="color:#bc8cff">2</span>
+││││
+││└┘── Đích:  cột <span style="color:#58a6ff">e</span>, hàng <span style="color:#bc8cff">2</span>
+└┘──── Gốc:   cột <span style="color:#3fb950">h</span>, hàng <span style="color:#d29922">2</span>
+</div>
+
+<p>→ Di chuyển quân ở <strong>h2</strong> sang <strong>e2</strong> (Pháo đỏ di ngang)</p>
+
+<h3>Ví dụ thực tế</h3>
+<table>
+  <thead><tr><th>bestMove</th><th>Nghĩa</th><th>Quân</th></tr></thead>
+  <tbody>
+    <tr><td><code>h2e2</code></td><td>h2 → e2</td><td>Pháo đỏ di ngang</td></tr>
+    <tr><td><code>h9g7</code></td><td>h9 → g7</td><td>Mã đen nhảy</td></tr>
+    <tr><td><code>b0c2</code></td><td>b0 → c2</td><td>Mã đỏ nhảy</td></tr>
+    <tr><td><code>e0e1</code></td><td>e0 → e1</td><td>Tướng đỏ tiến 1</td></tr>
+    <tr><td><code>a9a0</code></td><td>a9 → a0</td><td>Xe đen ăn Xe đỏ</td></tr>
+  </tbody>
+</table>
+
+<h3>Minh họa trên bàn cờ</h3>
+<div class="board-ascii">
+bestMove = "<span style="color:#3fb950">h2e2</span>" (Pháo đỏ h2 → e2)
+
+     <span style="color:var(--accent)">a   b   c   d   e   f   g   h   i</span>
+   ┌───┬───┬───┬───┬───┬───┬───┬───┬───┐
+ 2 │   │ C │   │   │<span style="color:#3fb950;font-weight:bold">[C]</span>│   │   │<span style="color:#f85149;text-decoration:line-through">(C)</span>│   │
+   └───┴───┴───┴───┴───┴───┴───┴───┴───┘
+                      ↑               ↑
+                    <span style="color:#3fb950">ĐẾN</span>            <span style="color:#f85149">TỪ ĐÂY</span>
+                   <span style="color:#3fb950">(e2)</span>            <span style="color:#f85149">(h2)</span>
+</div>
+
+<hr>
+
+<!-- ═══════════════════════════════ -->
+<h2 id="examples">5. Ví Dụ Sử Dụng Đầy Đủ</h2>
+
+<h3>Python</h3>
+<pre><code><span style="color:#ff7b72">import</span> requests
+
+url = <span style="color:#a5d6ff">"https://tuongkydaisu.com/api/engine/bestmove"</span>
+
+<span style="color:#8b949e"># Thế cờ ban đầu, Đỏ đi trước</span>
+fen = <span style="color:#a5d6ff">"rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1"</span>
+
+response = requests.post(url, json={<span style="color:#a5d6ff">"fen"</span>: fen})
+data = response.json()
+
+<span style="color:#ff7b72">if</span> data[<span style="color:#a5d6ff">"success"</span>]:
+    best = data[<span style="color:#a5d6ff">"data"</span>][<span style="color:#a5d6ff">"bestMove"</span>]  <span style="color:#8b949e"># ví dụ: "h2e2"</span>
+
+    from_col = best[<span style="color:#79c0ff">0</span>]     <span style="color:#8b949e"># 'h'</span>
+    from_row = <span style="color:#ff7b72">int</span>(best[<span style="color:#79c0ff">1</span>])  <span style="color:#8b949e"># 2</span>
+    to_col   = best[<span style="color:#79c0ff">2</span>]     <span style="color:#8b949e"># 'e'</span>
+    to_row   = <span style="color:#ff7b72">int</span>(best[<span style="color:#79c0ff">3</span>])  <span style="color:#8b949e"># 2</span>
+
+    <span style="color:#ff7b72">print</span>(<span style="color:#a5d6ff">f"Di chuyển quân từ <span style="color:#79c0ff">{from_col}{from_row}</span> → <span style="color:#79c0ff">{to_col}{to_row}</span>"</span>)</code></pre>
+
+<h3>JavaScript</h3>
+<pre><code><span style="color:#ff7b72">const</span> res = <span style="color:#ff7b72">await</span> <span style="color:#d2a8ff">fetch</span>(<span style="color:#a5d6ff">"https://tuongkydaisu.com/api/engine/bestmove"</span>, {
+  method: <span style="color:#a5d6ff">"POST"</span>,
+  headers: { <span style="color:#a5d6ff">"Content-Type"</span>: <span style="color:#a5d6ff">"application/json"</span> },
+  body: JSON.<span style="color:#d2a8ff">stringify</span>({
+    fen: <span style="color:#a5d6ff">"rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1"</span>
+  })
+});
+
+<span style="color:#ff7b72">const</span> { data } = <span style="color:#ff7b72">await</span> res.<span style="color:#d2a8ff">json</span>();
+console.<span style="color:#d2a8ff">log</span>(<span style="color:#a5d6ff">"Nước đi tốt nhất:"</span>, data.bestMove);
+<span style="color:#8b949e">// → "h2e2"</span></code></pre>
+
+<hr>
+
+<!-- ═══════════════════════════════ -->
+<h2 id="notes">6. Lưu Ý</h2>
+
+<ul>
+  <li>Engine sử dụng <strong>100,000 nodes</strong> (~depth 8-10), trả kết quả trong <strong>1-3 giây</strong></li>
+  <li>FEN phải đúng chuẩn Xiangqi: <code>{board} {w|b} - - {halfmove} {fullmove}</code></li>
+  <li><code>bestMove</code> luôn trả 4 ký tự: <code>[a-i][0-9][a-i][0-9]</code></li>
+  <li>API hoàn toàn <strong>miễn phí</strong>, không cần đăng ký hay token</li>
+</ul>
+
+<div class="alert alert-important">
+  FEN phải đúng chuẩn 6 phần: <code>vị_trí lượt_đi - - halfmove fullmove</code>
+  <br>Ví dụ: <code>rnbakabnr/9/.../RNBAKABNR <strong>w</strong> - - 0 1</code>
+</div>
+
+<hr>
+
+<p style="text-align:center; color: #484f58; margin-top: 40px; font-size: 0.85em;">
+  © 2026 Tướng Kỳ Đại Sư — Engine API Documentation
+</p>
+
+</body>
+</html>

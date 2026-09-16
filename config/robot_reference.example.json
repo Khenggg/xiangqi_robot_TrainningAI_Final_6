@@ -1,0 +1,9 @@
+{
+  "frame_size": [null, null],
+  "camera_points_px": [[null, null], [null, null], [null, null], [null, null]],
+  "robot_points_xy_mm": [[null, null], [null, null], [null, null], [null, null]],
+  "xy_limits_mm": [[null, null], [null, null]],
+  "motion_tolerance_mm": 1.0,
+  "robot_user": 1,
+  "robot_tool": 0
+}

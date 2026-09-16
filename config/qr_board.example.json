@@ -1,0 +1,9 @@
+{
+  "cell_mm": [null, null],
+  "markers": {
+    "TL": {"id": "XQ:TL", "qr_to_corner_mm": [null, null]},
+    "TR": {"id": "XQ:TR", "qr_to_corner_mm": [null, null]},
+    "BR": {"id": "XQ:BR", "qr_to_corner_mm": [null, null]},
+    "BL": {"id": "XQ:BL", "qr_to_corner_mm": [null, null]}
+  }
+}
