@@ -330,6 +330,21 @@ class TelemetryPublisher:
                 # Throttled/informative warning on failed send
                 print(f"[TELEMETRY WARN] Failed to send packet to client: {e}")
 
+    def broadcast_custom(self, packet_dict: dict) -> None:
+        """Broadcast an arbitrary event packet (e.g. trajectory_result) to all connected clients."""
+        if not self._loop or not self.clients:
+            return
+        msg = json.dumps(packet_dict)
+        with self.clients_lock:
+            clients_copy = list(self.clients)
+        for client in clients_copy:
+            try:
+                asyncio.run_coroutine_threadsafe(client.send(msg), self._loop)
+            except websockets.exceptions.ConnectionClosed:
+                pass
+            except Exception:
+                pass
+
     def _heartbeat_loop(self):
         """Broadcast current state at 25 Hz to ensure smooth UI mirror."""
         step_idx = 0

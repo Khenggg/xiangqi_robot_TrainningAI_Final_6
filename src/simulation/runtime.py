@@ -54,6 +54,10 @@ class VirtualXiangqiSimulation:
         self.telemetry = telemetry
         self.auto_sync_telemetry = auto_sync_telemetry
 
+        # Ensure backend is connected to telemetry publisher
+        if self.telemetry is not None and getattr(self.backend, "telemetry_publisher", None) is None:
+            self.backend.telemetry_publisher = self.telemetry
+
         # Attach collision guard
         if enable_collision_guard:
             self.collision_guard = FR3CollisionGuard(world=self.world)
@@ -194,6 +198,8 @@ class VirtualXiangqiSimulation:
 
         # Stream world state if telemetry connected
         if self.telemetry is not None and self.auto_sync_telemetry:
+            if getattr(self.backend, "telemetry_publisher", None) is None:
+                self.telemetry.update_from_snapshot(snapshot)
             self.telemetry.update_world_state(self.world.get_snapshot())
 
     def connect(self) -> bool:
@@ -201,6 +207,7 @@ class VirtualXiangqiSimulation:
         ok = self.backend.connect()
         self.world.step_until_settled(max_steps=60)
         if self.telemetry and self.auto_sync_telemetry:
+            self.telemetry.update_from_snapshot(self.backend.get_state_snapshot())
             self.telemetry.update_world_state(self.world.get_snapshot())
         return ok
 
@@ -487,6 +494,8 @@ class VirtualXiangqiSimulation:
     def set_telemetry(self, telemetry: TelemetryPublisher) -> None:
         """Attach telemetry publisher and register incoming command callback."""
         self.telemetry = telemetry
+        if self.backend is not None:
+            self.backend.telemetry_publisher = telemetry
         if self.telemetry is not None:
             self.telemetry.register_command_handler(self._handle_client_command)
 
@@ -502,7 +511,7 @@ class VirtualXiangqiSimulation:
             dst = cmd.get("dst")
             if src is not None and dst is not None and len(src) == 2 and len(dst) == 2:
                 threading.Thread(
-                    target=self.execute_3stage_trajectory,
+                    target=self._run_trajectory_async,
                     args=((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1]))),
                     daemon=True,
                 ).start()
@@ -513,6 +522,19 @@ class VirtualXiangqiSimulation:
             self.backend.reset_to_home()
         elif action == "STOP":
             self.backend.stop()
+
+    def _run_trajectory_async(self, src: Tuple[int, int], dst: Tuple[int, int]) -> None:
+        """Execute trajectory asynchronously and broadcast authoritative completion packet."""
+        res = self.execute_3stage_trajectory(src, dst)
+        if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+            self.telemetry.broadcast_custom({
+                "type": "trajectory_result",
+                "success": bool(res.get("success", False)),
+                "failed_stage": res.get("failed_stage"),
+                "error": res.get("error"),
+                "src": list(src),
+                "dst": list(dst),
+            })
 
     def execute_3stage_trajectory(
         self,
@@ -593,7 +615,20 @@ class VirtualXiangqiSimulation:
             dist_to_src_grasp = float(np.linalg.norm(curr_p_m - np.array(src_grasp_m)))
 
             if dist_to_src_grasp > 0.005:
-                # Preposition safely: first move to approach pose (safe transit height), then descend to grasp
+                # Preposition safely:
+                # If departing from near Home pose, elevate / retract j2 first to avoid sweeping low over pieces
+                curr_deg = curr_snap.joints_deg
+                is_near_home = (
+                    abs(curr_deg[0]) < 10.0 and
+                    curr_deg[1] > -55.0 and
+                    abs(curr_deg[2] - 90.0) < 20.0
+                )
+                if is_near_home:
+                    retract_joints = list(curr_deg)
+                    retract_joints[1] = -65.0
+                    self.backend.move_joint(retract_joints, speed_factor=speed_factor)
+
+                # Move to approach pose (safe transit height), then descend to grasp
                 if src_info and "approach_joints_deg" in src_info:
                     ok_app = self.backend.move_joint(src_info["approach_joints_deg"], speed_factor=speed_factor)
                 else:

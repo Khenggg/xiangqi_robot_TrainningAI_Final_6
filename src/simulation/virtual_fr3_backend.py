@@ -268,6 +268,7 @@ class VirtualFR3Backend(RobotBackend):
             if not self._connected:
                 self._last_error = "Cannot move: robot not connected"
                 return False
+            self._last_error = None
             start_rad = self._current_joints_rad.copy()
             self._motion_state = "MOVING"
 
@@ -371,6 +372,7 @@ class VirtualFR3Backend(RobotBackend):
             if not self._connected:
                 self._last_error = "Cannot move: robot not connected"
                 return False
+            self._last_error = None
             start_pose_mm_deg = list(self._tcp_pose_mm_deg)
             start_joints_rad = self._current_joints_rad.copy()
 

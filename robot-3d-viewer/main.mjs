@@ -644,6 +644,10 @@ function connectLive() {
             state.currentArm.gripper.setClosed(Boolean(val.gripper.closed));
           }
         }
+      } else if (data.type === "trajectory_result") {
+        if (!data.success) {
+          handleBackendError(data.error || `Quỹ đạo thất bại ở giai đoạn ${data.failed_stage}`);
+        }
       }
     } catch (error) {
       console.warn("Live message error:", error.message);
@@ -981,6 +985,13 @@ function handleBackendTrajectoryStage(stage, payload) {
     }
     if (expl) {
       expl.innerHTML = `✅ <strong>Đã hoàn thành quỹ đạo 3 giai đoạn:</strong> Robot đã thực thi Lift (+70mm) ➔ Transit ➔ Land bởi backend runtime có thẩm quyền. Trạng thái: <strong>COLLISION-FREE</strong>.`;
+    }
+  } else if (stage === "IDLE") {
+    if (payload && (payload.last_error || payload.motion_state === "COLLISION_REJECTED")) {
+      handleBackendError(payload.last_error || "Chuyển động bị từ chối bởi Collision Guard");
+    } else if (badge && badge.textContent === "GỬI LỆNH TỚI BACKEND...") {
+      badge.className = "badge-safe";
+      badge.textContent = "SẴN SÀNG (IDLE)";
     }
   }
 }

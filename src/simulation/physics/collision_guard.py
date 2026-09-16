@@ -65,10 +65,12 @@ class FR3CollisionGuard:
         world,  # VirtualPhysicalWorld
         safety_margin_m: float = 0.002,  # 2.0 mm default safety margin for links & obstacles
         gripper_board_margin_m: float = 0.0005,  # 0.5 mm clearance for gripper tips above board surface
+        self_collision_margin_m: float = 0.0005,  # 0.5 mm clearance for non-adjacent robot links
     ):
         self.world = world
         self.safety_margin_m = float(safety_margin_m)
         self.gripper_board_margin_m = float(gripper_board_margin_m)
+        self.self_collision_margin_m = float(self_collision_margin_m)
 
     def validate_configuration(
         self,
@@ -76,12 +78,14 @@ class FR3CollisionGuard:
         allowed_grasp_piece_id: Optional[str] = None,
         safety_margin_m: Optional[float] = None,
         gripper_board_margin_m: Optional[float] = None,
+        self_collision_margin_m: Optional[float] = None,
     ) -> CollisionResult:
         """
         Validate whether a single joint configuration is collision-free.
         """
         margin = safety_margin_m if safety_margin_m is not None else self.safety_margin_m
         gb_margin = gripper_board_margin_m if gripper_board_margin_m is not None else self.gripper_board_margin_m
+        self_margin = self_collision_margin_m if self_collision_margin_m is not None else self.self_collision_margin_m
         client = self.world.client_id
         robot_id = self.world.robot_body_id
         board_id = self.world.board_body_id
@@ -207,13 +211,13 @@ class FR3CollisionGuard:
                             )
 
         # 6. Check FR3 self-collision (excluding adjacent pairs)
-        pts = p.getClosestPoints(robot_id, robot_id, distance=margin, physicsClientId=client)
+        pts = p.getClosestPoints(robot_id, robot_id, distance=self_margin, physicsClientId=client)
         for pt in pts:
             linkA, linkB = int(pt[3]), int(pt[4])
             if linkA == linkB or (linkA, linkB) in self.IGNORED_ADJACENT_PAIRS:
                 continue
             dist = float(pt[8])
-            if dist < margin:
+            if dist < self_margin:
                 return CollisionResult(
                     safe=False,
                     colliding_body="robot",
@@ -224,7 +228,7 @@ class FR3CollisionGuard:
                     q_failed=[round(float(q), 4) for q in joints_rad],
                     failure_reason=(
                         f"Robot self-collision between link {linkA} and link {linkB} "
-                        f"(dist={dist*1000:.2f}mm < margin {margin*1000:.2f}mm)"
+                        f"(dist={dist*1000:.2f}mm < margin {self_margin*1000:.2f}mm)"
                     ),
                 )
 
@@ -236,6 +240,7 @@ class FR3CollisionGuard:
         allowed_grasp_piece_id: Optional[str] = None,
         safety_margin_m: Optional[float] = None,
         max_subdivision_step_rad: float = 0.0174533,  # 1.0 degree max joint delta
+        self_collision_margin_m: Optional[float] = None,
     ) -> CollisionResult:
         """
         Validate an entire trajectory sample-by-sample with defensive intermediate
@@ -263,6 +268,7 @@ class FR3CollisionGuard:
                             q_interp,
                             allowed_grasp_piece_id=allowed_grasp_piece_id,
                             safety_margin_m=safety_margin_m,
+                            self_collision_margin_m=self_collision_margin_m,
                         )
                         if not res.safe:
                             return CollisionResult(
@@ -286,6 +292,7 @@ class FR3CollisionGuard:
                 curr_q,
                 allowed_grasp_piece_id=allowed_grasp_piece_id,
                 safety_margin_m=safety_margin_m,
+                self_collision_margin_m=self_collision_margin_m,
             )
             if not res.safe:
                 return CollisionResult(

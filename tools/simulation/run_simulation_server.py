@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Interactive Virtual FAIRINO FR3 Simulation Server.
 Runs TelemetryPublisher (WebSocket ws://127.0.0.1:8765) and VirtualXiangqiSimulation.
@@ -13,6 +13,10 @@ import time
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(line_buffering=True)
 
 from src.hardware.telemetry_publisher import TelemetryPublisher
 from src.simulation.physics.world import VirtualPhysicalWorld
@@ -38,7 +42,7 @@ def main():
     telemetry.start()
 
     world = VirtualPhysicalWorld()
-    backend = VirtualFR3Backend(default_speed_factor=args.speed_factor)
+    backend = VirtualFR3Backend(telemetry_publisher=telemetry, default_speed_factor=args.speed_factor)
     sim = VirtualXiangqiSimulation(backend=backend, world=world, telemetry=telemetry, enable_collision_guard=True)
     sim.connect()
 
