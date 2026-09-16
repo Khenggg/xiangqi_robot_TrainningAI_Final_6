@@ -252,7 +252,7 @@ class CameraMonitor:
         
         # 1. Signal thread dừng
         self._stop_event.set()
-        
+
         # 2. Chờ thread kết thúc
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=2)

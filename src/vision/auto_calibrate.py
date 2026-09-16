@@ -9,7 +9,10 @@ import cv2
 import numpy as np
 from pathlib import Path
 
-from src.vision.calibrate_camera import calibrate_perspective_camera
+from src.vision.calibrate_camera import (
+    RETRY_AUTO_CALIBRATION,
+    calibrate_perspective_camera,
+)
 import config
 
 
@@ -120,7 +123,7 @@ class AutoCalibrator:
             return None
 
 
-def run_calibration_flow(cap, perspective_path, pose_model_path=None, preview_sec=2.0):
+def _run_calibration_attempt(cap, perspective_path, pose_model_path=None, preview_sec=2.0):
     """Quy trình hiệu chỉnh Camera tích hợp:
     
     1. Warm-up camera một lần duy nhất (tránh race condition).
@@ -210,5 +213,20 @@ def run_calibration_flow(cap, perspective_path, pose_model_path=None, preview_se
 
     # --- BƯỚC 3: FALLBACK CLICK TAY NẾU CHƯA CÓ MODEL HOẶC AUTO THẤT BẠI ---
     print("[CALIBRATE] 🖱️ Mở giao diện Click 4 góc thủ công...")
-    return calibrate_perspective_camera(cap, str(perspective_path))
+    manual_result = calibrate_perspective_camera(cap, str(perspective_path))
+    return manual_result
+
+
+def run_calibration_flow(cap, perspective_path, pose_model_path=None, preview_sec=2.0):
+    """Run calibration attempts until the operator saves, cancels, or retries AI."""
+    while True:
+        result = _run_calibration_attempt(
+            cap,
+            perspective_path,
+            pose_model_path=pose_model_path,
+            preview_sec=preview_sec,
+        )
+        if result is not RETRY_AUTO_CALIBRATION:
+            return result
+        print("[CALIBRATE] 🔄 Restarting AI Auto-Calibration...")
 
