@@ -92,10 +92,21 @@
 
 ---
 
+## B09 — `SERVICE_SAFE` Physical Safety Predicate & Board Relocation Collision Margin
+* **Status:** FIXED
+* **Severity:** BLOCKER
+* **Affected Files:** `src/simulation/physics/state.py`, `src/simulation/physics/world.py`, `src/simulation/runtime.py`, `src/simulation/virtual_fr3_backend.py`
+* **Evidence:** Previously, Candidate 1 (`[0, -25, 40, -105, -90, 0]`) penetrated the board by 22.3mm on forward shifts due to the 218mm tool flange-to-TCP offset; Candidate 2 (`HOME: [0, -45, 90, -45, -90, 0]`) had only 14.8mm clearance to link 4 and penetrated by 15.2mm upon a 30mm board elevation; `is_service_safe()` was a simple joint angle threshold check lacking physical grounding (connection, idle, gripper state, attached pieces, and physical clearance); and `set_board_placement` did not enforce continuous 3D swept volume safety margins ($\ge 5.0\text{ mm}$) or authoritative readiness token consumption.
+* **Fix Summary:** Audited both candidates and derived authoritative Upright Retracted configuration `[0.0, -70.0, 60.0, -80.0, -90.0, 0.0]°` ($> 129.9\text{ mm}$ moving link clearance, $> 216.3\text{ mm}$ gripper clearance, condition number $17.67$, joint margin $85.0^\circ$ across full $[-20, 60]\text{ mm}$ shift and $[-10, 30]\text{ mm}$ height envelope); implemented comprehensive `ServiceSafetyReport` and physical predicate `evaluate_service_safety()`; implemented dense 3D interpolated swept volume collision check `check_board_swept_volume_collision()` with positive clearance margin $\ge 5.0\text{ mm}$ and detailed diagnostics; implemented strict `BOARD_ADJUSTMENT_READY` lifecycle token invalidated by any motion/jogging/relocation; and enforced 100% state invariance on board relocation rejection.
+* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests::test_b1_service_safe_physical_predicate_clear` through `test_b11_jog_invalidates_service_safe`, `test_08_is_service_safe_predicate`, `test_09_go_service_safe_motion`, `test_10_prepare_board_adjustment_flow`, `test_12_swept_volume_collision_clear_path`
+* **Last Verified Functional HEAD:** 14f53e949a21b3a3aaee4501a39dcaec0bda1464
+
+---
+
 ## I01 — Deprecated `WebSocketServerProtocol` Import in Telemetry Publisher
 * **Status:** OPEN (Benign warning)
 * **Severity:** LOW
 * **Affected Files:** `src/hardware/telemetry_publisher.py`
 * **Evidence:** Warning during pytest: `DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated`.
 * **Action:** Low impact, server functions normally. Can be migrated to `websockets.asyncio.server.ServerConnection` in a future dependency cleanup.
-* **Last Verified HEAD:** 7ce5e71
+* **Last Verified HEAD:** 14f53e949a21b3a3aaee4501a39dcaec0bda1464

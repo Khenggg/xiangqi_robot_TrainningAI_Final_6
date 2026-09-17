@@ -6,11 +6,12 @@
 
 ## METADATA
 * **CURRENT_BRANCH:** `feature/virtual-robot-3d-simulator`
-* **LAST_REVIEWED_HEAD:** `5af7e3442519502c3028b476da126642cc8fa864`
-* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `5af7e3442519502c3028b476da126642cc8fa864`
+* **LAST_REVIEWED_HEAD:** `14f53e949a21b3a3aaee4501a39dcaec0bda1464`
+* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `14f53e949a21b3a3aaee4501a39dcaec0bda1464`
 * **PASS_A_RUNTIME_AUTHORITY:** `PASS`
 * **PASS_A1_REENTRANT_LOCK:** `PASS`
 * **PASS_A2_NO_SILENT_QUEUE:** `PASS`
+* **PASS_B_SERVICE_SAFE:** `PASS`
 * **PHASE:** `PHASE_3_SIMULATION_VIRTUAL_TWIN`
 * **PHASE_STATUS:** `PARTIAL`
 * **CI_STATUS:** `LOCAL_VERIFIED_GREEN`
@@ -25,17 +26,16 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 4. **[B04] Runtime State Machine, Authority & Concurrency (Pass A, A.1, A.2):** Defined `RuntimeOperationBusy`, implemented `runtime_move_joint()`, routed all WebSocket motion commands through runtime wrappers, closed validation race window by acquiring `acquire_operation_state()` atomically at entry, resolved re-entrant operation lock yielding bug by strictly releasing `_operation_lock` before `yield`, implemented `_operation_depth` tracking, eliminated redundant inner acquisitions, inverted command lock ordering across all 8 runtime wrappers (`runtime_move_joint`, `runtime_go_service_safe`, `runtime_retract_from_board`, `runtime_jog_joint`, `runtime_jog_tcp`, `pick_piece`, `place_piece`, `execute_3stage_trajectory`) so `RuntimeOperationState` acts as the primary admission gate before `_command_lock`, enforced strict non-reentrancy on physical motion operations (`MOTION`, `SERVICE_MOVE`), synchronized validation-in-progress state checking in admission, added deterministic test hooks (`_test_hook_motion_owned`, `_test_hook_service_move_owned`), and proved with timing handshakes that concurrent motions fail fast immediately with `MOTION_REJECTED_BUSY` without silent queueing. (Verified by `test_05_runtime_operation_state_transitions`, `test_06_runtime_operation_state_mutual_exclusion`, `test_a1_move_joint_command_uses_runtime_authority`, `test_a2_true_concurrent_acquisition`, `test_a3_1_real_validator_rejects_move_joint_before_release`, `test_a3_2_timing_handshake_proof`, `test_a3_3_full_route_validator_rejects_move_joint`, `test_a3_validation_vs_move_joint_race`, `test_a4_move_joint_owns_first`, `test_a5_validation_flag_consistency`, `test_a6_exception_cleanup`, `test_a6_nested_exception_cleanup`, `test_a7_service_jog_vs_validation`, `test_lock_not_held_across_yield`, `test_a2_1_move_joint_vs_move_joint_no_queue`, `test_a2_2_timing_handshake_proof`, `test_a2_3_move_joint_vs_jog`, `test_a2_4_service_move_vs_move_joint`, `test_a2_5_pick_vs_move_joint`, `test_a2_6_place_vs_jog`, `test_a2_7_3stage_trajectory_vs_move_joint`).
 5. **[B05] Ruler Listener De-duplication:** Consolidated 3D ruler update listener to a single authoritative telemetry event listener. (Verified by `test_16_ruler_single_authoritative_update`, `test_viewer_coordinate_ruler.mjs`).
 6. **[B06] Wildcard Protection:** Prohibited wildcard `*` in `allowed_grasp_piece_id` across `CollisionGuard` and backend. (Verified by `test_07_collision_guard_explicit_candidate_no_wildcard`).
-7. **Service Safe Pose:** Canonical joint angles `[0.0, -25.0, 40.0, -105.0, -90.0, 0.0]°` and `is_service_safe()` predicate. (Verified by `test_08_is_service_safe_predicate`, `test_09_go_service_safe_motion`).
-8. **Board Adjustment Preparation Flow:** Safe parking in `SERVICE_SAFE` and settling check before board movement. (Verified by `test_10_prepare_board_adjustment_flow`).
-9. **Swept-Volume Collision Detection:** Interpolated collision check between current and candidate board pose against arm links. (Verified by `test_11_swept_volume_collision_arm_obstruction`, `test_12_swept_volume_collision_clear_path`).
+7. **[B07] Swept Volume Collision Detection & Margin:** Interpolated 3D collision check between current and candidate board pose against arm links with positive clearance margin $\ge 5.0\text{ mm}$ and detailed diagnostics. (Verified by `test_11_swept_volume_collision_arm_obstruction`, `test_12_swept_volume_collision_clear_path`, `test_b6_vertical_board_raise_rejected_when_arm_low`, `test_b7_board_lowering_swept_path`, `test_b8_forward_and_backward_shift_swept_path`, `test_b9_combined_diagonal_swept_path`).
+8. **[B08] Validation Cell Loop Indentation Scope:** Corrected block indentation so each cell and route increments and records failures within its respective loop. (Verified by `test_recommended_placement_90_cells_pass`, `test_full_board_routes_validation`).
+9. **[B09] SERVICE_SAFE Physical Safety Predicate & Board Adjustment Safety (Pass B):** Resolved candidate pose collision audit: established authoritative Upright Retracted configuration `[0.0, -70.0, 60.0, -80.0, -90.0, 0.0]°` providing $> 129.9\text{ mm}$ moving link clearance and $> 216.3\text{ mm}$ gripper clearance across the entire adjustment envelope ($[-20, 60]\text{ mm}$ shift, $[-10, 30]\text{ mm}$ height offset); implemented full physical safety predicate `evaluate_service_safety()` with `ServiceSafetyReport`; enforced strict `BOARD_ADJUSTMENT_READY` lifecycle token invalidated by any motion, jog, or completed adjustment; ensured 100% state invariance on adjustment rejection. (Verified by `test_b1_service_safe_physical_predicate_clear` through `test_b11_jog_invalidates_service_safe`).
 10. **Manual Cartesian & Joint Jogging:** Incremental jog with step size selectors and collision prechecks. (Verified by `test_13_runtime_jog_tcp`, `test_14_runtime_jog_joint`).
 11. **In-Process Recovery Actions:** Granular recovery (`clear_error`, `reset_robot`, `reset_board`, `reset_pieces`) and `full_reset` without process termination. (Verified by `test_15_granular_recovery_actions`, `test_17_full_system_reset_in_process`).
 
 ---
 
 ## OPEN_BLOCKERS
-* **Total Count:** 5 (Passes B, C, D, E, F)
-* **Pass B:** `SERVICE_SAFE` physical predicate & Board Adjustment Safety (pending audit of hardware-safe pose invariants and dynamic board adjustment clearance).
+* **Total Count:** 4 (Passes C, D, E, F)
 * **Pass C:** Post-operation retreat (enforcing mandatory clearance retreat after trajectory execution).
 * **Pass D:** Reset transactionality (ensuring atomic cleanup during system/component resets).
 * **Pass E:** Viewer safety UX (front-end safety state guards and error indicators).
@@ -50,8 +50,8 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 ---
 
 ## TEST_EVIDENCE
-* **Python Unit Tests:** 72/72 Phase 3 specific tests PASSED (100% pass rate)
-  * `tests/unit/test_phase3_final_master.py`: 36 passed (including Pass A, A.1, and A.2 tests A2.1–A2.7)
+* **Python Unit Tests:** 83/83 Phase 3 specific tests PASSED (100% pass rate)
+  * `tests/unit/test_phase3_final_master.py`: 47 passed (including Pass A, A.1, A.2 tests and Pass B tests b1–b11)
   * `tests/unit/test_phase3_final_closure.py`: 11 passed
   * `tests/unit/test_phase3_isolation_and_fail_fast.py`: 12 passed
   * `tests/unit/test_phase3_dynamic_board_placement.py`: 13 passed
@@ -64,7 +64,7 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 ---
 
 ## NEXT_ALLOWED_WORK
-* Pass B — `SERVICE_SAFE` physical predicate & Board Adjustment Safety.
+* Pass C — Post-operation retreat (enforcing mandatory clearance retreat after trajectory execution).
 
 ---
 
