@@ -155,6 +155,7 @@ class BoardPlacementAnalyzer:
         forward_shift_mm: float,
         safe_transit_height_mm: float = 70.0,
         board_surface_mm: Optional[float] = None,
+        placement_version: int = 1,
     ) -> Dict[str, Any]:
         """
         Derive pure analytical geometric feasibility precheck.
@@ -209,7 +210,9 @@ class BoardPlacementAnalyzer:
         is_geometric_pass = (approach_margin >= 0.0) and (grasp_margin >= 0.0) and (d >= -20.0)
 
         return {
+            "type": "placement_analysis",
             "forward_shift_mm": round(d, 2),
+            "board_surface_z_mm": round(z_board, 2),
             "safe_transit_height_mm": round(H, 2),
             "row0_center_distance_mm": round(row0_center_dist, 2),
             "far_row_center_distance_mm": round(far_row_center_dist, 2),
@@ -225,6 +228,7 @@ class BoardPlacementAnalyzer:
             "h_max_for_current_d_mm": round(h_max_analytic, 2) if math.isfinite(h_max_analytic) else None,
             "status": "GEOMETRIC PASS" if is_geometric_pass else "GEOMETRIC FAIL",
             "is_geometric_pass": is_geometric_pass,
+            "placement_version": int(placement_version),
         }
 
     def compute_quality_score(

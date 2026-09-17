@@ -66,6 +66,10 @@ export function getActiveBoardGroup() {
   return _activeBoardGroup;
 }
 
+export function getBoardVisualRoot() {
+  return _activeBoardGroup;
+}
+
 export function getScenePlacement() {
   return _activeScenePlacement;
 }
@@ -293,7 +297,8 @@ function createBoardTexture(geometry = null) {
 export function buildBoardGrid(geometry = null) {
   const geo = geometry || getActiveGeometry();
   const group = new THREE.Group();
-  group.name = "xiangqi-board";
+  group.name = "boardVisualRoot";
+  group.userData = { isBoardVisualRoot: true, legacyName: "xiangqi-board" };
 
   const boardWidth = geo.boardWidthM;
   const boardDepth = geo.boardDepthM;

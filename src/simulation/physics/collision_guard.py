@@ -79,6 +79,7 @@ class FR3CollisionGuard:
         safety_margin_m: Optional[float] = None,
         gripper_board_margin_m: Optional[float] = None,
         self_collision_margin_m: Optional[float] = None,
+        restore_state: bool = False,
     ) -> CollisionResult:
         """
         Validate whether a single joint configuration is collision-free.
@@ -90,6 +91,36 @@ class FR3CollisionGuard:
         robot_id = self.world.robot_body_id
         board_id = self.world.board_body_id
 
+        q_bullet_orig = None
+        if restore_state:
+            q_bullet_orig = [p.getJointState(robot_id, j, physicsClientId=client)[0] for j in range(6)]
+
+        try:
+            return self._validate_configuration_internal(
+                joints_rad=joints_rad,
+                allowed_grasp_piece_id=allowed_grasp_piece_id,
+                margin=margin,
+                gb_margin=gb_margin,
+                self_margin=self_margin,
+                client=client,
+                robot_id=robot_id,
+                board_id=board_id,
+            )
+        finally:
+            if q_bullet_orig is not None:
+                self.world.sync_robot_configuration(q_bullet_orig)
+
+    def _validate_configuration_internal(
+        self,
+        joints_rad: Sequence[float],
+        allowed_grasp_piece_id: Optional[str],
+        margin: float,
+        gb_margin: float,
+        self_margin: float,
+        client: int,
+        robot_id: int,
+        board_id: int,
+    ) -> CollisionResult:
         # 1. Sync PyBullet robot and gripper proxies to candidate q
         self.world.sync_robot_configuration(joints_rad)
         p.performCollisionDetection(physicsClientId=client)
@@ -241,6 +272,7 @@ class FR3CollisionGuard:
         safety_margin_m: Optional[float] = None,
         max_subdivision_step_rad: float = 0.0174533,  # 1.0 degree max joint delta
         self_collision_margin_m: Optional[float] = None,
+        restore_state: bool = False,
     ) -> CollisionResult:
         """
         Validate an entire trajectory sample-by-sample with defensive intermediate
@@ -248,6 +280,31 @@ class FR3CollisionGuard:
         """
         if not q_samples:
             return CollisionResult(safe=True)
+
+        q_bullet_orig = None
+        if restore_state:
+            q_bullet_orig = [p.getJointState(self.world.robot_body_id, j, physicsClientId=self.world.client_id)[0] for j in range(6)]
+
+        try:
+            return self._validate_trajectory_internal(
+                q_samples=q_samples,
+                allowed_grasp_piece_id=allowed_grasp_piece_id,
+                safety_margin_m=safety_margin_m,
+                max_subdivision_step_rad=max_subdivision_step_rad,
+                self_collision_margin_m=self_collision_margin_m,
+            )
+        finally:
+            if q_bullet_orig is not None:
+                self.world.sync_robot_configuration(q_bullet_orig)
+
+    def _validate_trajectory_internal(
+        self,
+        q_samples: Sequence[Sequence[float]],
+        allowed_grasp_piece_id: Optional[str],
+        safety_margin_m: Optional[float],
+        max_subdivision_step_rad: float,
+        self_collision_margin_m: Optional[float],
+    ) -> CollisionResult:
 
         prev_q: Optional[np.ndarray] = None
         global_step_idx = 0

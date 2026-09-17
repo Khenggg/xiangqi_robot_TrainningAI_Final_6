@@ -159,6 +159,7 @@ class TelemetryPublisher:
         self._command_handlers: List = []
         self._latest_world_state: Optional[dict] = None
         self._latest_board_placement: Optional[dict] = None
+        self._latest_placement_analysis: Optional[dict] = None
         self.placement_version: int = 1
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -203,8 +204,11 @@ class TelemetryPublisher:
                 with self._state_lock:
                     ws_data = self._latest_world_state
                     bp_data = self._latest_board_placement
+                    pa_data = self._latest_placement_analysis
                 if bp_data is not None:
                     await websocket.send(json.dumps(bp_data))
+                if pa_data is not None:
+                    await websocket.send(json.dumps(pa_data))
                 if ws_data is not None:
                     await websocket.send(json.dumps(ws_data))
                 # Listen for incoming client commands
@@ -339,11 +343,15 @@ class TelemetryPublisher:
 
     def broadcast_custom(self, packet_dict: dict) -> None:
         """Broadcast an arbitrary event packet (e.g. trajectory_result) to all connected clients."""
-        if isinstance(packet_dict, dict) and packet_dict.get("type") == "board_placement":
-            with self._state_lock:
-                self._latest_board_placement = dict(packet_dict)
-                if "placement_version" in packet_dict:
-                    self.placement_version = int(packet_dict["placement_version"])
+        if isinstance(packet_dict, dict):
+            if packet_dict.get("type") == "board_placement":
+                with self._state_lock:
+                    self._latest_board_placement = dict(packet_dict)
+                    if "placement_version" in packet_dict:
+                        self.placement_version = int(packet_dict["placement_version"])
+            elif packet_dict.get("type") == "placement_analysis":
+                with self._state_lock:
+                    self._latest_placement_analysis = dict(packet_dict)
         if not self._loop or not self.clients:
             return
         msg = json.dumps(packet_dict)

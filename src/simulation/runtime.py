@@ -558,97 +558,442 @@ class VirtualXiangqiSimulation:
             self.backend.set_placement_version(new_version)
 
             packet = new_state.to_dict()
+            analysis_packet = self.placement_analyzer.compute_geometric_precheck(
+                forward_shift_mm=new_state.forward_shift_mm,
+                safe_transit_height_mm=new_state.safe_transit_height_mm,
+                board_surface_mm=new_state.grid_origin_robot_m[2] * 1000.0,
+                placement_version=new_version,
+            )
             if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
                 self.telemetry.broadcast_custom(packet)
+                self.telemetry.broadcast_custom(analysis_packet)
                 self.telemetry.update_world_state(self.world.get_snapshot())
 
-            return {"success": True, "placement": packet}
+            return {"success": True, "placement": packet, "analysis": analysis_packet}
 
     def reset_board_placement(self) -> Dict[str, Any]:
         """Reset board placement to nominal scene configuration."""
         return self.set_board_placement(forward_shift_mm=0.0, safe_transit_height_mm=70.0, board_height_offset_mm=0.0)
 
-    def validate_board_placement(self) -> Dict[str, Any]:
+    def validate_board_placement(
+        self,
+        expected_placement_version: Optional[int] = None,
+        placement_version: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
-        Full placement validation testing all 90 cells at runtime.
-        Evaluates grasp IK, approach IK, joint limits, and collision clearances.
+        Execution-equivalent 90-cell local trajectory validation at runtime.
+        For every one of 90 cells:
+          1. Approach endpoint IK & collision
+          2. LAND MoveL (Approach -> Grasp) Cartesian trajectory
+          3. Grasp endpoint IK & collision (target piece allowed)
+          4. LIFT MoveL (Grasp -> Approach) Cartesian trajectory
+
+        Guarantees:
+        - Strict state invariance: original PyBullet robot joint state and backend state
+          are snapshotted and guaranteed restored in finally.
+        - Placement version atomicity: rejects with STALE_VALIDATION_RESULT if placement
+          version changed during validation.
+        - Trajectory-level collision checking using backend.plan_cartesian() without commit.
         """
+        exp_ver = placement_version if placement_version is not None else expected_placement_version
+        if exp_ver is not None and exp_ver != self.placement_state.placement_version:
+            stale_res = {
+                "type": "placement_validation_result",
+                "status": "STALE_VALIDATION_RESULT",
+                "error": (
+                    f"Validation aborted: placement version mismatch (expected {exp_ver}, "
+                    f"current {self.placement_state.placement_version})"
+                ),
+                "placement_version": exp_ver,
+                "current_placement_version": self.placement_state.placement_version,
+                "all_passed": False,
+                "total_cells": 90,
+            }
+            if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+                self.telemetry.broadcast_custom(stale_res)
+            return stale_res
+
+        v_start = self.placement_state.placement_version
         d = self.placement_state.forward_shift_mm
         H = self.placement_state.safe_transit_height_mm
+        z_off = self.placement_state.board_height_offset_mm
         board_z = self.board_surface_z
         piece_h = self.geom.piece_height_mm / 1000.0
         z_grasp = board_z + piece_h / 2.0
         z_app = board_z + H / 1000.0
 
-        grasp_ik_ok = 0
-        app_ik_ok = 0
-        grasp_col_free = 0
-        app_col_free = 0
-        failed_cells = []
+        # Snapshot authoritative state for guaranteed restoration (Section K)
+        world = self.world
+        client = world.client_id
+        q_bullet_orig = [p.getJointState(world.robot_body_id, j, physicsClientId=client)[0] for j in range(6)]
+        snap_orig = self.backend.get_state_snapshot()
+        backend_q_orig = np.array(self.backend._current_joints_rad, copy=True)
 
-        for r in range(10):
-            for c in range(9):
-                pos_gr = self.cell_to_robot_xyz_m(r, c, z_grasp)
-                pos_ap = self.cell_to_robot_xyz_m(r, c, z_app)
-                pose_gr_mm = [v * 1000.0 for v in pos_gr] + list(self.target_tool_euler_deg)
-                pose_ap_mm = [v * 1000.0 for v in pos_ap] + list(self.target_tool_euler_deg)
+        try:
+            grasp_ik_ok = 0
+            app_ik_ok = 0
+            grasp_col_free = 0
+            app_col_free = 0
+            land_traj_ok = 0
+            lift_traj_ok = 0
+            passed_cells = 0
+            failed_cells = []
 
-                seed_info = self.reachability_dataset.get((r, c))
-                seed_app = np.deg2rad(seed_info["approach_joints_deg"]) if seed_info and "approach_joints_deg" in seed_info else None
-                seed_gr = np.deg2rad(seed_info["grasp_joints_deg"]) if seed_info and "grasp_joints_deg" in seed_info else None
+            for r in range(10):
+                for c in range(9):
+                    # Check version mid-validation for early stale rejection
+                    if self.placement_state.placement_version != v_start:
+                        break
 
-                ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
-                ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
+                    pos_gr = self.cell_to_robot_xyz_m(r, c, z_grasp)
+                    pos_ap = self.cell_to_robot_xyz_m(r, c, z_app)
+                    pose_gr_mm = [v * 1000.0 for v in pos_gr] + list(self.target_tool_euler_deg)
+                    pose_ap_mm = [v * 1000.0 for v in pos_ap] + list(self.target_tool_euler_deg)
 
-                ap_safe = False
-                gr_safe = False
-                reason = None
+                    seed_info = self.reachability_dataset.get((r, c))
+                    seed_app = np.deg2rad(seed_info["approach_joints_deg"]) if seed_info and "approach_joints_deg" in seed_info else None
+                    seed_gr = np.deg2rad(seed_info["grasp_joints_deg"]) if seed_info and "grasp_joints_deg" in seed_info else None
 
-                if ik_ap.success:
-                    app_ik_ok += 1
-                    col_ap = self.collision_guard.validate_configuration(ik_ap.joints_rad)
-                    if col_ap.safe:
-                        app_col_free += 1
-                        ap_safe = True
+                    # 1. Approach endpoint IK
+                    ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
+                    col_ap_safe = False
+                    col_ap_reason = None
+                    if ik_ap.success:
+                        app_ik_ok += 1
+                        col_ap = self.collision_guard.validate_configuration(ik_ap.joints_rad, restore_state=True)
+                        if col_ap.safe:
+                            app_col_free += 1
+                            col_ap_safe = True
+                        else:
+                            col_ap_reason = col_ap.failure_reason
+
+                    # 2. LAND MoveL trajectory (Approach -> Grasp)
+                    land_safe = False
+                    land_reason = None
+                    land_plan = None
+                    if ik_ap.success and col_ap_safe:
+                        land_plan = self.backend.plan_cartesian(
+                            start_q=ik_ap.joints_rad,
+                            target_pose_mm_deg=pose_gr_mm,
+                            samples=20,
+                            allowed_grasp_piece_id="*",
+                            check_collision=True,
+                        )
+                        if land_plan.success:
+                            land_traj_ok += 1
+                            land_safe = True
+                        else:
+                            land_reason = land_plan.failure_reason
+
+                    # 3. Grasp endpoint IK & collision
+                    ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
+                    col_gr_safe = False
+                    col_gr_reason = None
+                    if ik_gr.success:
+                        grasp_ik_ok += 1
+                        col_gr = self.collision_guard.validate_configuration(
+                            ik_gr.joints_rad, allowed_grasp_piece_id="*", restore_state=True
+                        )
+                        if col_gr.safe:
+                            grasp_col_free += 1
+                            col_gr_safe = True
+                        else:
+                            col_gr_reason = col_gr.failure_reason
+
+                    # 4. LIFT MoveL trajectory (Grasp -> Approach)
+                    lift_safe = False
+                    lift_reason = None
+                    lift_plan = None
+                    start_q_lift = land_plan.final_q if (land_plan and land_plan.success and land_plan.final_q is not None) else (
+                        ik_gr.joints_rad if ik_gr.success else None
+                    )
+                    if start_q_lift is not None and col_gr_safe:
+                        lift_plan = self.backend.plan_cartesian(
+                            start_q=start_q_lift,
+                            target_pose_mm_deg=pose_ap_mm,
+                            samples=20,
+                            allowed_grasp_piece_id="*",
+                            check_collision=True,
+                        )
+                        if lift_plan.success:
+                            lift_traj_ok += 1
+                            lift_safe = True
+                        else:
+                            lift_reason = lift_plan.failure_reason
+
+                    cell_passed = (
+                        ik_ap.success and col_ap_safe and land_safe and
+                        ik_gr.success and col_gr_safe and lift_safe
+                    )
+
+                    if cell_passed:
+                        passed_cells += 1
                     else:
-                        reason = f"Approach: {col_ap.failure_reason}"
-                else:
-                    reason = "Approach IK failed"
+                        failure_parts = []
+                        if not ik_ap.success:
+                            failure_parts.append("Approach IK failed")
+                        elif not col_ap_safe:
+                            failure_parts.append(f"Approach collision: {col_ap_reason}")
+                        if not land_safe:
+                            failure_parts.append(f"LAND MoveL: {land_reason}")
+                        if not ik_gr.success:
+                            failure_parts.append("Grasp IK failed")
+                        elif not col_gr_safe:
+                            failure_parts.append(f"Grasp collision: {col_gr_reason}")
+                        if not lift_safe:
+                            failure_parts.append(f"LIFT MoveL: {lift_reason}")
 
-                if ik_gr.success:
-                    grasp_ik_ok += 1
-                    col_gr = self.collision_guard.validate_configuration(ik_gr.joints_rad, allowed_grasp_piece_id="*")
-                    if col_gr.safe:
-                        grasp_col_free += 1
-                        gr_safe = True
-                    else:
-                        reason = (reason + " | " if reason else "") + f"Grasp: {col_gr.failure_reason}"
-                else:
-                    reason = (reason + " | " if reason else "") + "Grasp IK failed"
+                        stage_failed = (
+                            "APPROACH" if not (ik_ap.success and col_ap_safe) else (
+                                "LAND" if not land_safe else (
+                                    "GRASP" if not (ik_gr.success and col_gr_safe) else "LIFT"
+                                )
+                            )
+                        )
+                        fail_entry = {
+                            "row": r,
+                            "col": c,
+                            "stage": stage_failed,
+                            "reason": " | ".join(failure_parts),
+                            "approach_ik_ok": ik_ap.success,
+                            "approach_col_safe": col_ap_safe,
+                            "land_safe": land_safe,
+                            "grasp_ik_ok": ik_gr.success,
+                            "grasp_col_safe": col_gr_safe,
+                            "lift_safe": lift_safe,
+                        }
+                        if land_plan and not land_plan.success:
+                            fail_entry["sample_idx"] = land_plan.first_failing_sample
+                            fail_entry["first_failing_sample"] = land_plan.first_failing_sample
+                            fail_entry["q_failed"] = land_plan.q_failed
+                            fail_entry["colliding_links"] = land_plan.colliding_links_or_bodies
+                        elif lift_plan and not lift_plan.success:
+                            fail_entry["sample_idx"] = lift_plan.first_failing_sample
+                            fail_entry["first_failing_sample"] = lift_plan.first_failing_sample
+                            fail_entry["q_failed"] = lift_plan.q_failed
+                            fail_entry["colliding_links"] = lift_plan.colliding_links_or_bodies
+                        failed_cells.append(fail_entry)
 
-                if not (ap_safe and gr_safe):
-                    failed_cells.append({
-                        "row": r,
-                        "col": c,
-                        "reason": reason,
-                    })
+            # Check placement version atomicity
+            if self.placement_state.placement_version != v_start:
+                stale_res = {
+                    "type": "placement_validation_result",
+                    "status": "STALE_VALIDATION_RESULT",
+                    "error": (
+                        f"Validation aborted: placement version changed from v{v_start} "
+                        f"to v{self.placement_state.placement_version}"
+                    ),
+                    "placement_version": v_start,
+                    "current_placement_version": self.placement_state.placement_version,
+                    "all_passed": False,
+                    "total_cells": 90,
+                }
+                if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+                    self.telemetry.broadcast_custom(stale_res)
+                return stale_res
 
-        res = {
-            "type": "placement_validation_result",
-            "placement_version": self.placement_state.placement_version,
-            "forward_shift_mm": d,
-            "safe_transit_height_mm": H,
-            "grasp_ik_count": grasp_ik_ok,
-            "approach_ik_count": app_ik_ok,
-            "grasp_collision_free_count": grasp_col_free,
-            "approach_collision_free_count": app_col_free,
-            "total_cells": 90,
-            "all_passed": (grasp_col_free == 90 and app_col_free == 90),
-            "failed_cells": failed_cells,
-        }
-        if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
-            self.telemetry.broadcast_custom(res)
-        return res
+            all_passed = (passed_cells == 90)
+            res = {
+                "type": "placement_validation_result",
+                "validation_scope": "local_cell_trajectories",
+                "status": "LOCAL_CELL_TRAJECTORIES_PASS" if all_passed else "FAIL",
+                "placement_version": v_start,
+                "forward_shift_mm": d,
+                "safe_transit_height_mm": H,
+                "board_height_offset_mm": z_off,
+                "grasp_ik_count": grasp_ik_ok,
+                "approach_ik_count": app_ik_ok,
+                "grasp_collision_free_count": grasp_col_free,
+                "approach_collision_free_count": app_col_free,
+                "land_trajectory_safe_count": land_traj_ok,
+                "land_move_passed_count": land_traj_ok,
+                "lift_trajectory_safe_count": lift_traj_ok,
+                "lift_move_passed_count": lift_traj_ok,
+                "passed_cells_count": passed_cells,
+                "total_cells": 90,
+                "all_passed": all_passed,
+                "failed_cells": failed_cells,
+            }
+            if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+                self.telemetry.broadcast_custom(res)
+            return res
+
+        finally:
+            # Guaranteed state restoration (Section K)
+            world.sync_robot_configuration(q_bullet_orig)
+            self.backend._current_joints_rad = np.array(backend_q_orig, copy=True)
+            self.backend._current_joints_deg = [round(math.degrees(float(val)), 3) for val in backend_q_orig]
+            self.backend._flange_pose_mm_deg = self.backend._compute_flange_pose_mm_deg(backend_q_orig)
+            self.backend._tcp_pose_mm_deg = list(snap_orig.tcp_pose_mm_deg)
+            self.backend._motion_state = snap_orig.motion_state
+            self._sync_gripper_to_tcp(snap_orig)
+
+    def validate_full_board_routes(
+        self,
+        sample_limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Full Board Route Dry-Run Validation (Section J).
+        Validates all 90*89 = 8010 ordered routes (or sample_limit routes):
+          source grasp -> LIFT -> source approach -> TRANSIT -> dest approach -> LAND -> dest grasp
+        Uses plan_cartesian() without state commit.
+        Leaves PyBullet and backend robot state 100% unchanged.
+        """
+        v_start = self.placement_state.placement_version
+        world = self.world
+        client = world.client_id
+        q_bullet_orig = [p.getJointState(world.robot_body_id, j, physicsClientId=client)[0] for j in range(6)]
+        snap_orig = self.backend.get_state_snapshot()
+        backend_q_orig = np.array(self.backend._current_joints_rad, copy=True)
+
+        try:
+            board_z = self.board_surface_z
+            piece_h = self.geom.piece_height_mm / 1000.0
+            z_grasp = board_z + piece_h / 2.0
+            z_transit = board_z + (self.placement_state.safe_transit_height_mm / 1000.0)
+
+            # Step 1: Pre-plan and cache Approach IK, Grasp IK, LIFT, and LAND for all 90 cells
+            cell_plans = {}
+            for r in range(10):
+                for c in range(9):
+                    pos_gr = self.cell_to_robot_xyz_m(r, c, z_grasp)
+                    pos_ap = self.cell_to_robot_xyz_m(r, c, z_transit)
+                    pose_gr_mm = [v * 1000.0 for v in pos_gr] + list(self.target_tool_euler_deg)
+                    pose_ap_mm = [v * 1000.0 for v in pos_ap] + list(self.target_tool_euler_deg)
+
+                    seed_info = self.reachability_dataset.get((r, c))
+                    seed_app = np.deg2rad(seed_info["approach_joints_deg"]) if seed_info and "approach_joints_deg" in seed_info else None
+                    seed_gr = np.deg2rad(seed_info["grasp_joints_deg"]) if seed_info and "grasp_joints_deg" in seed_info else None
+
+                    ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
+                    ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
+
+                    lift_plan = None
+                    land_plan = None
+                    if ik_gr.success:
+                        lift_plan = self.backend.plan_cartesian(
+                            start_q=ik_gr.joints_rad,
+                            target_pose_mm_deg=pose_ap_mm,
+                            samples=15,
+                            allowed_grasp_piece_id="*",
+                            check_collision=True,
+                        )
+                    if ik_ap.success:
+                        land_plan = self.backend.plan_cartesian(
+                            start_q=ik_ap.joints_rad,
+                            target_pose_mm_deg=pose_gr_mm,
+                            samples=15,
+                            allowed_grasp_piece_id="*",
+                            check_collision=True,
+                        )
+
+                    cell_plans[(r, c)] = {
+                        "ik_ap": ik_ap,
+                        "ik_gr": ik_gr,
+                        "pose_ap_mm": pose_ap_mm,
+                        "pose_gr_mm": pose_gr_mm,
+                        "lift_plan": lift_plan,
+                        "land_plan": land_plan,
+                    }
+
+            # Step 2: Validate routes
+            all_cells = [(r, c) for r in range(10) for c in range(9)]
+            routes_to_test = []
+            for src in all_cells:
+                for dst in all_cells:
+                    if src != dst:
+                        routes_to_test.append((src, dst))
+
+            if sample_limit is not None and sample_limit < len(routes_to_test):
+                # Sample evenly across the route set
+                step = len(routes_to_test) // sample_limit
+                routes_to_test = routes_to_test[::step][:sample_limit]
+
+            total_routes = len(routes_to_test)
+            passed_routes = 0
+            failed_routes = 0
+            worst_route = None
+            first_col_stage = None
+            col_pair = None
+            min_margin_deg = float("inf")
+            worst_cond = 1.0
+
+            for src, dst in routes_to_test:
+                if self.placement_state.placement_version != v_start:
+                    break
+
+                src_cp = cell_plans[src]
+                dst_cp = cell_plans[dst]
+
+                # Stage 1: LIFT
+                if not (src_cp["lift_plan"] and src_cp["lift_plan"].success):
+                    failed_routes += 1
+                    if worst_route is None:
+                        worst_route = {"src": list(src), "dst": list(dst), "stage": "LIFT"}
+                        first_col_stage = "LIFT"
+                        col_pair = src_cp["lift_plan"].colliding_links_or_bodies if src_cp["lift_plan"] else "Grasp IK failed"
+                    continue
+
+                q_after_lift = src_cp["lift_plan"].final_q
+
+                # Stage 2: TRANSIT (MoveL at transit height)
+                transit_plan = self.backend.plan_cartesian(
+                    start_q=q_after_lift,
+                    target_pose_mm_deg=dst_cp["pose_ap_mm"],
+                    samples=15,
+                    allowed_grasp_piece_id="*",
+                    check_collision=True,
+                )
+                if not transit_plan.success:
+                    failed_routes += 1
+                    if worst_route is None:
+                        worst_route = {"src": list(src), "dst": list(dst), "stage": "TRANSIT"}
+                        first_col_stage = "TRANSIT"
+                        col_pair = transit_plan.colliding_links_or_bodies
+                    continue
+
+                # Stage 3: LAND
+                if not (dst_cp["land_plan"] and dst_cp["land_plan"].success):
+                    failed_routes += 1
+                    if worst_route is None:
+                        worst_route = {"src": list(src), "dst": list(dst), "stage": "LAND"}
+                        first_col_stage = "LAND"
+                        col_pair = dst_cp["land_plan"].colliding_links_or_bodies if dst_cp["land_plan"] else "Approach IK failed"
+                    continue
+
+                passed_routes += 1
+                if transit_plan.min_joint_margin_deg is not None:
+                    min_margin_deg = min(min_margin_deg, transit_plan.min_joint_margin_deg)
+                if transit_plan.worst_condition_number is not None:
+                    worst_cond = max(worst_cond, transit_plan.worst_condition_number)
+
+            all_routes_safe = (passed_routes == total_routes and total_routes > 0)
+            res = {
+                "type": "full_route_validation_result",
+                "total_routes": total_routes,
+                "passed_routes": passed_routes,
+                "failed_routes": failed_routes,
+                "all_routes_safe": all_routes_safe,
+                "status": "FULL_BOARD_ROUTE_SAFE" if all_routes_safe else "FAIL",
+                "worst_route": worst_route,
+                "first_collision_stage": first_col_stage,
+                "collision_pair": col_pair,
+                "min_joint_margin_deg": round(min_margin_deg, 2) if math.isfinite(min_margin_deg) else None,
+                "worst_condition_number": round(worst_cond, 2) if math.isfinite(worst_cond) else None,
+                "placement_version": v_start,
+            }
+            if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+                self.telemetry.broadcast_custom(res)
+            return res
+
+        finally:
+            world.sync_robot_configuration(q_bullet_orig)
+            self.backend._current_joints_rad = np.array(backend_q_orig, copy=True)
+            self.backend._current_joints_deg = [round(math.degrees(float(val)), 3) for val in backend_q_orig]
+            self.backend._flange_pose_mm_deg = self.backend._compute_flange_pose_mm_deg(backend_q_orig)
+            self.backend._tcp_pose_mm_deg = list(snap_orig.tcp_pose_mm_deg)
+            self.backend._motion_state = snap_orig.motion_state
+            self._sync_gripper_to_tcp(snap_orig)
 
     def set_telemetry(self, telemetry: TelemetryPublisher) -> None:
         """Attach telemetry publisher and register incoming command callback."""
@@ -657,9 +1002,16 @@ class VirtualXiangqiSimulation:
             self.backend.telemetry_publisher = telemetry
         if self.telemetry is not None:
             self.telemetry.register_command_handler(self._handle_client_command)
-            # Broadcast initial authoritative board placement
+            # Broadcast initial authoritative board placement and placement analysis
             if hasattr(self.telemetry, "broadcast_custom"):
                 self.telemetry.broadcast_custom(self.placement_state.to_dict())
+                analysis_packet = self.placement_analyzer.compute_geometric_precheck(
+                    forward_shift_mm=self.placement_state.forward_shift_mm,
+                    safe_transit_height_mm=self.placement_state.safe_transit_height_mm,
+                    board_surface_mm=self.board_surface_z * 1000.0,
+                    placement_version=self.placement_state.placement_version,
+                )
+                self.telemetry.broadcast_custom(analysis_packet)
 
     def _handle_client_command(self, cmd: Dict[str, Any]) -> None:
         """Handle incoming command from viewer or external WebSocket client."""
@@ -699,6 +1051,9 @@ class VirtualXiangqiSimulation:
             self.reset_board_placement()
         elif action == "VALIDATE_BOARD_PLACEMENT":
             threading.Thread(target=self.validate_board_placement, daemon=True).start()
+        elif action == "VALIDATE_FULL_BOARD_ROUTES":
+            limit = cmd.get("sample_limit")
+            threading.Thread(target=self.validate_full_board_routes, args=(limit,), daemon=True).start()
         elif action == "MOVE_JOINT":
             joints_deg = cmd.get("joints_deg")
             speed = cmd.get("speed_factor", self.backend.default_speed_factor)

@@ -31,7 +31,8 @@ from src.simulation.physics.collision_guard import FR3CollisionGuard
 from src.simulation.physics.state import PiecePhysicalState
 from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.runtime import VirtualXiangqiSimulation
-from src.simulation.virtual_fr3_backend import VirtualFR3Backend
+import pybullet as p_bullet
+from src.simulation.virtual_fr3_backend import VirtualFR3Backend, PlannedTrajectory
 
 
 class DynamicBoardPlacementTests(unittest.TestCase):
@@ -385,6 +386,141 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         for src, dst, label in routes:
             res = sim.execute_3stage_trajectory(src_cell=src, dst_cell=dst, samples_per_stage=10, speed_factor=100.0)
             self.assertTrue(res["success"], f"Trajectory '{label}' from {src} to {dst} failed: {res.get('error')}")
+
+        sim.stop()
+
+    def test_plan_cartesian_pure_planning_without_state_mutation(self):
+        """
+        Verify plan_cartesian() produces PlannedTrajectory without mutating robot joint state.
+        """
+        sim = VirtualXiangqiSimulation()
+        sim.start()
+        backend = sim.backend
+
+        init_joints = list(backend.get_state_snapshot().joints_deg)
+        q_start = np.deg2rad(init_joints)
+
+        # Plan move to a reachable target pose
+        target_pose_mm = [-300.0, 0.0, 150.0, 180.0, 0.0, 90.0]
+        planned = backend.plan_cartesian(q_start, target_pose_mm, samples=15)
+        self.assertIsInstance(planned, PlannedTrajectory)
+        self.assertTrue(planned.success)
+        self.assertGreaterEqual(len(planned.q_samples), 15)
+
+        # Assert backend state and PyBullet joints remained unchanged
+        current_joints = list(backend.get_state_snapshot().joints_deg)
+        np.testing.assert_allclose(current_joints, init_joints, atol=1e-3)
+
+        pb_joints = [p_bullet.getJointState(sim.world.robot_body_id, j, physicsClientId=sim.world.client_id)[0] for j in range(6)]
+        np.testing.assert_allclose(np.rad2deg(pb_joints), init_joints, atol=1e-2)
+
+        sim.stop()
+
+    def test_validation_state_invariance(self):
+        """
+        Verify validate_board_placement() guarantees joint state invariance
+        in backend and PyBullet world before and after full validation run.
+        """
+        sim = VirtualXiangqiSimulation()
+        sim.start()
+
+        # Set robot to specific non-default pose
+        test_pose = [10.0, -20.0, 30.0, -40.0, 50.0, -60.0]
+        sim.backend.set_authoritative_joints(np.deg2rad(test_pose).tolist(), is_deg=False)
+        sim.world.sync_robot_configuration(np.deg2rad(test_pose).tolist())
+
+        q_backend_before = list(sim.backend.get_state_snapshot().joints_deg)
+        q_pb_before = [p_bullet.getJointState(sim.world.robot_body_id, j, physicsClientId=sim.world.client_id)[0] for j in range(6)]
+
+        # Run validation
+        res = sim.validate_board_placement()
+        self.assertIn("total_cells", res)
+
+        # Assert state unchanged
+        q_backend_after = list(sim.backend.get_state_snapshot().joints_deg)
+        q_pb_after = [p_bullet.getJointState(sim.world.robot_body_id, j, physicsClientId=sim.world.client_id)[0] for j in range(6)]
+
+        np.testing.assert_allclose(q_backend_after, q_backend_before, atol=1e-3)
+        np.testing.assert_allclose(q_pb_after, q_pb_before, atol=1e-3)
+
+        sim.stop()
+
+    def test_validation_version_atomicity(self):
+        """
+        Verify validate_board_placement() rejects mismatched placement version
+        with status STALE_VALIDATION_RESULT.
+        """
+        sim = VirtualXiangqiSimulation()
+        sim.start()
+
+        curr_ver = sim.placement_state.placement_version
+        res = sim.validate_board_placement(placement_version=curr_ver + 99)
+        self.assertEqual(res["status"], "STALE_VALIDATION_RESULT")
+        self.assertFalse(res["all_passed"])
+
+        sim.stop()
+
+    def test_nominal_placement_fails_row0_with_link_pair_and_sample(self):
+        """
+        Verify nominal d=0, H=70 fails Row 0 Col 2..6 LAND MoveL descent,
+        reporting the failure stage, sample index, and self-collision link pair.
+        """
+        sim = VirtualXiangqiSimulation()
+        sim.start()
+        sim.reset_board_placement()
+
+        res = sim.validate_board_placement()
+        self.assertFalse(res["all_passed"])
+        self.assertGreater(len(res["failed_cells"]), 0)
+
+        # Look for (0, 4) in failed cells
+        fail_0_4 = next((f for f in res["failed_cells"] if f["row"] == 0 and f["col"] == 4), None)
+        self.assertIsNotNone(fail_0_4, "Row 0 Col 4 must fail at nominal placement")
+        self.assertEqual(fail_0_4["stage"], "LAND")
+        self.assertIn("link 1", fail_0_4["reason"])
+        self.assertIn("link 3", fail_0_4["reason"])
+        self.assertIsNotNone(fail_0_4.get("sample_idx"))
+        self.assertGreater(fail_0_4["sample_idx"], 0)
+
+        sim.stop()
+
+    def test_recommended_placement_90_cells_pass(self):
+        """
+        Verify recommended candidate placement d=28.5mm, H=40mm achieves:
+        - 90/90 Approach IK PASS
+        - 90/90 LAND MoveL PASS
+        - 90/90 Grasp IK PASS
+        - 90/90 LIFT MoveL PASS
+        - all_passed == True ("90/90 LOCAL CELL TRAJECTORIES PASS")
+        """
+        sim = VirtualXiangqiSimulation()
+        sim.start()
+        sim.set_board_placement(forward_shift_mm=28.5, safe_transit_height_mm=40.0)
+
+        res = sim.validate_board_placement()
+        self.assertTrue(res["all_passed"], f"Expected 90/90 pass, got failures: {res['failed_cells']}")
+        self.assertEqual(res["total_cells"], 90)
+        self.assertEqual(res["approach_ik_count"], 90)
+        self.assertEqual(res["grasp_ik_count"], 90)
+        self.assertEqual(res["land_move_passed_count"], 90)
+        self.assertEqual(res["lift_move_passed_count"], 90)
+        self.assertEqual(len(res["failed_cells"]), 0)
+
+        sim.stop()
+
+    def test_full_board_routes_validation(self):
+        """
+        Verify validate_full_board_routes() executes dry-run full trajectories
+        across candidate placement and reports safe status.
+        """
+        sim = VirtualXiangqiSimulation()
+        sim.start()
+        sim.set_board_placement(forward_shift_mm=28.5, safe_transit_height_mm=40.0)
+
+        res = sim.validate_full_board_routes(sample_limit=8)
+        self.assertTrue(res["all_routes_safe"])
+        self.assertEqual(res["failed_routes"], 0)
+        self.assertGreaterEqual(res["total_routes"], 4)
 
         sim.stop()
 

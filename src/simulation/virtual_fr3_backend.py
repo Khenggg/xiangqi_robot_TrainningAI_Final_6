@@ -14,7 +14,8 @@ import math
 from pathlib import Path
 import threading
 import time
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,27 @@ logger = logging.getLogger(__name__)
 from src.hardware.backends.base import RobotBackend, RobotStateSnapshot
 from src.simulation.kinematics.fr3 import FR3Kinematics, IKResult, IKStatus
 from src.simulation.kinematics.urdf_chain import Pose3D, matrix_to_rpy, rpy_to_matrix
+
+
+@dataclass
+class PlannedTrajectory:
+    """Outcome of Cartesian trajectory planning without committing robot state."""
+    success: bool
+    start_q: np.ndarray
+    target_tcp_pose: Sequence[float]
+    waypoints_cartesian: List[np.ndarray]
+    q_samples: List[np.ndarray]
+    ik_success: bool = True
+    collision_safe: bool = True
+    collision_result: Optional[Any] = None
+    failure_reason: Optional[str] = None
+    first_failing_sample: Optional[int] = None
+    q_failed: Optional[List[float]] = None
+    colliding_links_or_bodies: Optional[str] = None
+    final_q: Optional[np.ndarray] = None
+    min_joint_margin_deg: Optional[float] = None
+    worst_condition_number: Optional[float] = None
+    min_manipulability: Optional[float] = None
 
 
 class VirtualFR3Backend(RobotBackend):
@@ -461,41 +483,46 @@ class VirtualFR3Backend(RobotBackend):
             logger.warning("[COLLISION RECOVERY] Move to target from elevated pose failed.")
             return False
 
-    def move_cartesian(
+    def plan_cartesian(
         self,
+        start_q: Sequence[float],
         target_pose_mm_deg: Sequence[float],
-        speed_factor: Optional[float] = None,
         samples: int = 20,
-    ) -> bool:
+        allowed_grasp_piece_id: Optional[str] = None,
+        check_collision: bool = True,
+    ) -> PlannedTrajectory:
         """
-        Execute Cartesian linear motion (MoveL) by sampling Cartesian waypoints
-        and solving IK for each waypoint.
-        Fails fast if any waypoint is unreachable.
+        Plan Cartesian linear motion (MoveL) from start_q to target_pose_mm_deg
+        WITHOUT committing or mutating robot state.
+        Fails fast if any waypoint is unreachable or collides.
         """
+        start_q_arr = np.array(start_q, dtype=float)
         if len(target_pose_mm_deg) != 6:
-            with self._state_lock:
-                self._last_error = f"MoveCartesian requires 6 pose values, got {len(target_pose_mm_deg)}"
-                self._motion_state = "ERROR"
-            return False
+            return PlannedTrajectory(
+                success=False,
+                start_q=start_q_arr,
+                target_tcp_pose=target_pose_mm_deg,
+                waypoints_cartesian=[],
+                q_samples=[],
+                ik_success=False,
+                failure_reason=f"MoveCartesian requires 6 pose values, got {len(target_pose_mm_deg)}",
+            )
 
         if not all(math.isfinite(v) for v in target_pose_mm_deg):
-            with self._state_lock:
-                self._last_error = "MoveCartesian target contains non-finite values"
-                self._motion_state = "ERROR"
-            return False
+            return PlannedTrajectory(
+                success=False,
+                start_q=start_q_arr,
+                target_tcp_pose=target_pose_mm_deg,
+                waypoints_cartesian=[],
+                q_samples=[],
+                ik_success=False,
+                failure_reason="MoveCartesian target contains non-finite values",
+            )
 
-        with self._state_lock:
-            if not self._connected:
-                self._last_error = "Cannot move: robot not connected"
-                return False
-            self._last_error = None
-            start_pose_mm_deg = list(self._tcp_pose_mm_deg)
-            start_joints_rad = self._current_joints_rad.copy()
-
-        # Generate linear interpolation waypoints in Cartesian space
-        start_p = np.array(start_pose_mm_deg[:3], dtype=float)
+        start_tcp = self._compute_tcp_pose_mm_deg(start_q_arr)
+        start_p = np.array(start_tcp[:3], dtype=float)
         target_p = np.array(target_pose_mm_deg[:3], dtype=float)
-        start_rot = np.array(start_pose_mm_deg[3:], dtype=float)
+        start_rot = np.array(start_tcp[3:], dtype=float)
         target_rot = np.array(target_pose_mm_deg[3:], dtype=float)
 
         # Shortest-path angle difference in [-180, +180] deg to prevent 358-deg wraparounds
@@ -504,26 +531,26 @@ class VirtualFR3Backend(RobotBackend):
             dtype=float,
         )
 
-        # Derive sample count dynamically with bounded spatial/angular resolution (Anti-Tunneling):
-        # max translational step <= 3 mm, max rotational step <= 1.0 deg
         dist_mm = float(np.linalg.norm(target_p - start_p))
         n_trans = int(math.ceil(dist_mm / 3.0))
         max_rot_deg = float(np.max(np.abs(rot_diff))) if len(rot_diff) > 0 else 0.0
         n_rot = int(math.ceil(max_rot_deg / 1.0))
         num_samples = max(n_trans, n_rot, samples, 10)
+
+        waypoints_cartesian = []
         joint_trajectory = []
-        seed = start_joints_rad.copy()
+        seed = start_q_arr.copy()
 
-        self._stop_event.clear()
+        min_margin_deg = float("inf")
+        worst_cond = 0.0
+        min_manip = float("inf")
 
-        # Pre-validate all waypoints before executing motion
         for i in range(1, num_samples + 1):
             alpha = float(i) / float(num_samples)
             p_i = start_p + alpha * (target_p - start_p)
             rot_i = start_rot + alpha * rot_diff
+            waypoints_cartesian.append(p_i)
 
-            # Convert TCP waypoint to required flange target via rigid transformation:
-            # T_base_flange = T_base_tcp @ (T_flange_tcp)^(-1)
             p_m = p_i / 1000.0
             R_tcp_i = rpy_to_matrix(np.radians(rot_i))
             T_base_tcp_i = np.eye(4, dtype=float)
@@ -536,47 +563,117 @@ class VirtualFR3Backend(RobotBackend):
                 wp_flange, seed_joints=seed, allow_multi_seed=False
             )
             if not ik_res.success:
-                # Try with multi-seed fallback
                 ik_res = self.kinematics.inverse_kinematics(
                     wp_flange, seed_joints=seed, allow_multi_seed=True
                 )
 
             if not ik_res.success:
-                with self._state_lock:
-                    self._last_error = (
-                        f"Cartesian waypoint {i}/{num_samples} unreachable: {ik_res.failure_reason}"
-                    )
-                    self._motion_state = "ERROR"
-                    # Preserve last safe state strictly
-                    self._current_joints_rad = start_joints_rad.copy()
-                    self._current_joints_deg = [round(math.degrees(float(val)), 3) for val in start_joints_rad]
-                    self._flange_pose_mm_deg = self._compute_flange_pose_mm_deg(start_joints_rad)
-                    self._tcp_pose_mm_deg = list(start_pose_mm_deg)
-                    self._sync_telemetry()
-                return False
+                return PlannedTrajectory(
+                    success=False,
+                    start_q=start_q_arr,
+                    target_tcp_pose=target_pose_mm_deg,
+                    waypoints_cartesian=waypoints_cartesian,
+                    q_samples=joint_trajectory,
+                    ik_success=False,
+                    first_failing_sample=i,
+                    failure_reason=f"Cartesian waypoint {i}/{num_samples} unreachable: {ik_res.failure_reason}",
+                )
 
-            joint_trajectory.append(ik_res.joints_rad)
-            seed = ik_res.joints_rad.copy()
+            q_curr = ik_res.joints_rad
+            joint_trajectory.append(q_curr)
+            seed = q_curr.copy()
+
+            # Joint limit margin
+            margin_i = min(
+                min(q_curr[k] - self.kinematics.lower_limits[k], self.kinematics.upper_limits[k] - q_curr[k])
+                for k in range(len(q_curr))
+            )
+            min_margin_deg = min(min_margin_deg, math.degrees(margin_i))
+
+            # Jacobian metrics
+            J_i = self.kinematics.geometric_jacobian(q_curr)
+            cond_i = self.kinematics.compute_condition_number(J_i)
+            worst_cond = max(worst_cond, cond_i)
+            manip_i = self.kinematics.compute_manipulability(J_i)
+            min_manip = min(min_manip, manip_i)
 
         # Pre-validate trajectory through collision guard if configured
-        if self.collision_guard is not None and getattr(self, "collision_guard_enabled", True):
+        if check_collision and self.collision_guard is not None and getattr(self, "collision_guard_enabled", True):
             col_res = self.collision_guard.validate_trajectory(
                 joint_trajectory,
-                allowed_grasp_piece_id=self._allowed_grasp_piece_id,
+                allowed_grasp_piece_id=allowed_grasp_piece_id,
+                restore_state=True,
             )
             if not col_res.safe:
-                with self._state_lock:
-                    self._last_error = f"MoveCartesian rejected by collision guard: {col_res.failure_reason}"
-                    self._motion_state = "COLLISION_REJECTED"
-                    # Preserve last safe state strictly
-                    self._current_joints_rad = start_joints_rad.copy()
-                    self._current_joints_deg = [round(math.degrees(float(val)), 3) for val in start_joints_rad]
-                    self._flange_pose_mm_deg = self._compute_flange_pose_mm_deg(start_joints_rad)
-                    self._tcp_pose_mm_deg = list(start_pose_mm_deg)
-                    self._sync_telemetry()
-                return False
+                return PlannedTrajectory(
+                    success=False,
+                    start_q=start_q_arr,
+                    target_tcp_pose=target_pose_mm_deg,
+                    waypoints_cartesian=waypoints_cartesian,
+                    q_samples=joint_trajectory,
+                    collision_safe=False,
+                    collision_result=col_res,
+                    first_failing_sample=col_res.sample_index,
+                    q_failed=col_res.q_failed,
+                    colliding_links_or_bodies=col_res.colliding_body,
+                    failure_reason=f"MoveCartesian rejected by collision guard: {col_res.failure_reason}",
+                    min_joint_margin_deg=round(min_margin_deg, 2) if math.isfinite(min_margin_deg) else None,
+                    worst_condition_number=round(worst_cond, 2) if math.isfinite(worst_cond) else None,
+                    min_manipulability=round(min_manip, 4) if math.isfinite(min_manip) else None,
+                )
 
-        # Waypoints all validated: execute trajectory
+        return PlannedTrajectory(
+            success=True,
+            start_q=start_q_arr,
+            target_tcp_pose=target_pose_mm_deg,
+            waypoints_cartesian=waypoints_cartesian,
+            q_samples=joint_trajectory,
+            final_q=joint_trajectory[-1] if joint_trajectory else start_q_arr,
+            min_joint_margin_deg=round(min_margin_deg, 2) if math.isfinite(min_margin_deg) else None,
+            worst_condition_number=round(worst_cond, 2) if math.isfinite(worst_cond) else None,
+            min_manipulability=round(min_manip, 4) if math.isfinite(min_manip) else None,
+        )
+
+    def move_cartesian(
+        self,
+        target_pose_mm_deg: Sequence[float],
+        speed_factor: Optional[float] = None,
+        samples: int = 20,
+    ) -> bool:
+        """
+        Execute Cartesian linear motion (MoveL) by sampling Cartesian waypoints
+        and solving IK for each waypoint.
+        Uses plan_cartesian() to pre-validate and then commits state.
+        """
+        with self._state_lock:
+            if not self._connected:
+                self._last_error = "Cannot move: robot not connected"
+                return False
+            self._last_error = None
+            start_pose_mm_deg = list(self._tcp_pose_mm_deg)
+            start_joints_rad = self._current_joints_rad.copy()
+
+        plan = self.plan_cartesian(
+            start_q=start_joints_rad,
+            target_pose_mm_deg=target_pose_mm_deg,
+            samples=samples,
+            allowed_grasp_piece_id=self._allowed_grasp_piece_id,
+            check_collision=(self.collision_guard is not None and getattr(self, "collision_guard_enabled", True)),
+        )
+
+        if not plan.success:
+            with self._state_lock:
+                self._last_error = plan.failure_reason
+                self._motion_state = "COLLISION_REJECTED" if not plan.collision_safe else "ERROR"
+                # Preserve last safe state strictly
+                self._current_joints_rad = start_joints_rad.copy()
+                self._current_joints_deg = [round(math.degrees(float(val)), 3) for val in start_joints_rad]
+                self._flange_pose_mm_deg = self._compute_flange_pose_mm_deg(start_joints_rad)
+                self._tcp_pose_mm_deg = list(start_pose_mm_deg)
+                self._sync_telemetry()
+            return False
+
+        # Plan validated: execute trajectory
         with self._state_lock:
             self._motion_state = "MOVING"
 
@@ -586,7 +683,7 @@ class VirtualFR3Backend(RobotBackend):
         )
         prev_q = start_joints_rad
         total_joint_time = 0.0
-        for q_wp in joint_trajectory:
+        for q_wp in plan.q_samples:
             dq = np.abs(q_wp - prev_q)
             step_time = float(np.max(dq / np.maximum(max_vels, 1e-4)))
             total_joint_time += step_time
@@ -594,9 +691,11 @@ class VirtualFR3Backend(RobotBackend):
 
         sf = speed_factor if speed_factor is not None else self.default_speed_factor
         scaled_duration_s = max(total_joint_time / max(sf, 1e-4), 0.02)
-        sleep_time = (scaled_duration_s / len(joint_trajectory)) if sf < 50.0 else 0.0
+        sleep_time = (scaled_duration_s / len(plan.q_samples)) if sf < 50.0 else 0.0
 
-        for q_step in joint_trajectory:
+        self._stop_event.clear()
+
+        for q_step in plan.q_samples:
             if self._stop_event.is_set():
                 with self._state_lock:
                     self._motion_state = "IDLE"

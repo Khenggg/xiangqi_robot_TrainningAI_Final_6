@@ -12,6 +12,10 @@ import {
   updatePiecesFromWorldState,
   setBoardGeometry,
   fetchScenePlacement,
+  setScenePlacement,
+  getScenePlacement,
+  getActiveBoardGroup,
+  getBoardVisualRoot,
   boardPointToXYZ,
 } from "./board.mjs";
 import { buildCoordinateRulerGroup, createDimensionTape } from "./ruler.mjs";
@@ -660,16 +664,13 @@ function connectLive() {
         }
       } else if (data.type === "board_placement") {
         // Authoritative runtime placement packet from Python backend
-        setScenePlacement(data);
-        if (coordinateRulerGroup?.updateBoardPlacement) {
-          coordinateRulerGroup.updateBoardPlacement(data.board_center_world_m?.[2], data.board_center_world_m?.[1]);
-        }
-        state.placementVersion = Number(data.placement_version ?? state.placementVersion);
-        state.forwardShiftMm = Number(data.forward_shift_mm ?? state.forwardShiftMm);
-        state.safeTransitHeightMm = Number(data.safe_transit_height_mm ?? state.safeTransitHeightMm);
-        syncPlacementUIFromAuthoritative(data);
+        applyAuthoritativeBoardPlacement(data);
+      } else if (data.type === "placement_analysis") {
+        applyPlacementAnalysisUI(data);
       } else if (data.type === "placement_validation_result") {
         updatePlacementValidationResultUI(data);
+      } else if (data.type === "full_route_validation_result") {
+        updateFullRouteValidationResultUI(data);
       } else if (data.type === "trajectory_result") {
         if (data.placement_version !== undefined) {
           state.placementVersion = Number(data.placement_version);
@@ -845,8 +846,9 @@ function computeGeometricPrecheck(d_mm, H_mm, z_board_mm = 10.5) {
   };
 }
 
-function updateGeometricPrecheckUI(d_mm, H_mm) {
-  const res = computeGeometricPrecheck(d_mm, H_mm);
+function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0) {
+  const z_board = 10.5 + z_off_mm;
+  const res = computeGeometricPrecheck(d_mm, H_mm, z_board);
   const elD = document.getElementById("readoutShiftD");
   const elRow0 = document.getElementById("readoutRow0Dist");
   const elRow9 = document.getElementById("readoutRow9Dist");
@@ -883,12 +885,24 @@ function updateGeometricPrecheckUI(d_mm, H_mm) {
   }
 }
 
-function syncPlacementUIFromAuthoritative(data) {
-  const d = Number(data.forward_shift_mm ?? 0);
-  const h = Number(data.safe_transit_height_mm ?? 70);
-  const zOff = Number(data.board_height_offset_mm ?? 0);
-  const ver = data.placement_version ?? 1;
+export function applyAuthoritativeBoardPlacement(packet) {
+  if (!packet) return;
 
+  // 1 & 2. Atomically update board visual root & active scene placement cache
+  setScenePlacement(packet);
+
+  // 3, 4, 5, 6. Atomically update authoritative state values
+  const d = Number(packet.forward_shift_mm ?? state.forwardShiftMm ?? 0.0);
+  const h = Number(packet.safe_transit_height_mm ?? state.safeTransitHeightMm ?? 70.0);
+  const zOff = Number(packet.board_height_offset_mm ?? state.boardHeightOffsetMm ?? 0.0);
+  const ver = Number(packet.placement_version ?? state.placementVersion ?? 1);
+
+  state.forwardShiftMm = d;
+  state.safeTransitHeightMm = h;
+  state.boardHeightOffsetMm = zOff;
+  state.placementVersion = ver;
+
+  // Sync placement control UI
   const shiftSlider = document.getElementById("boardShiftSlider");
   const shiftNum = document.getElementById("boardShiftNum");
   const transitSlider = document.getElementById("safeTransitSlider");
@@ -903,18 +917,132 @@ function syncPlacementUIFromAuthoritative(data) {
   if (zOffsetNum) zOffsetNum.value = String(zOff);
   if (verBadge) verBadge.textContent = `VER: ${ver}`;
 
-  updateGeometricPrecheckUI(d, h);
-
+  // Invalidate or reset stale validation badge when placement changes
   const valBadge = document.getElementById("valResultBadge");
   if (valBadge && valBadge.textContent !== "ĐANG KIỂM ĐỊNH 90 Ô...") {
-    if (d !== 0.0) {
+    if (d !== 0.0 || zOff !== 0.0) {
       valBadge.className = "badge-warn";
-      valBadge.textContent = `CHƯA KIỂM ĐỊNH CHO VỊ TRÍ d=${d.toFixed(1)}mm`;
+      valBadge.textContent = `CHƯA KIỂM ĐỊNH CHO VỊ TRÍ d=${d.toFixed(1)}mm, z_off=${zOff.toFixed(1)}mm`;
+    }
+  }
+
+  // 7 & 8. Atomically update board coordinate ruler edges and ruler labels
+  const centerWorldZ = packet.board_center_world_m?.[2] ?? (0.36 + d / 1000.0);
+  const surfaceWorldY = packet.board_center_world_m?.[1] ?? (0.0105 + zOff / 1000.0);
+  if (coordinateRulerGroup?.updateBoardPlacement) {
+    coordinateRulerGroup.updateBoardPlacement(centerWorldZ, surfaceWorldY);
+  }
+
+  // 9, 10, 11, 12. Atomically update target ring, dimension tape, markers, readouts
+  if (state.selectedCell) {
+    const { row, col } = state.selectedCell;
+    const ring = getOrCreateTargetRing();
+    const pt = boardPointToXYZ(col, row, physicalGeometryRef);
+    ring.position.set(pt.x, pt.y + 0.001, pt.z);
+
+    if (activeDimensionTape) {
+      scene.remove(activeDimensionTape);
+      activeDimensionTape = null;
+    }
+    const distMm = (Math.hypot(pt.x, pt.z) * 1000).toFixed(0);
+    activeDimensionTape = createDimensionTape(
+      new THREE.Vector3(0, 0.002, 0),
+      new THREE.Vector3(pt.x, 0.002, pt.z),
+      `R = ${distMm}mm (Ô ${col},${row})`
+    );
+    if (coordinateRulerGroup) {
+      activeDimensionTape.visible = coordinateRulerGroup.visible;
+    }
+    scene.add(activeDimensionTape);
+
+    const robX = -0.180 - (d / 1000.0) - (row * 0.040);
+    const robY = -0.160 + (col * 0.040);
+    const robZ = 0.0105 + (zOff / 1000.0);
+
+    const worldX_mm = (pt.x * 1000).toFixed(1);
+    const worldY_mm = (pt.y * 1000).toFixed(1);
+    const worldZ_mm = (pt.z * 1000).toFixed(1);
+
+    const robX_mm = (robX * 1000).toFixed(1);
+    const robY_mm = (robY * 1000).toFixed(1);
+    const robZ_mm = (robZ * 1000).toFixed(1);
+
+    const coordReadoutEl = document.getElementById("coordReadout");
+    if (coordReadoutEl) {
+      coordReadoutEl.textContent = `X: ${worldX_mm}mm | Y: ${worldY_mm}mm | Z: ${worldZ_mm}mm`;
+    }
+    const diagWorldCoord = document.getElementById("diagWorldCoord");
+    if (diagWorldCoord) {
+      diagWorldCoord.textContent = `X: ${worldX_mm}mm, Y: ${worldY_mm}mm, Z: ${worldZ_mm}mm`;
+    }
+    const diagRobotCoord = document.getElementById("diagRobotCoord");
+    if (diagRobotCoord) {
+      diagRobotCoord.textContent = `X: ${robX_mm}mm, Y: ${robY_mm}mm, Z: ${robZ_mm}mm`;
+    }
+    const cellLabel = document.getElementById("diagCellLabel");
+    if (cellLabel) {
+      cellLabel.textContent = `Cột ${col}, Hàng ${row} (X=${robX.toFixed(3)}m, Y=${robY.toFixed(3)}m, Z=${robZ.toFixed(3)}m)`;
     }
   }
 }
+window.applyAuthoritativeBoardPlacement = applyAuthoritativeBoardPlacement;
+window.setScenePlacement = setScenePlacement;
 
-function updatePlacementValidationResultUI(res) {
+export function applyPlacementAnalysisUI(data) {
+  if (!data) return;
+  const d_mm = Number(data.forward_shift_mm ?? 0);
+  const H_mm = Number(data.safe_transit_height_mm ?? 70);
+
+  const elD = document.getElementById("readoutShiftD");
+  const elRow0 = document.getElementById("readoutRow0Dist");
+  const elRow9 = document.getElementById("readoutRow9Dist");
+  const elNear = document.getElementById("readoutNearEdgeDist");
+  const elCenter = document.getElementById("readoutCenterDist");
+  const elFar = document.getElementById("readoutFarEdgeDist");
+  const elH = document.getElementById("readoutHVal");
+  const elFarGrasp = document.getElementById("readoutFarGraspDist");
+  const elFarApp = document.getElementById("readoutFarAppDist");
+  const elGraspMargin = document.getElementById("readoutGraspMargin");
+  const elAppMargin = document.getElementById("readoutAppMargin");
+  const elDMax = document.getElementById("readoutDMax");
+  const elHMax = document.getElementById("readoutHMax");
+  const badge = document.getElementById("geomPrecheckBadge");
+
+  if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
+  if (elRow0) elRow0.textContent = data.row0_center_distance_mm !== undefined ? `${data.row0_center_distance_mm.toFixed(1)} mm` : `${(180.0 + d_mm).toFixed(1)} mm`;
+  if (elRow9) elRow9.textContent = data.far_row_center_distance_mm !== undefined ? `${data.far_row_center_distance_mm.toFixed(1)} mm` : `${(540.0 + d_mm).toFixed(1)} mm`;
+  if (elNear) elNear.textContent = data.near_board_edge_distance_mm !== undefined ? `${data.near_board_edge_distance_mm.toFixed(1)} mm` : `${(180.0 + d_mm - 25.0).toFixed(1)} mm`;
+  if (elCenter) elCenter.textContent = data.board_center_distance_mm !== undefined ? `${data.board_center_distance_mm.toFixed(1)} mm` : `${(360.0 + d_mm).toFixed(1)} mm`;
+  if (elFar) elFar.textContent = data.far_board_edge_distance_mm !== undefined ? `${data.far_board_edge_distance_mm.toFixed(1)} mm` : `${(540.0 + d_mm + 25.0).toFixed(1)} mm`;
+  if (elH) elH.textContent = `${H_mm.toFixed(1)} mm`;
+
+  if (elFarGrasp && data.far_grasp_distance_mm !== undefined) elFarGrasp.textContent = `${data.far_grasp_distance_mm.toFixed(1)} mm`;
+  if (elFarApp && data.far_approach_distance_mm !== undefined) elFarApp.textContent = `${data.far_approach_distance_mm.toFixed(1)} mm`;
+  if (elGraspMargin && data.grasp_reach_margin_mm !== undefined) elGraspMargin.textContent = `${data.grasp_reach_margin_mm.toFixed(1)} mm`;
+  if (elAppMargin && data.approach_reach_margin_mm !== undefined) elAppMargin.textContent = `${data.approach_reach_margin_mm.toFixed(1)} mm`;
+  if (elDMax) elDMax.textContent = data.d_max_for_current_h_mm !== null && data.d_max_for_current_h_mm !== undefined ? `${data.d_max_for_current_h_mm.toFixed(1)} mm` : "VÔ NGHIỆM";
+  if (elHMax) elHMax.textContent = data.h_max_for_current_d_mm !== null && data.h_max_for_current_d_mm !== undefined ? `${data.h_max_for_current_d_mm.toFixed(1)} mm` : "VÔ NGHIỆM";
+
+  if (badge) {
+    const isPass = Boolean(data.is_geometric_pass);
+    badge.className = isPass ? "badge-safe" : "badge-warn";
+    badge.textContent = isPass ? "GEOMETRIC PASS" : "GEOMETRIC FAIL";
+  }
+}
+
+export function updateFullRouteValidationResultUI(res) {
+  const valBadge = document.getElementById("valResultBadge");
+  if (!valBadge) return;
+  if (res.all_routes_safe) {
+    valBadge.className = "badge-safe";
+    valBadge.textContent = "FULL BOARD ROUTE SAFE";
+  } else {
+    valBadge.className = "badge-warn";
+    valBadge.textContent = `THẤT BẠI ${res.failed_routes}/${res.total_routes} TUYẾN (${res.worst_route?.stage || "LỖI"})`;
+  }
+}
+
+export function updatePlacementValidationResultUI(res) {
   const valBadge = document.getElementById("valResultBadge");
   const elGraspIk = document.getElementById("valGraspIkCount");
   const elAppIk = document.getElementById("valAppIkCount");
@@ -922,6 +1050,15 @@ function updatePlacementValidationResultUI(res) {
   const elAppCol = document.getElementById("valAppColCount");
   const failContainer = document.getElementById("valFailuresContainer");
   const failList = document.getElementById("valFailuresList");
+
+  // Rejection of stale validation result (Section L)
+  if (res.status === "STALE_VALIDATION_RESULT" || (res.placement_version !== undefined && res.placement_version !== state.placementVersion)) {
+    if (valBadge) {
+      valBadge.className = "badge-warn";
+      valBadge.textContent = "KẾT QUẢ KIỂM ĐỊNH ĐÃ CŨ (STALE)";
+    }
+    return;
+  }
 
   if (elGraspIk) elGraspIk.textContent = `${res.grasp_ik_count} / ${res.total_cells}`;
   if (elAppIk) elAppIk.textContent = `${res.approach_ik_count} / ${res.total_cells}`;
@@ -931,7 +1068,7 @@ function updatePlacementValidationResultUI(res) {
   if (res.all_passed) {
     if (valBadge) {
       valBadge.className = "badge-safe";
-      valBadge.textContent = "90/90 TOÀN BỘ AN TOÀN (ALL PASSED)";
+      valBadge.textContent = "90/90 LOCAL CELL TRAJECTORIES PASS";
     }
     if (failContainer) failContainer.style.display = "none";
   } else {
@@ -962,7 +1099,8 @@ function initPlacementPanelEvents() {
   const syncPrecheckFromInputs = () => {
     const d = Number(shiftNum?.value ?? 0);
     const h = Number(transitNum?.value ?? 70);
-    updateGeometricPrecheckUI(d, h);
+    const zOff = Number(zOffsetNum?.value ?? 0);
+    updateGeometricPrecheckUI(d, h, zOff);
   };
 
   shiftSlider?.addEventListener("input", (e) => {
@@ -980,6 +1118,13 @@ function initPlacementPanelEvents() {
   });
   transitNum?.addEventListener("change", (e) => {
     if (transitSlider) transitSlider.value = e.target.value;
+    syncPrecheckFromInputs();
+  });
+
+  zOffsetNum?.addEventListener("input", () => {
+    syncPrecheckFromInputs();
+  });
+  zOffsetNum?.addEventListener("change", () => {
     syncPrecheckFromInputs();
   });
 
@@ -1242,8 +1387,9 @@ function initJointControlPanelEvents() {
 
     if (!isHoveringInteractive) {
       canvas.style.cursor = "default";
+      const expectedY = 0.0105 + (state.boardHeightOffsetMm || 0.0) / 1000.0;
       for (const hit of hits) {
-        if (hit.point && Math.abs(hit.point.y - 0.0105) < 0.03) {
+        if (hit.point && Math.abs(hit.point.y - expectedY) < 0.03) {
           const x_mm = (hit.point.x * 1000).toFixed(0);
           const y_mm = (hit.point.y * 1000).toFixed(1);
           const z_mm = (hit.point.z * 1000).toFixed(0);

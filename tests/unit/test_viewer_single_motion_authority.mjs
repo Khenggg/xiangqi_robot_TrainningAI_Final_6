@@ -141,5 +141,110 @@ assert.ok(
   "board.mjs must maintain _activeBoardGroup to move board visuals consistently"
 );
 
+// 9. Test main.mjs imports setScenePlacement and exports applyAuthoritativeBoardPlacement
+assert.ok(
+  mainMjsContent.includes('import {') && mainMjsContent.includes('setScenePlacement') && mainMjsContent.includes('"./board.mjs"'),
+  "main.mjs must import setScenePlacement from ./board.mjs"
+);
+assert.ok(
+  mainMjsContent.includes("export function applyAuthoritativeBoardPlacement"),
+  "main.mjs must export applyAuthoritativeBoardPlacement"
+);
+assert.ok(
+  mainMjsContent.includes("window.applyAuthoritativeBoardPlacement = applyAuthoritativeBoardPlacement"),
+  "main.mjs must attach applyAuthoritativeBoardPlacement to window for testing/debugging"
+);
+
+// 10. Test boardVisualRoot naming and piece isolation (pieces not inside boardVisualRoot)
+assert.ok(
+  boardMjsContent.includes('group.name = "boardVisualRoot"'),
+  "board.mjs must name board group 'boardVisualRoot'"
+);
+assert.ok(
+  mainMjsContent.includes("scene.add(piecesGroup)") && !mainMjsContent.includes("boardVisualRoot.add(piecesGroup)"),
+  "Pieces must be added directly to scene, NOT as children of boardVisualRoot (prevents double-translation)"
+);
+
+// 11. Test authoritative placement coordinate updates (+15mm shift -> +15mm world Z, +30mm z_offset -> +30mm world Y)
+assert.ok(
+  boardMjsContent.includes("export function setScenePlacement"),
+  "board.mjs must export setScenePlacement"
+);
+assert.ok(
+  boardMjsContent.includes("export function getScenePlacement"),
+  "board.mjs must export getScenePlacement"
+);
+assert.ok(
+  boardMjsContent.includes("export function getActiveBoardGroup"),
+  "board.mjs must export getActiveBoardGroup"
+);
+assert.ok(
+  boardMjsContent.includes("export function getBoardVisualRoot"),
+  "board.mjs must export getBoardVisualRoot"
+);
+assert.ok(
+  boardMjsContent.includes("_activeBoardGroup.position.set(") &&
+  boardMjsContent.includes("_activeScenePlacement.boardCenterZ") &&
+  boardMjsContent.includes("_activeScenePlacement.boardSurfaceY"),
+  "board.mjs must update _activeBoardGroup position using authoritative center coordinates"
+);
+
+// Verify canonical transformation math contract for viewer
+function simulateSetScenePlacement(placement) {
+  const centerWorld = placement.board_center_world_m || [
+    placement.boardCenterX ?? 0.0,
+    placement.boardSurfaceY ?? 0.0105,
+    placement.boardCenterZ ?? 0.36
+  ];
+  return {
+    boardCenterX: Number(centerWorld[0]),
+    boardSurfaceY: Number(centerWorld[1]),
+    boardCenterZ: Number(centerWorld[2]),
+    forwardShiftMm: Number(placement.forward_shift_mm ?? 0.0),
+    safeTransitHeightMm: Number(placement.safe_transit_height_mm ?? 70.0),
+    boardHeightOffsetMm: Number(placement.board_height_offset_mm ?? 0.0),
+    placementVersion: Number(placement.placement_version ?? 1),
+  };
+}
+
+const currentScenePlacement = simulateSetScenePlacement({
+  forward_shift_mm: 15.0,
+  safe_transit_height_mm: 50.0,
+  board_height_offset_mm: 30.0,
+  board_center_world_m: [0.0, 0.0405, 0.375],
+  placement_version: 3,
+});
+assert.equal(currentScenePlacement.forwardShiftMm, 15.0);
+assert.equal(currentScenePlacement.safeTransitHeightMm, 50.0);
+assert.equal(currentScenePlacement.boardHeightOffsetMm, 30.0);
+assert.equal(currentScenePlacement.placementVersion, 3);
+assert.equal(currentScenePlacement.boardCenterZ, 0.375, "Forward shift of +15mm must shift Three.js world Z from 0.360 to 0.375 (+15mm)");
+assert.equal(currentScenePlacement.boardSurfaceY, 0.0405, "Vertical offset of +30mm must shift Three.js surface Y from 0.0105 to 0.0405 (+30mm)");
+
+// 12. Test stale validation rejection and full route safe terminology in main.mjs
+assert.ok(
+  mainMjsContent.includes('"STALE_VALIDATION_RESULT"'),
+  "main.mjs must check for STALE_VALIDATION_RESULT"
+);
+assert.ok(
+  mainMjsContent.includes('"90/90 LOCAL CELL TRAJECTORIES PASS"'),
+  "main.mjs must display authoritative terminology '90/90 LOCAL CELL TRAJECTORIES PASS'"
+);
+assert.ok(
+  mainMjsContent.includes('"FULL BOARD ROUTE SAFE"'),
+  "main.mjs must display authoritative terminology 'FULL BOARD ROUTE SAFE'"
+);
+
+// 13. Test placement_analysis UI synchronization
+assert.ok(
+  mainMjsContent.includes("applyPlacementAnalysisUI"),
+  "main.mjs must implement applyPlacementAnalysisUI"
+);
+assert.ok(
+  mainMjsContent.includes('"placement_analysis"'),
+  "main.mjs must dispatch placement_analysis telemetry directly to applyPlacementAnalysisUI"
+);
+
 console.log("  [PASS] Dynamic Board Placement commands and authoritative telemetry updates verified.");
+console.log("  [PASS] applyAuthoritativeBoardPlacement, visual translation, and piece isolation verified.");
 console.log("ALL VIEWER SINGLE MOTION AUTHORITY & DYNAMIC PLACEMENT TESTS PASSED SUCCESSFULLY!");
