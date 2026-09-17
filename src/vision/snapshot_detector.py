@@ -165,9 +165,19 @@ class SnapshotDetector:
                     np.array([[[float(cx), float(cy)]]], dtype=np.float32), M
                 )[0][0]
                 c_raw, r_raw = dst[0], dst[1]
+
+                # 2a. BỘ LỌC BOUNDS CÁC GIÁ TRỊ THỰC (Raw Bounds Check)
+                # Kiểm tra c_raw/r_raw TRƯỚC KHI round để tránh trường hợp:
+                # c_raw = -0.28 → round → c=0 (hợp lệ) → dist=0.28 < 0.32 → PASS nhầm
+                # Chỉ chấp nhận nếu giá trị thực nằm trong [-0.45, num_cols-0.55] và tương tự row
+                if not (-0.45 <= c_raw <= (self.num_cols - 1) + 0.45):
+                    continue
+                if not (-0.45 <= r_raw <= (self.num_rows - 1) + 0.45):
+                    continue
+
                 c, r = int(round(c_raw)), int(round(r_raw))
 
-                # 2. BỘ LỌC BIÊN BÀN CỜ NGHIÊM NGẶT (Strict Boundary Check)
+                # 2b. BỘ LỌC BIÊN BÀN CỜ NGHIÊM NGẶT (Strict Boundary Check)
                 # Chỉ chấp nhận nếu điểm rơi vào trong phạm vi hợp lệ 0..8 và 0..9
                 # Tuyệt đối không clamp các vật thể ngoài biên vào cột 0 / hàng 0
                 if 0 <= c < self.num_cols and 0 <= r < self.num_rows:

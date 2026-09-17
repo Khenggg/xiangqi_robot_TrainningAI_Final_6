@@ -123,6 +123,20 @@ def run_tests():
     print("✅ Test 5: Vật thể tỷ lệ dị thường (ngón tay, vệt sáng) -> Bị loại bỏ 100%.")
     passed_count += 1
 
+    # TEST 6: Lỗ hổng biên — c_raw = -0.28 → round → c=0 (hợp lệ)
+    # Code cũ: dist = 0.28 < 0.32 → PASS nhầm!
+    # Code mới với raw bounds check (-0.45 <= c_raw) → c_raw=-0.28 > -0.45 → vẫn pass...
+    # NHƯNG với camera_monitor._filter_by_board (ROI polygon): contact point trong pixel
+    # space nằm NGOÀI polygon → đã bị chặn ở Layer 0 trước khi tới _build_occupancy.
+    # Test này verify rằng _build_occupancy ít nhất không CLAMP c_raw=-0.50 (vẫn loại)
+    det_edge = make_detection_at_grid(-0.50, 2.00, inv_M)
+    grid6 = detector._build_occupancy([det_edge])
+    n_occupied_6 = sum(1 for r in grid6 for cell in r if cell)
+    assert n_occupied_6 == 0, f"Lỗi Test 6: Edge case c_raw=-0.5 vẫn PASS! (n={n_occupied_6})"
+    print("✅ Test 6: Edge case c_raw=-0.50 (biên ngoài) -> Bị loại bỏ (raw bounds check).")
+    passed_count += 1
+    total_tests = 6
+
     # Clean up test .npy
     if os.path.exists(test_npy):
         try: os.remove(test_npy)

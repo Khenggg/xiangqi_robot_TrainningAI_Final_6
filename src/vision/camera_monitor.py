@@ -45,7 +45,12 @@ class CameraMonitor:
         self._lock = threading.Lock()       # Bảo vệ _last_frame/_last_detections
         self._cam_lock = threading.Lock()   # Bảo vệ truy cập camera (cap.read/grab)
 
+        self._board_polygon = None  # Cache polygon bàn cờ trong pixel space (4 điểm)
         self._load_perspective()
+
+    # -------------------------------------------------------------------------
+    # ROI BOARD FILTER — Lọc detections nằm ngoài bàn cờ (pixel space)
+    # -------------------------------------------------------------------------
 
     def _load_perspective(self):
         """Load perspective matrix từ file."""
@@ -55,6 +60,7 @@ class CameraMonitor:
                 self._inv_M = np.linalg.inv(self._M)
             except:
                 self._inv_M = None
+            self._board_polygon = None  # Invalidate polygon cache sau khi reload
             print(f"[CAM MONITOR] ✅ Perspective loaded: {self.perspective_path}")
         else:
             print(f"[CAM MONITOR] ⚠️ Không tìm thấy perspective.npy")
@@ -62,6 +68,64 @@ class CameraMonitor:
     def reload_perspective(self):
         """Reload perspective sau khi calibrate lại."""
         self._load_perspective()
+
+    def _compute_board_polygon(self):
+        """Tính và cache đa giác bàn cờ trong không gian pixel (4 góc tứ giác).
+
+        Dùng inv_M để map 4 góc lưới (0,0)→(8,0)→(8,9)→(0,9) về pixel.
+        Kết quả cache vào self._board_polygon để tránh tính lại mỗi frame.
+
+        Returns:
+            np.ndarray shape (4,1,2) float32 hoặc None nếu không có perspective.
+        """
+        if self._board_polygon is not None:
+            return self._board_polygon
+        if self._inv_M is None:
+            return None
+        try:
+            corners_grid = np.array([
+                [[0.0, 0.0]],   # Góc trên-trái (Black, left)
+                [[8.0, 0.0]],   # Góc trên-phải (Black, right)
+                [[8.0, 9.0]],   # Góc dưới-phải (Red, right)
+                [[0.0, 9.0]],   # Góc dưới-trái (Red, left)
+            ], dtype=np.float32)
+            corners_px = cv2.perspectiveTransform(corners_grid, self._inv_M)
+            self._board_polygon = corners_px.reshape(-1, 1, 2).astype(np.float32)
+            return self._board_polygon
+        except Exception:
+            return None
+
+    def _filter_by_board(self, detections):
+        """Lọc danh sách detections: chỉ giữ lại những detection có contact point
+        nằm BÊN TRONG đa giác bàn cờ (pixel space).
+
+        Nếu không có perspective matrix, trả về detections gốc (không lọc).
+        Đây là 'Layer 0' — lọc trước khi _build_occupancy chạy.
+
+        Args:
+            detections: list of (cls_id, conf, (x1, y1, x2, y2))
+
+        Returns:
+            list — tập con của detections đã lọc
+        """
+        poly = self._compute_board_polygon()
+        if poly is None:
+            return detections  # Không có perspective → fallback, không lọc
+
+        filtered = []
+        for det in detections:
+            cls_id, conf, (x1, y1, x2, y2) = det
+            h = y2 - y1
+            if h <= 0:
+                continue
+            cx = float((x1 + x2) / 2)
+            cy = float(y1 + h * 0.85)  # Contact point (điểm chân quân)
+
+            # pointPolygonTest >= 0 → điểm nằm trong hoặc trên biên đa giác
+            if cv2.pointPolygonTest(poly, (cx, cy), False) >= 0:
+                filtered.append(det)
+
+        return filtered
 
     def _capture_and_detect(self):
         """Thread: đọc camera + chạy YOLO detect liên tục."""
@@ -104,9 +168,13 @@ class CameraMonitor:
                 except:
                     pass
 
+            # Layer 0: Lọc những detection nằm ngoài vùng bàn cờ (pixel space)
+            detections = self._filter_by_board(detections)
+
             with self._lock:
                 self._last_frame = frame.copy()
                 self._last_detections = detections
+
 
             # Bản thân model YOLO đã mất ~100-200ms để chạy xong,
             # nên vòng lặp này đã có delay tự nhiên, không cần sleep 0.15s nữa.
@@ -203,12 +271,16 @@ class CameraMonitor:
             except Exception as e:
                 print(f"[CAM MONITOR] ⚠️ YOLO error in snapshot: {e}")
 
+        # Layer 0: Lọc những detection nằm ngoài vùng bàn cờ (pixel space)
+        detections = self._filter_by_board(detections)
+
         # Cập nhật cache luôn
         with self._lock:
             self._last_frame = frame.copy()
             self._last_detections = detections
 
         return frame, detections
+
 
     def start(self):
         """Bắt đầu thread capture + detect."""
