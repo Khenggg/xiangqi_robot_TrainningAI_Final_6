@@ -33,6 +33,7 @@
         <span id="liveState">OFFLINE</span>
         <button id="toggleControlsBtn" class="hud-btn-secondary" title="Bật/tắt bảng điều khiển góc khớp">🎮 Điều khiển khớp</button>
         <button id="toggleRulerBtn" class="hud-btn-secondary" title="Click trực tiếp vào cạnh trục/bàn cờ hoặc bấm nút này để hiện hệ số tọa độ (Phím R)">📏 Thước đo (Click cạnh)</button>
+        <button id="resetBackendBtn" class="hud-btn-danger" title="Khởi động lại toàn bộ dữ liệu backend (Robot về Home, 32 quân cờ về vị trí xuất phát, reset vị trí bàn cờ)">🔄 Reset Backend</button>
         <span id="coordReadout" class="hud-coord-readout" title="Tọa độ mục tiêu / Click vào cạnh để xem tọa độ">Click cạnh để đo tọa độ mm</span>
         <span id="jointsReadout"></span>
       </header>
@@ -55,6 +56,7 @@
             <div class="panel-actions">
               <button id="homeBtn" class="action-btn" title="Đưa robot về tư thế đứng chuẩn">🏠 Về Home</button>
               <button id="gripperBtn" class="action-btn" title="Đóng hoặc mở ngàm kẹp CAD">🗜️ Kẹp / Nhả</button>
+              <button id="panelResetBackendBtn" class="action-btn danger-action" title="Khởi động lại toàn bộ dữ liệu backend">🔄 Reset Data</button>
             </div>
             <div class="joints-container" id="jointControlsList"></div>
           </div>

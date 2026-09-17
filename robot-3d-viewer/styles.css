@@ -75,6 +75,28 @@ html, body {
   border-color: #58a6ff !important;
   color: #ffffff !important;
 }
+.hud-btn-danger {
+  background: #da3633 !important;
+  border: 1px solid #f85149 !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.hud-btn-danger:hover {
+  background: #b62324 !important;
+  border-color: #ff7b72 !important;
+}
+.danger-action {
+  background: rgba(218, 54, 51, 0.15) !important;
+  border-color: rgba(248, 81, 73, 0.4) !important;
+  color: #ff7b72 !important;
+}
+.danger-action:hover {
+  background: #da3633 !important;
+  border-color: #f85149 !important;
+  color: #ffffff !important;
+}
 .hud-coord-readout {
   font-size: 12px;
   color: #58a6ff;

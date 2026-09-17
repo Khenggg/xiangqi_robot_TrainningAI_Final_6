@@ -740,6 +740,6 @@ class VirtualFR3Backend(RobotBackend):
             self._sync_telemetry()
         return True
 
-    def reset_to_home(self) -> bool:
+    def reset_to_home(self, speed_factor: Optional[float] = None) -> bool:
         """Move arm back to canonical home joint pose."""
-        return self.move_joint(self.DEFAULT_HOME_JOINTS_DEG)
+        return self.move_joint(self.DEFAULT_HOME_JOINTS_DEG, speed_factor=speed_factor)

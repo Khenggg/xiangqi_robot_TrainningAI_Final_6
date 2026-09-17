@@ -405,6 +405,50 @@ class VirtualPhysicalWorld:
             )
             self.pieces[piece_id] = piece_body
 
+    def reset_pieces(self) -> None:
+        """Reset all pieces to their initial canonical grid positions."""
+        with self._physics_lock:
+            # First release any attached piece
+            if self.gripper.attached_piece is not None:
+                self.release_attached_piece()
+
+            shift_m = self.current_forward_shift_m
+            nom_origin = self.board_cfg.get("grid_origin_in_robot_base_m", [-0.180, -0.160, 0.0105])
+            x0 = nom_origin[0] - shift_m
+            y0 = nom_origin[1]
+            z0 = self.board_surface_z
+
+            height_m = self.geom.piece_height_mm / 1000.0
+            col_spacing_m = self.geom.grid_cell_width_mm / 1000.0
+            row_spacing_m = self.geom.grid_cell_length_mm / 1000.0
+
+            for p_info in self.layout_cfg.get("pieces", []):
+                pid = p_info["id"]
+                p_body = self.pieces.get(pid)
+                if not p_body:
+                    continue
+                c = int(p_info["col"])
+                r = int(p_info["row"])
+                x = x0 - r * row_spacing_m
+                y = y0 + c * col_spacing_m
+                z = z0 + (height_m / 2.0) + 0.001
+
+                p.resetBasePositionAndOrientation(
+                    p_body.body_id,
+                    [x, y, z],
+                    [0.0, 0.0, 0.0, 1.0],
+                    physicsClientId=self.client_id,
+                )
+                p.resetBaseVelocity(
+                    p_body.body_id,
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    physicsClientId=self.client_id,
+                )
+                p_body.physical_state = PiecePhysicalState.SETTLING
+                p_body._consecutive_settled_steps = 0
+                p_body.grid_origin_robot = (x0, y0, z0)
+
     def step(self, num_steps: int = 1) -> None:
         """Step the simulation by fixed deterministic timesteps."""
         for _ in range(num_steps):

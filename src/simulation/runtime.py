@@ -124,7 +124,7 @@ class VirtualXiangqiSimulation:
         self._scheduled_drop: Optional[Dict[str, Any]] = None
         self.last_drop_event: Optional[DropEvent] = None
 
-        self._command_lock = threading.Lock()
+        self._command_lock = threading.RLock()
         self._physics_query_lock = getattr(self.world, "_physics_lock", threading.RLock())
         self._validation_in_progress = False
 
@@ -720,6 +720,53 @@ class VirtualXiangqiSimulation:
         """Reset board placement to nominal scene configuration."""
         return self.set_board_placement(forward_shift_mm=0.0, safe_transit_height_mm=70.0, board_height_offset_mm=0.0)
 
+    def reset_all_backend_data(self) -> Dict[str, Any]:
+        """
+        Authoritatively reset all backend data, physics, pieces, robot, and board placement.
+        1. Stop any active robot motion.
+        2. Detach any piece from gripper and open gripper.
+        3. Reset robot joints to HOME pose.
+        4. Reset board placement to nominal scene configuration.
+        5. Reset all 32 pieces to initial canonical layout.
+        6. Step physics until settled (all pieces resting/on_board).
+        7. Broadcast updated placement and world state snapshots to 3D Viewer.
+        """
+        with self._command_lock:
+            self._validation_in_progress = False
+            self.backend.stop()
+            self.world.release_attached_piece()
+            self.backend.set_gripper(False)
+            self.backend.reset_to_home()
+
+            # Reset board placement (internally relocates PyBullet board & updates placement_state)
+            self.reset_board_placement()
+
+            # Reset all pieces to canonical start layout
+            if hasattr(self.world, "reset_pieces"):
+                self.world.reset_pieces()
+            if hasattr(self.world, "step_until_settled"):
+                self.world.step_until_settled(max_steps=30)
+
+            # Clear any scheduled drop or drop event
+            self._scheduled_drop = None
+            self.last_drop_event = None
+
+            # Sync gripper to current robot TCP
+            self._sync_gripper_to_tcp(self.backend.get_state_snapshot())
+
+            # Broadcast full state update to viewer
+            if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+                self.telemetry.broadcast_custom({
+                    "type": "backend_data_reset",
+                    "status": "SUCCESS",
+                    "placement": self.placement_state.to_dict(),
+                    "message": "All backend data, pieces, robot pose, and board placement reset to initial state.",
+                })
+                self.telemetry.update_world_state(self.world.get_snapshot())
+
+            logger.info("All backend data and simulation state successfully reset.")
+            return {"success": True, "status": "RESET_COMPLETE"}
+
     def validate_board_placement(
         self,
         expected_placement_version: Optional[int] = None,
@@ -1232,6 +1279,8 @@ class VirtualXiangqiSimulation:
             self.backend.set_gripper(closed)
         elif action == "RESET":
             self.backend.reset_to_home()
+        elif action in ("RESET_ALL_BACKEND_DATA", "RESET_BACKEND_DATA", "RESTART_BACKEND_DATA"):
+            self.reset_all_backend_data()
         elif action == "STOP":
             self.backend.stop()
         elif action == "SET_BOARD_PLACEMENT":

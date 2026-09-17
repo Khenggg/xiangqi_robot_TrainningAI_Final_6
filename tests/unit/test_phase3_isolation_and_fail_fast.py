@@ -358,6 +358,38 @@ class Phase3IsolationAndFailFastTests(unittest.TestCase):
             mapped_r, mapped_c = find_nearest_cell(xyz, grid_origin_robot_m=shifted_origin)
             self.assertEqual((mapped_r, mapped_c), (r, c))
 
+    # -------------------------------------------------------------------------
+    # Test 12: Full backend data reset (RESET_ALL_BACKEND_DATA)
+    # -------------------------------------------------------------------------
+    def test_reset_all_backend_data(self):
+        """Verify full reset restores robot HOME, canonical piece positions, and nominal board placement."""
+        # 1. Mutate state: shift board, move robot, attach piece
+        self.sim.set_board_placement(forward_shift_mm=30.0)
+        piece = self.world.get_piece("red_king_0")
+        self.world.gripper.attached_piece = piece
+        piece.physical_state = PiecePhysicalState.ATTACHED_TO_GRIPPER
+        self.backend.set_gripper(True)
+        self.backend._joints_deg = [10.0, -30.0, 80.0, -50.0, -85.0, 5.0]
+
+        # 2. Invoke full reset via client command handler
+        self.sim._handle_client_command({"command": "RESET_ALL_BACKEND_DATA"})
+
+        # 3. Assertions
+        # Board placement restored to nominal (d=0)
+        self.assertAlmostEqual(self.sim.placement_state.forward_shift_mm, 0.0)
+        self.assertAlmostEqual(self.sim.placement_state.grid_origin_robot_m[0], -0.180, places=4)
+        # Gripper open and piece detached
+        self.assertFalse(self.backend.get_state_snapshot().gripper_closed)
+        self.assertIsNone(self.world.get_attached_piece())
+        # Robot returned to HOME pose
+        self.assertTrue(np.allclose(self.backend.get_state_snapshot().joints_deg, [0.0, -45.0, 90.0, -45.0, -90.0, 0.0], atol=1e-2))
+        # Piece position restored to canonical grid (red_king_0 is at row 9, col 4: x = -0.540, y = 0.0)
+        pos, _ = piece.get_pose_robot_base()
+        self.assertAlmostEqual(pos[0], -0.540, delta=0.01)
+        self.assertAlmostEqual(pos[1], 0.0, delta=0.01)
+        self.assertIn(piece.physical_state, (PiecePhysicalState.ON_BOARD, PiecePhysicalState.RESTING))
+
 
 if __name__ == "__main__":
     unittest.main()
+

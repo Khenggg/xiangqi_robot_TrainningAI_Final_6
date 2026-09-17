@@ -680,6 +680,21 @@ function connectLive() {
         if (!data.success) {
           handleBackendError(data.error || `Quỹ đạo thất bại ở giai đoạn ${data.failed_stage}`);
         }
+      } else if (data.type === "backend_data_reset") {
+        const badge = document.getElementById("diagStatusBadge");
+        if (badge) {
+          badge.className = "badge-safe";
+          badge.textContent = "ĐÃ RESET BACKEND";
+        }
+        const expl = document.getElementById("diagExplanation");
+        if (expl) {
+          expl.innerHTML = `✅ <strong>Khởi động lại backend thành công:</strong> Toàn bộ dữ liệu backend, vị trí 32 quân cờ, góc khớp robot và vị trí bàn cờ đã được phục hồi về trạng thái ban đầu.`;
+        }
+        updateStepperUI(null, []);
+        state.currentCell = null;
+        if (data.placement) {
+          applyAuthoritativeBoardPlacement(data.placement);
+        }
       } else if (data.type === "error") {
         handleBackendError(data.message || "Lỗi backend");
       }
@@ -1214,6 +1229,31 @@ function initJointControlPanelEvents() {
       gripperBtn.textContent = state.gripperClosed ? "🗜️ Đang Kẹp" : "🗜️ Kẹp / Nhả";
       gripperBtn.style.color = state.gripperClosed ? "#f0883e" : "#c9d1d9";
     });
+  }
+
+  function triggerBackendDataReset() {
+    if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+      const badge = document.getElementById("diagStatusBadge");
+      if (badge) {
+        badge.className = "badge-warn";
+        badge.textContent = "ĐANG RESET BACKEND...";
+      }
+      state.liveSocket.send(JSON.stringify({
+        command: "RESET_ALL_BACKEND_DATA",
+      }));
+    } else {
+      handleBackendError("Chưa kết nối Backend: Bấm Connect live để khởi động lại dữ liệu backend.");
+    }
+  }
+
+  const resetBackendBtn = document.getElementById("resetBackendBtn");
+  if (resetBackendBtn) {
+    resetBackendBtn.addEventListener("click", triggerBackendDataReset);
+  }
+
+  const panelResetBackendBtn = document.getElementById("panelResetBackendBtn");
+  if (panelResetBackendBtn) {
+    panelResetBackendBtn.addEventListener("click", triggerBackendDataReset);
   }
 
   const panelEl = document.getElementById("jointControlPanel");
