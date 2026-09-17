@@ -6,12 +6,13 @@
 
 ## METADATA
 * **CURRENT_BRANCH:** `feature/virtual-robot-3d-simulator`
-* **LAST_REVIEWED_HEAD:** `097490d1ce95ee3ea87f5caa4f2183b189dfeaf4`
-* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `097490d1ce95ee3ea87f5caa4f2183b189dfeaf4`
+* **LAST_REVIEWED_HEAD:** `12ce7330393a9014b0ad5e9013e845c8a3bf525e`
+* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `12ce7330393a9014b0ad5e9013e845c8a3bf525e`
 * **PASS_A_RUNTIME_AUTHORITY:** `PASS`
 * **PASS_A1_REENTRANT_LOCK:** `PASS`
 * **PASS_A2_NO_SILENT_QUEUE:** `PASS`
 * **PASS_B_SERVICE_SAFE:** `PASS`
+* **PASS_C_POST_OP_RETREAT:** `PASS`
 * **PHASE:** `PHASE_3_SIMULATION_VIRTUAL_TWIN`
 * **PHASE_STATUS:** `PARTIAL`
 * **CI_STATUS:** `LOCAL_VERIFIED_GREEN`
@@ -32,12 +33,12 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 10. **Manual Cartesian & Joint Jogging:** Incremental jog with step size selectors and collision prechecks. (Verified by `test_13_runtime_jog_tcp`, `test_14_runtime_jog_joint`).
 11. **In-Process Recovery Actions:** Granular recovery (`clear_error`, `reset_robot`, `reset_board`, `reset_pieces`) and `full_reset` without process termination. (Verified by `test_15_granular_recovery_actions`, `test_17_full_system_reset_in_process`).
 12. **[B10] Pass B Corrective: Predicate Methods, Settling Piece Guard, Mandatory Relocation Gate & Swept Exclusion Volume (Pass B Corrective):** Fixed `is_connected()` method invocation on backend; incorporated `PiecePhysicalState.SETTLING` into transient piece physical state check so settling pieces invalidate `is_service_safe()` and `is_board_adjustment_ready`; enforced mandatory `prepare_board_adjustment()` readiness token and fresh physical `evaluate_service_safety()` check before executing `set_board_placement()` (with narrow internal reset bypass); established behavioral regression test fixture (`[0, -60, 125, -135, -90, 0]°`) with proven initial clearance $d_{\text{initial}} = 7.14\text{ mm} > 5.0\text{ mm}$ margin, proving negative board lowering triggers collision at step $k = 1 > 0$ with `BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR` and 100% state invariance; implemented canonical service exclusion volume derived from `self.geom` and `self.placement_state` with PyBullet continuous collision detection across all moving links (0..5) and gripper proxies, and explicitly verified arm link detection inside exclusion volume while TCP is $> 39\text{ mm}$ outside the ceiling. (Verified by `test_bc1_disconnected_backend_rejects_service_safe` through `test_bc12_supported_envelope_boundary_cases_remain_safe`).
+13. **[B11] Post-Operation Safe Retreat & Separation of Manipulation from Robot Safety (Pass C):** Defined `PayloadSafetyReport` dataclass and `evaluate_payload_clearance()` predicate in runtime; extended `PickResult` (`piece_grasped`, `payload_clear`, `requires_recovery`, `payload_safety`) and `PlaceResult` (`piece_placed`, `piece_released`, `post_release_lift_complete`, `board_clear`, `service_safe`, `requires_recovery`, `service_safety`) preserving backward-compatible dict/bool fallback; enforced sequential trajectory stages on `pick_piece()` (`PREPOSITION` -> `DESCEND` -> `GRASP` -> `LIFT` -> `PAYLOAD_CLEAR` -> `COMPLETE`), reaching payload-safe clearance above board without requiring `SERVICE_SAFE` while piece is attached; enforced 3-stage post-release retreat on `place_piece()` (`APPROACH` -> `LAND` -> `RELEASE` -> `SETTLE` -> `POST_RELEASE_LIFT` -> `CLEAR_BOARD` -> `SERVICE_RETREAT` -> `COMPLETE`), evaluating physical predicate `evaluate_service_safety()`; decoupled physical piece placement success from post-operation retreat safety so that if piece release succeeds but post-release lift or service retreat fails, `success = False`, `piece_placed = True`, `piece_released = True`, `service_safe = False`, and `requires_recovery = True`, resolving legacy bug where `LIFT_FAILED_AFTER_RELEASE` reported `success = True`; and ensured board adjustment controls remain strictly locked (`is_board_adjustment_ready == False`) whenever post-operation retreat leaves robot un-retreated. (Verified by `test_c1_normal_pick_retreat` through `test_c12_trajectory_stage_truthfulness`).
 
 ---
 
 ## OPEN_BLOCKERS
-* **Total Count:** 4 (Passes C, D, E, F)
-* **Pass C:** Post-operation retreat (enforcing mandatory clearance retreat after trajectory execution).
+* **Total Count:** 3 (Passes D, E, F)
 * **Pass D:** Reset transactionality (ensuring atomic cleanup during system/component resets).
 * **Pass E:** Viewer safety UX (front-end safety state guards and error indicators).
 * **Pass F:** Final closure (end-to-end integration and simulation phase sign-off).
@@ -51,8 +52,8 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 ---
 
 ## TEST_EVIDENCE
-* **Python Unit Tests:** 95/95 Phase 3 specific tests PASSED (100% pass rate)
-  * `tests/unit/test_phase3_final_master.py`: 59 passed (including Pass A, A.1, A.2 tests, Pass B tests b1–b11, and Pass B Corrective tests bc1–bc12)
+* **Python Unit Tests:** 107/107 Phase 3 specific tests PASSED (100% pass rate)
+  * `tests/unit/test_phase3_final_master.py`: 71 passed (including Pass A/A.1/A.2 tests, Pass B/B-Corr tests, and Pass C tests c1–c12)
   * `tests/unit/test_phase3_final_closure.py`: 11 passed
   * `tests/unit/test_phase3_isolation_and_fail_fast.py`: 12 passed
   * `tests/unit/test_phase3_dynamic_board_placement.py`: 13 passed
@@ -65,7 +66,7 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 ---
 
 ## NEXT_ALLOWED_WORK
-* Pass C — Post-operation retreat (enforcing mandatory clearance retreat after trajectory execution).
+* Pass D — Reset transactionality (ensuring atomic cleanup during system/component resets).
 
 ---
 

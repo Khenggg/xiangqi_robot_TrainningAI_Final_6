@@ -124,10 +124,30 @@
 
 ---
 
+## B11 — Post-Operation Safe Retreat & Split Physical Manipulation from Service Safety (Pass C)
+* **Status:** FIXED
+* **Severity:** BLOCKER
+* **Affected Files:** `src/simulation/physics/state.py`, `src/simulation/physics/collision_guard.py`, `src/simulation/virtual_fr3_backend.py`, `src/simulation/runtime.py`
+* **Evidence:**
+  1. Previously, `place_piece()` returned `success = True` if piece was released, even when post-release lift or service retreat failed with collision/error (`LIFT_FAILED_AFTER_RELEASE`), violating the physical safety contract.
+  2. `pick_piece()` did not track trajectory stages (`PREPOSITION` -> `DESCEND` -> `GRASP` -> `LIFT` -> `PAYLOAD_CLEAR` -> `COMPLETE`) or ensure physical payload clearance over the board.
+  3. No distinct `PayloadSafetyReport` existed to evaluate safe post-pick holding without demanding `SERVICE_SAFE` (which requires an empty gripper).
+  4. Post-release retreat stages (`POST_RELEASE_LIFT` -> `CLEAR_BOARD` -> `SERVICE_RETREAT`) were not monitored, allowing robot to finish operation parked within board clearance envelope without validating `evaluate_service_safety()`.
+* **Fix Summary:**
+  1. Defined `PayloadSafetyReport` dataclass and `evaluate_payload_clearance()` runtime predicate ($z_{\text{piece}} > z_{\text{board}} + 20\text{ mm}$).
+  2. Extended `PickResult` and `PlaceResult` with typed physical/safety outcome fields, recovery flags, and report objects while preserving dictionary/boolean fallback.
+  3. Fixed collision guard palm penetration checks during grasp descent to specifically ignore currently carried pieces, preventing false collisions during retreat.
+  4. Decoupled manipulation outcome from robot safety: if release succeeds but retreat fails, `success = False`, `piece_placed = True`, `piece_released = True`, `service_safe = False`, and `requires_recovery = True`.
+  5. Enforced that post-operation unsafe state keeps board adjustment strictly locked (`is_board_adjustment_ready == False`).
+* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests` (`test_c1_normal_pick_retreat` through `test_c12_trajectory_stage_truthfulness`)
+* **Last Verified Functional HEAD:** 12ce7330393a9014b0ad5e9013e845c8a3bf525e
+
+---
+
 ## I01 — Deprecated `WebSocketServerProtocol` Import in Telemetry Publisher
 * **Status:** OPEN (Benign warning)
 * **Severity:** LOW
 * **Affected Files:** `src/hardware/telemetry_publisher.py`
 * **Evidence:** Warning during pytest: `DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated`.
 * **Action:** Low impact, server functions normally. Can be migrated to `websockets.asyncio.server.ServerConnection` in a future dependency cleanup.
-* **Last Verified HEAD:** 097490d1ce95ee3ea87f5caa4f2183b189dfeaf4
+* **Last Verified HEAD:** 12ce7330393a9014b0ad5e9013e845c8a3bf525e
