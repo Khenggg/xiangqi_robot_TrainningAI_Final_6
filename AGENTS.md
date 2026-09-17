@@ -523,3 +523,27 @@ Sử dụng repository Skills cho các workflow chuyên biệt.
 `.agents/skills/deep-pr-review/SKILL.md`
 
 Không nhân bản toàn bộ quy trình review PR chi tiết vào file này.
+
+---
+
+# 20. QUY CHUẨN RÀ SOÁT GIA TĂNG (INCREMENTAL CONTEXT PROTOCOL)
+
+Để tối ưu hóa ngữ cảnh và tốc độ xử lý, AI Agent BẮT BUỘC tuân thủ nguyên tắc **Diff-First**:
+
+1. **Khởi tạo ngữ cảnh chuẩn xác:**
+   * Đọc 4 tài liệu cốt lõi: `PROJECT_CONTEXT.md`, `REPO_MAP.md`, `CURRENT_STATE.md`, `KNOWN_ISSUES.md` (hoặc kích hoạt skill `.agents/skills/xiangqi-project-context/`).
+   * TUYỆT ĐỐI KHÔNG quét (grep/glob/read) toàn bộ repository ngay từ đầu.
+2. **Xác định Baseline `LAST_REVIEWED_HEAD`:**
+   * So sánh `LAST_REVIEWED_HEAD` trong `CURRENT_STATE.md` với commit `HEAD` hiện tại (hoặc chạy `python tools/agent_context.py`).
+   * Nếu không có commit mới và working tree sạch: chỉ kiểm tra file thuộc phạm vi tác vụ được chỉ định.
+   * Nếu có commit mới: chỉ phân tích `git log LAST_REVIEWED_HEAD..HEAD` và `git diff --stat`.
+3. **Phạm vi hóa theo `REPO_MAP.md`:**
+   * Dựa vào Routing Table trong `REPO_MAP.md` để mở ĐÚNG các file thuộc phân hệ bị ảnh hưởng và file phụ thuộc trực tiếp.
+   * Chỉ mở rộng phạm vi khi có bằng chứng rõ ràng (lỗi import, stack trace của test fail, kiểm tra chuỗi an toàn).
+4. **Kiểm thử tập trung (Focused Testing First):**
+   * Chạy test nhỏ nhất liên quan đến phân hệ vừa sửa đổi trước.
+   * Chỉ chạy toàn bộ bộ test hồi quy (53 tests) khi các test tập trung đã PASS.
+5. **Cập nhật trạng thái sau khi hoàn thành:**
+   * Cập nhật `CURRENT_STATE.md` (cập nhật `LAST_REVIEWED_HEAD`, `VERIFIED_FIXED`, `TEST_EVIDENCE`) và `KNOWN_ISSUES.md`.
+   * Luôn cung cấp bằng chứng thực thi thực tế (evidence-first) theo Section 18.
+

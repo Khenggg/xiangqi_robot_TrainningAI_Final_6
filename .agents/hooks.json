@@ -1,0 +1,10 @@
+{
+  "xiangqi-delta-guard": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python tools/agent_context.py"
+      }
+    ]
+  }
+}
