@@ -31,6 +31,7 @@
         </label>
         <button id="liveBtn">Connect live</button>
         <span id="liveState">OFFLINE</span>
+        <span id="opStateBadge" class="state-idle" title="Trạng thái vận hành máy trạng thái runtime">IDLE</span>
         <button id="toggleControlsBtn" class="hud-btn-secondary" title="Bật/tắt bảng điều khiển góc khớp">🎮 Điều khiển khớp</button>
         <button id="toggleRulerBtn" class="hud-btn-secondary" title="Click trực tiếp vào cạnh trục/bàn cờ hoặc bấm nút này để hiện hệ số tọa độ (Phím R)">📏 Thước đo (Click cạnh)</button>
         <button id="resetBackendBtn" class="hud-btn-danger" title="Khởi động lại toàn bộ dữ liệu backend (Robot về Home, 32 quân cờ về vị trí xuất phát, reset vị trí bàn cờ)">🔄 Reset Backend</button>
@@ -48,9 +49,10 @@
             <button id="closeControlsBtn" class="close-btn" title="Đóng panel">✕</button>
           </div>
           <div class="panel-tabs">
-            <button id="tabJointsBtn" class="tab-btn active">🎮 Góc Khớp J1..J6</button>
-            <button id="tabReachBtn" class="tab-btn">🎯 Chạm Ô Cờ (90 Ô)</button>
-            <button id="tabPlacementBtn" class="tab-btn">📐 Vị Trí Bàn Cờ</button>
+            <button id="tabJointsBtn" class="tab-btn active">🎮 Khớp</button>
+            <button id="tabReachBtn" class="tab-btn">🎯 90 Ô</button>
+            <button id="tabPlacementBtn" class="tab-btn">📐 Vị Trí</button>
+            <button id="tabServiceBtn" class="tab-btn">🛠️ Service</button>
           </div>
           <div id="jointsTabContent" class="tab-content active">
             <div class="panel-actions">
@@ -346,6 +348,86 @@
               <div id="valFailuresContainer" style="display: none; margin-top: 6px; font-size: 11px; color: #f85149;">
                 <div style="font-weight: 600;">Ô thất bại:</div>
                 <div id="valFailuresList" style="max-height: 80px; overflow-y: auto; font-family: monospace;"></div>
+              </div>
+            </div>
+          </div>
+          <div id="serviceTabContent" class="tab-content">
+            <div class="service-section">
+              <div class="service-section-title">🚨 PHỤC HỒI & RESET (RECOVERY)</div>
+              <div class="panel-actions-grid">
+                <button id="btnOpClearError" class="action-btn" title="Xóa cờ lỗi runtime và cho phép nhận lệnh tiếp theo">🧹 Xóa Lỗi</button>
+                <button id="btnOpResetRobot" class="action-btn" title="Đưa robot về tư thế chuẩn Home an toàn">🤖 Reset Robot</button>
+                <button id="btnOpResetBoard" class="action-btn" title="Đưa vị trí bàn cờ về danh định (nominal)">🏁 Reset Bàn</button>
+                <button id="btnOpResetPieces" class="action-btn" title="Phục hồi 32 quân cờ về vị trí ban đầu">♟️ Reset Quân</button>
+                <button id="btnOpFullReset" class="action-btn danger-action" style="grid-column: span 2;" title="Phục hồi toàn bộ hệ thống in-process">🔄 FULL RESET TOÀN BỘ</button>
+              </div>
+            </div>
+
+            <div class="service-section" style="margin-top: 10px;">
+              <div class="service-section-title">🛡️ AN TOÀN DỊCH VỤ (SERVICE SAFE)</div>
+              <div class="panel-actions-grid">
+                <button id="btnGoServiceSafe" class="action-btn primary-action" title="Đưa robot về tư thế lùi an toàn [0, -45, 90, -45, -90, 0] deg">🛡️ Go Service Safe</button>
+                <button id="btnRetractBoard" class="action-btn" title="Nâng thẳng Z lên transit plane an toàn rồi lùi">⬆️ Lùi Khỏi Bàn</button>
+                <button id="btnPrepareBoardAdj" class="action-btn" style="grid-column: span 2;" title="Nâng ngàm nhả kẹp và chuyển sang service safe trước khi dời bàn cờ">⚙️ Chuẩn Bị Dời Bàn</button>
+              </div>
+            </div>
+
+            <div class="service-section" style="margin-top: 10px;">
+              <div class="service-section-title">🕹️ CARTESIAN JOG (TCP)</div>
+              <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 11px; color: #8b949e;">Bước dịch:</span>
+                <select id="tcpJogStepSelect" style="flex: 1; padding: 2px 4px; background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px; font-size: 11px;">
+                  <option value="1">1 mm</option>
+                  <option value="5" selected>5 mm</option>
+                  <option value="10">10 mm</option>
+                  <option value="25">25 mm</option>
+                </select>
+              </div>
+              <div class="jog-grid">
+                <button class="jog-btn" data-tcp-axis="+X">X +</button>
+                <button class="jog-btn" data-tcp-axis="-X">X -</button>
+                <button class="jog-btn" data-tcp-axis="+Y">Y +</button>
+                <button class="jog-btn" data-tcp-axis="-Y">Y -</button>
+                <button class="jog-btn" data-tcp-axis="+Z">Z +</button>
+                <button class="jog-btn" data-tcp-axis="-Z">Z -</button>
+              </div>
+            </div>
+
+            <div class="service-section" style="margin-top: 10px;">
+              <div class="service-section-title">🦾 JOINT JOG (J1..J6)</div>
+              <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 11px; color: #8b949e;">Bước góc:</span>
+                <select id="jointJogStepSelect" style="flex: 1; padding: 2px 4px; background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px; font-size: 11px;">
+                  <option value="1">1 °</option>
+                  <option value="5" selected>5 °</option>
+                  <option value="10">10 °</option>
+                </select>
+              </div>
+              <div class="joint-jog-list">
+                <div class="joint-jog-row">
+                  <span>J1</span>
+                  <button class="jog-btn-mini" data-joint-idx="0" data-joint-dir="-1">-</button>
+                  <button class="jog-btn-mini" data-joint-idx="0" data-joint-dir="1">+</button>
+                  <span>J2</span>
+                  <button class="jog-btn-mini" data-joint-idx="1" data-joint-dir="-1">-</button>
+                  <button class="jog-btn-mini" data-joint-idx="1" data-joint-dir="1">+</button>
+                </div>
+                <div class="joint-jog-row">
+                  <span>J3</span>
+                  <button class="jog-btn-mini" data-joint-idx="2" data-joint-dir="-1">-</button>
+                  <button class="jog-btn-mini" data-joint-idx="2" data-joint-dir="1">+</button>
+                  <span>J4</span>
+                  <button class="jog-btn-mini" data-joint-idx="3" data-joint-dir="-1">-</button>
+                  <button class="jog-btn-mini" data-joint-idx="3" data-joint-dir="1">+</button>
+                </div>
+                <div class="joint-jog-row">
+                  <span>J5</span>
+                  <button class="jog-btn-mini" data-joint-idx="4" data-joint-dir="-1">-</button>
+                  <button class="jog-btn-mini" data-joint-idx="4" data-joint-dir="1">+</button>
+                  <span>J6</span>
+                  <button class="jog-btn-mini" data-joint-idx="5" data-joint-dir="-1">-</button>
+                  <button class="jog-btn-mini" data-joint-idx="5" data-joint-dir="1">+</button>
+                </div>
               </div>
             </div>
           </div>

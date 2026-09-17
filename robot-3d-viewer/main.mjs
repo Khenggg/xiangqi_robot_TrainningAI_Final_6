@@ -695,6 +695,8 @@ function connectLive() {
         if (data.placement) {
           applyAuthoritativeBoardPlacement(data.placement);
         }
+      } else if (data.type === "operation_state") {
+        updateOperationStateUI(data.state);
       } else if (data.type === "error") {
         handleBackendError(data.message || "Lỗi backend");
       }
@@ -1102,6 +1104,100 @@ export function updatePlacementValidationResultUI(res) {
   }
 }
 
+function updateOperationStateUI(stateName) {
+  const badge = document.getElementById("opStateBadge");
+  if (!badge) return;
+  const s = String(stateName || "IDLE").toUpperCase();
+  badge.textContent = s;
+  badge.className = "";
+  if (s === "IDLE") {
+    badge.classList.add("state-idle");
+  } else if (s === "MOTION") {
+    badge.classList.add("state-motion");
+  } else if (s.startsWith("VALIDATING")) {
+    badge.classList.add("state-validating");
+  } else if (s === "BOARD_ADJUSTMENT") {
+    badge.classList.add("state-board");
+  } else if (s === "SERVICE_MOVE") {
+    badge.classList.add("state-service");
+  } else if (s === "RESETTING") {
+    badge.classList.add("state-resetting");
+  } else {
+    badge.classList.add("state-idle");
+  }
+}
+
+function initServicePanelEvents() {
+  const sendCmd = (cmdObj) => {
+    if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+      state.liveSocket.send(JSON.stringify(cmdObj));
+    } else {
+      handleBackendError("Chưa kết nối Backend: Bấm Connect live để gửi lệnh.");
+    }
+  };
+
+  document.getElementById("btnOpClearError")?.addEventListener("click", () => {
+    sendCmd({ command: "CLEAR_ERROR" });
+  });
+
+  document.getElementById("btnOpResetRobot")?.addEventListener("click", () => {
+    sendCmd({ command: "RESET_ROBOT" });
+  });
+
+  document.getElementById("btnOpResetBoard")?.addEventListener("click", () => {
+    sendCmd({ command: "RESET_BOARD" });
+  });
+
+  document.getElementById("btnOpResetPieces")?.addEventListener("click", () => {
+    sendCmd({ command: "RESET_PIECES" });
+  });
+
+  document.getElementById("btnOpFullReset")?.addEventListener("click", () => {
+    triggerBackendDataReset();
+  });
+
+  document.getElementById("btnGoServiceSafe")?.addEventListener("click", () => {
+    sendCmd({ command: "GO_SERVICE_SAFE" });
+  });
+
+  document.getElementById("btnRetractBoard")?.addEventListener("click", () => {
+    sendCmd({ command: "RETRACT_FROM_BOARD" });
+  });
+
+  document.getElementById("btnPrepareBoardAdj")?.addEventListener("click", () => {
+    sendCmd({ command: "PREPARE_BOARD_ADJUSTMENT" });
+  });
+
+  // Cartesian Jog
+  document.querySelectorAll(".jog-btn[data-tcp-axis]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const axis = btn.dataset.tcpAxis;
+      const stepSel = document.getElementById("tcpJogStepSelect");
+      const step = stepSel ? Number(stepSel.value) : 5.0;
+      sendCmd({
+        command: "JOG_TCP",
+        axis: axis,
+        step_mm: step,
+      });
+    });
+  });
+
+  // Joint Jog
+  document.querySelectorAll(".jog-btn-mini[data-joint-idx]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.dataset.jointIdx);
+      const dir = Number(btn.dataset.jointDir || 1);
+      const stepSel = document.getElementById("jointJogStepSelect");
+      const step = stepSel ? Number(stepSel.value) : 5.0;
+      sendCmd({
+        command: "JOG_JOINT",
+        joint_idx: idx,
+        delta_deg: dir * step,
+      });
+    });
+  });
+}
+
 function initPlacementPanelEvents() {
   const shiftSlider = document.getElementById("boardShiftSlider");
   const shiftNum = document.getElementById("boardShiftNum");
@@ -1270,17 +1366,19 @@ function initJointControlPanelEvents() {
     });
   }
 
-  // Tabs switching: J1..J6 | Reach Cells | Board Placement
+  // Tabs switching: J1..J6 | Reach Cells | Board Placement | Service & Recovery
   const tabJointsBtn = document.getElementById("tabJointsBtn");
   const tabReachBtn = document.getElementById("tabReachBtn");
   const tabPlacementBtn = document.getElementById("tabPlacementBtn");
+  const tabServiceBtn = document.getElementById("tabServiceBtn");
   const jointsContent = document.getElementById("jointsTabContent");
   const reachContent = document.getElementById("reachTabContent");
   const placementContent = document.getElementById("placementTabContent");
+  const serviceContent = document.getElementById("serviceTabContent");
 
   function switchTab(activeTab, activeContent) {
-    [tabJointsBtn, tabReachBtn, tabPlacementBtn].forEach((b) => b?.classList.remove("active"));
-    [jointsContent, reachContent, placementContent].forEach((c) => c?.classList.remove("active"));
+    [tabJointsBtn, tabReachBtn, tabPlacementBtn, tabServiceBtn].forEach((b) => b?.classList.remove("active"));
+    [jointsContent, reachContent, placementContent, serviceContent].forEach((c) => c?.classList.remove("active"));
     activeTab?.classList.add("active");
     activeContent?.classList.add("active");
   }
@@ -1288,6 +1386,7 @@ function initJointControlPanelEvents() {
   tabJointsBtn?.addEventListener("click", () => switchTab(tabJointsBtn, jointsContent));
   tabReachBtn?.addEventListener("click", () => switchTab(tabReachBtn, reachContent));
   tabPlacementBtn?.addEventListener("click", () => switchTab(tabPlacementBtn, placementContent));
+  tabServiceBtn?.addEventListener("click", () => switchTab(tabServiceBtn, serviceContent));
 
   // Reach cell button
   const reachBtn = document.getElementById("reachCellBtn");
@@ -1301,6 +1400,7 @@ function initJointControlPanelEvents() {
 
   // Setup dynamic board placement panel handlers
   initPlacementPanelEvents();
+  initServicePanelEvents();
 
   // Quick cell buttons
   document.querySelectorAll(".quick-cell-btn").forEach((btn) => {

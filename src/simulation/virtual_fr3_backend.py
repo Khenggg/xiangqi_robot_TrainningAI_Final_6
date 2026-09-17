@@ -46,12 +46,17 @@ class PlannedTrajectory:
     min_manipulability: Optional[float] = None
 
 
+DEFAULT_HOME_JOINTS_DEG = [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
+SERVICE_SAFE_JOINTS_DEG = [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
+
+
 class VirtualFR3Backend(RobotBackend):
     """
     Authoritative virtual FR3 robot actuator and state manager.
     """
 
     DEFAULT_HOME_JOINTS_DEG = [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
+    SERVICE_SAFE_JOINTS_DEG = [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
 
     def __init__(
         self,
@@ -154,8 +159,11 @@ class VirtualFR3Backend(RobotBackend):
             self._sync_telemetry()
 
     def set_allowed_grasp_piece_id(self, piece_id: Optional[str]) -> None:
-        """Set or clear the allowed target piece during grasp."""
-        self._allowed_grasp_piece_id = piece_id
+        """Set or clear the allowed target piece during grasp (wildcard '*' rejected)."""
+        if piece_id == "*":
+            self._allowed_grasp_piece_id = None
+        else:
+            self._allowed_grasp_piece_id = piece_id
 
     @property
     def allowed_grasp_piece_id(self) -> Optional[str]:
@@ -301,6 +309,11 @@ class VirtualFR3Backend(RobotBackend):
             self._gripper_closed = bool(closed)
             self._sync_telemetry()
             return True
+
+    def is_gripper_closed(self) -> bool:
+        """Check if gripper virtual actuator is in closed state."""
+        with self._state_lock:
+            return bool(self._gripper_closed)
 
     def move_joint(
         self,
@@ -743,3 +756,71 @@ class VirtualFR3Backend(RobotBackend):
     def reset_to_home(self, speed_factor: Optional[float] = None) -> bool:
         """Move arm back to canonical home joint pose."""
         return self.move_joint(self.DEFAULT_HOME_JOINTS_DEG, speed_factor=speed_factor)
+
+    @property
+    def home_joints_deg(self) -> List[float]:
+        return list(self.DEFAULT_HOME_JOINTS_DEG)
+
+    def is_service_safe(self, tolerance_deg: float = 2.0) -> bool:
+        """
+        Check if robot is in SERVICE_SAFE pose (within tolerance_deg on all joints)
+        and gripper is open / not attached.
+        """
+        with self._state_lock:
+            curr = self._current_joints_deg
+            for c, target in zip(curr, self.SERVICE_SAFE_JOINTS_DEG):
+                if abs(c - target) > tolerance_deg:
+                    return False
+            return True
+
+    def go_service_safe(self, speed_factor: Optional[float] = None) -> bool:
+        """
+        Safely move arm to SERVICE_SAFE joint configuration.
+        Uses lift recovery if near or below transit safe plane.
+        """
+        return self.move_joint_with_lift_recovery(
+            self.SERVICE_SAFE_JOINTS_DEG,
+            speed_factor=speed_factor,
+        )
+
+    def jog_joint(
+        self,
+        joint_idx: int,
+        delta_deg: float,
+        speed_factor: Optional[float] = None,
+    ) -> bool:
+        """
+        Jog a single joint by delta_deg while validating joint limits and collisions.
+        """
+        if joint_idx < 0 or joint_idx >= 6:
+            self._last_error = f"Invalid joint index {joint_idx}"
+            return False
+
+        with self._state_lock:
+            target_deg = list(self._current_joints_deg)
+
+        target_deg[joint_idx] += float(delta_deg)
+        return self.move_joint(target_deg, speed_factor=speed_factor)
+
+    def jog_tcp(
+        self,
+        delta_xyz_mm: Optional[Sequence[float]] = None,
+        delta_rpy_deg: Optional[Sequence[float]] = None,
+        speed_factor: Optional[float] = None,
+        samples: int = 10,
+    ) -> bool:
+        """
+        Jog TCP in Cartesian space by delta_xyz_mm and delta_rpy_deg.
+        """
+        with self._state_lock:
+            current_pose = list(self._tcp_pose_mm_deg)
+
+        target_pose = list(current_pose)
+        if delta_xyz_mm is not None:
+            for i in range(min(3, len(delta_xyz_mm))):
+                target_pose[i] += float(delta_xyz_mm[i])
+        if delta_rpy_deg is not None:
+            for i in range(min(3, len(delta_rpy_deg))):
+                target_pose[3 + i] += float(delta_rpy_deg[i])
+
+        return self.move_cartesian(target_pose, speed_factor=speed_factor, samples=samples)

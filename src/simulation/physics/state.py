@@ -5,7 +5,7 @@ Physical simulation state enums, results, and immutable snapshot models.
 from dataclasses import asdict, dataclass
 from enum import Enum
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class PiecePhysicalState(str, Enum):
@@ -25,6 +25,8 @@ class GraspStatus(str, Enum):
     AMBIGUOUS = "AMBIGUOUS"
     ALREADY_ATTACHED = "ALREADY_ATTACHED"
     INVALID_GRIPPER_STATE = "INVALID_GRIPPER_STATE"
+    PARTIAL = "PARTIAL"
+    LIFT_FAILED_AFTER_GRASP = "LIFT_FAILED_AFTER_GRASP"
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,85 @@ class GraspResult:
     piece_id: Optional[str] = None
     distance_m: float = 0.0
     reason: str = ""
+
+
+class PickResult(dict):
+    """Structured result for pick_piece operation with backwards-compatible dictionary and boolean behavior."""
+    def __init__(
+        self,
+        success: bool,
+        status: str,
+        reason: Optional[str] = None,
+        error: Optional[str] = None,
+        piece_id: Optional[str] = None,
+    ):
+        err = error or reason
+        super().__init__(success=success, status=str(status), reason=err, error=err, piece_id=piece_id)
+
+    def __bool__(self) -> bool:
+        return bool(self.get("success", False))
+
+    @property
+    def success(self) -> bool:
+        return bool(self.get("success", False))
+
+    @property
+    def status(self) -> str:
+        return str(self.get("status", ""))
+
+    @property
+    def reason(self) -> Optional[str]:
+        return self.get("reason") or self.get("error")
+
+    @property
+    def error(self) -> Optional[str]:
+        return self.get("error") or self.get("reason")
+
+    @property
+    def piece_id(self) -> Optional[str]:
+        return self.get("piece_id")
+
+
+class PlaceResult(dict):
+    """Structured result for place_piece operation with backwards-compatible boolean behavior."""
+    def __init__(
+        self,
+        success: bool,
+        status: str,
+        reason: Optional[str] = None,
+        error: Optional[str] = None,
+        piece_id: Optional[str] = None,
+        target_cell: Optional[Tuple[int, int]] = None,
+    ):
+        err = error or reason
+        super().__init__(success=success, status=str(status), reason=err, error=err, piece_id=piece_id, target_cell=target_cell)
+
+    def __bool__(self) -> bool:
+        return bool(self.get("success", False))
+
+    @property
+    def success(self) -> bool:
+        return bool(self.get("success", False))
+
+    @property
+    def status(self) -> str:
+        return str(self.get("status", ""))
+
+    @property
+    def reason(self) -> Optional[str]:
+        return self.get("reason") or self.get("error")
+
+    @property
+    def error(self) -> Optional[str]:
+        return self.get("error") or self.get("reason")
+
+    @property
+    def piece_id(self) -> Optional[str]:
+        return self.get("piece_id")
+
+    @property
+    def target_cell(self) -> Optional[Tuple[int, int]]:
+        return self.get("target_cell")
 
 
 @dataclass(frozen=True)

@@ -648,13 +648,6 @@ export function buildCoordinateRulerGroup(options = {}) {
     }
   };
 
-  group.updateBoardPlacement = function (centerWorldZ, surfaceWorldY) {
-    if (boardEdgesGroup) {
-      boardEdgesGroup.position.z = centerWorldZ - 0.36;
-      boardEdgesGroup.position.y = surfaceWorldY - 0.0105;
-    }
-  };
-
   return group;
 }
 

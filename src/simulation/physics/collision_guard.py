@@ -224,10 +224,7 @@ class FR3CollisionGuard:
         for pid, piece in self.world.pieces.items():
             if piece.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
                 continue
-            is_target_piece = (pid == allowed_grasp_piece_id) or (pid == attached_id) or (piece.attached_to_gripper) or (
-                allowed_grasp_piece_id == "*"
-                and np.linalg.norm(piece.get_pose_robot_base()[0] - self.world.gripper.tcp_pos) < 0.025
-            )
+            is_target_piece = (pid == allowed_grasp_piece_id) or (pid == attached_id) or (piece.attached_to_gripper)
             if is_target_piece:
                 # Allowed grasp piece: finger jaws may contact piece. Palm must not penetrate.
                 if self.world.gripper.palm_body_id >= 0:

@@ -28,6 +28,10 @@ class RobotStateSnapshot:
     trajectory_stage: Optional[str] = None  # "PREPOSITION", "LIFT", "TRANSIT", "LAND", "COMPLETE", etc.
     placement_version: int = 1
 
+    @property
+    def joints_rad(self) -> List[float]:
+        return np.deg2rad(self.joints_deg).tolist()
+
 
 class RobotBackend(ABC):
     """

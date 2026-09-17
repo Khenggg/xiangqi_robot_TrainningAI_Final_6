@@ -613,4 +613,113 @@ canvas#scene {
   font-weight: 600;
 }
 
+/* Operation State Badge */
+#opStateBadge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #30363d;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #8b949e;
+  border: 1px solid #484f58;
+}
+#opStateBadge.state-idle {
+  background: #238636;
+  border-color: #2ea043;
+  color: #ffffff;
+}
+#opStateBadge.state-motion {
+  background: #1f6feb;
+  border-color: #388bfd;
+  color: #ffffff;
+}
+#opStateBadge.state-validating {
+  background: #8957e5;
+  border-color: #a371f7;
+  color: #ffffff;
+}
+#opStateBadge.state-board {
+  background: #d29922;
+  border-color: #e3b341;
+  color: #ffffff;
+}
+#opStateBadge.state-service {
+  background: #db61a2;
+  border-color: #f778ba;
+  color: #ffffff;
+}
+#opStateBadge.state-resetting {
+  background: #da3633;
+  border-color: #f85149;
+  color: #ffffff;
+}
+
+/* Service & Recovery Panel */
+.panel-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.service-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #8b949e;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.jog-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.jog-btn {
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #58a6ff;
+  border-radius: 6px;
+  padding: 6px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.jog-btn:hover {
+  background: #30363d;
+  border-color: #58a6ff;
+  color: #ffffff;
+}
+.joint-jog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.joint-jog-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #c9d1d9;
+}
+.joint-jog-row span {
+  width: 24px;
+  font-family: monospace;
+  font-weight: 700;
+}
+.jog-btn-mini {
+  flex: 1;
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #38bdf8;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.jog-btn-mini:hover {
+  background: #30363d;
+  color: #ffffff;
+}
+
+
 

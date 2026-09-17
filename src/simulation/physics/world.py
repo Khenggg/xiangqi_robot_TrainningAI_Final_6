@@ -217,6 +217,13 @@ class VirtualPhysicalWorld:
         """Backwards-compatible alias for authoritative runtime synchronization."""
         self.sync_robot_runtime_configuration(joints_rad)
 
+    def get_robot_joint_positions(self) -> List[float]:
+        """Get current 6 joint angles of FR3 robot in PyBullet (in radians)."""
+        if self.robot_body_id < 0 or self.client_id < 0:
+            return []
+        with self._physics_lock:
+            return [float(p.getJointState(self.robot_body_id, j, physicsClientId=self.client_id)[0]) for j in range(6)]
+
     def _spawn_board(self) -> None:
         """Create finite static board box collider."""
         board_physics = self.physics_cfg.get("board", {})
@@ -333,6 +340,84 @@ class VirtualPhysicalWorld:
             pos, orn = p.getBasePositionAndOrientation(self.board_body_id, physicsClientId=self.client_id)
             return np.array(pos), np.array(orn)
         return np.array([self._nominal_board_center[0] - self.current_forward_shift_m, self._nominal_board_center[1], self.board_surface_z - self._board_half_z]), np.array([0.0, 0.0, 0.0, 1.0])
+
+    def check_board_swept_volume_collision(
+        self,
+        new_forward_shift_m: float,
+        new_height_offset_m: float = 0.0,
+        step_size_m: float = 0.005,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Check whether moving the board from current placement to (new_forward_shift_m, new_height_offset_m)
+        would collide along the interpolated swept volume against the robot arm or gripper proxies.
+        Returns (is_safe: bool, collision_reason: Optional[str]).
+        """
+        if self.board_body_id < 0 or self.client_id < 0:
+            return True, None
+
+        with self._physics_lock:
+            shift_old = self.current_forward_shift_m
+            h_old = self.current_height_offset_m
+            shift_new = float(new_forward_shift_m)
+            h_new = float(new_height_offset_m)
+
+            dist = math.hypot(shift_new - shift_old, h_new - h_old)
+            num_steps = max(2, int(math.ceil(dist / step_size_m)) + 1)
+
+            orig_pos, orig_orn = p.getBasePositionAndOrientation(self.board_body_id, physicsClientId=self.client_id)
+
+            try:
+                for step_idx in range(num_steps):
+                    alpha = step_idx / (num_steps - 1) if num_steps > 1 else 1.0
+                    s = (1.0 - alpha) * shift_old + alpha * shift_new
+                    h = (1.0 - alpha) * h_old + alpha * h_new
+
+                    cx = self._nominal_board_center[0] - s
+                    cy = self._nominal_board_center[1]
+                    cz = (self._nominal_surface_height + h) - self._board_half_z
+
+                    p.resetBasePositionAndOrientation(
+                        self.board_body_id,
+                        [cx, cy, cz],
+                        [0.0, 0.0, 0.0, 1.0],
+                        physicsClientId=self.client_id,
+                    )
+
+                    # 1. Check collision against articulated FR3 robot links
+                    if self.robot_body_id >= 0:
+                        contacts = p.getClosestPoints(
+                            self.board_body_id,
+                            self.robot_body_id,
+                            distance=0.002,
+                            physicsClientId=self.client_id,
+                        )
+                        for pt in contacts:
+                            contact_dist = float(pt[8])
+                            if contact_dist <= 0.001:
+                                link_idx = int(pt[4])
+                                return False, f"Board swept volume collides with robot link {link_idx} at step {step_idx}/{num_steps} (distance={contact_dist*1000:.2f}mm)"
+
+                    # 2. Check collision against gripper proxy bodies
+                    for proxy_id in self.gripper.proxy_body_ids:
+                        contacts = p.getClosestPoints(
+                            self.board_body_id,
+                            proxy_id,
+                            distance=0.002,
+                            physicsClientId=self.client_id,
+                        )
+                        for pt in contacts:
+                            contact_dist = float(pt[8])
+                            if contact_dist <= 0.001:
+                                return False, f"Board swept volume collides with gripper proxy at step {step_idx}/{num_steps} (distance={contact_dist*1000:.2f}mm)"
+
+                return True, None
+            finally:
+                p.resetBasePositionAndOrientation(
+                    self.board_body_id,
+                    orig_pos,
+                    orig_orn,
+                    physicsClientId=self.client_id,
+                )
 
     def _spawn_pieces(self) -> None:
         """Spawn 32 Xiangqi pieces as cylinder rigid bodies at initial intersections."""
@@ -537,17 +622,37 @@ class VirtualPhysicalWorld:
         self.gripper.set_gripper_state(gripper_closed)
         self.gripper.set_tcp_pose(tcp_xyz_m, tcp_quat, self.sim_time)
 
-    def try_grasp(self) -> GraspResult:
+    def try_grasp(self, sim_time: Optional[float] = None, target_piece_id: Optional[str] = None) -> GraspResult:
         """
         Attempt deterministic geometric grasp on candidate pieces.
+        If target_piece_id is provided, candidates are filtered strictly to that piece.
         If successful, attaches piece to gripper.
         """
-        candidates = list(self.pieces.values())
-        result = self.gripper.evaluate_grasp_eligibility(candidates)
-        if result.success and result.piece_id:
-            target_piece = self.pieces[result.piece_id]
-            self.gripper.attach_piece(target_piece)
-        return result
+        with self._physics_lock:
+            if target_piece_id is not None:
+                if target_piece_id not in self.pieces:
+                    return GraspResult(
+                        success=False,
+                        status=GraspStatus.NO_CANDIDATE,
+                        piece_id=target_piece_id,
+                        reason=f"Target piece {target_piece_id} does not exist in world",
+                    )
+                candidates = [self.pieces[target_piece_id]]
+            else:
+                candidates = list(self.pieces.values())
+
+            result = self.gripper.evaluate_grasp_eligibility(candidates)
+            if target_piece_id is not None and result.piece_id is not None and result.piece_id != target_piece_id:
+                return GraspResult(
+                    success=False,
+                    status=GraspStatus.AMBIGUOUS,
+                    piece_id=target_piece_id,
+                    reason=f"Candidate {result.piece_id} does not match requested target piece {target_piece_id}",
+                )
+            if result.success and result.piece_id:
+                target_piece = self.pieces[result.piece_id]
+                self.gripper.attach_piece(target_piece)
+            return result
 
     def release_attached_piece(self) -> Optional[XiangqiPieceBody]:
         """Release attached piece. It inherits current motion velocity."""
