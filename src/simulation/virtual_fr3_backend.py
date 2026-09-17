@@ -260,6 +260,16 @@ class VirtualFR3Backend(RobotBackend):
             self._trajectory_stage = stage
             self._sync_telemetry()
 
+    def get_trajectory_stage(self) -> Optional[str]:
+        """Return current trajectory stage."""
+        with self._state_lock:
+            return self._trajectory_stage
+
+    @property
+    def trajectory_stage(self) -> Optional[str]:
+        with self._state_lock:
+            return self._trajectory_stage
+
     def get_state_snapshot(self) -> RobotStateSnapshot:
         """Return immutable, thread-safe snapshot of current authoritative state."""
         with self._state_lock:
@@ -323,6 +333,8 @@ class VirtualFR3Backend(RobotBackend):
                 self._last_error = "Cannot set gripper: robot not connected"
                 return False
             self._gripper_closed = bool(closed)
+            if not self._gripper_closed:
+                self._attached_piece_id = None
             self._sync_telemetry()
             return True
 

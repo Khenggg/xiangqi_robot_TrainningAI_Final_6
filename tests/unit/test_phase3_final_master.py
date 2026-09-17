@@ -19,6 +19,7 @@ Comprehensive Master Unit Tests for Phase 3 Final Corrective Pass:
 17. test_full_system_reset_in_process: full_reset() restores complete system state without restarting Python process.
 """
 
+import dataclasses
 import json
 from pathlib import Path
 import sys
@@ -32,7 +33,10 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.simulation.physics.state import GraspStatus, GraspResult, PickResult, PlaceResult, PiecePhysicalState, ServiceSafetyReport
+from src.simulation.physics.state import (
+    GraspStatus, GraspResult, PickResult, PlaceResult, PiecePhysicalState,
+    ServiceSafetyReport, PayloadSafetyReport,
+)
 from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.physics.collision_guard import FR3CollisionGuard
 from src.simulation.runtime import VirtualXiangqiSimulation, RuntimeOperationState, RuntimeOperationBusy
@@ -1422,6 +1426,432 @@ class Phase3FinalMasterTests(unittest.TestCase):
             self.assertFalse(excl["gripper_inside"], f"Corner ({fwd}, {z_off}) gripper encroached: {excl}")
             self.assertGreater(excl["min_moving_link_dist_m"], 0.05, f"Corner ({fwd}, {z_off}) link margin < 50mm")
             self.assertGreater(excl["min_gripper_proxy_dist_m"], 0.10, f"Corner ({fwd}, {z_off}) proxy margin < 100mm")
+
+    # =========================================================================
+    # PASS C: POST-OPERATION SAFE RETREAT TESTS (test_c1 .. test_c12)
+    # =========================================================================
+
+    def test_c1_normal_pick_retreat(self):
+        """C1. Normal PICK lifts attached piece away from board to safe transit height and verifies PAYLOAD_CLEAR."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        p_id = list(self.sim.world.pieces.keys())[0]
+
+        res = self.sim.pick_piece(p_id)
+        self.assertTrue(res.success, f"Pick should succeed: {res.error}")
+        self.assertTrue(res.piece_grasped)
+        self.assertTrue(res.payload_clear)
+        self.assertFalse(res.requires_recovery)
+        self.assertEqual(res.piece_id, p_id)
+        self.assertEqual(res.status, GraspStatus.SUCCESS.value)
+        self.assertTrue(self.sim.is_payload_clear())
+
+        # Authoritative physical predicate verification
+        rep = self.sim.evaluate_payload_clearance(expected_piece_id=p_id)
+        self.assertTrue(rep.payload_clear)
+        self.assertTrue(rep.piece_attached)
+        self.assertTrue(rep.gripper_closed)
+        self.assertTrue(rep.robot_idle)
+        self.assertTrue(rep.trajectory_idle)
+        self.assertTrue(rep.collision_safe)
+        self.assertTrue(rep.payload_above_transit_plane)
+        self.assertGreaterEqual(rep.board_clearance_mm, 20.0)
+
+        # Standalone PICK does NOT reach SERVICE_SAFE because piece is attached
+        self.assertFalse(self.sim.is_service_safe())
+
+        # Clean up
+        self.sim.world.release_attached_piece()
+        self.sim.backend.open_gripper()
+        self.sim.runtime_go_service_safe()
+        self.sim.reset_pieces()
+
+    def test_c2_pick_lift_failure(self):
+        """C2. Pick post-grasp lift failure reports failure with attached piece and requires recovery."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        p_id = list(self.sim.world.pieces.keys())[0]
+
+        orig_mc = self.sim.backend.move_cartesian
+        def mock_mc(pose, **kwargs):
+            if self.sim.backend.get_trajectory_stage() == "LIFT":
+                self.sim.backend._last_error = "MOCK_LIFT_STALL"
+                return False
+            return orig_mc(pose, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "move_cartesian", side_effect=mock_mc):
+            res = self.sim.pick_piece(p_id)
+
+        self.assertFalse(res.success)
+        self.assertEqual(res.status, "PICK_LIFT_FAILED_WITH_ATTACHED_PIECE")
+        self.assertTrue(res.piece_grasped)
+        self.assertFalse(res.payload_clear)
+        self.assertTrue(res.requires_recovery)
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
+
+        # Clean up
+        self.sim.world.release_attached_piece()
+        self.sim.backend.open_gripper()
+        self.sim.clear_error()
+        self.sim.runtime_go_service_safe()
+        self.sim.reset_pieces()
+
+    def test_c3_attachment_loss_during_retreat(self):
+        """C3. Dropping piece during post-grasp lift reports attachment lost and requires recovery."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        p_id = list(self.sim.world.pieces.keys())[0]
+
+        orig_mc = self.sim.backend.move_cartesian
+        def mock_mc(pose, **kwargs):
+            if self.sim.backend.get_trajectory_stage() == "LIFT":
+                # Simulate attachment loss / piece drop during lift
+                self.sim.world.release_attached_piece()
+                self.sim.backend.set_attached_piece_id(None)
+            return orig_mc(pose, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "move_cartesian", side_effect=mock_mc):
+            res = self.sim.pick_piece(p_id)
+
+        self.assertFalse(res.success)
+        self.assertEqual(res.status, "PICK_ATTACHMENT_LOST_DURING_RETREAT")
+        self.assertFalse(res.piece_grasped)
+        self.assertFalse(res.payload_clear)
+        self.assertTrue(res.requires_recovery)
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
+
+        # Clean up
+        self.sim.clear_error()
+        self.sim.runtime_go_service_safe()
+        self.sim.reset_pieces()
+
+    def test_c4_normal_place_full_retreat(self):
+        """C4. Normal PLACE executes complete retreat through LIFT, CLEAR_BOARD, SERVICE_RETREAT to SERVICE_SAFE."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        p_id = list(self.sim.world.pieces.keys())[0]
+
+        pick_res = self.sim.pick_piece(p_id)
+        self.assertTrue(pick_res.success)
+
+        res = self.sim.place_piece(target_cell=(4, 4))
+        self.assertTrue(res.success)
+        self.assertEqual(res.status, "SUCCESS")
+        self.assertTrue(res.piece_placed)
+        self.assertTrue(res.piece_released)
+        self.assertTrue(res.post_release_lift_complete)
+        self.assertTrue(res.board_clear)
+        self.assertTrue(res.service_safe)
+        self.assertFalse(res.requires_recovery)
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "COMPLETE")
+
+        # Authoritative physical predicate verification
+        rep = self.sim.evaluate_service_safety()
+        self.assertTrue(rep.service_safe)
+        self.assertTrue(self.sim.is_service_safe())
+
+        # Clean up
+        self.sim.reset_pieces()
+        self.sim.runtime_go_service_safe()
+
+    def test_c5_release_succeeds_lift_fails(self):
+        """C5. Release succeeds but post-release lift fails: success is False, piece is placed, requires recovery."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        p_id = list(self.sim.world.pieces.keys())[0]
+        pick_res = self.sim.pick_piece(p_id)
+        self.assertTrue(pick_res.success)
+
+        orig_mc = self.sim.backend.move_cartesian
+        def mock_mc(pose, **kwargs):
+            if self.sim.backend.get_trajectory_stage() == "POST_RELEASE_LIFT":
+                self.sim.backend._last_error = "MOCK_POST_RELEASE_LIFT_FAILED"
+                return False
+            return orig_mc(pose, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "move_cartesian", side_effect=mock_mc):
+            res = self.sim.place_piece(target_cell=(4, 4))
+
+        # CRITICAL BUG FIX INVARIANT: Under NO circumstances return success=True!
+        self.assertFalse(res.success)
+        self.assertEqual(res.status, "PLACE_LIFT_FAILED_AFTER_RELEASE")
+        self.assertTrue(res.piece_placed)
+        self.assertTrue(res.piece_released)
+        self.assertFalse(res.post_release_lift_complete)
+        self.assertFalse(res.board_clear)
+        self.assertFalse(res.service_safe)
+        self.assertTrue(res.requires_recovery)
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
+
+        # Piece remains physically placed at cell (4, 4)
+        p = self.sim.world.pieces[p_id]
+        pos, _ = p.get_pose_robot_base()
+        tx, ty, _ = self.sim.cell_to_robot_xyz_m(4, 4)
+        np.testing.assert_allclose(pos[:2], [tx, ty], atol=0.03)
+
+        # Clean up
+        self.sim.clear_error()
+        self.sim.runtime_go_service_safe()
+        self.sim.reset_pieces()
+
+    def test_c6_clear_board_succeeds_service_retreat_fails(self):
+        """C6. Post-release lift succeeds but SERVICE_RETREAT fails: success is False, piece is placed, requires recovery."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        p_id = list(self.sim.world.pieces.keys())[0]
+        pick_res = self.sim.pick_piece(p_id)
+        self.assertTrue(pick_res.success)
+
+        orig_fn = self.sim.backend.move_joint_with_lift_recovery
+        def mock_retreat(target_joints_deg, **kwargs):
+            if self.sim.backend.get_trajectory_stage() == "SERVICE_RETREAT":
+                self.sim.backend._last_error = "MOCK_SERVICE_RETREAT_INTERRUPTED"
+                return False
+            return orig_fn(target_joints_deg, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "move_joint_with_lift_recovery", side_effect=mock_retreat):
+            res = self.sim.place_piece(target_cell=(4, 4))
+
+        self.assertFalse(res.success)
+        self.assertEqual(res.status, "PLACE_SERVICE_RETREAT_FAILED")
+        self.assertTrue(res.piece_placed)
+        self.assertTrue(res.piece_released)
+        self.assertTrue(res.post_release_lift_complete)
+        self.assertTrue(res.board_clear)
+        self.assertFalse(res.service_safe)
+        self.assertTrue(res.requires_recovery)
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
+
+        # Clean up
+        self.sim.clear_error()
+        self.sim.runtime_go_service_safe()
+        self.sim.reset_pieces()
+
+    def test_c7_joint_target_reached_but_physical_service_predicate_fails(self):
+        """C7. Reaches SERVICE_SAFE joint target but physical predicate fails: reports COMPLETE_BUT_NOT_SERVICE_SAFE."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        p_id = list(self.sim.world.pieces.keys())[0]
+        pick_res = self.sim.pick_piece(p_id)
+        self.assertTrue(pick_res.success)
+
+        orig_eval = self.sim.evaluate_service_safety
+        def mock_eval():
+            rep = orig_eval()
+            return dataclasses.replace(
+                rep,
+                service_safe=False,
+                gripper_open=False,
+                reasons=["SERVICE_UNSAFE_GRIPPER_NOT_OPEN"],
+            )
+
+        with mock.patch.object(self.sim, "evaluate_service_safety", side_effect=mock_eval):
+            res = self.sim.place_piece(target_cell=(4, 4))
+
+        self.assertFalse(res.success)
+        self.assertEqual(res.status, "COMPLETE_BUT_NOT_SERVICE_SAFE")
+        self.assertTrue(res.piece_placed)
+        self.assertTrue(res.piece_released)
+        self.assertTrue(res.post_release_lift_complete)
+        self.assertFalse(res.service_safe)
+        self.assertTrue(res.requires_recovery)
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
+
+        # Clean up
+        self.sim.clear_error()
+        self.sim.runtime_go_service_safe()
+        self.sim.reset_pieces()
+
+    def test_c8_dynamic_board_height(self):
+        """C8. Place and retreat operates correctly under dynamic board placement and height offset."""
+        self.sim.runtime_go_service_safe()
+        self.sim.prepare_board_adjustment()
+        adj_res = self.sim.set_board_placement(forward_shift_mm=0.0, board_height_offset_mm=15.0)
+        self.assertTrue(adj_res.get("success", False))
+
+        p_id = list(self.sim.world.pieces.keys())[0]
+        pick_res = self.sim.pick_piece(p_id)
+        self.assertTrue(pick_res.success)
+
+        place_res = self.sim.place_piece(target_cell=(4, 4))
+        self.assertTrue(place_res.success)
+        self.assertTrue(place_res.service_safe)
+        self.assertEqual(place_res.status, "SUCCESS")
+
+        # Verify robot reached SERVICE_SAFE pose above elevated board
+        rep = self.sim.evaluate_service_safety()
+        self.assertTrue(rep.service_safe)
+
+        # Restore default placement
+        self.sim.prepare_board_adjustment()
+        self.sim.set_board_placement(forward_shift_mm=0.0, board_height_offset_mm=0.0)
+        self.sim.reset_pieces()
+
+    def test_c9_retreat_collision(self):
+        """C9. Staged retreat halts safely if obstacle is detected, preventing swept collisions."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        p_id = list(self.sim.world.pieces.keys())[0]
+        pick_res = self.sim.pick_piece(p_id)
+        self.assertTrue(pick_res.success)
+
+        orig_fn = self.sim.backend.move_joint_with_lift_recovery
+        def mock_retreat(target_joints_deg, **kwargs):
+            if self.sim.backend.get_trajectory_stage() == "SERVICE_RETREAT":
+                self.sim.backend._last_error = "COLLISION_DETECTED_IN_RETREAT"
+                return False
+            return orig_fn(target_joints_deg, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "move_joint_with_lift_recovery", side_effect=mock_retreat):
+            res = self.sim.place_piece(target_cell=(4, 4))
+
+        self.assertFalse(res.success)
+        self.assertEqual(res.status, "PLACE_SERVICE_RETREAT_FAILED")
+        self.assertTrue(res.requires_recovery)
+        self.assertFalse(res.service_safe)
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
+
+        # Clean up
+        self.sim.clear_error()
+        self.sim.runtime_go_service_safe()
+        self.sim.reset_pieces()
+
+    def test_c10_board_controls_remain_locked_after_unsafe_partial_place(self):
+        """C10. Board controls remain locked after unsafe partial place; relocation is strictly rejected."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        p_id = list(self.sim.world.pieces.keys())[0]
+        pick_res = self.sim.pick_piece(p_id)
+        self.assertTrue(pick_res.success)
+
+        orig_mc = self.sim.backend.move_cartesian
+        def mock_mc(pose, **kwargs):
+            if self.sim.backend.get_trajectory_stage() == "POST_RELEASE_LIFT":
+                self.sim.backend._last_error = "LIFT_MOTOR_OVERLOAD"
+                return False
+            return orig_mc(pose, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "move_cartesian", side_effect=mock_mc):
+            res = self.sim.place_piece(target_cell=(4, 4))
+
+        self.assertFalse(res.success)
+        self.assertEqual(res.status, "PLACE_LIFT_FAILED_AFTER_RELEASE")
+
+        # Pass B invariant: board adjustment readiness MUST be False
+        self.assertFalse(self.sim.is_board_adjustment_ready)
+
+        # Attempting board adjustment must be rejected
+        reloc = self.sim.set_board_placement(forward_shift_mm=10.0)
+        self.assertFalse(reloc.get("success", False))
+        self.assertIn("BOARD_RELOCATION_REJECTED", reloc.get("status", ""))
+
+        # Clean up: clear error, prepare board adjustment and restore service safe
+        self.sim.clear_error()
+        self.sim.runtime_go_service_safe()
+        self.sim.reset_pieces()
+
+    def test_c11_no_duplicate_place(self):
+        """C11. Partial place failure preserves placed piece without duplicate release or re-grasp retry."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        initial_piece_count = len(self.sim.world.pieces)
+        p_id = list(self.sim.world.pieces.keys())[0]
+
+        pick_res = self.sim.pick_piece(p_id)
+        self.assertTrue(pick_res.success)
+
+        orig_mc = self.sim.backend.move_cartesian
+        def mock_mc(pose, **kwargs):
+            if self.sim.backend.get_trajectory_stage() == "POST_RELEASE_LIFT":
+                self.sim.backend._last_error = "MOCK_LIFT_STALL"
+                return False
+            return orig_mc(pose, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "move_cartesian", side_effect=mock_mc):
+            res = self.sim.place_piece(target_cell=(4, 4))
+
+        self.assertFalse(res.success)
+        self.assertTrue(res.piece_placed)
+        self.assertTrue(res.piece_released)
+
+        # Piece count remains strictly invariant
+        self.assertEqual(len(self.sim.world.pieces), initial_piece_count)
+
+        # Gripper is empty (no re-grasp attempt)
+        self.assertIsNone(self.sim.world.get_attached_piece())
+        self.assertIsNone(self.sim.backend.get_attached_piece_id())
+
+        # Piece physically resting at target cell
+        p = self.sim.world.pieces[p_id]
+        pos, _ = p.get_pose_robot_base()
+        tx, ty, _ = self.sim.cell_to_robot_xyz_m(4, 4)
+        np.testing.assert_allclose(pos[:2], [tx, ty], atol=0.03)
+
+        # Clean up
+        self.sim.clear_error()
+        self.sim.runtime_go_service_safe()
+        self.sim.reset_pieces()
+
+    def test_c12_trajectory_stage_truthfulness(self):
+        """C12. Trajectory stage is never COMPLETE prior to verified retreat and reports FAILED on retreat error."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        p_id = list(self.sim.world.pieces.keys())[0]
+        pick_res = self.sim.pick_piece(p_id)
+        self.assertTrue(pick_res.success)
+
+        stages_observed = []
+        orig_set_stage = self.sim.backend.set_trajectory_stage
+        def record_stage(stage):
+            stages_observed.append(stage)
+            return orig_set_stage(stage)
+
+        with mock.patch.object(self.sim.backend, "set_trajectory_stage", side_effect=record_stage):
+            orig_retreat = self.sim.backend.move_joint_with_lift_recovery
+            def mock_retreat(target_joints_deg, **kwargs):
+                if self.sim.backend.get_trajectory_stage() == "SERVICE_RETREAT":
+                    return False
+                return orig_retreat(target_joints_deg, **kwargs)
+
+            with mock.patch.object(self.sim.backend, "move_joint_with_lift_recovery", side_effect=mock_retreat):
+                res = self.sim.place_piece(target_cell=(4, 4))
+
+        self.assertFalse(res.success)
+        self.assertIn("SERVICE_RETREAT", stages_observed)
+        self.assertEqual(stages_observed[-1], "FAILED")
+        self.assertNotIn("COMPLETE", stages_observed)
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
+
+        # Now test successful place stage progression
+        self.sim.clear_error()
+        self.sim.runtime_go_service_safe()
+        self.sim.reset_pieces()
+
+        p_id = list(self.sim.world.pieces.keys())[0]
+        self.sim.pick_piece(p_id)
+
+        stages_success = []
+        def record_stage_ok(stage):
+            stages_success.append(stage)
+            return orig_set_stage(stage)
+
+        with mock.patch.object(self.sim.backend, "set_trajectory_stage", side_effect=record_stage_ok):
+            res_ok = self.sim.place_piece(target_cell=(4, 4))
+
+        self.assertTrue(res_ok.success)
+        self.assertIn("APPROACH", stages_success)
+        self.assertIn("LAND", stages_success)
+        self.assertIn("RELEASE", stages_success)
+        self.assertIn("SETTLE", stages_success)
+        self.assertIn("POST_RELEASE_LIFT", stages_success)
+        self.assertIn("CLEAR_BOARD", stages_success)
+        self.assertIn("SERVICE_RETREAT", stages_success)
+        self.assertEqual(stages_success[-1], "COMPLETE")
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "COMPLETE")
+
+        # Clean up
+        self.sim.reset_pieces()
+        self.sim.runtime_go_service_safe()
 
 
 if __name__ == "__main__":

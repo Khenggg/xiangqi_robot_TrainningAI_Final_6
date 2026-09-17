@@ -39,6 +39,46 @@ class GraspResult:
     reason: str = ""
 
 
+@dataclass
+class PayloadSafetyReport:
+    """
+    Authoritative physical safety report for carrying-piece payload clearance.
+    Evaluates attachment, gripper state, robot conditioning, and physical board clearance.
+    """
+    payload_clear: bool
+    piece_attached: bool
+    gripper_closed: bool
+    robot_idle: bool
+    trajectory_idle: bool
+    collision_safe: bool
+    tcp_clearance_mm: float
+    piece_bottom_clearance_mm: float
+    board_clearance_mm: float
+    payload_above_transit_plane: bool
+    attached_piece_id: Optional[str] = None
+    reasons: Optional[List[str]] = None
+
+    def __post_init__(self):
+        if self.reasons is None:
+            self.reasons = []
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "payload_clear": self.payload_clear,
+            "piece_attached": self.piece_attached,
+            "gripper_closed": self.gripper_closed,
+            "robot_idle": self.robot_idle,
+            "trajectory_idle": self.trajectory_idle,
+            "collision_safe": self.collision_safe,
+            "tcp_clearance_mm": round(self.tcp_clearance_mm, 2),
+            "piece_bottom_clearance_mm": round(self.piece_bottom_clearance_mm, 2),
+            "board_clearance_mm": round(self.board_clearance_mm, 2),
+            "payload_above_transit_plane": self.payload_above_transit_plane,
+            "attached_piece_id": self.attached_piece_id,
+            "reasons": list(self.reasons),
+        }
+
+
 class PickResult(dict):
     """Structured result for pick_piece operation with backwards-compatible dictionary and boolean behavior."""
     def __init__(
@@ -48,9 +88,28 @@ class PickResult(dict):
         reason: Optional[str] = None,
         error: Optional[str] = None,
         piece_id: Optional[str] = None,
+        piece_grasped: Optional[bool] = None,
+        payload_clear: Optional[bool] = None,
+        requires_recovery: Optional[bool] = None,
+        payload_safety: Optional[PayloadSafetyReport] = None,
+        **kwargs: Any,
     ):
         err = error or reason
-        super().__init__(success=success, status=str(status), reason=err, error=err, piece_id=piece_id)
+        grasped = piece_grasped if piece_grasped is not None else bool(success)
+        clear = payload_clear if payload_clear is not None else bool(success)
+        rec = requires_recovery if requires_recovery is not None else (not success and grasped)
+        super().__init__(
+            success=bool(success),
+            status=str(status),
+            reason=err,
+            error=err,
+            piece_id=piece_id,
+            piece_grasped=grasped,
+            payload_clear=clear,
+            requires_recovery=rec,
+            payload_safety=payload_safety,
+            **kwargs,
+        )
 
     def __bool__(self) -> bool:
         return bool(self.get("success", False))
@@ -75,6 +134,22 @@ class PickResult(dict):
     def piece_id(self) -> Optional[str]:
         return self.get("piece_id")
 
+    @property
+    def piece_grasped(self) -> bool:
+        return bool(self.get("piece_grasped", False))
+
+    @property
+    def payload_clear(self) -> bool:
+        return bool(self.get("payload_clear", False))
+
+    @property
+    def requires_recovery(self) -> bool:
+        return bool(self.get("requires_recovery", False))
+
+    @property
+    def payload_safety(self) -> Optional[PayloadSafetyReport]:
+        return self.get("payload_safety")
+
 
 class PlaceResult(dict):
     """Structured result for place_piece operation with backwards-compatible boolean behavior."""
@@ -86,9 +161,39 @@ class PlaceResult(dict):
         error: Optional[str] = None,
         piece_id: Optional[str] = None,
         target_cell: Optional[Tuple[int, int]] = None,
+        piece_placed: Optional[bool] = None,
+        piece_released: Optional[bool] = None,
+        post_release_lift_complete: Optional[bool] = None,
+        board_clear: Optional[bool] = None,
+        service_safe: Optional[bool] = None,
+        requires_recovery: Optional[bool] = None,
+        service_safety: Optional[Any] = None,
+        **kwargs: Any,
     ):
         err = error or reason
-        super().__init__(success=success, status=str(status), reason=err, error=err, piece_id=piece_id, target_cell=target_cell)
+        placed = piece_placed if piece_placed is not None else bool(success)
+        released = piece_released if piece_released is not None else placed
+        lift_done = post_release_lift_complete if post_release_lift_complete is not None else bool(success)
+        b_clear = board_clear if board_clear is not None else bool(success)
+        s_safe = service_safe if service_safe is not None else bool(success)
+        rec = requires_recovery if requires_recovery is not None else (not success and placed)
+        overall_success = bool(success) and bool(placed) and bool(s_safe)
+        super().__init__(
+            success=overall_success,
+            status=str(status),
+            reason=err,
+            error=err,
+            piece_id=piece_id,
+            target_cell=target_cell,
+            piece_placed=placed,
+            piece_released=released,
+            post_release_lift_complete=lift_done,
+            board_clear=b_clear,
+            service_safe=s_safe,
+            requires_recovery=rec,
+            service_safety=service_safety,
+            **kwargs,
+        )
 
     def __bool__(self) -> bool:
         return bool(self.get("success", False))
@@ -116,6 +221,34 @@ class PlaceResult(dict):
     @property
     def target_cell(self) -> Optional[Tuple[int, int]]:
         return self.get("target_cell")
+
+    @property
+    def piece_placed(self) -> bool:
+        return bool(self.get("piece_placed", False))
+
+    @property
+    def piece_released(self) -> bool:
+        return bool(self.get("piece_released", False))
+
+    @property
+    def post_release_lift_complete(self) -> bool:
+        return bool(self.get("post_release_lift_complete", False))
+
+    @property
+    def board_clear(self) -> bool:
+        return bool(self.get("board_clear", False))
+
+    @property
+    def service_safe(self) -> bool:
+        return bool(self.get("service_safe", False))
+
+    @property
+    def requires_recovery(self) -> bool:
+        return bool(self.get("requires_recovery", False))
+
+    @property
+    def service_safety(self) -> Optional[Any]:
+        return self.get("service_safety")
 
 
 @dataclass(frozen=True)

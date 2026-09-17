@@ -226,28 +226,30 @@ class FR3CollisionGuard:
                 continue
             is_target_piece = (pid == allowed_grasp_piece_id) or (pid == attached_id) or (piece.attached_to_gripper)
             if is_target_piece:
-                # Allowed grasp piece: finger jaws may contact piece. Palm must not penetrate.
-                if self.world.gripper.palm_body_id >= 0:
-                    pts = p.getClosestPoints(
-                        self.world.gripper.palm_body_id,
-                        piece.body_id,
-                        distance=0.0,
-                        physicsClientId=client,
-                    )
-                    if pts and pts[0][8] < -1e-4:
-                        dist = float(pts[0][8])
-                        return CollisionResult(
-                            safe=False,
-                            colliding_body="gripper_palm",
-                            robot_link=5,
-                            obstacle=f"piece:{pid}",
-                            distance_m=dist,
-                            penetration_m=-dist,
-                            q_failed=[round(float(q), 4) for q in joints_rad],
-                            failure_reason=(
-                                f"Gripper palm penetrating target piece {pid} (penetration={-dist*1000:.2f}mm)"
-                            ),
+                # If piece is already attached, it moves with gripper end-effector assembly.
+                # Palm penetration check strictly guards against crushing an unattached piece during grasp descent.
+                if not piece.attached_to_gripper and pid != attached_id:
+                    if self.world.gripper.palm_body_id >= 0:
+                        pts = p.getClosestPoints(
+                            self.world.gripper.palm_body_id,
+                            piece.body_id,
+                            distance=0.0,
+                            physicsClientId=client,
                         )
+                        if pts and pts[0][8] < -1e-4:
+                            dist = float(pts[0][8])
+                            return CollisionResult(
+                                safe=False,
+                                colliding_body="gripper_palm",
+                                robot_link=5,
+                                obstacle=f"piece:{pid}",
+                                distance_m=dist,
+                                penetration_m=-dist,
+                                q_failed=[round(float(q), 4) for q in joints_rad],
+                                failure_reason=(
+                                    f"Gripper palm penetrating target piece {pid} (penetration={-dist*1000:.2f}mm)"
+                                ),
+                            )
             else:
                 for proxy_id in self.world.gripper.proxy_body_ids:
                     pts = p.getClosestPoints(proxy_id, piece.body_id, distance=margin, physicsClientId=client)

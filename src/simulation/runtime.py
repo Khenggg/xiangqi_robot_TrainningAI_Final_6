@@ -37,8 +37,10 @@ from src.simulation.physics.state import (
     DropEvent,
     GraspResult,
     GraspStatus,
+    PayloadSafetyReport,
     PickResult,
     PiecePhysicalState,
+    PlaceResult,
     ServiceSafetyReport,
     WorldStateSnapshot,
 )
@@ -62,42 +64,6 @@ class RuntimeOperationState(str, Enum):
 class RuntimeOperationBusy(RuntimeError):
     """Raised when an operation cannot be started because the runtime is busy."""
     pass
-
-
-class PlaceResult(dict):
-    """Structured result for place_piece operation with backwards-compatible boolean behavior."""
-    def __init__(
-        self,
-        success: bool,
-        status: str,
-        error: Optional[str] = None,
-        piece_id: Optional[str] = None,
-        target_cell: Optional[Tuple[int, int]] = None,
-    ):
-        super().__init__(success=success, status=status, error=error, piece_id=piece_id, target_cell=target_cell)
-
-    def __bool__(self) -> bool:
-        return bool(self.get("success", False))
-
-    @property
-    def success(self) -> bool:
-        return bool(self.get("success", False))
-
-    @property
-    def status(self) -> str:
-        return str(self.get("status", "UNKNOWN"))
-
-    @property
-    def error(self) -> Optional[str]:
-        return self.get("error")
-
-    @property
-    def piece_id(self) -> Optional[str]:
-        return self.get("piece_id")
-
-    @property
-    def target_cell(self) -> Optional[Tuple[int, int]]:
-        return self.get("target_cell")
 
 
 class VirtualXiangqiSimulation:
@@ -445,12 +411,13 @@ class VirtualXiangqiSimulation:
         speed_factor: float = 50.0,
     ) -> PickResult:
         """
-        Execute pick trajectory over piece with strict fail-fast validation:
+        Execute pick trajectory over piece with strict fail-fast validation and post-operation safe retreat:
         1. Open gripper
-        2. Move above piece (hover) using current placement IK (dataset q is SEED only)
-        3. Descend to grasp center
-        4. Close gripper & verify grasp
-        5. Lift back to hover
+        2. Move above piece (hover) using current placement IK (PREPOSITION)
+        3. Descend to grasp center (DESCEND)
+        4. Close gripper & verify grasp (GRASP)
+        5. Lift back to hover (LIFT)
+        6. Verify payload clearance away from board (PAYLOAD_CLEAR)
         """
         try:
             with self.acquire_operation_state(RuntimeOperationState.MOTION):
@@ -458,7 +425,16 @@ class VirtualXiangqiSimulation:
                     self._board_adjustment_ready = False
                     piece = self.world.pieces.get(piece_id)
                     if piece is None:
-                        return PickResult(success=False, status="PIECE_NOT_FOUND", error=f"Piece {piece_id} not found", piece_id=piece_id)
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PickResult(
+                            success=False,
+                            status="PIECE_NOT_FOUND",
+                            error=f"Piece {piece_id} not found",
+                            piece_id=piece_id,
+                            piece_grasped=False,
+                            payload_clear=False,
+                            requires_recovery=False,
+                        )
 
                     pos_robot, _ = piece.get_pose_robot_base()
                     px, py, pz = pos_robot
@@ -481,29 +457,68 @@ class VirtualXiangqiSimulation:
 
                     ik_hover = self.backend.solve_tcp_ik(hover_pose, seed_joints=seed_joints, allow_multi_seed=True)
                     if not ik_hover.success:
-                        return PickResult(success=False, status="HOVER_UNREACHABLE", error="Hover pose unreachable", piece_id=piece_id)
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PickResult(
+                            success=False,
+                            status="HOVER_UNREACHABLE",
+                            error="Hover pose unreachable",
+                            piece_id=piece_id,
+                            piece_grasped=False,
+                            payload_clear=False,
+                            requires_recovery=False,
+                        )
 
                     # 2. Preposition / Hover
+                    self.backend.set_trajectory_stage("PREPOSITION")
                     ok_hover = self.backend.move_joint_with_lift_recovery(
                         np.degrees(ik_hover.joints_rad),
                         speed_factor=speed_factor,
                         safe_plane_z_m=safe_plane_z,
                     )
                     if not ok_hover:
-                        return PickResult(success=False, status="HOVER_APPROACH_REJECTED", error=f"Hover approach rejected: {self.backend._last_error}", piece_id=piece_id)
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PickResult(
+                            success=False,
+                            status="HOVER_APPROACH_REJECTED",
+                            error=f"Hover approach rejected: {self.backend._last_error}",
+                            piece_id=piece_id,
+                            piece_grasped=False,
+                            payload_clear=False,
+                            requires_recovery=False,
+                        )
 
                     if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
-                        return PickResult(success=False, status="HOVER_ALIGNMENT_REJECTED", error=f"Hover Cartesian alignment rejected: {self.backend._last_error}", piece_id=piece_id)
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PickResult(
+                            success=False,
+                            status="HOVER_ALIGNMENT_REJECTED",
+                            error=f"Hover Cartesian alignment rejected: {self.backend._last_error}",
+                            piece_id=piece_id,
+                            piece_grasped=False,
+                            payload_clear=False,
+                            requires_recovery=False,
+                        )
 
                     try:
                         self.backend.set_allowed_grasp_piece_id(piece_id)
 
                         # 3. Descend to grasp (TCP at piece center)
+                        self.backend.set_trajectory_stage("DESCEND")
                         grasp_pose = [px * 1000.0, py * 1000.0, pz * 1000.0, rx, ry, rz]
                         if not self.backend.move_cartesian(grasp_pose, speed_factor=speed_factor):
-                            return PickResult(success=False, status="DESCENT_REJECTED", error=f"Grasp descent rejected: {self.backend._last_error}", piece_id=piece_id)
+                            self.backend.set_trajectory_stage("FAILED")
+                            return PickResult(
+                                success=False,
+                                status="DESCENT_REJECTED",
+                                error=f"Grasp descent rejected: {self.backend._last_error}",
+                                piece_id=piece_id,
+                                piece_grasped=False,
+                                payload_clear=False,
+                                requires_recovery=False,
+                            )
 
                         # 4. Close gripper (triggers try_grasp)
+                        self.backend.set_trajectory_stage("GRASP")
                         self.backend.set_gripper(True)
                         attached = self.world.get_attached_piece()
                         if attached is not None and attached.piece_id == piece_id:
@@ -526,28 +541,100 @@ class VirtualXiangqiSimulation:
 
                         if not grasp_res.success:
                             logger.warning(f"Grasp verification failed for {piece_id}: {grasp_res.reason}")
-                            return PickResult(success=False, status=str(getattr(grasp_res, "status", "GRASP_FAILED")), error=f"Grasp verification failed: {grasp_res.reason}", piece_id=piece_id)
+                            self.backend.set_trajectory_stage("FAILED")
+                            return PickResult(
+                                success=False,
+                                status=str(getattr(grasp_res, "status", "GRASP_FAILED")),
+                                error=f"Grasp verification failed: {grasp_res.reason}",
+                                piece_id=piece_id,
+                                piece_grasped=False,
+                                payload_clear=False,
+                                requires_recovery=False,
+                            )
+
+                        self.backend.set_attached_piece_id(piece_id)
 
                         # 5. Lift back to hover
-                        if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
-                            return PickResult(success=False, status=GraspStatus.LIFT_FAILED_AFTER_GRASP.value, error=f"Lift after grasp failed: {self.backend._last_error}", piece_id=piece_id)
+                        self.backend.set_trajectory_stage("LIFT")
+                        lift_ok = self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
+                        if not lift_ok:
+                            self.backend.set_trajectory_stage("FAILED")
+                            attached_now = (self.world.get_attached_piece() is not None)
+                            return PickResult(
+                                success=False,
+                                status="PICK_LIFT_FAILED_WITH_ATTACHED_PIECE" if attached_now else GraspStatus.LIFT_FAILED_AFTER_GRASP.value,
+                                error=f"Lift after grasp failed: {self.backend._last_error}",
+                                piece_id=piece_id,
+                                piece_grasped=attached_now,
+                                payload_clear=False,
+                                requires_recovery=True,
+                            )
 
-                        return PickResult(success=True, status=GraspStatus.SUCCESS.value, piece_id=piece_id)
+                        # Check for attachment loss during/after lift
+                        attached_after_lift = self.world.get_attached_piece()
+                        if attached_after_lift is None or attached_after_lift.piece_id != piece_id:
+                            self.backend.set_trajectory_stage("FAILED")
+                            return PickResult(
+                                success=False,
+                                status="PICK_ATTACHMENT_LOST_DURING_RETREAT",
+                                error="Piece dropped or attachment lost during lift retreat",
+                                piece_id=piece_id,
+                                piece_grasped=False,
+                                payload_clear=False,
+                                requires_recovery=True,
+                            )
+
+                        # 6. Verify payload clearance away from board
+                        self.backend.set_trajectory_stage("PAYLOAD_CLEAR")
+                        self.world.step_until_settled(max_steps=20)
+                        payload_rep = self.evaluate_payload_clearance(expected_piece_id=piece_id)
+                        if not payload_rep.payload_clear:
+                            self.backend.set_trajectory_stage("FAILED")
+                            return PickResult(
+                                success=False,
+                                status="PICK_NOT_PAYLOAD_CLEAR",
+                                error=f"Payload clear verification failed: {', '.join(payload_rep.reasons)}",
+                                piece_id=piece_id,
+                                piece_grasped=True,
+                                payload_clear=False,
+                                requires_recovery=True,
+                                payload_safety=payload_rep,
+                            )
+
+                        # Full success for standalone pick
+                        self.backend.set_trajectory_stage("COMPLETE")
+                        return PickResult(
+                            success=True,
+                            status=GraspStatus.SUCCESS.value,
+                            piece_id=piece_id,
+                            piece_grasped=True,
+                            payload_clear=True,
+                            requires_recovery=False,
+                            payload_safety=payload_rep,
+                        )
                     finally:
                         self.backend.set_allowed_grasp_piece_id(None)
         except RuntimeOperationBusy as e:
+            self.backend.set_trajectory_stage("FAILED")
             return PickResult(
                 success=False,
                 status="MOTION_REJECTED_BUSY",
                 error=str(e),
                 piece_id=piece_id,
+                piece_grasped=False,
+                payload_clear=False,
+                requires_recovery=False,
             )
         except Exception as e:
+            self.backend.set_trajectory_stage("FAILED")
             return PickResult(
                 success=False,
                 status="PICK_FAILED",
                 error=str(e),
                 piece_id=piece_id,
+                piece_grasped=False,
+                payload_clear=False,
+                requires_recovery=False,
             )
 
     def place_piece(
@@ -561,14 +648,18 @@ class VirtualXiangqiSimulation:
         **kwargs: Any,
     ) -> PlaceResult:
         """
-        Execute place trajectory to target board cell with strict fail-fast semantics:
+        Execute place trajectory to target board cell with strict fail-fast semantics
+        and post-operation safe retreat:
         1. Verify piece is currently attached
-        2. Move to hover above cell
-        3. Descend to land pose (surface + piece thickness / 2)
+        2. Move to hover above cell (APPROACH)
+        3. Descend to land pose (LAND)
         4. VERIFY LAND SUCCESS - IF FAILED: DO NOT OPEN GRIPPER, DO NOT RELEASE PIECE!
-        5. Open gripper & release piece
-        6. Settle
-        7. Lift back to hover
+        5. Open gripper & release piece (RELEASE)
+        6. Settle (SETTLE)
+        7. Lift back to hover (POST_RELEASE_LIFT)
+        8. Clear board workspace (CLEAR_BOARD)
+        9. Move to SERVICE_SAFE (SERVICE_RETREAT)
+        10. Verify physical SERVICE_SAFE predicate before returning success
         """
         try:
             with self.acquire_operation_state(RuntimeOperationState.MOTION):
@@ -576,7 +667,21 @@ class VirtualXiangqiSimulation:
                     self._board_adjustment_ready = False
                     attached = self.world.get_attached_piece()
                     if attached is None:
-                        return PlaceResult(success=False, status="INVALID_STATE", error="No piece attached to gripper")
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PlaceResult(
+                            success=False,
+                            status="INVALID_STATE",
+                            error="No piece attached to gripper",
+                            piece_placed=False,
+                            piece_released=False,
+                            post_release_lift_complete=False,
+                            board_clear=False,
+                            service_safe=False,
+                            requires_recovery=False,
+                        )
+
+                    placed_piece_id = attached.piece_id
+                    self.backend.set_allowed_grasp_piece_id(placed_piece_id)
 
                     # Resolve destination coordinates across flexible invocation patterns:
                     # e.g.: place_piece(col, row), place_piece("piece_id", target_cell=(r, c)), place_piece(target_cell=(r, c))
@@ -591,10 +696,25 @@ class VirtualXiangqiSimulation:
                         if len(positional) >= 2:
                             c_val, r_val = int(positional[0]), int(positional[1])
                             tx, ty, tz = self.cell_to_robot_xyz(c_val, r_val)
+                            r_target, c_target = r_val, c_val
                         elif col is not None and row is not None:
                             tx, ty, tz = self.cell_to_robot_xyz(int(col), int(row))
+                            r_target, c_target = int(row), int(col)
                         else:
-                            return PlaceResult(success=False, status="INVALID_ARGS", error="Missing destination cell or (col, row)")
+                            self.backend.set_trajectory_stage("FAILED")
+                            return PlaceResult(
+                                success=False,
+                                status="INVALID_ARGS",
+                                error="Missing destination cell or (col, row)",
+                                piece_placed=False,
+                                piece_released=False,
+                                post_release_lift_complete=False,
+                                board_clear=False,
+                                service_safe=False,
+                                requires_recovery=False,
+                            )
+
+                    target_cell_tuple = (r_target, c_target)
 
                     piece_h = self.geom.piece_height_mm / 1000.0
                     piece_z = tz + piece_h / 2.0
@@ -607,7 +727,8 @@ class VirtualXiangqiSimulation:
                     hover_pose = [tx * 1000.0, ty * 1000.0, (piece_z + eff_hover_h) * 1000.0, rx, ry, rz]
                     place_pose = [tx * 1000.0, ty * 1000.0, piece_z * 1000.0, rx, ry, rz]
 
-                    # 1. Move to hover
+                    # 1. Move to hover (APPROACH)
+                    self.backend.set_trajectory_stage("APPROACH")
                     if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
                         ik = self.backend.solve_tcp_ik(hover_pose, allow_multi_seed=True)
                         if ik.success:
@@ -617,43 +738,232 @@ class VirtualXiangqiSimulation:
                                 safe_plane_z_m=safe_plane_z,
                             )
                             if not ok_app:
-                                return PlaceResult(success=False, status="APPROACH_FAILED", error=f"Approach failed: {self.backend._last_error}")
+                                self.backend.set_trajectory_stage("FAILED")
+                                return PlaceResult(
+                                    success=False,
+                                    status="APPROACH_FAILED",
+                                    error=f"Approach failed: {self.backend._last_error}",
+                                    piece_id=placed_piece_id,
+                                    target_cell=target_cell_tuple,
+                                    piece_placed=False,
+                                    piece_released=False,
+                                    post_release_lift_complete=False,
+                                    board_clear=False,
+                                    service_safe=False,
+                                    requires_recovery=False,
+                                )
                         else:
-                            return PlaceResult(success=False, status="APPROACH_FAILED", error="Hover pose unreachable")
+                            self.backend.set_trajectory_stage("FAILED")
+                            return PlaceResult(
+                                success=False,
+                                status="APPROACH_FAILED",
+                                error="Hover pose unreachable",
+                                piece_id=placed_piece_id,
+                                target_cell=target_cell_tuple,
+                                piece_placed=False,
+                                piece_released=False,
+                                post_release_lift_complete=False,
+                                board_clear=False,
+                                service_safe=False,
+                                requires_recovery=False,
+                            )
+
                     # 2. Descend to place (LAND)
+                    self.backend.set_trajectory_stage("LAND")
                     land_ok = self.backend.move_cartesian(place_pose, speed_factor=speed_factor)
                     if not land_ok:
                         # CRITICAL FAIL-FAST INVARIANT: DO NOT OPEN GRIPPER, DO NOT RELEASE PIECE!
                         logger.error("place_piece LAND failed. Preserving grasp; piece NOT released.")
-                        return PlaceResult(success=False, status="LAND_FAILED", error=f"Landing rejected: {self.backend._last_error}")
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PlaceResult(
+                            success=False,
+                            status="LAND_FAILED",
+                            error=f"Landing rejected: {self.backend._last_error}",
+                            piece_id=placed_piece_id,
+                            target_cell=target_cell_tuple,
+                            piece_placed=False,
+                            piece_released=False,
+                            post_release_lift_complete=False,
+                            board_clear=False,
+                            service_safe=False,
+                            requires_recovery=True,
+                        )
 
                     # Verify piece is still attached before release
                     if self.world.get_attached_piece() is None:
-                        return PlaceResult(success=False, status="INVALID_STATE", error="Piece lost before release")
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PlaceResult(
+                            success=False,
+                            status="INVALID_STATE",
+                            error="Piece lost before release",
+                            piece_id=placed_piece_id,
+                            target_cell=target_cell_tuple,
+                            piece_placed=False,
+                            piece_released=False,
+                            post_release_lift_complete=False,
+                            board_clear=False,
+                            service_safe=False,
+                            requires_recovery=True,
+                        )
 
-                    # 3. Open gripper & release piece
+                    # 3. Open gripper & release piece (RELEASE)
+                    self.backend.set_trajectory_stage("RELEASE")
                     self.backend.set_gripper(False)
                     self.world.release_attached_piece()
+                    self.backend.set_attached_piece_id(None)
+                    self.backend.set_allowed_grasp_piece_id(None)
+
+                    # 4. Settle (SETTLE)
+                    self.backend.set_trajectory_stage("SETTLE")
                     self.world.step_until_settled(max_steps=20)
 
-                    # 4. Lift back to hover
+                    # Physical placement committed!
+                    piece_placed = True
+                    piece_released = True
+
+                    # 5. POST_RELEASE_LIFT: Vertical lift back to hover
+                    self.backend.set_trajectory_stage("POST_RELEASE_LIFT")
                     lift_ok = self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
                     if not lift_ok:
-                        return PlaceResult(success=True, status="LIFT_FAILED_AFTER_RELEASE", error=f"Lift after release failed: {self.backend._last_error}")
+                        self.backend.set_trajectory_stage("FAILED")
+                        rep = self.evaluate_service_safety()
+                        return PlaceResult(
+                            success=False,
+                            status="PLACE_LIFT_FAILED_AFTER_RELEASE",
+                            error=f"Lift after release failed: {self.backend._last_error}",
+                            piece_id=placed_piece_id,
+                            target_cell=target_cell_tuple,
+                            piece_placed=True,
+                            piece_released=True,
+                            post_release_lift_complete=False,
+                            board_clear=False,
+                            service_safe=False,
+                            requires_recovery=True,
+                            service_safety=rep,
+                        )
 
-                    return PlaceResult(success=True, status="SUCCESS", error=None)
+                    post_release_lift_complete = True
+
+                    # 6. CLEAR_BOARD: Elevate to full clearance transit altitude above board
+                    self.backend.set_trajectory_stage("CLEAR_BOARD")
+                    clear_z_mm = (safe_plane_z + 0.030) * 1000.0
+                    curr_tcp = list(self.backend.get_state_snapshot().tcp_pose_mm_deg)
+                    if curr_tcp[2] < clear_z_mm:
+                        clear_tcp_pose = list(curr_tcp)
+                        clear_tcp_pose[2] = clear_z_mm
+                        ok_clear = self.backend.move_cartesian(clear_tcp_pose, speed_factor=speed_factor)
+                        if not ok_clear:
+                            ik_clear = self.backend.solve_tcp_ik(clear_tcp_pose, allow_multi_seed=True)
+                            if ik_clear.success:
+                                ok_clear = self.backend.move_joint(np.degrees(ik_clear.joints_rad).tolist(), speed_factor=speed_factor)
+                        if not ok_clear:
+                            self.backend.set_trajectory_stage("FAILED")
+                            rep = self.evaluate_service_safety()
+                            return PlaceResult(
+                                success=False,
+                                status="PLACE_CLEAR_BOARD_FAILED",
+                                error=f"Clear board failed: {self.backend._last_error}",
+                                piece_id=placed_piece_id,
+                                target_cell=target_cell_tuple,
+                                piece_placed=True,
+                                piece_released=True,
+                                post_release_lift_complete=True,
+                                board_clear=False,
+                                service_safe=False,
+                                requires_recovery=True,
+                                service_safety=rep,
+                            )
+
+                    board_clear = True
+
+                    # 7. SERVICE_RETREAT: Move arm to SERVICE_SAFE joint configuration
+                    self.backend.set_trajectory_stage("SERVICE_RETREAT")
+                    ok_retreat = self.backend.move_joint_with_lift_recovery(
+                        self.backend.SERVICE_SAFE_JOINTS_DEG,
+                        speed_factor=speed_factor,
+                        safe_plane_z_m=safe_plane_z,
+                    )
+                    if not ok_retreat:
+                        self.backend.set_trajectory_stage("FAILED")
+                        rep = self.evaluate_service_safety()
+                        return PlaceResult(
+                            success=False,
+                            status="PLACE_SERVICE_RETREAT_FAILED",
+                            error=f"Retreat to SERVICE_SAFE failed: {self.backend._last_error}",
+                            piece_id=placed_piece_id,
+                            target_cell=target_cell_tuple,
+                            piece_placed=True,
+                            piece_released=True,
+                            post_release_lift_complete=True,
+                            board_clear=True,
+                            service_safe=False,
+                            requires_recovery=True,
+                            service_safety=rep,
+                        )
+
+                    # 8. Physical SERVICE_SAFE verification using Pass B predicate
+                    rep = self.evaluate_service_safety()
+                    if not rep.service_safe:
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PlaceResult(
+                            success=False,
+                            status="COMPLETE_BUT_NOT_SERVICE_SAFE",
+                            error=f"Physical service safety predicate failed after retreat: {', '.join(rep.reasons)}",
+                            piece_id=placed_piece_id,
+                            target_cell=target_cell_tuple,
+                            piece_placed=True,
+                            piece_released=True,
+                            post_release_lift_complete=True,
+                            board_clear=True,
+                            service_safe=False,
+                            requires_recovery=True,
+                            service_safety=rep,
+                        )
+
+                    # Full success!
+                    self.backend.set_trajectory_stage("COMPLETE")
+                    return PlaceResult(
+                        success=True,
+                        status="SUCCESS",
+                        piece_id=placed_piece_id,
+                        target_cell=target_cell_tuple,
+                        piece_placed=True,
+                        piece_released=True,
+                        post_release_lift_complete=True,
+                        board_clear=True,
+                        service_safe=True,
+                        requires_recovery=False,
+                        service_safety=rep,
+                    )
         except RuntimeOperationBusy as e:
+            self.backend.set_trajectory_stage("FAILED")
             return PlaceResult(
                 success=False,
                 status="MOTION_REJECTED_BUSY",
                 error=str(e),
+                piece_placed=False,
+                piece_released=False,
+                post_release_lift_complete=False,
+                board_clear=False,
+                service_safe=False,
+                requires_recovery=False,
             )
         except Exception as e:
+            self.backend.set_trajectory_stage("FAILED")
+            placed = (self.world.get_attached_piece() is None and "placed_piece_id" in locals())
             return PlaceResult(
                 success=False,
                 status="PLACE_FAILED",
                 error=str(e),
+                piece_placed=placed,
+                piece_released=placed,
+                post_release_lift_complete=False,
+                board_clear=False,
+                service_safe=False,
+                requires_recovery=placed,
             )
+        finally:
+            self.backend.set_allowed_grasp_piece_id(None)
 
     def schedule_force_drop(
         self,
@@ -825,7 +1135,12 @@ class VirtualXiangqiSimulation:
                     if snap.motion_state == "MOVING":
                         err = "Cannot change board placement while robot is MOVING"
                         return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ROBOT_MOVING", "error": err}
-                    if snap.trajectory_stage not in (None, "IDLE", "COMPLETE"):
+                    active_stages = (
+                        "PREPOSITION", "DESCEND", "GRASP", "LIFT", "TRANSIT",
+                        "LAND", "RELEASE", "SETTLE", "POST_RELEASE_LIFT",
+                        "CLEAR_BOARD", "SERVICE_RETREAT", "MOVING",
+                    )
+                    if snap.trajectory_stage in active_stages:
                         err = f"Cannot change board placement during active trajectory ({snap.trajectory_stage})"
                         return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ACTIVE_TRAJECTORY", "error": err}
 
@@ -940,6 +1255,9 @@ class VirtualXiangqiSimulation:
             self.backend._last_error = None
             if hasattr(self.backend, "_in_error_state"):
                 self.backend._in_error_state = False
+            self.backend.set_trajectory_stage("IDLE")
+            if not self.world.get_attached_piece():
+                self.backend.set_attached_piece_id(None)
             if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
                 self.telemetry.broadcast_custom({
                     "type": "error_cleared",
@@ -1067,7 +1385,7 @@ class VirtualXiangqiSimulation:
         if not robot_idle:
             reasons.append("SERVICE_UNSAFE_ROBOT_MOVING")
 
-        trajectory_idle = (snap.trajectory_stage in (None, "IDLE", "COMPLETE"))
+        trajectory_idle = (snap.trajectory_stage in (None, "IDLE", "COMPLETE", "SERVICE_RETREAT"))
         if not trajectory_idle:
             reasons.append("SERVICE_UNSAFE_TRAJECTORY_ACTIVE")
 
@@ -1203,6 +1521,132 @@ class VirtualXiangqiSimulation:
         rep = self.evaluate_service_safety(tolerance_deg=tolerance_deg)
         return rep.service_safe
 
+    def evaluate_payload_clearance(
+        self,
+        expected_piece_id: Optional[str] = None,
+        min_clearance_margin_mm: float = 20.0,
+    ) -> PayloadSafetyReport:
+        """
+        Authoritative physical safety report for carrying-piece payload clearance.
+        Evaluates:
+        - Piece attached to gripper (backend & world)
+        - Attached piece matches expected_piece_id if specified
+        - Gripper closed
+        - Robot not actively moving (motion_state == IDLE)
+        - Trajectory stage is idle/payload_clear/complete
+        - Attached piece clear of board surface (above board surface + min_clearance_margin_mm)
+        - Attached piece and TCP above safe transit plane
+        - Arm and attached piece collision-safe with non-target pieces and board
+        - No transient drop or unsettled piece states
+        """
+        reasons = []
+
+        # 1. Attached piece check
+        world_attached = self.world.get_attached_piece()
+        backend_attached_id = self.backend.get_attached_piece_id()
+        attached_piece_id = world_attached.piece_id if world_attached else backend_attached_id
+
+        piece_attached = (world_attached is not None or backend_attached_id is not None)
+        if world_attached is not None and backend_attached_id is None:
+            self.backend.set_attached_piece_id(world_attached.piece_id)
+            backend_attached_id = world_attached.piece_id
+        elif world_attached is None and backend_attached_id is not None:
+            self.backend.set_attached_piece_id(None)
+            backend_attached_id = None
+            piece_attached = False
+
+        if not piece_attached:
+            reasons.append("PAYLOAD_UNSAFE_NO_ATTACHED_PIECE")
+        elif expected_piece_id is not None and attached_piece_id != expected_piece_id:
+            reasons.append("PAYLOAD_UNSAFE_PIECE_MISMATCH")
+
+        # 2. Gripper state
+        gripper_closed = bool(self.backend.is_gripper_closed())
+        if not gripper_closed:
+            reasons.append("PAYLOAD_UNSAFE_GRIPPER_OPEN")
+
+        # 3. Controller & motion state
+        snap = self.backend.get_state_snapshot()
+        robot_idle = (snap.motion_state == "IDLE")
+        if not robot_idle:
+            reasons.append("PAYLOAD_UNSAFE_ROBOT_MOVING")
+
+        trajectory_idle = (snap.trajectory_stage in (None, "IDLE", "COMPLETE", "PAYLOAD_CLEAR"))
+        if not trajectory_idle:
+            reasons.append("PAYLOAD_UNSAFE_TRAJECTORY_ACTIVE")
+
+        # 4. Attachment physical state & drop check
+        if world_attached is not None:
+            if world_attached.physical_state != PiecePhysicalState.ATTACHED_TO_GRIPPER:
+                reasons.append("PAYLOAD_UNSAFE_ATTACHMENT_INVALID")
+
+        # Transient pieces check
+        transient = [
+            p_body for p_body in self.world.pieces.values()
+            if p_body.physical_state in (PiecePhysicalState.FALLING, PiecePhysicalState.SETTLING)
+        ]
+        if transient:
+            reasons.append("PAYLOAD_UNSAFE_WORLD_NOT_SETTLED")
+
+        # 5. Clearance heights
+        board_z = self.board_surface_z
+        safe_h_m = (self.placement_state.safe_transit_height_mm / 1000.0) if hasattr(self, "placement_state") else 0.070
+        safe_plane_z = board_z + safe_h_m
+
+        tcp_z = snap.tcp_pose_mm_deg[2] / 1000.0
+        tcp_clearance_mm = (tcp_z - board_z) * 1000.0
+
+        if world_attached is not None:
+            p_pos, _ = world_attached.get_pose_robot_base()
+            piece_h_m = self.geom.piece.height / 1000.0
+            piece_bottom_z = p_pos[2] - (piece_h_m / 2.0)
+            piece_bottom_clearance_mm = (piece_bottom_z - board_z) * 1000.0
+            board_clearance_mm = piece_bottom_clearance_mm
+        else:
+            piece_bottom_clearance_mm = 0.0
+            board_clearance_mm = 0.0
+
+        if piece_bottom_clearance_mm < min_clearance_margin_mm:
+            reasons.append("PAYLOAD_UNSAFE_INSUFFICIENT_CLEARANCE")
+
+        # Payload above safe transit plane (with 5mm tolerance)
+        payload_above_transit_plane = (tcp_z >= safe_plane_z - 0.005)
+        if not payload_above_transit_plane:
+            reasons.append("PAYLOAD_UNSAFE_BELOW_TRANSIT_PLANE")
+
+        # 6. Collision check
+        collision_safe = True
+        if self.backend.collision_guard is not None:
+            col_res = self.backend.collision_guard.validate_configuration(
+                snap.joints_rad,
+                allowed_grasp_piece_id=attached_piece_id,
+            )
+            if not col_res.safe:
+                collision_safe = False
+                reasons.append(f"PAYLOAD_UNSAFE_COLLISION: {col_res.failure_reason}")
+
+        payload_clear = (len(reasons) == 0)
+
+        return PayloadSafetyReport(
+            payload_clear=payload_clear,
+            piece_attached=piece_attached,
+            gripper_closed=gripper_closed,
+            robot_idle=robot_idle,
+            trajectory_idle=trajectory_idle,
+            collision_safe=collision_safe,
+            tcp_clearance_mm=tcp_clearance_mm,
+            piece_bottom_clearance_mm=piece_bottom_clearance_mm,
+            board_clearance_mm=board_clearance_mm,
+            payload_above_transit_plane=payload_above_transit_plane,
+            attached_piece_id=attached_piece_id,
+            reasons=reasons,
+        )
+
+    def is_payload_clear(self, expected_piece_id: Optional[str] = None) -> bool:
+        """Physical predicate helper forwarding to evaluate_payload_clearance()."""
+        rep = self.evaluate_payload_clearance(expected_piece_id=expected_piece_id)
+        return rep.payload_clear
+
     @property
     def is_board_adjustment_ready(self) -> bool:
         """Authoritative live readiness property."""
@@ -1264,6 +1708,7 @@ class VirtualXiangqiSimulation:
                                 "status": "PREPARE_BOARD_ADJUSTMENT_FAILED",
                                 "error": f"Failed to reach SERVICE_SAFE pose: {self.backend._last_error}",
                             }
+                        self.backend.set_trajectory_stage("IDLE")
                         report = self.evaluate_service_safety()
                         if not report.service_safe:
                             return {
@@ -1357,12 +1802,14 @@ class VirtualXiangqiSimulation:
 
                     ok = self.backend.go_service_safe(speed_factor=speed_factor)
                     if not ok:
+                        self.backend.set_trajectory_stage("FAILED")
                         return {
                             "success": False,
                             "status": "SERVICE_SAFE_FAILED",
                             "error": self.backend._last_error or "Failed to move to SERVICE_SAFE",
                         }
 
+                    self.backend.set_trajectory_stage("IDLE")
                     self.world.step_until_settled(max_steps=80)
                     report = self.evaluate_service_safety()
                     if not report.service_safe:
