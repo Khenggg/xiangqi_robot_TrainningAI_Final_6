@@ -815,11 +815,35 @@ class VirtualXiangqiSimulation:
 
                     # 4. Settle (SETTLE)
                     self.backend.set_trajectory_stage("SETTLE")
-                    self.world.step_until_settled(max_steps=20)
+                    self.world.step_until_settled(max_steps=40)
 
-                    # Physical placement committed!
-                    piece_placed = True
+                    # Physical placement verification
                     piece_released = True
+                    piece_placed = False
+
+                    p_obj = self.world.pieces.get(placed_piece_id) if placed_piece_id else None
+                    if p_obj is not None:
+                        is_stable = p_obj.physical_state in (PiecePhysicalState.ON_BOARD, PiecePhysicalState.RESTING)
+                        not_bad = p_obj.physical_state not in (
+                            PiecePhysicalState.OUT_OF_BOUNDS,
+                            PiecePhysicalState.FALLING,
+                            PiecePhysicalState.SETTLING,
+                        )
+                        c_p, r_p, d_p = p_obj.get_nearest_intersection()
+                        cell_match = True
+                        if target_cell_tuple is not None:
+                            cell_match = (r_p, c_p) == target_cell_tuple and d_p < 0.025
+                        pos_m, _ = p_obj.get_pose_robot_base()
+                        expected_z = self.board_surface_z + (self.geom.piece_height_mm / 2000.0)
+                        z_match = abs(pos_m[2] - expected_z) < 0.015
+
+                        if is_stable and not_bad and cell_match and z_match:
+                            piece_placed = True
+                        else:
+                            logger.warning(
+                                f"Physical placement unverified for piece {placed_piece_id}: "
+                                f"state={p_obj.physical_state}, cell=({r_p},{c_p}), d={d_p:.4f}m, z={pos_m[2]:.4f}m"
+                            )
 
                     # 5. POST_RELEASE_LIFT: Vertical lift back to hover
                     self.backend.set_trajectory_stage("POST_RELEASE_LIFT")
@@ -833,7 +857,7 @@ class VirtualXiangqiSimulation:
                             error=f"Lift after release failed: {self.backend._last_error}",
                             piece_id=placed_piece_id,
                             target_cell=target_cell_tuple,
-                            piece_placed=True,
+                            piece_placed=piece_placed,
                             piece_released=True,
                             post_release_lift_complete=False,
                             board_clear=False,
@@ -892,7 +916,7 @@ class VirtualXiangqiSimulation:
                             error=f"Retreat to SERVICE_SAFE failed: {self.backend._last_error}",
                             piece_id=placed_piece_id,
                             target_cell=target_cell_tuple,
-                            piece_placed=True,
+                            piece_placed=piece_placed,
                             piece_released=True,
                             post_release_lift_complete=True,
                             board_clear=True,
@@ -911,11 +935,29 @@ class VirtualXiangqiSimulation:
                             error=f"Physical service safety predicate failed after retreat: {', '.join(rep.reasons)}",
                             piece_id=placed_piece_id,
                             target_cell=target_cell_tuple,
-                            piece_placed=True,
+                            piece_placed=piece_placed,
                             piece_released=True,
                             post_release_lift_complete=True,
                             board_clear=True,
                             service_safe=False,
+                            requires_recovery=True,
+                            service_safety=rep,
+                        )
+
+                    # Final placement verification
+                    if not piece_placed:
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PlaceResult(
+                            success=False,
+                            status="PIECE_PLACEMENT_UNVERIFIED",
+                            error=f"Piece {placed_piece_id} placement could not be physically verified at target cell {target_cell_tuple}",
+                            piece_id=placed_piece_id,
+                            target_cell=target_cell_tuple,
+                            piece_placed=False,
+                            piece_released=True,
+                            post_release_lift_complete=True,
+                            board_clear=True,
+                            service_safe=rep.service_safe,
                             requires_recovery=True,
                             service_safety=rep,
                         )
@@ -2512,10 +2554,13 @@ class VirtualXiangqiSimulation:
             src = cmd.get("src")
             dst = cmd.get("dst")
             p_ver = cmd.get("placement_version")
+            grasp = cmd.get("grasp")
+            if grasp is None:
+                grasp = cmd.get("grasp_piece")
             if src is not None and dst is not None and len(src) == 2 and len(dst) == 2:
                 threading.Thread(
                     target=self._run_trajectory_async,
-                    args=((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1])), p_ver),
+                    args=((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1])), p_ver, grasp),
                     daemon=True,
                 ).start()
         elif action == "SET_GRIPPER":
@@ -2618,9 +2663,15 @@ class VirtualXiangqiSimulation:
                     "enabled": self.backend.collision_guard_enabled,
                 })
 
-    def _run_trajectory_async(self, src: Tuple[int, int], dst: Tuple[int, int], planned_version: Optional[int] = None) -> None:
+    def _run_trajectory_async(
+        self,
+        src: Tuple[int, int],
+        dst: Tuple[int, int],
+        planned_version: Optional[int] = None,
+        grasp_piece: Optional[bool] = None,
+    ) -> None:
         """Execute trajectory asynchronously and broadcast authoritative completion packet."""
-        res = self.execute_3stage_trajectory(src, dst, planned_placement_version=planned_version)
+        res = self.execute_3stage_trajectory(src, dst, planned_placement_version=planned_version, grasp_piece=grasp_piece)
         if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
             self.telemetry.broadcast_custom({
                 "type": "trajectory_result",
@@ -2629,6 +2680,8 @@ class VirtualXiangqiSimulation:
                 "error": res.get("error"),
                 "src": list(src),
                 "dst": list(dst),
+                "service_safe": bool(res.get("service_safe", False)),
+                "piece_placed": bool(res.get("piece_placed", False)),
                 "placement_version": res.get("placement_version", self.placement_state.placement_version),
             })
 
@@ -2639,17 +2692,21 @@ class VirtualXiangqiSimulation:
         speed_factor: Optional[float] = None,
         samples_per_stage: int = 20,
         planned_placement_version: Optional[int] = None,
+        grasp_piece: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
-        Execute authoritative 3-stage Pick & Place Cartesian trajectory:
-        0. PREPOSITION: Move robot to source grasp pose (fail-fast validation before lift)
-        1. LIFT: Cartesian MoveL (same X/Y, increasing Z from grasp to transit height)
-        2. TRANSIT: Cartesian MoveL (source transit -> target transit at constant safe Z)
-        3. LAND: Cartesian MoveL (same target X/Y, decreasing Z from transit to target grasp)
+        Execute authoritative 3-stage Pick & Place Cartesian trajectory with Pass C Safe Retreat:
+        0. PREPOSITION: Move robot to source approach/grasp pose
+        1. LIFT: Cartesian MoveL (vertical increase from grasp to safe transit height)
+        2. TRANSIT: Cartesian MoveL (horizontal transit at constant safe transit height)
+        3. LAND: Cartesian MoveL (vertical decrease from transit to target grasp height)
+        4. RELEASE / SETTLE: Release piece if held, settle physics, and physically verify placement
+        5. POST-OPERATION RETREAT: Mandatory Pass C retreat (POST_RELEASE_LIFT -> CLEAR_BOARD -> SERVICE_RETREAT -> evaluate_service_safety())
 
         Uses downward tool orientation [180.0, 0.0, 90.0] deg.
         Pre-validates collision guard, enforces placement version consistency,
-        solves on-demand IK, and guarantees allowed_grasp_piece_id cleanup.
+        solves on-demand IK, guarantees allowed_grasp_piece_id cleanup, and strictly
+        enforces that control returns to IDLE only after reaching SERVICE_SAFE.
         """
         try:
             with self.acquire_operation_state(RuntimeOperationState.MOTION):
@@ -2660,6 +2717,7 @@ class VirtualXiangqiSimulation:
                         speed_factor=speed_factor,
                         samples_per_stage=samples_per_stage,
                         planned_placement_version=planned_placement_version,
+                        grasp_piece=grasp_piece,
                     )
         except RuntimeOperationBusy as e:
             err_msg = f"System busy ({str(e)})"
@@ -2689,6 +2747,7 @@ class VirtualXiangqiSimulation:
         speed_factor: Optional[float] = None,
         samples_per_stage: int = 20,
         planned_placement_version: Optional[int] = None,
+        grasp_piece: Optional[bool] = None,
     ) -> Dict[str, Any]:
             current_ver = self.placement_state.placement_version
             if planned_placement_version is not None and planned_placement_version != current_ver:
@@ -2756,8 +2815,9 @@ class VirtualXiangqiSimulation:
                 return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg, "placement_version": current_ver}
 
             try:
-                # Detect if there is a piece at src_cell to allow grasp without proxy collision
+                # Detect pieces at src_cell and dst_cell
                 piece_at_src = None
+                piece_at_dst = None
                 if hasattr(self.world, "pieces"):
                     for p_id, p_body in self.world.pieces.items():
                         if p_body.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
@@ -2765,7 +2825,27 @@ class VirtualXiangqiSimulation:
                         c_p, r_p, d_p = p_body.get_nearest_intersection()
                         if (r_p, c_p) == (r_src, c_src) and d_p < 0.025:
                             piece_at_src = p_id
-                            break
+                        elif (r_p, c_p) == (r_dst, c_dst) and d_p < 0.025:
+                            piece_at_dst = p_id
+
+                # Determine whether this trajectory executes a pick & place or an arm transit:
+                # - If grasp_piece is explicitly True: requires empty dst_cell and valid piece_at_src.
+                # - If grasp_piece is None: pick & place if piece_at_src is present AND dst_cell is empty;
+                #   if dst_cell is occupied, treat as arm-only transit to avoid colliding into dst piece.
+                # - If grasp_piece is False: arm-only transit.
+                should_grasp = False
+                if grasp_piece is True:
+                    if piece_at_dst is not None:
+                        err_msg = f"Cannot pick and place to occupied destination cell {dst_cell} (occupied by {piece_at_dst})"
+                        self.backend._last_error = err_msg
+                        self.backend.set_trajectory_stage("IDLE")
+                        return {"success": False, "failed_stage": "PRECHECK", "error": err_msg, "placement_version": current_ver}
+                    should_grasp = (piece_at_src is not None)
+                elif grasp_piece is None:
+                    should_grasp = (piece_at_src is not None and piece_at_dst is None)
+                else:
+                    should_grasp = False
+
                 if piece_at_src:
                     self.backend.set_allowed_grasp_piece_id(piece_at_src)
 
@@ -2807,6 +2887,14 @@ class VirtualXiangqiSimulation:
                         self.backend.set_trajectory_stage("IDLE")
                         return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg, "placement_version": current_ver}
 
+                # Grasp piece if present at src_cell and should_grasp is True
+                if should_grasp and piece_at_src:
+                    self.backend.set_gripper(True)
+                    self.world.try_grasp(target_piece_id=piece_at_src)
+                    self.backend.set_attached_piece_id(piece_at_src)
+                else:
+                    self.backend.set_gripper(False)
+
                 # --- Stage 1: LIFT (vertical MoveL from grasp to safe transit height) ---
                 self.backend.set_trajectory_stage("LIFT")
                 ok1 = self.move_cartesian(to_mm_deg(src_app_m), speed_factor=speed_factor, samples=samples_per_stage)
@@ -2814,6 +2902,24 @@ class VirtualXiangqiSimulation:
                     err_msg = self.backend._last_error or "LIFT stage failed"
                     self.backend.set_trajectory_stage("IDLE")
                     return {"success": False, "failed_stage": "LIFT", "error": err_msg, "placement_version": current_ver}
+
+                # If piece was grasped, verify payload clearance
+                if should_grasp and piece_at_src:
+                    self.backend.set_trajectory_stage("PAYLOAD_CLEAR")
+                    self.world.step_until_settled(max_steps=20)
+                    payload_rep = self.evaluate_payload_clearance(expected_piece_id=piece_at_src)
+                    if not payload_rep.payload_clear:
+                        err_msg = f"LIFT stage failed: Payload clearance predicate failed ({', '.join(payload_rep.reasons)})"
+                        self.backend._last_error = err_msg
+                        self.backend.set_trajectory_stage("FAILED")
+                        return {
+                            "success": False,
+                            "failed_stage": "LIFT",
+                            "error": err_msg,
+                            "service_safe": False,
+                            "requires_recovery": True,
+                            "placement_version": current_ver,
+                        }
 
                 # --- Stage 2: TRANSIT (horizontal MoveL across safe transit plane) ---
                 self.backend.set_trajectory_stage("TRANSIT")
@@ -2831,6 +2937,123 @@ class VirtualXiangqiSimulation:
                     self.backend.set_trajectory_stage("IDLE")
                     return {"success": False, "failed_stage": "LAND", "error": err_msg, "placement_version": current_ver}
 
+                # --- Stage 4: Release & Settle (if piece was grasped) ---
+                piece_placed = False
+                piece_released = False
+                if should_grasp and (piece_at_src or self.world.get_attached_piece() is not None):
+                    self.backend.set_trajectory_stage("RELEASE")
+                    self.backend.set_gripper(False)
+                    self.world.release_attached_piece()
+                    self.backend.set_attached_piece_id(None)
+                    self.backend.set_allowed_grasp_piece_id(None)
+                    piece_released = True
+
+                    self.backend.set_trajectory_stage("SETTLE")
+                    self.world.step_until_settled(max_steps=40)
+
+                    # Physical placement verification
+                    p_obj = self.world.pieces.get(piece_at_src) if piece_at_src else None
+                    if p_obj is not None:
+                        is_stable = p_obj.physical_state in (PiecePhysicalState.ON_BOARD, PiecePhysicalState.RESTING)
+                        not_bad = p_obj.physical_state not in (
+                            PiecePhysicalState.OUT_OF_BOUNDS,
+                            PiecePhysicalState.FALLING,
+                            PiecePhysicalState.SETTLING,
+                        )
+                        c_p, r_p, d_p = p_obj.get_nearest_intersection()
+                        cell_match = (r_p, c_p) == (r_dst, c_dst) and d_p < 0.025
+                        pos_m, _ = p_obj.get_pose_robot_base()
+                        expected_z = board_z + (self.geom.piece_height_mm / 2000.0)
+                        z_match = abs(pos_m[2] - expected_z) < 0.015
+                        if is_stable and not_bad and cell_match and z_match:
+                            piece_placed = True
+                else:
+                    self.backend.set_gripper(False)
+
+                # --- Stage 5: Mandatory Pass C Post-Operation Safe Retreat ---
+                # 5.1 POST_RELEASE_LIFT: Vertical lift back to safe transit height
+                self.backend.set_trajectory_stage("POST_RELEASE_LIFT")
+                ok_lift_retreat = self.move_cartesian(to_mm_deg(dst_app_m), speed_factor=speed_factor, samples=samples_per_stage)
+                if not ok_lift_retreat:
+                    self.backend.set_trajectory_stage("FAILED")
+                    err_msg = self.backend._last_error or "Post-release lift failed"
+                    return {
+                        "success": False,
+                        "failed_stage": "POST_RELEASE_LIFT",
+                        "error": err_msg,
+                        "service_safe": False,
+                        "requires_recovery": True,
+                        "piece_placed": piece_placed,
+                        "piece_released": piece_released,
+                        "placement_version": current_ver,
+                    }
+
+                # 5.2 CLEAR_BOARD: Elevate to full clearance transit altitude above board
+                self.backend.set_trajectory_stage("CLEAR_BOARD")
+                clear_z_mm = (z_transit + 0.030) * 1000.0
+                curr_tcp = list(self.backend.get_state_snapshot().tcp_pose_mm_deg)
+                if curr_tcp[2] < clear_z_mm:
+                    clear_tcp = list(curr_tcp)
+                    clear_tcp[2] = clear_z_mm
+                    ok_clear = self.backend.move_cartesian(clear_tcp, speed_factor=speed_factor)
+                    if not ok_clear:
+                        ik_clear = self.backend.solve_tcp_ik(clear_tcp, allow_multi_seed=True)
+                        if ik_clear.success:
+                            self.backend.move_joint(np.degrees(ik_clear.joints_rad).tolist(), speed_factor=speed_factor)
+
+                # 5.3 SERVICE_RETREAT: Move to authoritative SERVICE_SAFE_JOINTS_DEG
+                self.backend.set_trajectory_stage("SERVICE_RETREAT")
+                ok_retreat = self.backend.move_joint_with_lift_recovery(
+                    self.backend.SERVICE_SAFE_JOINTS_DEG,
+                    speed_factor=speed_factor,
+                    safe_plane_z_m=z_transit,
+                )
+                if not ok_retreat:
+                    self.backend.set_trajectory_stage("FAILED")
+                    err_msg = self.backend._last_error or "Retreat to SERVICE_SAFE failed"
+                    return {
+                        "success": False,
+                        "failed_stage": "SERVICE_RETREAT",
+                        "error": err_msg,
+                        "service_safe": False,
+                        "requires_recovery": True,
+                        "piece_placed": piece_placed,
+                        "piece_released": piece_released,
+                        "placement_version": current_ver,
+                    }
+
+                # 5.4 Physical SERVICE_SAFE verification using Pass B predicate
+                rep = self.evaluate_service_safety()
+                if not rep.service_safe:
+                    self.backend.set_trajectory_stage("FAILED")
+                    err_msg = f"Physical service safety predicate failed after retreat: {', '.join(rep.reasons)}"
+                    return {
+                        "success": False,
+                        "failed_stage": "SERVICE_RETREAT",
+                        "error": err_msg,
+                        "service_safe": False,
+                        "requires_recovery": True,
+                        "service_safety": rep,
+                        "piece_placed": piece_placed,
+                        "piece_released": piece_released,
+                        "placement_version": current_ver,
+                    }
+
+                # If piece was grasped but placement unverified:
+                if should_grasp and piece_at_src and not piece_placed:
+                    self.backend.set_trajectory_stage("FAILED")
+                    return {
+                        "success": False,
+                        "failed_stage": "VERIFY_PLACEMENT",
+                        "error": f"Piece {piece_at_src} placement could not be physically verified at destination cell {dst_cell}",
+                        "service_safe": True,
+                        "requires_recovery": True,
+                        "piece_placed": False,
+                        "piece_released": True,
+                        "service_safety": rep,
+                        "placement_version": current_ver,
+                    }
+
                 # --- COMPLETE ---
                 self.backend.set_trajectory_stage("COMPLETE")
                 time.sleep(0.05)
@@ -2838,11 +3061,25 @@ class VirtualXiangqiSimulation:
 
                 return {
                     "success": True,
-                    "stages": ["PREPOSITION", "LIFT", "TRANSIT", "LAND", "COMPLETE"],
+                    "status": "SUCCESS",
+                    "stages": [
+                        "PREPOSITION",
+                        "LIFT",
+                        "TRANSIT",
+                        "LAND",
+                        "POST_RELEASE_LIFT",
+                        "CLEAR_BOARD",
+                        "SERVICE_RETREAT",
+                        "COMPLETE",
+                    ],
                     "src": src_cell,
                     "dst": dst_cell,
                     "z_grasp_m": z_grasp,
                     "z_transit_m": z_transit,
+                    "service_safe": True,
+                    "service_safety": rep,
+                    "piece_placed": piece_placed if (should_grasp and piece_at_src) else False,
+                    "piece_released": piece_released if (should_grasp and piece_at_src) else False,
                     "placement_version": current_ver,
                 }
             finally:

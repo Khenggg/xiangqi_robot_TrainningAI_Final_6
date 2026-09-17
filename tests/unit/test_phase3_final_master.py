@@ -28,6 +28,7 @@ import time
 import unittest
 from unittest import mock
 import numpy as np
+import pybullet as p
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -1695,26 +1696,27 @@ class Phase3FinalMasterTests(unittest.TestCase):
         pick_res = self.sim.pick_piece(p_id)
         self.assertTrue(pick_res.success)
 
-        orig_fn = self.sim.backend.move_joint_with_lift_recovery
-        def mock_retreat(target_joints_deg, **kwargs):
-            if self.sim.backend.get_trajectory_stage() == "SERVICE_RETREAT":
-                self.sim.backend._last_error = "COLLISION_DETECTED_IN_RETREAT"
-                return False
-            return orig_fn(target_joints_deg, **kwargs)
+        # Place a real physical obstacle in the retreat path to trigger CollisionGuard
+        # without mocking any controller, motion, or collision guard functions.
+        obs = self.sim.world.pieces["black_cannon_0"]
+        orig_pos, orig_orn = obs.get_pose_robot_base()
+        p.changeDynamics(obs.body_id, -1, mass=0)
+        p.resetBasePositionAndOrientation(obs.body_id, [-0.434, -0.102, 0.227], [0, 0, 0, 1])
 
-        with mock.patch.object(self.sim.backend, "move_joint_with_lift_recovery", side_effect=mock_retreat):
+        try:
             res = self.sim.place_piece(target_cell=(4, 4))
-
-        self.assertFalse(res.success)
-        self.assertEqual(res.status, "PLACE_SERVICE_RETREAT_FAILED")
-        self.assertTrue(res.requires_recovery)
-        self.assertFalse(res.service_safe)
-        self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
-
-        # Clean up
-        self.sim.clear_error()
-        self.sim.runtime_go_service_safe()
-        self.sim.reset_pieces()
+            self.assertFalse(res.success)
+            self.assertEqual(res.status, "PLACE_SERVICE_RETREAT_FAILED")
+            self.assertTrue(res.requires_recovery)
+            self.assertFalse(res.service_safe)
+            self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
+        finally:
+            # Clean up obstacle and simulator state
+            p.changeDynamics(obs.body_id, -1, mass=obs.mass_kg)
+            p.resetBasePositionAndOrientation(obs.body_id, orig_pos, orig_orn)
+            self.sim.clear_error()
+            self.sim.runtime_go_service_safe()
+            self.sim.reset_pieces()
 
     def test_c10_board_controls_remain_locked_after_unsafe_partial_place(self):
         """C10. Board controls remain locked after unsafe partial place; relocation is strictly rejected."""
@@ -1850,6 +1852,87 @@ class Phase3FinalMasterTests(unittest.TestCase):
         self.assertEqual(self.sim.backend.get_trajectory_stage(), "COMPLETE")
 
         # Clean up
+        self.sim.reset_pieces()
+        self.sim.runtime_go_service_safe()
+
+    def test_c13_execute_3stage_enforces_service_safe_retreat(self):
+        """C13. execute_3stage_trajectory enforces Pass C safe retreat to SERVICE_SAFE on arm motion."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+
+        # Execute trajectory across empty board cells
+        res = self.sim.execute_3stage_trajectory((4, 4), (5, 5))
+        self.assertTrue(res.get("success"), f"Trajectory failed: {res}")
+        self.assertEqual(res.get("status"), "SUCCESS")
+        self.assertTrue(res.get("service_safe"))
+        self.assertFalse(res.get("piece_placed"))
+        self.assertIn("POST_RELEASE_LIFT", res.get("stages", []))
+        self.assertIn("CLEAR_BOARD", res.get("stages", []))
+        self.assertIn("SERVICE_RETREAT", res.get("stages", []))
+
+        # Authoritative predicate verification
+        rep = self.sim.evaluate_service_safety()
+        self.assertTrue(rep.service_safe)
+        snap = self.sim.backend.get_state_snapshot()
+        self.assertEqual(snap.motion_state, "IDLE")
+        self.assertEqual(snap.trajectory_stage, "IDLE")
+
+        # Clean up
+        self.sim.runtime_go_service_safe()
+
+    def test_c14_execute_3stage_pick_place_and_retreat(self):
+        """C14. execute_3stage_trajectory performs full pick & place with physical verification and safe retreat."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        self.sim.reset_pieces()
+
+        # Cell (2, 1) has black_cannon_0 in default layout; cell (4, 1) is empty
+        res = self.sim.execute_3stage_trajectory((2, 1), (4, 1))
+        self.assertTrue(res.get("success"), f"Pick & place trajectory failed: {res}")
+        self.assertEqual(res.get("status"), "SUCCESS")
+        self.assertTrue(res.get("piece_placed"))
+        self.assertTrue(res.get("piece_released"))
+        self.assertTrue(res.get("service_safe"))
+
+        # Physical placement verified
+        rep = self.sim.evaluate_service_safety()
+        self.assertTrue(rep.service_safe)
+        snap = self.sim.backend.get_state_snapshot()
+        self.assertEqual(snap.motion_state, "IDLE")
+        self.assertEqual(snap.trajectory_stage, "IDLE")
+
+        # Clean up
+        self.sim.reset_pieces()
+        self.sim.runtime_go_service_safe()
+
+    def test_c15_place_piece_unverified_if_piece_tumbles_or_lost(self):
+        """C15. place_piece rejects with PIECE_PLACEMENT_UNVERIFIED if piece tumbles or is displaced after release."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        p_id = list(self.sim.world.pieces.keys())[0]
+        pick_res = self.sim.pick_piece(p_id)
+        self.assertTrue(pick_res.success)
+
+        # Simulate piece being knocked off target cell during settle
+        orig_settle = self.sim.world.step_until_settled
+        def displace_on_settle(*args, **kwargs):
+            orig_settle(*args, **kwargs)
+            p_obj = self.sim.world.pieces[p_id]
+            p.resetBasePositionAndOrientation(p_obj.body_id, [0.0, 0.0, 0.0], [0, 0, 0, 1])
+
+        with mock.patch.object(self.sim.world, "step_until_settled", side_effect=displace_on_settle):
+            res = self.sim.place_piece(target_cell=(4, 4))
+
+        self.assertFalse(res.success)
+        self.assertEqual(res.status, "PIECE_PLACEMENT_UNVERIFIED")
+        self.assertFalse(res.piece_placed)
+        self.assertTrue(res.piece_released)
+        self.assertTrue(res.service_safe)
+        self.assertTrue(res.requires_recovery)
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
+
+        # Clean up
+        self.sim.clear_error()
         self.sim.reset_pieces()
         self.sim.runtime_go_service_safe()
 
