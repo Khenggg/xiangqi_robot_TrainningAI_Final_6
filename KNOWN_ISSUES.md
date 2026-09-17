@@ -99,7 +99,28 @@
 * **Evidence:** Previously, Candidate 1 (`[0, -25, 40, -105, -90, 0]`) penetrated the board by 22.3mm on forward shifts due to the 218mm tool flange-to-TCP offset; Candidate 2 (`HOME: [0, -45, 90, -45, -90, 0]`) had only 14.8mm clearance to link 4 and penetrated by 15.2mm upon a 30mm board elevation; `is_service_safe()` was a simple joint angle threshold check lacking physical grounding (connection, idle, gripper state, attached pieces, and physical clearance); and `set_board_placement` did not enforce continuous 3D swept volume safety margins ($\ge 5.0\text{ mm}$) or authoritative readiness token consumption.
 * **Fix Summary:** Audited both candidates and derived authoritative Upright Retracted configuration `[0.0, -70.0, 60.0, -80.0, -90.0, 0.0]°` ($> 129.9\text{ mm}$ moving link clearance, $> 216.3\text{ mm}$ gripper clearance, condition number $17.67$, joint margin $85.0^\circ$ across full $[-20, 60]\text{ mm}$ shift and $[-10, 30]\text{ mm}$ height envelope); implemented comprehensive `ServiceSafetyReport` and physical predicate `evaluate_service_safety()`; implemented dense 3D interpolated swept volume collision check `check_board_swept_volume_collision()` with positive clearance margin $\ge 5.0\text{ mm}$ and detailed diagnostics; implemented strict `BOARD_ADJUSTMENT_READY` lifecycle token invalidated by any motion/jogging/relocation; and enforced 100% state invariance on board relocation rejection.
 * **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests::test_b1_service_safe_physical_predicate_clear` through `test_b11_jog_invalidates_service_safe`, `test_08_is_service_safe_predicate`, `test_09_go_service_safe_motion`, `test_10_prepare_board_adjustment_flow`, `test_12_swept_volume_collision_clear_path`
-* **Last Verified Functional HEAD:** 14f53e949a21b3a3aaee4501a39dcaec0bda1464
+* **Last Verified Functional HEAD:** 2b50063d446717abff5d89f44e219d270e369230
+
+---
+
+## B10 — Pass B Corrective: SERVICE_SAFE Physical Predicate, Settling State & Swept Exclusion Volume Gaps
+* **Status:** FIXED
+* **Severity:** HIGH
+* **Affected Files:** `src/simulation/virtual_fr3_backend.py`, `src/simulation/physics/world.py`, `src/simulation/runtime.py`, `tests/unit/test_phase3_final_master.py`, `tests/unit/test_phase3_isolation_and_fail_fast.py`, `tests/unit/test_phase3_dynamic_board_placement.py`
+* **Evidence:** 
+  1. `backend.is_connected` was inspected as a boolean object rather than invoked as a method (`is_connected()`).
+  2. `PiecePhysicalState.SETTLING` was missing from the transient piece state check in `evaluate_service_safety()`, allowing settling pieces to pass service safety.
+  3. `set_board_placement()` did not strictly enforce the `_board_adjustment_ready` token and fresh physical `evaluate_service_safety()` check before execution.
+  4. Missing behavioral test validating negative board lowering into an obstructing arm/gripper with 100% state invariance upon rejection.
+  5. Service exclusion volume used static coordinates rather than canonical geometric derivations from `self.geom` and `self.placement_state`, and did not query all moving arm links (0..5) and gripper proxies via PyBullet collision detection.
+* **Fix Summary:**
+  1. Updated `virtual_fr3_backend.py` and `runtime.py` to strictly invoke `self.backend.is_connected()`.
+  2. Included `PiecePhysicalState.SETTLING` alongside `FALLING` in `evaluate_service_safety()`.
+  3. Added strict readiness token validation and fresh physical safety predicate check in `set_board_placement()`, with narrow `internal_reset: bool = False` bypass for reset routines, returning `BOARD_RELOCATION_REJECTED_NOT_READY` and `BOARD_RELOCATION_REJECTED_SERVICE_UNSAFE`.
+  4. Added `test_bc7` and `test_bc8` verifying negative lowering collision detection and complete board, piece, and robot joint state invariance on rejection.
+  5. Implemented `check_service_exclusion_occupancy()` in `world.py` utilizing a temporary PyBullet collision shape box querying all FR3 moving links (0..5) and gripper proxies with deterministic cleanup. In `runtime.py`, dynamically computed bounding box dimensions from `self.geom.board_length_m`, `self.geom.board_width_m`, `self.geom.board_thickness_m`, `self.placement_state.board_height_offset_m`, `DEFAULT_SERVICE_XY_MARGIN_M` (0.030m), and `DEFAULT_SERVICE_VERTICAL_CLEARANCE_M` (0.050m).
+* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests` (`test_bc1_disconnected_backend_rejects_service_safe` through `test_bc12_supported_envelope_boundary_cases_remain_safe`)
+* **Last Verified Functional HEAD:** 2b50063d446717abff5d89f44e219d270e369230
 
 ---
 
@@ -109,4 +130,4 @@
 * **Affected Files:** `src/hardware/telemetry_publisher.py`
 * **Evidence:** Warning during pytest: `DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated`.
 * **Action:** Low impact, server functions normally. Can be migrated to `websockets.asyncio.server.ServerConnection` in a future dependency cleanup.
-* **Last Verified HEAD:** 14f53e949a21b3a3aaee4501a39dcaec0bda1464
+* **Last Verified HEAD:** 2b50063d446717abff5d89f44e219d270e369230

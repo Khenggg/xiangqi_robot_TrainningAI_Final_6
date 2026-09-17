@@ -6,8 +6,8 @@
 
 ## METADATA
 * **CURRENT_BRANCH:** `feature/virtual-robot-3d-simulator`
-* **LAST_REVIEWED_HEAD:** `14f53e949a21b3a3aaee4501a39dcaec0bda1464`
-* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `14f53e949a21b3a3aaee4501a39dcaec0bda1464`
+* **LAST_REVIEWED_HEAD:** `2b50063d446717abff5d89f44e219d270e369230`
+* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `2b50063d446717abff5d89f44e219d270e369230`
 * **PASS_A_RUNTIME_AUTHORITY:** `PASS`
 * **PASS_A1_REENTRANT_LOCK:** `PASS`
 * **PASS_A2_NO_SILENT_QUEUE:** `PASS`
@@ -31,6 +31,7 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 9. **[B09] SERVICE_SAFE Physical Safety Predicate & Board Adjustment Safety (Pass B):** Resolved candidate pose collision audit: established authoritative Upright Retracted configuration `[0.0, -70.0, 60.0, -80.0, -90.0, 0.0]°` providing $> 129.9\text{ mm}$ moving link clearance and $> 216.3\text{ mm}$ gripper clearance across the entire adjustment envelope ($[-20, 60]\text{ mm}$ shift, $[-10, 30]\text{ mm}$ height offset); implemented full physical safety predicate `evaluate_service_safety()` with `ServiceSafetyReport`; enforced strict `BOARD_ADJUSTMENT_READY` lifecycle token invalidated by any motion, jog, or completed adjustment; ensured 100% state invariance on adjustment rejection. (Verified by `test_b1_service_safe_physical_predicate_clear` through `test_b11_jog_invalidates_service_safe`).
 10. **Manual Cartesian & Joint Jogging:** Incremental jog with step size selectors and collision prechecks. (Verified by `test_13_runtime_jog_tcp`, `test_14_runtime_jog_joint`).
 11. **In-Process Recovery Actions:** Granular recovery (`clear_error`, `reset_robot`, `reset_board`, `reset_pieces`) and `full_reset` without process termination. (Verified by `test_15_granular_recovery_actions`, `test_17_full_system_reset_in_process`).
+12. **[B10] Pass B Corrective: Predicate Methods, Settling Piece Guard, Mandatory Relocation Gate & Swept Exclusion Volume (Pass B Corrective):** Fixed `is_connected()` method invocation on backend; incorporated `PiecePhysicalState.SETTLING` into transient piece physical state check so settling pieces invalidate `is_service_safe()` and `is_board_adjustment_ready`; enforced mandatory `prepare_board_adjustment()` readiness token and fresh physical `evaluate_service_safety()` check before executing `set_board_placement()` (with narrow internal reset bypass); added behavioral regression test for negative board lowering into obstructing arm returning `BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR` with 100% state invariance; implemented canonical service exclusion volume derived from `self.geom` and `self.placement_state` with PyBullet continuous collision detection across all moving links (0..5) and gripper proxies. (Verified by `test_bc1_disconnected_backend_rejects_service_safe` through `test_bc12_supported_envelope_boundary_cases_remain_safe`).
 
 ---
 
@@ -50,8 +51,8 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 ---
 
 ## TEST_EVIDENCE
-* **Python Unit Tests:** 83/83 Phase 3 specific tests PASSED (100% pass rate)
-  * `tests/unit/test_phase3_final_master.py`: 47 passed (including Pass A, A.1, A.2 tests and Pass B tests b1–b11)
+* **Python Unit Tests:** 95/95 Phase 3 specific tests PASSED (100% pass rate)
+  * `tests/unit/test_phase3_final_master.py`: 59 passed (including Pass A, A.1, A.2 tests, Pass B tests b1–b11, and Pass B Corrective tests bc1–bc12)
   * `tests/unit/test_phase3_final_closure.py`: 11 passed
   * `tests/unit/test_phase3_isolation_and_fail_fast.py`: 12 passed
   * `tests/unit/test_phase3_dynamic_board_placement.py`: 13 passed
