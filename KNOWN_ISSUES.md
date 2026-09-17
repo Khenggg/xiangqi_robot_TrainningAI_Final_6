@@ -124,23 +124,29 @@
 
 ---
 
-## B11 — Post-Operation Safe Retreat & Split Physical Manipulation from Service Safety (Pass C)
+## B11 — Post-Operation Safe Retreat & Split Physical Manipulation from Service Safety (Pass C & Pass C Corrective)
 * **Status:** FIXED
 * **Severity:** BLOCKER
-* **Affected Files:** `src/simulation/physics/state.py`, `src/simulation/physics/collision_guard.py`, `src/simulation/virtual_fr3_backend.py`, `src/simulation/runtime.py`
+* **Affected Files:** `src/simulation/physics/state.py`, `src/simulation/physics/collision_guard.py`, `src/simulation/virtual_fr3_backend.py`, `src/simulation/runtime.py`, `tests/unit/test_phase3_final_master.py`
 * **Evidence:**
   1. Previously, `place_piece()` returned `success = True` if piece was released, even when post-release lift or service retreat failed with collision/error (`LIFT_FAILED_AFTER_RELEASE`), violating the physical safety contract.
   2. `pick_piece()` did not track trajectory stages (`PREPOSITION` -> `DESCEND` -> `GRASP` -> `LIFT` -> `PAYLOAD_CLEAR` -> `COMPLETE`) or ensure physical payload clearance over the board.
   3. No distinct `PayloadSafetyReport` existed to evaluate safe post-pick holding without demanding `SERVICE_SAFE` (which requires an empty gripper).
-  4. Post-release retreat stages (`POST_RELEASE_LIFT` -> `CLEAR_BOARD` -> `SERVICE_RETREAT`) were not monitored, allowing robot to finish operation parked within board clearance envelope without validating `evaluate_service_safety()`.
+  4. Post-release retreat stages (`POST_RELEASE_LIFT` -> `CLEAR_BOARD` -> `SERVICE_RETREAT`) were not monitored in `place_piece()`, and were entirely bypassed in `execute_3stage_trajectory()` / WebSocket `EXECUTE_3STAGE`, leaving the robot at `LAND` or low altitude before reporting `success = True`.
+  5. `place_piece()` set `piece_placed = True` without physical position and state verification after release and settle.
+  6. `test_c9_retreat_collision` previously used a mock rather than a real physical PyBullet collision fixture.
 * **Fix Summary:**
   1. Defined `PayloadSafetyReport` dataclass and `evaluate_payload_clearance()` runtime predicate ($z_{\text{piece}} > z_{\text{board}} + 20\text{ mm}$).
   2. Extended `PickResult` and `PlaceResult` with typed physical/safety outcome fields, recovery flags, and report objects while preserving dictionary/boolean fallback.
   3. Fixed collision guard palm penetration checks during grasp descent to specifically ignore currently carried pieces, preventing false collisions during retreat.
   4. Decoupled manipulation outcome from robot safety: if release succeeds but retreat fails, `success = False`, `piece_placed = True`, `piece_released = True`, `service_safe = False`, and `requires_recovery = True`.
   5. Enforced that post-operation unsafe state keeps board adjustment strictly locked (`is_board_adjustment_ready == False`).
-* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests` (`test_c1_normal_pick_retreat` through `test_c12_trajectory_stage_truthfulness`)
-* **Last Verified Functional HEAD:** 12ce7330393a9014b0ad5e9013e845c8a3bf525e
+  6. Integrated full Pass C retreat pipeline (`POST_RELEASE_LIFT` -> `CLEAR_BOARD` -> `SERVICE_RETREAT` -> `evaluate_service_safety()`) into `execute_3stage_trajectory()` and WebSocket `EXECUTE_3STAGE`, supporting both pick & place and arm-only transit without leaving the arm in an unretreated state.
+  7. Implemented physical placement verification: verifies piece is in `ON_BOARD` or `RESTING` physical state, within $25\text{ mm}$ of target cell intersection and within $15\text{ mm}$ of board surface altitude. Returns `status = "PIECE_PLACEMENT_UNVERIFIED"` if piece tumbles or is lost.
+  8. Converted `test_c9_retreat_collision` into a true physical PyBullet collision fixture with a zero-mass obstacle piece `black_cannon_0` at `[-0.434, -0.102, 0.227]`, halting safely with `PLACE_SERVICE_RETREAT_FAILED`, `requires_recovery = True`, `service_safe = False`.
+  9. Added `test_c13`, `test_c14`, and `test_c15`.
+* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests` (`test_c1_normal_pick_retreat` through `test_c15_place_piece_unverified_if_piece_tumbles_or_lost`)
+* **Last Verified Functional HEAD:** 35fbbef053aa0e8bace0c4a74776cc753a0aa026
 
 ---
 
