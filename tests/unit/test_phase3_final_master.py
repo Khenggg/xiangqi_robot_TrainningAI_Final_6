@@ -407,6 +407,8 @@ class Phase3FinalMasterTests(unittest.TestCase):
         self.assertEqual(len(successes), 1, f"Expected exactly 1 success, got {successes}")
         self.assertEqual(len(busies), 1, f"Expected exactly 1 busy rejection, got {busies}")
         self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+        self.assertIsNone(self.sim.operation_owner)
+        self.assertEqual(self.sim.operation_depth, 0)
 
     def test_a3_validation_vs_move_joint_race(self):
         """A3: Validator paused in VALIDATING_LOCAL rejects runtime_move_joint with MOTION_REJECTED_BUSY, resumes to IDLE."""
@@ -432,6 +434,174 @@ class Phase3FinalMasterTests(unittest.TestCase):
             t.join(timeout=2.0)
 
         self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a3_1_real_validator_rejects_move_joint_before_release(self):
+        """A3.1: Real validate_board_placement() pauses via hook; runtime_move_joint rejects with MOTION_REJECTED_BUSY before release."""
+        val_started = threading.Event()
+        val_release = threading.Event()
+        val_result = {}
+
+        def _hook():
+            val_started.set()
+            val_release.wait(timeout=5.0)
+
+        self.sim._test_hook_validation_owned = _hook
+        try:
+            def _run_val():
+                val_result["res"] = self.sim.validate_board_placement(sample_limit=1)
+
+            t_val = threading.Thread(target=_run_val)
+            t_val.start()
+
+            self.assertTrue(val_started.wait(timeout=2.0), "Validator did not start in time")
+            self.assertEqual(self.sim.operation_state, RuntimeOperationState.VALIDATING_LOCAL)
+            self.assertFalse(val_release.is_set(), "Release event must not be set yet")
+
+            # Call runtime_move_joint while validator is paused in VALIDATING_LOCAL
+            res_move = self.sim.runtime_move_joint(self.sim.backend.home_joints_deg)
+
+            # Assert MoveJ returned BUSY BEFORE validation release
+            self.assertFalse(val_release.is_set(), "MoveJ must return BEFORE validation release event is set")
+            self.assertFalse(res_move["success"])
+            self.assertEqual(res_move["status"], "MOTION_REJECTED_BUSY")
+        finally:
+            val_release.set()
+            t_val.join(timeout=10.0)
+            self.sim._test_hook_validation_owned = None
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+        self.assertIsNone(self.sim.operation_owner)
+        self.assertEqual(self.sim.operation_depth, 0)
+        self.assertFalse(self.sim._validation_in_progress)
+
+    def test_a3_2_timing_handshake_proof(self):
+        """A3.2: Deterministic timing handshake proving MoveJ returns before validation release event is set."""
+        val_holding = threading.Event()
+        val_release = threading.Event()
+        move_j_finished = threading.Event()
+        order_log = []
+
+        def _hook():
+            order_log.append("validator_holding")
+            val_holding.set()
+            val_release.wait(timeout=5.0)
+            order_log.append("validator_resumed")
+
+        self.sim._test_hook_validation_owned = _hook
+        try:
+            t_val = threading.Thread(target=self.sim.validate_board_placement, kwargs={"sample_limit": 1})
+            t_val.start()
+
+            self.assertTrue(val_holding.wait(timeout=2.0))
+
+            def _run_move():
+                res = self.sim.runtime_move_joint(self.sim.backend.home_joints_deg)
+                order_log.append(f"move_j_returned_{res['status']}")
+                move_j_finished.set()
+
+            t_move = threading.Thread(target=_run_move)
+            t_move.start()
+
+            self.assertTrue(move_j_finished.wait(timeout=2.0), "MoveJ thread did not finish")
+
+            # Deterministic handshake assertion: MoveJ returned BEFORE validator was released!
+            self.assertFalse(val_release.is_set(), "MoveJ must finish while validator is still holding state")
+            order_log.append("releasing_validator")
+            val_release.set()
+
+            t_val.join(timeout=10.0)
+            t_move.join(timeout=2.0)
+        finally:
+            val_release.set()
+            self.sim._test_hook_validation_owned = None
+
+        self.assertEqual(
+            order_log,
+            [
+                "validator_holding",
+                "move_j_returned_MOTION_REJECTED_BUSY",
+                "releasing_validator",
+                "validator_resumed",
+            ],
+        )
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+        self.assertIsNone(self.sim.operation_owner)
+        self.assertEqual(self.sim.operation_depth, 0)
+
+    def test_a3_3_full_route_validator_rejects_move_joint(self):
+        """A3.3: Real validate_full_board_routes(sample_limit=1) pauses via hook; runtime_move_joint rejects before release."""
+        route_holding = threading.Event()
+        route_release = threading.Event()
+        move_j_done = threading.Event()
+        move_res = {}
+
+        def _hook():
+            route_holding.set()
+            route_release.wait(timeout=5.0)
+
+        self.sim._test_hook_routes_owned = _hook
+        try:
+            t_route = threading.Thread(target=self.sim.validate_full_board_routes, kwargs={"sample_limit": 1})
+            t_route.start()
+
+            self.assertTrue(route_holding.wait(timeout=2.0), "Route validator did not start")
+            self.assertEqual(self.sim.operation_state, RuntimeOperationState.VALIDATING_ROUTES)
+
+            def _run_move():
+                move_res["result"] = self.sim.runtime_move_joint(self.sim.backend.home_joints_deg)
+                move_j_done.set()
+
+            t_move = threading.Thread(target=_run_move)
+            t_move.start()
+            self.assertTrue(move_j_done.wait(timeout=2.0), "MoveJ did not complete")
+
+            # Check rejection occurred before route release
+            self.assertFalse(route_release.is_set())
+            self.assertFalse(move_res["result"]["success"])
+            self.assertEqual(move_res["result"]["status"], "MOTION_REJECTED_BUSY")
+        finally:
+            route_release.set()
+            t_route.join(timeout=10.0)
+            self.sim._test_hook_routes_owned = None
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+        self.assertIsNone(self.sim.operation_owner)
+        self.assertEqual(self.sim.operation_depth, 0)
+        self.assertFalse(self.sim._validation_in_progress)
+
+    def test_lock_not_held_across_yield(self):
+        """Verify _operation_lock is released while operation is in progress, allowing instant state inspection."""
+        op_holding = threading.Event()
+        op_release = threading.Event()
+
+        def _long_op():
+            with self.sim.acquire_operation_state(RuntimeOperationState.MOTION):
+                op_holding.set()
+                op_release.wait(timeout=5.0)
+
+        t_op = threading.Thread(target=_long_op)
+        t_op.start()
+        self.assertTrue(op_holding.wait(timeout=2.0))
+
+        try:
+            # While MOTION is active, competing thread can acquire _operation_lock instantly without blocking
+            t0 = time.perf_counter()
+            acquired = self.sim._operation_lock.acquire(timeout=0.2)
+            self.assertTrue(acquired, "_operation_lock should NOT be held while operation is active!")
+            try:
+                self.assertEqual(self.sim._operation_state, RuntimeOperationState.MOTION)
+                self.assertEqual(self.sim._operation_depth, 1)
+            finally:
+                self.sim._operation_lock.release()
+            elapsed = time.perf_counter() - t0
+            self.assertLess(elapsed, 0.1, f"Lock acquisition took too long: {elapsed:.4f}s")
+        finally:
+            op_release.set()
+            t_op.join(timeout=2.0)
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+        self.assertIsNone(self.sim.operation_owner)
+        self.assertEqual(self.sim.operation_depth, 0)
 
     def test_a4_move_joint_owns_first(self):
         """A4: Active motion paused in MOTION rejects validate_board_placement without touching PyBullet q."""
@@ -499,6 +669,37 @@ class Phase3FinalMasterTests(unittest.TestCase):
         self.assertTrue(res_subsequent["success"])
         self.assertEqual(res_subsequent["status"], "SUCCESS")
         self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a6_nested_exception_cleanup(self):
+        """A6.2: Exception inside nested acquisition cleanly restores state to IDLE, owner=None, depth=0."""
+        # Test 1: Exception in nested acquire of same target state
+        try:
+            with self.sim.acquire_operation_state(RuntimeOperationState.VALIDATING_LOCAL):
+                self.assertEqual(self.sim.operation_depth, 1)
+                with self.sim.acquire_operation_state(RuntimeOperationState.VALIDATING_LOCAL):
+                    self.assertEqual(self.sim.operation_depth, 2)
+                    raise RuntimeError("Simulated nested failure")
+        except RuntimeError:
+            pass
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+        self.assertIsNone(self.sim.operation_owner)
+        self.assertEqual(self.sim.operation_depth, 0)
+        self.assertFalse(self.sim._validation_in_progress)
+
+        # Test 2: Exception in nested acquire of RESETTING
+        try:
+            with self.sim.acquire_operation_state(RuntimeOperationState.RESETTING):
+                self.assertEqual(self.sim.operation_depth, 1)
+                with self.sim.acquire_operation_state(RuntimeOperationState.BOARD_ADJUSTMENT):
+                    self.assertEqual(self.sim.operation_depth, 2)
+                    raise ValueError("Simulated nested reset failure")
+        except ValueError:
+            pass
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+        self.assertIsNone(self.sim.operation_owner)
+        self.assertEqual(self.sim.operation_depth, 0)
 
     def test_a7_service_jog_vs_validation(self):
         """A7: While in VALIDATING_LOCAL, runtime_jog_tcp and runtime_jog_joint reject with BUSY and mutate nothing."""

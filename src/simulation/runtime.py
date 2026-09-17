@@ -14,7 +14,7 @@ import math
 from pathlib import Path
 import threading
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pybullet as p
 
@@ -154,7 +154,10 @@ class VirtualXiangqiSimulation:
         self._validation_in_progress = False
         self._operation_state = RuntimeOperationState.IDLE
         self._operation_owner: Optional[int] = None
+        self._operation_depth = 0
         self._operation_lock = threading.RLock()
+        self._test_hook_validation_owned: Optional[Callable[[], None]] = None
+        self._test_hook_routes_owned: Optional[Callable[[], None]] = None
 
         # Register listener with backend
         self.backend.add_state_listener(self._on_robot_state_update)
@@ -216,34 +219,59 @@ class VirtualXiangqiSimulation:
         with self._operation_lock:
             return self._operation_state
 
+    @property
+    def operation_depth(self) -> int:
+        with self._operation_lock:
+            return self._operation_depth
+
+    @property
+    def operation_owner(self) -> Optional[int]:
+        with self._operation_lock:
+            return self._operation_owner
+
     @contextlib.contextmanager
     def acquire_operation_state(self, target_state: RuntimeOperationState):
-        """Atomically enter an operation state. Prevents concurrent mutations."""
+        """Atomically enter an operation state. Prevents concurrent mutations.
+
+        Guarantees:
+        - _operation_lock is NEVER held across the yield statement.
+        - Supports re-entrant acquisition by the owning thread when in RESETTING
+          or re-entering the SAME target state (tracking nesting depth via _operation_depth).
+        - Any competing thread immediately gets RuntimeOperationBusy without blocking.
+        - Outermost exit restores state to IDLE, clears owner, and resets depth to 0.
+        """
         current_thread = threading.get_ident()
         with self._operation_lock:
-            if self._operation_owner == current_thread and (
-                self._operation_state == RuntimeOperationState.RESETTING
-                or self._operation_state == target_state
-            ):
-                # Re-entrant acquisition by the owning thread for reset sub-tasks or nested validation scopes
-                yield
-                return
-            if self._operation_state != RuntimeOperationState.IDLE:
-                raise RuntimeOperationBusy(f"BUSY: System is currently in state {self._operation_state.value}")
-            self._operation_state = target_state
-            self._operation_owner = current_thread
-            if target_state in (RuntimeOperationState.VALIDATING_LOCAL, RuntimeOperationState.VALIDATING_ROUTES):
-                self._validation_in_progress = True
-            self._broadcast_operation_state()
+            is_reentrant = (
+                self._operation_owner == current_thread and (
+                    self._operation_state == RuntimeOperationState.RESETTING
+                    or self._operation_state == target_state
+                )
+            )
+            if is_reentrant:
+                self._operation_depth += 1
+            else:
+                if self._operation_state != RuntimeOperationState.IDLE:
+                    raise RuntimeOperationBusy(f"BUSY: System is currently in state {self._operation_state.value}")
+                self._operation_state = target_state
+                self._operation_owner = current_thread
+                self._operation_depth = 1
+                if target_state in (RuntimeOperationState.VALIDATING_LOCAL, RuntimeOperationState.VALIDATING_ROUTES):
+                    self._validation_in_progress = True
+                self._broadcast_operation_state()
+
         try:
             yield
         finally:
             with self._operation_lock:
-                if self._operation_state == target_state and self._operation_owner == current_thread:
-                    self._operation_state = RuntimeOperationState.IDLE
-                    self._operation_owner = None
-                    self._validation_in_progress = False
-                    self._broadcast_operation_state()
+                if self._operation_owner == current_thread:
+                    self._operation_depth -= 1
+                    if self._operation_depth <= 0:
+                        self._operation_state = RuntimeOperationState.IDLE
+                        self._operation_owner = None
+                        self._operation_depth = 0
+                        self._validation_in_progress = False
+                        self._broadcast_operation_state()
 
     def _broadcast_operation_state(self) -> None:
         if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
@@ -1146,6 +1174,7 @@ class VirtualXiangqiSimulation:
         self,
         expected_placement_version: Optional[int] = None,
         placement_version: Optional[int] = None,
+        sample_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Execution-equivalent 90-cell local trajectory validation at runtime.
@@ -1182,6 +1211,8 @@ class VirtualXiangqiSimulation:
 
         try:
             with self.acquire_operation_state(RuntimeOperationState.VALIDATING_LOCAL):
+                if callable(self._test_hook_validation_owned):
+                    self._test_hook_validation_owned()
                 is_busy = (
                     getattr(self.backend, "_motion_state", None) == "MOVING"
                     or getattr(self.backend, "_trajectory_stage", None) not in (None, "IDLE", "COMPLETE")
@@ -1225,153 +1256,155 @@ class VirtualXiangqiSimulation:
 
                 self._physics_query_lock.acquire()
                 try:
-                    with self.acquire_operation_state(RuntimeOperationState.VALIDATING_LOCAL):
-                        grasp_ik_ok = 0
-                        app_ik_ok = 0
-                        grasp_col_free = 0
-                        app_col_free = 0
-                        land_traj_ok = 0
-                        lift_traj_ok = 0
-                        passed_cells = 0
-                        failed_cells = []
+                    grasp_ik_ok = 0
+                    app_ik_ok = 0
+                    grasp_col_free = 0
+                    app_col_free = 0
+                    land_traj_ok = 0
+                    lift_traj_ok = 0
+                    passed_cells = 0
+                    failed_cells = []
 
-                        for r in range(10):
-                            for c in range(9):
-                                # Check version mid-validation for early stale rejection
-                                if self.placement_state.placement_version != v_start:
-                                    break
+                    cells_to_test = [(r, c) for r in range(10) for c in range(9)]
+                    if sample_limit is not None and sample_limit < len(cells_to_test):
+                        cells_to_test = cells_to_test[:sample_limit]
 
-                                pos_gr = self.cell_to_robot_xyz_m(r, c, z_grasp)
-                                pos_ap = self.cell_to_robot_xyz_m(r, c, z_app)
-                                pose_gr_mm = [v * 1000.0 for v in pos_gr] + list(self.target_tool_euler_deg)
-                                pose_ap_mm = [v * 1000.0 for v in pos_ap] + list(self.target_tool_euler_deg)
+                    for r, c in cells_to_test:
+                        # Check version mid-validation for early stale rejection
+                            if self.placement_state.placement_version != v_start:
+                                break
 
-                                seed_info = self.reachability_dataset.get((r, c))
-                                seed_app = np.deg2rad(seed_info["approach_joints_deg"]) if seed_info and "approach_joints_deg" in seed_info else None
-                                seed_gr = np.deg2rad(seed_info["grasp_joints_deg"]) if seed_info and "grasp_joints_deg" in seed_info else None
+                            pos_gr = self.cell_to_robot_xyz_m(r, c, z_grasp)
+                            pos_ap = self.cell_to_robot_xyz_m(r, c, z_app)
+                            pose_gr_mm = [v * 1000.0 for v in pos_gr] + list(self.target_tool_euler_deg)
+                            pose_ap_mm = [v * 1000.0 for v in pos_ap] + list(self.target_tool_euler_deg)
 
-                                # Resolve candidate target piece on cell if any (replaces wildcard '*')
-                                target_piece_id = self._get_piece_at_cell(r, c)
+                            seed_info = self.reachability_dataset.get((r, c))
+                            seed_app = np.deg2rad(seed_info["approach_joints_deg"]) if seed_info and "approach_joints_deg" in seed_info else None
+                            seed_gr = np.deg2rad(seed_info["grasp_joints_deg"]) if seed_info and "grasp_joints_deg" in seed_info else None
 
-                                # 1. Approach endpoint IK
-                                ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
-                                col_ap_safe = False
-                                col_ap_reason = None
-                                if ik_ap.success:
-                                    app_ik_ok += 1
-                                    col_ap = self.collision_guard.validate_configuration(ik_ap.joints_rad, restore_state=True)
-                                    if col_ap.safe:
-                                        app_col_free += 1
-                                        col_ap_safe = True
-                                    else:
-                                        col_ap_reason = col_ap.failure_reason
+                            # Resolve candidate target piece on cell if any (replaces wildcard '*')
+                            target_piece_id = self._get_piece_at_cell(r, c)
 
-                                # 2. LAND MoveL trajectory (Approach -> Grasp)
-                                land_safe = False
-                                land_reason = None
-                                land_plan = None
-                                if ik_ap.success and col_ap_safe:
-                                    land_plan = self.backend.plan_cartesian(
-                                        start_q=ik_ap.joints_rad,
-                                        target_pose_mm_deg=pose_gr_mm,
-                                        samples=20,
-                                        allowed_grasp_piece_id=target_piece_id,
-                                        check_collision=True,
-                                    )
-                                    if land_plan.success:
-                                        land_traj_ok += 1
-                                        land_safe = True
-                                    else:
-                                        land_reason = land_plan.failure_reason
-
-                                # 3. Grasp endpoint IK & collision
-                                ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
-                                col_gr_safe = False
-                                col_gr_reason = None
-                                if ik_gr.success:
-                                    grasp_ik_ok += 1
-                                    col_gr = self.collision_guard.validate_configuration(
-                                        ik_gr.joints_rad, allowed_grasp_piece_id=target_piece_id, restore_state=True
-                                    )
-                                    if col_gr.safe:
-                                        grasp_col_free += 1
-                                        col_gr_safe = True
-                                    else:
-                                        col_gr_reason = col_gr.failure_reason
-
-                                # 4. LIFT MoveL trajectory (Grasp -> Approach)
-                                lift_safe = False
-                                lift_reason = None
-                                lift_plan = None
-                                start_q_lift = land_plan.final_q if (land_plan and land_plan.success and land_plan.final_q is not None) else (
-                                    ik_gr.joints_rad if ik_gr.success else None
-                                )
-                                if start_q_lift is not None and col_gr_safe:
-                                    lift_plan = self.backend.plan_cartesian(
-                                        start_q=start_q_lift,
-                                        target_pose_mm_deg=pose_ap_mm,
-                                        samples=20,
-                                        allowed_grasp_piece_id=target_piece_id,
-                                        check_collision=True,
-                                    )
-                                    if lift_plan.success:
-                                        lift_traj_ok += 1
-                                        lift_safe = True
-                                    else:
-                                        lift_reason = lift_plan.failure_reason
-
-                                cell_passed = (
-                                    ik_ap.success and col_ap_safe and land_safe and
-                                    ik_gr.success and col_gr_safe and lift_safe
-                                )
-
-                                if cell_passed:
-                                    passed_cells += 1
+                            # 1. Approach endpoint IK
+                            ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
+                            col_ap_safe = False
+                            col_ap_reason = None
+                            if ik_ap.success:
+                                app_ik_ok += 1
+                                col_ap = self.collision_guard.validate_configuration(ik_ap.joints_rad, restore_state=True)
+                                if col_ap.safe:
+                                    app_col_free += 1
+                                    col_ap_safe = True
                                 else:
-                                    failure_parts = []
-                                    if not ik_ap.success:
-                                        failure_parts.append("Approach IK failed")
-                                    elif not col_ap_safe:
-                                        failure_parts.append(f"Approach collision: {col_ap_reason}")
-                                    if not land_safe:
-                                        failure_parts.append(f"LAND MoveL: {land_reason}")
-                                    if not ik_gr.success:
-                                        failure_parts.append("Grasp IK failed")
-                                    elif not col_gr_safe:
-                                        failure_parts.append(f"Grasp collision: {col_gr_reason}")
-                                    if not lift_safe:
-                                        failure_parts.append(f"LIFT MoveL: {lift_reason}")
+                                    col_ap_reason = col_ap.failure_reason
 
-                                    stage_failed = (
-                                        "APPROACH" if not (ik_ap.success and col_ap_safe) else (
-                                            "LAND" if not land_safe else (
-                                                "GRASP" if not (ik_gr.success and col_gr_safe) else "LIFT"
-                                            )
+                            # 2. LAND MoveL trajectory (Approach -> Grasp)
+                            land_safe = False
+                            land_reason = None
+                            land_plan = None
+                            if ik_ap.success and col_ap_safe:
+                                land_plan = self.backend.plan_cartesian(
+                                    start_q=ik_ap.joints_rad,
+                                    target_pose_mm_deg=pose_gr_mm,
+                                    samples=20,
+                                    allowed_grasp_piece_id=target_piece_id,
+                                    check_collision=True,
+                                )
+                                if land_plan.success:
+                                    land_traj_ok += 1
+                                    land_safe = True
+                                else:
+                                    land_reason = land_plan.failure_reason
+
+                            # 3. Grasp endpoint IK & collision
+                            ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
+                            col_gr_safe = False
+                            col_gr_reason = None
+                            if ik_gr.success:
+                                grasp_ik_ok += 1
+                                col_gr = self.collision_guard.validate_configuration(
+                                    ik_gr.joints_rad, allowed_grasp_piece_id=target_piece_id, restore_state=True
+                                )
+                                if col_gr.safe:
+                                    grasp_col_free += 1
+                                    col_gr_safe = True
+                                else:
+                                    col_gr_reason = col_gr.failure_reason
+
+                            # 4. LIFT MoveL trajectory (Grasp -> Approach)
+                            lift_safe = False
+                            lift_reason = None
+                            lift_plan = None
+                            start_q_lift = land_plan.final_q if (land_plan and land_plan.success and land_plan.final_q is not None) else (
+                                ik_gr.joints_rad if ik_gr.success else None
+                            )
+                            if start_q_lift is not None and col_gr_safe:
+                                lift_plan = self.backend.plan_cartesian(
+                                    start_q=start_q_lift,
+                                    target_pose_mm_deg=pose_ap_mm,
+                                    samples=20,
+                                    allowed_grasp_piece_id=target_piece_id,
+                                    check_collision=True,
+                                )
+                                if lift_plan.success:
+                                    lift_traj_ok += 1
+                                    lift_safe = True
+                                else:
+                                    lift_reason = lift_plan.failure_reason
+
+                            cell_passed = (
+                                ik_ap.success and col_ap_safe and land_safe and
+                                ik_gr.success and col_gr_safe and lift_safe
+                            )
+
+                            if cell_passed:
+                                passed_cells += 1
+                            else:
+                                failure_parts = []
+                                if not ik_ap.success:
+                                    failure_parts.append("Approach IK failed")
+                                elif not col_ap_safe:
+                                    failure_parts.append(f"Approach collision: {col_ap_reason}")
+                                if not land_safe:
+                                    failure_parts.append(f"LAND MoveL: {land_reason}")
+                                if not ik_gr.success:
+                                    failure_parts.append("Grasp IK failed")
+                                elif not col_gr_safe:
+                                    failure_parts.append(f"Grasp collision: {col_gr_reason}")
+                                if not lift_safe:
+                                    failure_parts.append(f"LIFT MoveL: {lift_reason}")
+
+                                stage_failed = (
+                                    "APPROACH" if not (ik_ap.success and col_ap_safe) else (
+                                        "LAND" if not land_safe else (
+                                            "GRASP" if not (ik_gr.success and col_gr_safe) else "LIFT"
                                         )
                                     )
-                                    fail_entry = {
-                                        "row": r,
-                                        "col": c,
-                                        "stage": stage_failed,
-                                        "reason": " | ".join(failure_parts),
-                                        "approach_ik_ok": ik_ap.success,
-                                        "approach_col_safe": col_ap_safe,
-                                        "land_safe": land_safe,
-                                        "grasp_ik_ok": ik_gr.success,
-                                        "grasp_col_safe": col_gr_safe,
-                                        "lift_safe": lift_safe,
-                                    }
-                                    if land_plan and not land_plan.success:
-                                        fail_entry["sample_idx"] = land_plan.first_failing_sample
-                                        fail_entry["first_failing_sample"] = land_plan.first_failing_sample
-                                        fail_entry["q_failed"] = land_plan.q_failed
-                                        fail_entry["colliding_links"] = land_plan.colliding_links_or_bodies
-                                    elif lift_plan and not lift_plan.success:
-                                        fail_entry["sample_idx"] = lift_plan.first_failing_sample
-                                        fail_entry["first_failing_sample"] = lift_plan.first_failing_sample
-                                        fail_entry["q_failed"] = lift_plan.q_failed
-                                        fail_entry["colliding_links"] = lift_plan.colliding_links_or_bodies
-                                    failed_cells.append(fail_entry)
+                                )
+                                fail_entry = {
+                                    "row": r,
+                                    "col": c,
+                                    "stage": stage_failed,
+                                    "reason": " | ".join(failure_parts),
+                                    "approach_ik_ok": ik_ap.success,
+                                    "approach_col_safe": col_ap_safe,
+                                    "land_safe": land_safe,
+                                    "grasp_ik_ok": ik_gr.success,
+                                    "grasp_col_safe": col_gr_safe,
+                                    "lift_safe": lift_safe,
+                                }
+                                if land_plan and not land_plan.success:
+                                    fail_entry["sample_idx"] = land_plan.first_failing_sample
+                                    fail_entry["first_failing_sample"] = land_plan.first_failing_sample
+                                    fail_entry["q_failed"] = land_plan.q_failed
+                                    fail_entry["colliding_links"] = land_plan.colliding_links_or_bodies
+                                elif lift_plan and not lift_plan.success:
+                                    fail_entry["sample_idx"] = lift_plan.first_failing_sample
+                                    fail_entry["first_failing_sample"] = lift_plan.first_failing_sample
+                                    fail_entry["q_failed"] = lift_plan.q_failed
+                                    fail_entry["colliding_links"] = lift_plan.colliding_links_or_bodies
+                                failed_cells.append(fail_entry)
 
                     # Check placement version atomicity
                     if self.placement_state.placement_version != v_start:
@@ -1391,7 +1424,7 @@ class VirtualXiangqiSimulation:
                             self.telemetry.broadcast_custom(stale_res)
                         return stale_res
 
-                    all_passed = (passed_cells == 90)
+                    all_passed = (passed_cells == len(cells_to_test) and len(cells_to_test) > 0)
                     res = {
                         "type": "placement_validation_result",
                         "validation_scope": "local_cell_trajectories",
@@ -1409,7 +1442,7 @@ class VirtualXiangqiSimulation:
                         "lift_trajectory_safe_count": lift_traj_ok,
                         "lift_move_passed_count": lift_traj_ok,
                         "passed_cells_count": passed_cells,
-                        "total_cells": 90,
+                        "total_cells": len(cells_to_test),
                         "all_passed": all_passed,
                         "failed_cells": failed_cells,
                     }
@@ -1456,6 +1489,8 @@ class VirtualXiangqiSimulation:
         """
         try:
             with self.acquire_operation_state(RuntimeOperationState.VALIDATING_ROUTES):
+                if callable(self._test_hook_routes_owned):
+                    self._test_hook_routes_owned()
                 is_busy = (
                     getattr(self.backend, "_motion_state", None) == "MOVING"
                     or getattr(self.backend, "_trajectory_stage", None) not in (None, "IDLE", "COMPLETE")
@@ -1491,130 +1526,130 @@ class VirtualXiangqiSimulation:
 
                 self._physics_query_lock.acquire()
                 try:
-                    with self.acquire_operation_state(RuntimeOperationState.VALIDATING_ROUTES):
-                        board_z = self.board_surface_z
-                        piece_h = self.geom.piece_height_mm / 1000.0
-                        z_grasp = board_z + piece_h / 2.0
-                        z_transit = board_z + (self.placement_state.safe_transit_height_mm / 1000.0)
+                    board_z = self.board_surface_z
+                    piece_h = self.geom.piece_height_mm / 1000.0
+                    z_grasp = board_z + piece_h / 2.0
+                    z_transit = board_z + (self.placement_state.safe_transit_height_mm / 1000.0)
 
-                        # Step 1: Pre-plan and cache Approach IK, Grasp IK, LIFT, and LAND for all 90 cells
-                        cell_plans = {}
-                        for r in range(10):
-                            for c in range(9):
-                                pos_gr = self.cell_to_robot_xyz_m(r, c, z_grasp)
-                                pos_ap = self.cell_to_robot_xyz_m(r, c, z_transit)
-                                pose_gr_mm = [v * 1000.0 for v in pos_gr] + list(self.target_tool_euler_deg)
-                                pose_ap_mm = [v * 1000.0 for v in pos_ap] + list(self.target_tool_euler_deg)
+                    # Step 1: Determine routes to test
+                    all_cells = [(r, c) for r in range(10) for c in range(9)]
+                    routes_to_test = []
+                    for src in all_cells:
+                        for dst in all_cells:
+                            if src != dst:
+                                routes_to_test.append((src, dst))
 
-                                seed_info = self.reachability_dataset.get((r, c))
-                                seed_app = np.deg2rad(seed_info["approach_joints_deg"]) if seed_info and "approach_joints_deg" in seed_info else None
-                                seed_gr = np.deg2rad(seed_info["grasp_joints_deg"]) if seed_info and "grasp_joints_deg" in seed_info else None
+                    if sample_limit is not None and sample_limit < len(routes_to_test):
+                        # Sample evenly across the route set
+                        step = len(routes_to_test) // sample_limit
+                        routes_to_test = routes_to_test[::step][:sample_limit]
 
-                                # Resolve explicit piece ID for candidate cell
-                                target_piece_id = self._get_piece_at_cell(r, c)
+                    needed_cells = {c for pair in routes_to_test for c in pair}
 
-                                ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
-                                ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
+                    # Step 2: Pre-plan and cache Approach IK, Grasp IK, LIFT, and LAND for needed cells
+                    cell_plans = {}
+                    for r, c in needed_cells:
+                        pos_gr = self.cell_to_robot_xyz_m(r, c, z_grasp)
+                        pos_ap = self.cell_to_robot_xyz_m(r, c, z_transit)
+                        pose_gr_mm = [v * 1000.0 for v in pos_gr] + list(self.target_tool_euler_deg)
+                        pose_ap_mm = [v * 1000.0 for v in pos_ap] + list(self.target_tool_euler_deg)
 
-                                lift_plan = None
-                                land_plan = None
-                                if ik_gr.success:
-                                    lift_plan = self.backend.plan_cartesian(
-                                        start_q=ik_gr.joints_rad,
-                                        target_pose_mm_deg=pose_ap_mm,
-                                        samples=15,
-                                        allowed_grasp_piece_id=target_piece_id,
-                                        check_collision=True,
-                                    )
-                                if ik_ap.success:
-                                    land_plan = self.backend.plan_cartesian(
-                                        start_q=ik_ap.joints_rad,
-                                        target_pose_mm_deg=pose_gr_mm,
-                                        samples=15,
-                                        allowed_grasp_piece_id=target_piece_id,
-                                        check_collision=True,
-                                    )
+                        seed_info = self.reachability_dataset.get((r, c))
+                        seed_app = np.deg2rad(seed_info["approach_joints_deg"]) if seed_info and "approach_joints_deg" in seed_info else None
+                        seed_gr = np.deg2rad(seed_info["grasp_joints_deg"]) if seed_info and "grasp_joints_deg" in seed_info else None
 
-                                cell_plans[(r, c)] = {
-                                    "ik_ap": ik_ap,
-                                    "ik_gr": ik_gr,
-                                    "pose_ap_mm": pose_ap_mm,
-                                    "pose_gr_mm": pose_gr_mm,
-                                    "lift_plan": lift_plan,
-                                    "land_plan": land_plan,
-                                }
+                        # Resolve explicit piece ID for candidate cell
+                        target_piece_id = self._get_piece_at_cell(r, c)
 
-                        # Step 2: Validate routes
-                        all_cells = [(r, c) for r in range(10) for c in range(9)]
-                        routes_to_test = []
-                        for src in all_cells:
-                            for dst in all_cells:
-                                if src != dst:
-                                    routes_to_test.append((src, dst))
+                        ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
+                        ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
 
-                        if sample_limit is not None and sample_limit < len(routes_to_test):
-                            # Sample evenly across the route set
-                            step = len(routes_to_test) // sample_limit
-                            routes_to_test = routes_to_test[::step][:sample_limit]
-
-                        total_routes = len(routes_to_test)
-                        passed_routes = 0
-                        failed_routes = 0
-                        worst_route = None
-                        first_col_stage = None
-                        col_pair = None
-                        min_margin_deg = float("inf")
-                        worst_cond = 1.0
-
-                        for src, dst in routes_to_test:
-                            if self.placement_state.placement_version != v_start:
-                                break
-
-                            src_cp = cell_plans[src]
-                            dst_cp = cell_plans[dst]
-
-                            # Stage 1: LIFT
-                            if not (src_cp["lift_plan"] and src_cp["lift_plan"].success):
-                                failed_routes += 1
-                                if worst_route is None:
-                                    worst_route = {"src": list(src), "dst": list(dst), "stage": "LIFT"}
-                                    first_col_stage = "LIFT"
-                                    col_pair = src_cp["lift_plan"].colliding_links_or_bodies if src_cp["lift_plan"] else "Grasp IK failed"
-                                continue
-
-                            q_after_lift = src_cp["lift_plan"].final_q
-
-                            # Stage 2: TRANSIT (MoveL at transit height) - carried piece is from src
-                            src_piece_id = self._get_piece_at_cell(src[0], src[1])
-                            transit_plan = self.backend.plan_cartesian(
-                                start_q=q_after_lift,
-                                target_pose_mm_deg=dst_cp["pose_ap_mm"],
+                        lift_plan = None
+                        land_plan = None
+                        if ik_gr.success:
+                            lift_plan = self.backend.plan_cartesian(
+                                start_q=ik_gr.joints_rad,
+                                target_pose_mm_deg=pose_ap_mm,
                                 samples=15,
-                                allowed_grasp_piece_id=src_piece_id,
+                                allowed_grasp_piece_id=target_piece_id,
                                 check_collision=True,
                             )
-                            if not transit_plan.success:
-                                failed_routes += 1
-                                if worst_route is None:
-                                    worst_route = {"src": list(src), "dst": list(dst), "stage": "TRANSIT"}
-                                    first_col_stage = "TRANSIT"
-                                    col_pair = transit_plan.colliding_links_or_bodies
-                                continue
+                        if ik_ap.success:
+                            land_plan = self.backend.plan_cartesian(
+                                start_q=ik_ap.joints_rad,
+                                target_pose_mm_deg=pose_gr_mm,
+                                samples=15,
+                                allowed_grasp_piece_id=target_piece_id,
+                                check_collision=True,
+                            )
 
-                            # Stage 3: LAND
-                            if not (dst_cp["land_plan"] and dst_cp["land_plan"].success):
-                                failed_routes += 1
-                                if worst_route is None:
-                                    worst_route = {"src": list(src), "dst": list(dst), "stage": "LAND"}
-                                    first_col_stage = "LAND"
-                                    col_pair = dst_cp["land_plan"].colliding_links_or_bodies if dst_cp["land_plan"] else "Approach IK failed"
-                                continue
+                        cell_plans[(r, c)] = {
+                            "ik_ap": ik_ap,
+                            "ik_gr": ik_gr,
+                            "pose_ap_mm": pose_ap_mm,
+                            "pose_gr_mm": pose_gr_mm,
+                            "lift_plan": lift_plan,
+                            "land_plan": land_plan,
+                        }
 
-                            passed_routes += 1
-                            if transit_plan.min_joint_margin_deg is not None:
-                                min_margin_deg = min(min_margin_deg, transit_plan.min_joint_margin_deg)
-                            if transit_plan.worst_condition_number is not None:
-                                worst_cond = max(worst_cond, transit_plan.worst_condition_number)
+                    total_routes = len(routes_to_test)
+                    passed_routes = 0
+                    failed_routes = 0
+                    worst_route = None
+                    first_col_stage = None
+                    col_pair = None
+                    min_margin_deg = float("inf")
+                    worst_cond = 1.0
+
+                    for src, dst in routes_to_test:
+                        if self.placement_state.placement_version != v_start:
+                            break
+
+                        src_cp = cell_plans[src]
+                        dst_cp = cell_plans[dst]
+
+                        # Stage 1: LIFT
+                        if not (src_cp["lift_plan"] and src_cp["lift_plan"].success):
+                            failed_routes += 1
+                            if worst_route is None:
+                                worst_route = {"src": list(src), "dst": list(dst), "stage": "LIFT"}
+                                first_col_stage = "LIFT"
+                                col_pair = src_cp["lift_plan"].colliding_links_or_bodies if src_cp["lift_plan"] else "Grasp IK failed"
+                            continue
+
+                        q_after_lift = src_cp["lift_plan"].final_q
+
+                        # Stage 2: TRANSIT (MoveL at transit height) - carried piece is from src
+                        src_piece_id = self._get_piece_at_cell(src[0], src[1])
+                        transit_plan = self.backend.plan_cartesian(
+                            start_q=q_after_lift,
+                            target_pose_mm_deg=dst_cp["pose_ap_mm"],
+                            samples=15,
+                            allowed_grasp_piece_id=src_piece_id,
+                            check_collision=True,
+                        )
+                        if not transit_plan.success:
+                            failed_routes += 1
+                            if worst_route is None:
+                                worst_route = {"src": list(src), "dst": list(dst), "stage": "TRANSIT"}
+                                first_col_stage = "TRANSIT"
+                                col_pair = transit_plan.colliding_links_or_bodies
+                            continue
+
+                        # Stage 3: LAND
+                        if not (dst_cp["land_plan"] and dst_cp["land_plan"].success):
+                            failed_routes += 1
+                            if worst_route is None:
+                                worst_route = {"src": list(src), "dst": list(dst), "stage": "LAND"}
+                                first_col_stage = "LAND"
+                                col_pair = dst_cp["land_plan"].colliding_links_or_bodies if dst_cp["land_plan"] else "Approach IK failed"
+                            continue
+
+                        passed_routes += 1
+                        if transit_plan.min_joint_margin_deg is not None:
+                            min_margin_deg = min(min_margin_deg, transit_plan.min_joint_margin_deg)
+                        if transit_plan.worst_condition_number is not None:
+                            worst_cond = max(worst_cond, transit_plan.worst_condition_number)
 
                     all_routes_safe = (passed_routes == total_routes and total_routes > 0)
                     res = {
