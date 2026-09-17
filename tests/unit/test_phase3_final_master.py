@@ -22,7 +22,10 @@ Comprehensive Master Unit Tests for Phase 3 Final Corrective Pass:
 import json
 from pathlib import Path
 import sys
+import threading
+import time
 import unittest
+from unittest import mock
 import numpy as np
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -32,7 +35,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from src.simulation.physics.state import GraspStatus, GraspResult, PickResult, PlaceResult, PiecePhysicalState
 from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.physics.collision_guard import FR3CollisionGuard
-from src.simulation.runtime import VirtualXiangqiSimulation, RuntimeOperationState
+from src.simulation.runtime import VirtualXiangqiSimulation, RuntimeOperationState, RuntimeOperationBusy
 from src.simulation.virtual_fr3_backend import VirtualFR3Backend, SERVICE_SAFE_JOINTS_DEG
 
 
@@ -356,6 +359,170 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
         snap = self.sim.backend.get_state_snapshot()
         np.testing.assert_allclose(snap.joints_deg, self.sim.backend.home_joints_deg, atol=1.0)
+
+    def test_a1_move_joint_command_uses_runtime_authority(self):
+        """A1: _handle_client_command(MOVE_JOINT) rejected when in VALIDATING_LOCAL, joints unchanged."""
+        initial_q = list(self.sim.backend.get_state_snapshot().joints_deg)
+        target_q = [val + 10.0 for val in initial_q]
+
+        with self.sim.acquire_operation_state(RuntimeOperationState.VALIDATING_LOCAL):
+            # Direct runtime wrapper rejection
+            res = self.sim.runtime_move_joint(target_q)
+            self.assertFalse(res["success"])
+            self.assertEqual(res["status"], "MOTION_REJECTED_BUSY")
+
+            # UI WebSocket command dispatch rejection
+            self.sim._handle_client_command({"command": "MOVE_JOINT", "joints_deg": target_q})
+            # Sleep briefly to ensure async thread ran
+            time.sleep(0.05)
+
+            # Joints must be completely unchanged
+            current_q = list(self.sim.backend.get_state_snapshot().joints_deg)
+            np.testing.assert_allclose(initial_q, current_q, atol=1e-3)
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a2_true_concurrent_acquisition(self):
+        """A2: True concurrent acquisition with Barrier(2): exactly one succeeds, one gets RuntimeOperationBusy."""
+        barrier = threading.Barrier(2)
+        successes = []
+        busies = []
+
+        def _worker(thread_name: str):
+            barrier.wait()
+            try:
+                with self.sim.acquire_operation_state(RuntimeOperationState.MOTION):
+                    successes.append(thread_name)
+                    time.sleep(0.05)
+            except RuntimeOperationBusy:
+                busies.append(thread_name)
+
+        t1 = threading.Thread(target=_worker, args=("Thread-1",))
+        t2 = threading.Thread(target=_worker, args=("Thread-2",))
+        t1.start()
+        t2.start()
+        t1.join(timeout=2.0)
+        t2.join(timeout=2.0)
+
+        self.assertEqual(len(successes), 1, f"Expected exactly 1 success, got {successes}")
+        self.assertEqual(len(busies), 1, f"Expected exactly 1 busy rejection, got {busies}")
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a3_validation_vs_move_joint_race(self):
+        """A3: Validator paused in VALIDATING_LOCAL rejects runtime_move_joint with MOTION_REJECTED_BUSY, resumes to IDLE."""
+        entered_val = threading.Event()
+        resume_val = threading.Event()
+
+        def _val_task():
+            with self.sim.acquire_operation_state(RuntimeOperationState.VALIDATING_LOCAL):
+                entered_val.set()
+                resume_val.wait(timeout=2.0)
+
+        t = threading.Thread(target=_val_task)
+        t.start()
+        self.assertTrue(entered_val.wait(timeout=1.0))
+
+        try:
+            # While holding VALIDATING_LOCAL, runtime_move_joint must reject
+            res = self.sim.runtime_move_joint(self.sim.backend.home_joints_deg)
+            self.assertFalse(res["success"])
+            self.assertEqual(res["status"], "MOTION_REJECTED_BUSY")
+        finally:
+            resume_val.set()
+            t.join(timeout=2.0)
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a4_move_joint_owns_first(self):
+        """A4: Active motion paused in MOTION rejects validate_board_placement without touching PyBullet q."""
+        entered_motion = threading.Event()
+        resume_motion = threading.Event()
+
+        def _mock_move(q, speed_factor=None):
+            entered_motion.set()
+            resume_motion.wait(timeout=2.0)
+            return True
+
+        q_bullet_before = self.sim.world.get_robot_joint_positions()
+
+        with mock.patch.object(self.sim.backend, "move_joint", side_effect=_mock_move):
+            t = threading.Thread(target=self.sim.runtime_move_joint, args=(self.sim.backend.home_joints_deg,))
+            t.start()
+            self.assertTrue(entered_motion.wait(timeout=1.0))
+
+            try:
+                # Validation must be rejected atomically
+                res_val = self.sim.validate_board_placement()
+                self.assertFalse(res_val["success"])
+                self.assertEqual(res_val["status"], "VALIDATION_REJECTED_BUSY")
+
+                # Verify PyBullet configuration was NOT altered
+                q_bullet_after = self.sim.world.get_robot_joint_positions()
+                np.testing.assert_allclose(q_bullet_before, q_bullet_after, atol=1e-5)
+            finally:
+                resume_motion.set()
+                t.join(timeout=2.0)
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a5_validation_flag_consistency(self):
+        """A5: _validation_in_progress is True during validation states and False when IDLE."""
+        self.assertFalse(self.sim._validation_in_progress)
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+        with self.sim.acquire_operation_state(RuntimeOperationState.VALIDATING_LOCAL):
+            self.assertTrue(self.sim._validation_in_progress)
+            self.assertEqual(self.sim.operation_state, RuntimeOperationState.VALIDATING_LOCAL)
+
+        self.assertFalse(self.sim._validation_in_progress)
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+        with self.sim.acquire_operation_state(RuntimeOperationState.VALIDATING_ROUTES):
+            self.assertTrue(self.sim._validation_in_progress)
+            self.assertEqual(self.sim.operation_state, RuntimeOperationState.VALIDATING_ROUTES)
+
+        self.assertFalse(self.sim._validation_in_progress)
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a6_exception_cleanup(self):
+        """A6: Exception inside runtime_move_joint cleanly restores state to IDLE and permits subsequent motion."""
+        with mock.patch.object(self.sim.backend, "move_joint", side_effect=RuntimeError("Simulated motor fault")):
+            res = self.sim.runtime_move_joint([10.0, 10.0, 10.0, 10.0, 10.0, 10.0])
+            self.assertFalse(res["success"])
+            self.assertEqual(res["status"], "MOVE_FAILED")
+
+        # State must be cleanly restored to IDLE
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+        # Subsequent operation must succeed cleanly
+        res_subsequent = self.sim.runtime_move_joint(self.sim.backend.home_joints_deg)
+        self.assertTrue(res_subsequent["success"])
+        self.assertEqual(res_subsequent["status"], "SUCCESS")
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a7_service_jog_vs_validation(self):
+        """A7: While in VALIDATING_LOCAL, runtime_jog_tcp and runtime_jog_joint reject with BUSY and mutate nothing."""
+        with self.sim.acquire_operation_state(RuntimeOperationState.VALIDATING_LOCAL):
+            snap_before = self.sim.backend.get_state_snapshot()
+            tcp_before = list(snap_before.tcp_pose_mm_deg)
+            joints_before = list(snap_before.joints_deg)
+
+            res_tcp = self.sim.runtime_jog_tcp(axis="+Z", step_mm=10.0)
+            self.assertFalse(res_tcp["success"])
+            self.assertEqual(res_tcp["status"], "MOTION_REJECTED_BUSY")
+
+            res_joint = self.sim.runtime_jog_joint(joint_idx=0, delta_deg=10.0)
+            self.assertFalse(res_joint["success"])
+            self.assertEqual(res_joint["status"], "MOTION_REJECTED_BUSY")
+
+            snap_after = self.sim.backend.get_state_snapshot()
+            tcp_after = list(snap_after.tcp_pose_mm_deg)
+            joints_after = list(snap_after.joints_deg)
+
+            np.testing.assert_allclose(tcp_before, tcp_after, atol=1e-5)
+            np.testing.assert_allclose(joints_before, joints_after, atol=1e-5)
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
 
 
 if __name__ == "__main__":

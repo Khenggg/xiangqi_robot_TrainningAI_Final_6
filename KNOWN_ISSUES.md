@@ -37,14 +37,13 @@
 
 ---
 
-## B04 — Validation vs Motion Mutual Exclusion Atomicity
+## B04 — Validation vs Motion Mutual Exclusion Atomicity & Single Authority
 * **Status:** FIXED
 * **Severity:** BLOCKER
 * **Affected Files:** `src/simulation/runtime.py`
-* **Evidence:** Rapid concurrent calls to `validate_board_placement` and `execute_3stage_trajectory` caused race conditions during PyBullet robot state restoration.
-* **Fix Summary:** Created `RuntimeOperationState` enum (`IDLE`, `MOTION`, `VALIDATING_LOCAL`, `VALIDATING_ROUTES`, `BOARD_ADJUSTMENT`, `SERVICE_MOVE`, `RESETTING`) with an atomic `acquire_operation_state()` context manager.
-* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests::test_05_runtime_operation_state_transitions`, `test_06_runtime_operation_state_mutual_exclusion`
-* **Last Verified HEAD:** 7ce5e71
+* **Evidence:** Previously, `MOVE_JOINT` bypassed `RuntimeOperationState`, and validation checked `is_busy` before acquiring `VALIDATING_*`, leaving a race window where PyBullet joint configurations could be snapshot or mutated concurrently.
+* **Fix Summary:** Defined `RuntimeOperationBusy(RuntimeError)`, implemented authoritative `runtime_move_joint()`, routed `_handle_client_command(MOVE_JOINT)` and `RESET` through runtime wrappers, wrapped `validate_board_placement` and `validate_full_board_routes` in atomic outer `acquire_operation_state()`, and enforced thread-owner re-entrancy for nested sub-tasks.
+* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests::test_05_runtime_operation_state_transitions`, `test_06_runtime_operation_state_mutual_exclusion`, `test_a1_move_joint_command_uses_runtime_authority`, `test_a2_true_concurrent_acquisition`, `test_a3_validation_vs_move_joint_race`, `test_a4_move_joint_owns_first`, `test_a5_validation_flag_consistency`, `test_a6_exception_cleanup`, `test_a7_service_jog_vs_validation`
 
 ---
 
