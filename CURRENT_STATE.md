@@ -6,9 +6,10 @@
 
 ## METADATA
 * **CURRENT_BRANCH:** `feature/virtual-robot-3d-simulator`
-* **HEAD:** `c40a2d3984f2c93c20063e9d4b7e628c32f2e500`
-* **LAST_REVIEWED_HEAD:** `c40a2d3984f2c93c20063e9d4b7e628c32f2e500`
+* **HEAD:** `2edfed83cf254ad0e0fccd3fc25645ca9345c854`
+* **LAST_REVIEWED_HEAD:** `2edfed83cf254ad0e0fccd3fc25645ca9345c854`
 * **PASS_A_RUNTIME_AUTHORITY:** `PASS`
+* **PASS_A1_REENTRANT_LOCK:** `PASS`
 * **PHASE:** `PHASE_3_SIMULATION_VIRTUAL_TWIN`
 * **PHASE_STATUS:** `PARTIAL`
 * **CI_STATUS:** `LOCAL_VERIFIED_GREEN`
@@ -20,7 +21,7 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 1. **[B01] try_grasp Candidate Matching:** Strict single-candidate matching and rejection of mismatched candidate IDs with `GraspStatus.AMBIGUOUS`. (Verified by `test_01_try_grasp_target_matching`, `test_02_try_grasp_target_mismatch_rejection`).
 2. **[B02] PlaceResult & GraspStatus Contract:** Formal `PlaceResult` dataclass with backward-compatible dict/bool protocol. (Verified by `test_03_pick_result_fail_fast_contract`).
 3. **[B03] PyBullet FR3 Articulated Tracking:** Added `@property def joints_rad` to `RobotStateSnapshot` and `get_robot_joint_positions()` in `VirtualPhysicalWorld`, ensuring real-time tracking of robot joints in PyBullet. (Verified by `test_04_pybullet_fr3_tracking_interpolated`).
-4. **[B04] Runtime State Machine, Authority & Concurrency:** Defined `RuntimeOperationBusy`, implemented `runtime_move_joint()`, routed all WebSocket motion commands through runtime wrappers, closed validation race window by acquiring `acquire_operation_state()` atomically at entry, and guaranteed zero PyBullet mutation upon busy rejections. (Verified by `test_05_runtime_operation_state_transitions`, `test_06_runtime_operation_state_mutual_exclusion`, `test_a1_move_joint_command_uses_runtime_authority`, `test_a2_true_concurrent_acquisition`, `test_a3_validation_vs_move_joint_race`, `test_a4_move_joint_owns_first`, `test_a5_validation_flag_consistency`, `test_a6_exception_cleanup`, `test_a7_service_jog_vs_validation`).
+4. **[B04] Runtime State Machine, Authority & Concurrency (Pass A & A.1):** Defined `RuntimeOperationBusy`, implemented `runtime_move_joint()`, routed all WebSocket motion commands through runtime wrappers, closed validation race window by acquiring `acquire_operation_state()` atomically at entry, resolved re-entrant operation lock yielding bug by strictly releasing `_operation_lock` before `yield`, implemented `_operation_depth` tracking, eliminated redundant inner acquisitions in `validate_board_placement` and `validate_full_board_routes`, added deterministic pause test hooks, and verified zero blocking / instant `MOTION_REJECTED_BUSY` response under real validation concurrency. (Verified by `test_05_runtime_operation_state_transitions`, `test_06_runtime_operation_state_mutual_exclusion`, `test_a1_move_joint_command_uses_runtime_authority`, `test_a2_true_concurrent_acquisition`, `test_a3_1_real_validator_rejects_move_joint_before_release`, `test_a3_2_timing_handshake_proof`, `test_a3_3_full_route_validator_rejects_move_joint`, `test_a3_validation_vs_move_joint_race`, `test_a4_move_joint_owns_first`, `test_a5_validation_flag_consistency`, `test_a6_exception_cleanup`, `test_a6_nested_exception_cleanup`, `test_a7_service_jog_vs_validation`, `test_lock_not_held_across_yield`).
 5. **[B05] Ruler Listener De-duplication:** Consolidated 3D ruler update listener to a single authoritative telemetry event listener. (Verified by `test_16_ruler_single_authoritative_update`, `test_viewer_coordinate_ruler.mjs`).
 6. **[B06] Wildcard Protection:** Prohibited wildcard `*` in `allowed_grasp_piece_id` across `CollisionGuard` and backend. (Verified by `test_07_collision_guard_explicit_candidate_no_wildcard`).
 7. **Service Safe Pose:** Canonical joint angles `[0.0, -25.0, 40.0, -105.0, -90.0, 0.0]°` and `is_service_safe()` predicate. (Verified by `test_08_is_service_safe_predicate`, `test_09_go_service_safe_motion`).
@@ -44,8 +45,8 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 ---
 
 ## TEST_EVIDENCE
-* **Python Unit Tests:** 60/60 Phase 3 specific tests PASSED (169/169 total repository tests passed, 100% pass rate)
-  * `tests/unit/test_phase3_final_master.py`: 24 passed (including mandatory Pass A tests A1-A7)
+* **Python Unit Tests:** 65/65 Phase 3 specific tests PASSED (100% pass rate)
+  * `tests/unit/test_phase3_final_master.py`: 29 passed (including mandatory Pass A & A.1 tests A1-A7, A3.1, A3.2, A3.3, A6.2, lock yield)
   * `tests/unit/test_phase3_final_closure.py`: 11 passed
   * `tests/unit/test_phase3_isolation_and_fail_fast.py`: 12 passed
   * `tests/unit/test_phase3_dynamic_board_placement.py`: 13 passed

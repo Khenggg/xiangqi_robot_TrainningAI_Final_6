@@ -41,9 +41,10 @@
 * **Status:** FIXED
 * **Severity:** BLOCKER
 * **Affected Files:** `src/simulation/runtime.py`
-* **Evidence:** Previously, `MOVE_JOINT` bypassed `RuntimeOperationState`, and validation checked `is_busy` before acquiring `VALIDATING_*`, leaving a race window where PyBullet joint configurations could be snapshot or mutated concurrently.
-* **Fix Summary:** Defined `RuntimeOperationBusy(RuntimeError)`, implemented authoritative `runtime_move_joint()`, routed `_handle_client_command(MOVE_JOINT)` and `RESET` through runtime wrappers, wrapped `validate_board_placement` and `validate_full_board_routes` in atomic outer `acquire_operation_state()`, and enforced thread-owner re-entrancy for nested sub-tasks.
-* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests::test_05_runtime_operation_state_transitions`, `test_06_runtime_operation_state_mutual_exclusion`, `test_a1_move_joint_command_uses_runtime_authority`, `test_a2_true_concurrent_acquisition`, `test_a3_validation_vs_move_joint_race`, `test_a4_move_joint_owns_first`, `test_a5_validation_flag_consistency`, `test_a6_exception_cleanup`, `test_a7_service_jog_vs_validation`
+* **Evidence:** Previously, `MOVE_JOINT` bypassed `RuntimeOperationState`, validation checked `is_busy` before acquiring `VALIDATING_*`, and re-entrant acquisition in `acquire_operation_state` yielded inside `with self._operation_lock:`, holding the lock across nested long-running operations and blocking concurrent callers.
+* **Fix Summary:** Defined `RuntimeOperationBusy(RuntimeError)`, implemented authoritative `runtime_move_joint()`, routed `_handle_client_command(MOVE_JOINT)` and `RESET` through runtime wrappers, wrapped `validate_board_placement` and `validate_full_board_routes` in atomic outer `acquire_operation_state()`, resolved re-entrant lock yielding bug by strictly releasing `_operation_lock` before `yield`, implemented `_operation_depth` tracking, and eliminated redundant inner validation acquisitions.
+* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests` (`test_05_runtime_operation_state_transitions`, `test_06_runtime_operation_state_mutual_exclusion`, `test_a1_move_joint_command_uses_runtime_authority`, `test_a2_true_concurrent_acquisition`, `test_a3_1_real_validator_rejects_move_joint_before_release`, `test_a3_2_timing_handshake_proof`, `test_a3_3_full_route_validator_rejects_move_joint`, `test_a3_validation_vs_move_joint_race`, `test_a4_move_joint_owns_first`, `test_a5_validation_flag_consistency`, `test_a6_exception_cleanup`, `test_a6_nested_exception_cleanup`, `test_a7_service_jog_vs_validation`, `test_lock_not_held_across_yield`)
+* **Last Verified HEAD:** 2edfed83cf254ad0e0fccd3fc25645ca9345c854
 
 ---
 
