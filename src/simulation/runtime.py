@@ -158,6 +158,8 @@ class VirtualXiangqiSimulation:
         self._operation_lock = threading.RLock()
         self._test_hook_validation_owned: Optional[Callable[[], None]] = None
         self._test_hook_routes_owned: Optional[Callable[[], None]] = None
+        self._test_hook_motion_owned: Optional[Callable[[], None]] = None
+        self._test_hook_service_move_owned: Optional[Callable[[], None]] = None
 
         # Register listener with backend
         self.backend.add_state_listener(self._on_robot_state_update)
@@ -242,17 +244,24 @@ class VirtualXiangqiSimulation:
         """
         current_thread = threading.get_ident()
         with self._operation_lock:
+            # Re-entrancy is permitted for RESETTING (cascading cleanup) and matching non-motion states.
+            # Physical motions (MOTION, SERVICE_MOVE) are strictly non-reentrant: any motion request while
+            # motion is active must be rejected with RuntimeOperationBusy.
             is_reentrant = (
                 self._operation_owner == current_thread and (
                     self._operation_state == RuntimeOperationState.RESETTING
-                    or self._operation_state == target_state
+                    or (
+                        self._operation_state == target_state
+                        and target_state not in (RuntimeOperationState.MOTION, RuntimeOperationState.SERVICE_MOVE)
+                    )
                 )
             )
             if is_reentrant:
                 self._operation_depth += 1
             else:
-                if self._operation_state != RuntimeOperationState.IDLE:
-                    raise RuntimeOperationBusy(f"BUSY: System is currently in state {self._operation_state.value}")
+                if self._operation_state != RuntimeOperationState.IDLE or getattr(self, "_validation_in_progress", False):
+                    err_msg = f"System is currently in state {self._operation_state.value}" if self._operation_state != RuntimeOperationState.IDLE else "Validation actively in progress"
+                    raise RuntimeOperationBusy(f"BUSY: {err_msg}")
                 self._operation_state = target_state
                 self._operation_owner = current_thread
                 self._operation_depth = 1
@@ -261,6 +270,11 @@ class VirtualXiangqiSimulation:
                 self._broadcast_operation_state()
 
         try:
+            if not is_reentrant:
+                if target_state == RuntimeOperationState.MOTION and callable(self._test_hook_motion_owned):
+                    self._test_hook_motion_owned()
+                elif target_state == RuntimeOperationState.SERVICE_MOVE and callable(self._test_hook_service_move_owned):
+                    self._test_hook_service_move_owned()
             yield
         finally:
             with self._operation_lock:
@@ -433,95 +447,102 @@ class VirtualXiangqiSimulation:
         4. Close gripper & verify grasp
         5. Lift back to hover
         """
-        with self._command_lock:
-            if self._operation_state != RuntimeOperationState.IDLE:
-                return PickResult(
-                    success=False,
-                    status="MOTION_REJECTED_BUSY",
-                    error=f"System currently in state {self._operation_state.value}",
-                    piece_id=piece_id,
-                )
-
-            piece = self.world.pieces.get(piece_id)
-            if piece is None:
-                return PickResult(success=False, status="PIECE_NOT_FOUND", error=f"Piece {piece_id} not found", piece_id=piece_id)
-
-            pos_robot, _ = piece.get_pose_robot_base()
-            px, py, pz = pos_robot
-
-            # Default hover height derives from authoritative dynamic placement
-            safe_h_m = (self.placement_state.safe_transit_height_mm / 1000.0) if hasattr(self, "placement_state") else 0.070
-            eff_hover_h = hover_height_m if hover_height_m is not None else safe_h_m
-            safe_plane_z = self.board_surface_z + safe_h_m
-
-            # 1. Open gripper
-            self.backend.set_gripper(False)
-
-            rx, ry, rz = self.target_tool_euler_deg
-            hover_pose = [px * 1000.0, py * 1000.0, (pz + eff_hover_h) * 1000.0, rx, ry, rz]
-
-            # Use dataset approach joints STRICTLY as IK seed, never as direct motion target
-            r, c = self.find_nearest_cell(pos_robot)
-            cell_info = self.reachability_dataset.get((r, c))
-            seed_joints = np.radians(cell_info["approach_joints_deg"]) if cell_info and "approach_joints_deg" in cell_info else None
-
-            ik_hover = self.backend.solve_tcp_ik(hover_pose, seed_joints=seed_joints, allow_multi_seed=True)
-            if not ik_hover.success:
-                return PickResult(success=False, status="HOVER_UNREACHABLE", error="Hover pose unreachable", piece_id=piece_id)
-
+        try:
             with self.acquire_operation_state(RuntimeOperationState.MOTION):
-                # 2. Preposition / Hover
-                ok_hover = self.backend.move_joint_with_lift_recovery(
-                    np.degrees(ik_hover.joints_rad),
-                    speed_factor=speed_factor,
-                    safe_plane_z_m=safe_plane_z,
-                )
-                if not ok_hover:
-                    return PickResult(success=False, status="HOVER_APPROACH_REJECTED", error=f"Hover approach rejected: {self.backend._last_error}", piece_id=piece_id)
+                with self._command_lock:
+                    piece = self.world.pieces.get(piece_id)
+                    if piece is None:
+                        return PickResult(success=False, status="PIECE_NOT_FOUND", error=f"Piece {piece_id} not found", piece_id=piece_id)
 
-                if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
-                    return PickResult(success=False, status="HOVER_ALIGNMENT_REJECTED", error=f"Hover Cartesian alignment rejected: {self.backend._last_error}", piece_id=piece_id)
+                    pos_robot, _ = piece.get_pose_robot_base()
+                    px, py, pz = pos_robot
 
-                try:
-                    self.backend.set_allowed_grasp_piece_id(piece_id)
+                    # Default hover height derives from authoritative dynamic placement
+                    safe_h_m = (self.placement_state.safe_transit_height_mm / 1000.0) if hasattr(self, "placement_state") else 0.070
+                    eff_hover_h = hover_height_m if hover_height_m is not None else safe_h_m
+                    safe_plane_z = self.board_surface_z + safe_h_m
 
-                    # 3. Descend to grasp (TCP at piece center)
-                    grasp_pose = [px * 1000.0, py * 1000.0, pz * 1000.0, rx, ry, rz]
-                    if not self.backend.move_cartesian(grasp_pose, speed_factor=speed_factor):
-                        return PickResult(success=False, status="DESCENT_REJECTED", error=f"Grasp descent rejected: {self.backend._last_error}", piece_id=piece_id)
+                    # 1. Open gripper
+                    self.backend.set_gripper(False)
 
-                    # 4. Close gripper (triggers try_grasp)
-                    self.backend.set_gripper(True)
-                    attached = self.world.get_attached_piece()
-                    if attached is not None and attached.piece_id == piece_id:
-                        grasp_res = GraspResult(success=True, status=GraspStatus.SUCCESS, piece_id=attached.piece_id)
-                    else:
-                        raw_res = self.world.try_grasp(target_piece_id=piece_id)
-                        if isinstance(raw_res, GraspResult):
-                            grasp_res = raw_res
-                        elif isinstance(raw_res, bool):
-                            grasp_res = GraspResult(
-                                success=raw_res,
-                                status=GraspStatus.SUCCESS if raw_res else None,
-                                piece_id=piece_id if raw_res else None,
-                                reason=None if raw_res else "Grasp failed",
-                            )
-                        elif hasattr(raw_res, "success"):
-                            grasp_res = raw_res
-                        else:
-                            grasp_res = GraspResult(success=bool(raw_res), status=GraspStatus.SUCCESS if raw_res else None)
+                    rx, ry, rz = self.target_tool_euler_deg
+                    hover_pose = [px * 1000.0, py * 1000.0, (pz + eff_hover_h) * 1000.0, rx, ry, rz]
 
-                    if not grasp_res.success:
-                        logger.warning(f"Grasp verification failed for {piece_id}: {grasp_res.reason}")
-                        return PickResult(success=False, status=str(getattr(grasp_res, "status", "GRASP_FAILED")), error=f"Grasp verification failed: {grasp_res.reason}", piece_id=piece_id)
+                    # Use dataset approach joints STRICTLY as IK seed, never as direct motion target
+                    r, c = self.find_nearest_cell(pos_robot)
+                    cell_info = self.reachability_dataset.get((r, c))
+                    seed_joints = np.radians(cell_info["approach_joints_deg"]) if cell_info and "approach_joints_deg" in cell_info else None
 
-                    # 5. Lift back to hover
+                    ik_hover = self.backend.solve_tcp_ik(hover_pose, seed_joints=seed_joints, allow_multi_seed=True)
+                    if not ik_hover.success:
+                        return PickResult(success=False, status="HOVER_UNREACHABLE", error="Hover pose unreachable", piece_id=piece_id)
+
+                    # 2. Preposition / Hover
+                    ok_hover = self.backend.move_joint_with_lift_recovery(
+                        np.degrees(ik_hover.joints_rad),
+                        speed_factor=speed_factor,
+                        safe_plane_z_m=safe_plane_z,
+                    )
+                    if not ok_hover:
+                        return PickResult(success=False, status="HOVER_APPROACH_REJECTED", error=f"Hover approach rejected: {self.backend._last_error}", piece_id=piece_id)
+
                     if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
-                        return PickResult(success=False, status=GraspStatus.LIFT_FAILED_AFTER_GRASP.value, error=f"Lift after grasp failed: {self.backend._last_error}", piece_id=piece_id)
+                        return PickResult(success=False, status="HOVER_ALIGNMENT_REJECTED", error=f"Hover Cartesian alignment rejected: {self.backend._last_error}", piece_id=piece_id)
 
-                    return PickResult(success=True, status=GraspStatus.SUCCESS.value, piece_id=piece_id)
-                finally:
-                    self.backend.set_allowed_grasp_piece_id(None)
+                    try:
+                        self.backend.set_allowed_grasp_piece_id(piece_id)
+
+                        # 3. Descend to grasp (TCP at piece center)
+                        grasp_pose = [px * 1000.0, py * 1000.0, pz * 1000.0, rx, ry, rz]
+                        if not self.backend.move_cartesian(grasp_pose, speed_factor=speed_factor):
+                            return PickResult(success=False, status="DESCENT_REJECTED", error=f"Grasp descent rejected: {self.backend._last_error}", piece_id=piece_id)
+
+                        # 4. Close gripper (triggers try_grasp)
+                        self.backend.set_gripper(True)
+                        attached = self.world.get_attached_piece()
+                        if attached is not None and attached.piece_id == piece_id:
+                            grasp_res = GraspResult(success=True, status=GraspStatus.SUCCESS, piece_id=attached.piece_id)
+                        else:
+                            raw_res = self.world.try_grasp(target_piece_id=piece_id)
+                            if isinstance(raw_res, GraspResult):
+                                grasp_res = raw_res
+                            elif isinstance(raw_res, bool):
+                                grasp_res = GraspResult(
+                                    success=raw_res,
+                                    status=GraspStatus.SUCCESS if raw_res else None,
+                                    piece_id=piece_id if raw_res else None,
+                                    reason=None if raw_res else "Grasp failed",
+                                )
+                            elif hasattr(raw_res, "success"):
+                                grasp_res = raw_res
+                            else:
+                                grasp_res = GraspResult(success=bool(raw_res), status=GraspStatus.SUCCESS if raw_res else None)
+
+                        if not grasp_res.success:
+                            logger.warning(f"Grasp verification failed for {piece_id}: {grasp_res.reason}")
+                            return PickResult(success=False, status=str(getattr(grasp_res, "status", "GRASP_FAILED")), error=f"Grasp verification failed: {grasp_res.reason}", piece_id=piece_id)
+
+                        # 5. Lift back to hover
+                        if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
+                            return PickResult(success=False, status=GraspStatus.LIFT_FAILED_AFTER_GRASP.value, error=f"Lift after grasp failed: {self.backend._last_error}", piece_id=piece_id)
+
+                        return PickResult(success=True, status=GraspStatus.SUCCESS.value, piece_id=piece_id)
+                    finally:
+                        self.backend.set_allowed_grasp_piece_id(None)
+        except RuntimeOperationBusy as e:
+            return PickResult(
+                success=False,
+                status="MOTION_REJECTED_BUSY",
+                error=str(e),
+                piece_id=piece_id,
+            )
+        except Exception as e:
+            return PickResult(
+                success=False,
+                status="PICK_FAILED",
+                error=str(e),
+                piece_id=piece_id,
+            )
 
     def place_piece(
         self,
@@ -543,61 +564,55 @@ class VirtualXiangqiSimulation:
         6. Settle
         7. Lift back to hover
         """
-        with self._command_lock:
-            if self._operation_state != RuntimeOperationState.IDLE:
-                return PlaceResult(
-                    success=False,
-                    status="MOTION_REJECTED_BUSY",
-                    error=f"System currently in state {self._operation_state.value}",
-                )
-
-            attached = self.world.get_attached_piece()
-            if attached is None:
-                return PlaceResult(success=False, status="INVALID_STATE", error="No piece attached to gripper")
-
-            # Resolve destination coordinates across flexible invocation patterns:
-            # e.g.: place_piece(col, row), place_piece("piece_id", target_cell=(r, c)), place_piece(target_cell=(r, c))
-            if target_cell is None and "target_cell" in kwargs:
-                target_cell = kwargs["target_cell"]
-
-            if target_cell is not None:
-                r_target, c_target = int(target_cell[0]), int(target_cell[1])
-                tx, ty, tz = self.cell_to_robot_xyz_m(r_target, c_target)
-            else:
-                positional = [a for a in args if not isinstance(a, str)]
-                if len(positional) >= 2:
-                    c_val, r_val = int(positional[0]), int(positional[1])
-                    tx, ty, tz = self.cell_to_robot_xyz(c_val, r_val)
-                elif col is not None and row is not None:
-                    tx, ty, tz = self.cell_to_robot_xyz(int(col), int(row))
-                else:
-                    return PlaceResult(success=False, status="INVALID_ARGS", error="Missing destination cell or (col, row)")
-
-            piece_h = self.geom.piece_height_mm / 1000.0
-            piece_z = tz + piece_h / 2.0
-
-            safe_h_m = (self.placement_state.safe_transit_height_mm / 1000.0) if hasattr(self, "placement_state") else 0.070
-            eff_hover_h = hover_height_m if hover_height_m is not None else safe_h_m
-            safe_plane_z = self.board_surface_z + safe_h_m
-
-            rx, ry, rz = self.target_tool_euler_deg
-            hover_pose = [tx * 1000.0, ty * 1000.0, (piece_z + eff_hover_h) * 1000.0, rx, ry, rz]
-            place_pose = [tx * 1000.0, ty * 1000.0, piece_z * 1000.0, rx, ry, rz]
-
+        try:
             with self.acquire_operation_state(RuntimeOperationState.MOTION):
-                # 1. Move to hover
-                if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
-                    ik = self.backend.solve_tcp_ik(hover_pose, allow_multi_seed=True)
-                    if ik.success:
-                        ok_app = self.backend.move_joint_with_lift_recovery(
-                            np.degrees(ik.joints_rad),
-                            speed_factor=speed_factor,
-                            safe_plane_z_m=safe_plane_z,
-                        )
-                        if not ok_app:
-                            return PlaceResult(success=False, status="APPROACH_FAILED", error=f"Approach failed: {self.backend._last_error}")
+                with self._command_lock:
+                    attached = self.world.get_attached_piece()
+                    if attached is None:
+                        return PlaceResult(success=False, status="INVALID_STATE", error="No piece attached to gripper")
+
+                    # Resolve destination coordinates across flexible invocation patterns:
+                    # e.g.: place_piece(col, row), place_piece("piece_id", target_cell=(r, c)), place_piece(target_cell=(r, c))
+                    if target_cell is None and "target_cell" in kwargs:
+                        target_cell = kwargs["target_cell"]
+
+                    if target_cell is not None:
+                        r_target, c_target = int(target_cell[0]), int(target_cell[1])
+                        tx, ty, tz = self.cell_to_robot_xyz_m(r_target, c_target)
                     else:
-                        return PlaceResult(success=False, status="APPROACH_FAILED", error="Hover pose unreachable")
+                        positional = [a for a in args if not isinstance(a, str)]
+                        if len(positional) >= 2:
+                            c_val, r_val = int(positional[0]), int(positional[1])
+                            tx, ty, tz = self.cell_to_robot_xyz(c_val, r_val)
+                        elif col is not None and row is not None:
+                            tx, ty, tz = self.cell_to_robot_xyz(int(col), int(row))
+                        else:
+                            return PlaceResult(success=False, status="INVALID_ARGS", error="Missing destination cell or (col, row)")
+
+                    piece_h = self.geom.piece_height_mm / 1000.0
+                    piece_z = tz + piece_h / 2.0
+
+                    safe_h_m = (self.placement_state.safe_transit_height_mm / 1000.0) if hasattr(self, "placement_state") else 0.070
+                    eff_hover_h = hover_height_m if hover_height_m is not None else safe_h_m
+                    safe_plane_z = self.board_surface_z + safe_h_m
+
+                    rx, ry, rz = self.target_tool_euler_deg
+                    hover_pose = [tx * 1000.0, ty * 1000.0, (piece_z + eff_hover_h) * 1000.0, rx, ry, rz]
+                    place_pose = [tx * 1000.0, ty * 1000.0, piece_z * 1000.0, rx, ry, rz]
+
+                    # 1. Move to hover
+                    if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
+                        ik = self.backend.solve_tcp_ik(hover_pose, allow_multi_seed=True)
+                        if ik.success:
+                            ok_app = self.backend.move_joint_with_lift_recovery(
+                                np.degrees(ik.joints_rad),
+                                speed_factor=speed_factor,
+                                safe_plane_z_m=safe_plane_z,
+                            )
+                            if not ok_app:
+                                return PlaceResult(success=False, status="APPROACH_FAILED", error=f"Approach failed: {self.backend._last_error}")
+                        else:
+                            return PlaceResult(success=False, status="APPROACH_FAILED", error="Hover pose unreachable")
                     # 2. Descend to place (LAND)
                     land_ok = self.backend.move_cartesian(place_pose, speed_factor=speed_factor)
                     if not land_ok:
@@ -620,6 +635,18 @@ class VirtualXiangqiSimulation:
                         return PlaceResult(success=True, status="LIFT_FAILED_AFTER_RELEASE", error=f"Lift after release failed: {self.backend._last_error}")
 
                     return PlaceResult(success=True, status="SUCCESS", error=None)
+        except RuntimeOperationBusy as e:
+            return PlaceResult(
+                success=False,
+                status="MOTION_REJECTED_BUSY",
+                error=str(e),
+            )
+        except Exception as e:
+            return PlaceResult(
+                success=False,
+                status="PLACE_FAILED",
+                error=str(e),
+            )
 
     def schedule_force_drop(
         self,
@@ -1025,9 +1052,9 @@ class VirtualXiangqiSimulation:
         Execute joint move via authoritative runtime wrapper.
         Guarantees RuntimeOperationState.MOTION acquisition and proper mutual exclusion.
         """
-        with self._command_lock:
-            try:
-                with self.acquire_operation_state(RuntimeOperationState.MOTION):
+        try:
+            with self.acquire_operation_state(RuntimeOperationState.MOTION):
+                with self._command_lock:
                     ok = self.backend.move_joint(target_joints_deg, speed_factor=speed_factor)
                     if not ok:
                         err = self.backend._last_error or "Joint move failed"
@@ -1042,57 +1069,69 @@ class VirtualXiangqiSimulation:
                         "status": "SUCCESS",
                         "joints_deg": list(self.backend.get_state_snapshot().joints_deg),
                     }
-            except RuntimeOperationBusy as e:
-                return {
-                    "success": False,
-                    "status": "MOTION_REJECTED_BUSY",
-                    "error": str(e),
-                    "joints_deg": list(self.backend.get_state_snapshot().joints_deg),
-                }
-            except Exception as e:
-                return {
-                    "success": False,
-                    "status": "MOVE_FAILED",
-                    "error": str(e),
-                    "joints_deg": list(self.backend.get_state_snapshot().joints_deg),
-                }
+        except RuntimeOperationBusy as e:
+            return {
+                "success": False,
+                "status": "MOTION_REJECTED_BUSY",
+                "error": str(e),
+                "joints_deg": list(self.backend.get_state_snapshot().joints_deg),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "status": "MOVE_FAILED",
+                "error": str(e),
+                "joints_deg": list(self.backend.get_state_snapshot().joints_deg),
+            }
 
     def runtime_go_service_safe(self, speed_factor: Optional[float] = None) -> Dict[str, Any]:
         """Move arm to SERVICE_SAFE joint configuration."""
-        with self._command_lock:
-            if self._operation_state != RuntimeOperationState.IDLE:
-                return {
-                    "success": False,
-                    "status": "MOTION_REJECTED_BUSY",
-                    "error": f"System is currently in state {self._operation_state.value}",
-                }
-
+        try:
             with self.acquire_operation_state(RuntimeOperationState.SERVICE_MOVE):
-                ok = self.backend.go_service_safe(speed_factor=speed_factor)
-                if not ok:
-                    return {"success": False, "status": "SERVICE_SAFE_FAILED", "error": self.backend._last_error}
-                return {"success": True, "status": "SERVICE_SAFE_REACHED"}
+                with self._command_lock:
+                    ok = self.backend.go_service_safe(speed_factor=speed_factor)
+                    if not ok:
+                        return {"success": False, "status": "SERVICE_SAFE_FAILED", "error": self.backend._last_error}
+                    return {"success": True, "status": "SERVICE_SAFE_REACHED"}
+        except RuntimeOperationBusy as e:
+            return {
+                "success": False,
+                "status": "MOTION_REJECTED_BUSY",
+                "error": str(e),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "status": "SERVICE_SAFE_FAILED",
+                "error": str(e),
+            }
 
     def runtime_retract_from_board(self, speed_factor: Optional[float] = None) -> Dict[str, Any]:
         """Safely lift TCP vertically then move arm to SERVICE_SAFE."""
-        with self._command_lock:
-            if self._operation_state != RuntimeOperationState.IDLE:
-                return {
-                    "success": False,
-                    "status": "MOTION_REJECTED_BUSY",
-                    "error": f"System is currently in state {self._operation_state.value}",
-                }
-
+        try:
             with self.acquire_operation_state(RuntimeOperationState.SERVICE_MOVE):
-                curr_tcp = list(self.backend.get_state_snapshot().tcp_pose_mm_deg)
-                safe_z_mm = (self.board_surface_z + self.placement_state.safe_transit_height_mm / 1000.0) * 1000.0 + 30.0
-                if curr_tcp[2] < safe_z_mm:
-                    curr_tcp[2] = safe_z_mm
-                    self.backend.move_cartesian(curr_tcp, speed_factor=speed_factor)
-                ok = self.backend.go_service_safe(speed_factor=speed_factor)
-                if not ok:
-                    return {"success": False, "status": "RETRACT_FAILED", "error": self.backend._last_error}
-                return {"success": True, "status": "RETRACT_COMPLETE"}
+                with self._command_lock:
+                    curr_tcp = list(self.backend.get_state_snapshot().tcp_pose_mm_deg)
+                    safe_z_mm = (self.board_surface_z + self.placement_state.safe_transit_height_mm / 1000.0) * 1000.0 + 30.0
+                    if curr_tcp[2] < safe_z_mm:
+                        curr_tcp[2] = safe_z_mm
+                        self.backend.move_cartesian(curr_tcp, speed_factor=speed_factor)
+                    ok = self.backend.go_service_safe(speed_factor=speed_factor)
+                    if not ok:
+                        return {"success": False, "status": "RETRACT_FAILED", "error": self.backend._last_error}
+                    return {"success": True, "status": "RETRACT_COMPLETE"}
+        except RuntimeOperationBusy as e:
+            return {
+                "success": False,
+                "status": "MOTION_REJECTED_BUSY",
+                "error": str(e),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "status": "RETRACT_FAILED",
+                "error": str(e),
+            }
 
     def runtime_jog_joint(
         self,
@@ -1101,21 +1140,27 @@ class VirtualXiangqiSimulation:
         speed_factor: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Jog a single joint by delta_deg while validating limits and collision guard."""
-        with self._command_lock:
-            if self._operation_state != RuntimeOperationState.IDLE:
-                return {
-                    "success": False,
-                    "status": "MOTION_REJECTED_BUSY",
-                    "error": f"System is currently in state {self._operation_state.value}",
-                }
-
+        try:
             with self.acquire_operation_state(RuntimeOperationState.SERVICE_MOVE):
-                ok = self.backend.jog_joint(joint_idx, delta_deg, speed_factor=speed_factor)
-                if not ok:
-                    err = self.backend._last_error or "Jog joint rejected"
-                    status = "JOG_REJECTED_COLLISION" if "collid" in err.lower() else "JOG_REJECTED_LIMIT"
-                    return {"success": False, "status": status, "error": err}
-                return {"success": True, "status": "JOG_COMPLETE", "joints_deg": list(self.backend.get_state_snapshot().joints_deg)}
+                with self._command_lock:
+                    ok = self.backend.jog_joint(joint_idx, delta_deg, speed_factor=speed_factor)
+                    if not ok:
+                        err = self.backend._last_error or "Jog joint rejected"
+                        status = "JOG_REJECTED_COLLISION" if "collid" in err.lower() else "JOG_REJECTED_LIMIT"
+                        return {"success": False, "status": status, "error": err}
+                    return {"success": True, "status": "JOG_COMPLETE", "joints_deg": list(self.backend.get_state_snapshot().joints_deg)}
+        except RuntimeOperationBusy as e:
+            return {
+                "success": False,
+                "status": "MOTION_REJECTED_BUSY",
+                "error": str(e),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "status": "JOG_FAILED",
+                "error": str(e),
+            }
 
     def runtime_jog_tcp(
         self,
@@ -1127,48 +1172,54 @@ class VirtualXiangqiSimulation:
         speed_factor: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Jog TCP in Cartesian space along axis or deltas with collision guard protection."""
-        with self._command_lock:
-            if self._operation_state != RuntimeOperationState.IDLE:
-                return {
-                    "success": False,
-                    "status": "MOTION_REJECTED_BUSY",
-                    "error": f"System is currently in state {self._operation_state.value}",
-                }
+        dx, dy, dz = 0.0, 0.0, 0.0
+        drx, dry, drz = 0.0, 0.0, 0.0
+        if axis:
+            ax = axis.strip().upper()
+            if ax == "+X": dx = step_mm
+            elif ax == "-X": dx = -step_mm
+            elif ax == "+Y": dy = step_mm
+            elif ax == "-Y": dy = -step_mm
+            elif ax == "+Z": dz = step_mm
+            elif ax == "-Z": dz = -step_mm
+            elif ax == "+RX": drx = step_deg
+            elif ax == "-RX": drx = -step_deg
+            elif ax == "+RY": dry = step_deg
+            elif ax == "-RY": dry = -step_deg
+            elif ax == "+RZ": drz = step_deg
+            elif ax == "-RZ": drz = -step_deg
 
-            dx, dy, dz = 0.0, 0.0, 0.0
-            drx, dry, drz = 0.0, 0.0, 0.0
-            if axis:
-                ax = axis.strip().upper()
-                if ax == "+X": dx = step_mm
-                elif ax == "-X": dx = -step_mm
-                elif ax == "+Y": dy = step_mm
-                elif ax == "-Y": dy = -step_mm
-                elif ax == "+Z": dz = step_mm
-                elif ax == "-Z": dz = -step_mm
-                elif ax == "+RX": drx = step_deg
-                elif ax == "-RX": drx = -step_deg
-                elif ax == "+RY": dry = step_deg
-                elif ax == "-RY": dry = -step_deg
-                elif ax == "+RZ": drz = step_deg
-                elif ax == "-RZ": drz = -step_deg
+        if delta_xyz_mm is not None:
+            dx += delta_xyz_mm[0] if len(delta_xyz_mm) > 0 else 0.0
+            dy += delta_xyz_mm[1] if len(delta_xyz_mm) > 1 else 0.0
+            dz += delta_xyz_mm[2] if len(delta_xyz_mm) > 2 else 0.0
 
-            if delta_xyz_mm is not None:
-                dx += delta_xyz_mm[0] if len(delta_xyz_mm) > 0 else 0.0
-                dy += delta_xyz_mm[1] if len(delta_xyz_mm) > 1 else 0.0
-                dz += delta_xyz_mm[2] if len(delta_xyz_mm) > 2 else 0.0
+        if delta_rpy_deg is not None:
+            drx += delta_rpy_deg[0] if len(delta_rpy_deg) > 0 else 0.0
+            dry += delta_rpy_deg[1] if len(delta_rpy_deg) > 1 else 0.0
+            drz += delta_rpy_deg[2] if len(delta_rpy_deg) > 2 else 0.0
 
-            if delta_rpy_deg is not None:
-                drx += delta_rpy_deg[0] if len(delta_rpy_deg) > 0 else 0.0
-                dry += delta_rpy_deg[1] if len(delta_rpy_deg) > 1 else 0.0
-                drz += delta_rpy_deg[2] if len(delta_rpy_deg) > 2 else 0.0
-
+        try:
             with self.acquire_operation_state(RuntimeOperationState.SERVICE_MOVE):
-                ok = self.backend.jog_tcp([dx, dy, dz], [drx, dry, drz], speed_factor=speed_factor)
-                if not ok:
-                    err = self.backend._last_error or "Jog TCP rejected"
-                    status = "JOG_REJECTED_COLLISION" if "collid" in err.lower() else "JOG_REJECTED_IK"
-                    return {"success": False, "status": status, "error": err}
-                return {"success": True, "status": "JOG_COMPLETE", "tcp_pose": list(self.backend.get_state_snapshot().tcp_pose_mm_deg)}
+                with self._command_lock:
+                    ok = self.backend.jog_tcp([dx, dy, dz], [drx, dry, drz], speed_factor=speed_factor)
+                    if not ok:
+                        err = self.backend._last_error or "Jog TCP rejected"
+                        status = "JOG_REJECTED_COLLISION" if "collid" in err.lower() else "JOG_REJECTED_IK"
+                        return {"success": False, "status": status, "error": err}
+                    return {"success": True, "status": "JOG_COMPLETE", "tcp_pose": list(self.backend.get_state_snapshot().tcp_pose_mm_deg)}
+        except RuntimeOperationBusy as e:
+            return {
+                "success": False,
+                "status": "MOTION_REJECTED_BUSY",
+                "error": str(e),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "status": "JOG_FAILED",
+                "error": str(e),
+            }
 
     def validate_board_placement(
         self,
@@ -1865,25 +1916,36 @@ class VirtualXiangqiSimulation:
         Pre-validates collision guard, enforces placement version consistency,
         solves on-demand IK, and guarantees allowed_grasp_piece_id cleanup.
         """
-        with self._command_lock:
-            if getattr(self, "_validation_in_progress", False) or self._operation_state != RuntimeOperationState.IDLE:
-                err_msg = f"System busy ({self._operation_state.value})" if self._operation_state != RuntimeOperationState.IDLE else "Validation actively in progress"
-                self.backend._last_error = err_msg
-                return {
-                    "success": False,
-                    "status": "MOTION_REJECTED_BUSY",
-                    "failed_stage": "PREPOSITION",
-                    "error": err_msg,
-                    "placement_version": self.placement_state.placement_version,
-                }
+        try:
             with self.acquire_operation_state(RuntimeOperationState.MOTION):
-                return self._execute_3stage_trajectory_impl(
-                    src_cell=src_cell,
-                    dst_cell=dst_cell,
-                    speed_factor=speed_factor,
-                    samples_per_stage=samples_per_stage,
-                    planned_placement_version=planned_placement_version,
-                )
+                with self._command_lock:
+                    return self._execute_3stage_trajectory_impl(
+                        src_cell=src_cell,
+                        dst_cell=dst_cell,
+                        speed_factor=speed_factor,
+                        samples_per_stage=samples_per_stage,
+                        planned_placement_version=planned_placement_version,
+                    )
+        except RuntimeOperationBusy as e:
+            err_msg = f"System busy ({str(e)})"
+            self.backend._last_error = err_msg
+            return {
+                "success": False,
+                "status": "MOTION_REJECTED_BUSY",
+                "failed_stage": "PREPOSITION",
+                "error": err_msg,
+                "placement_version": self.placement_state.placement_version,
+            }
+        except Exception as e:
+            err_msg = str(e)
+            self.backend._last_error = err_msg
+            return {
+                "success": False,
+                "status": "TRAJECTORY_FAILED",
+                "failed_stage": "EXECUTION",
+                "error": err_msg,
+                "placement_version": self.placement_state.placement_version,
+            }
 
     def _execute_3stage_trajectory_impl(
         self,

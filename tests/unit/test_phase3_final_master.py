@@ -725,6 +725,240 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
         self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
 
+    def test_a2_1_move_joint_vs_move_joint_no_queue(self):
+        """A2.1: Competing MoveJ returns MOTION_REJECTED_BUSY immediately without waiting on _command_lock."""
+        target_a = [10.0, -20.0, 30.0, -40.0, -90.0, 0.0]
+        target_b = [-10.0, -10.0, 20.0, -30.0, -90.0, 10.0]
+
+        motion_a_started = threading.Event()
+        motion_a_release = threading.Event()
+
+        orig_move_joint = self.sim.backend.move_joint
+
+        def blocking_move_joint(*args, **kwargs):
+            motion_a_started.set()
+            motion_a_release.wait(timeout=5.0)
+            return orig_move_joint(*args, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "move_joint", side_effect=blocking_move_joint):
+            t_a = threading.Thread(target=self.sim.runtime_move_joint, args=(target_a,), daemon=True)
+            t_a.start()
+
+            self.assertTrue(motion_a_started.wait(timeout=2.0))
+            self.assertEqual(self.sim.operation_state, RuntimeOperationState.MOTION)
+
+            # Thread B calls runtime_move_joint while Thread A holds MOTION and _command_lock
+            res_b = self.sim.runtime_move_joint(target_b)
+
+            # Thread B must have returned immediately BEFORE motion_a_release was set
+            self.assertFalse(res_b["success"])
+            self.assertEqual(res_b["status"], "MOTION_REJECTED_BUSY")
+            self.assertFalse(motion_a_release.is_set(), "Queueing occurred: Thread B waited for Thread A completion!")
+
+            # Release Thread A
+            motion_a_release.set()
+            t_a.join(timeout=3.0)
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+        self.assertIsNone(self.sim.operation_owner)
+        self.assertEqual(self.sim.operation_depth, 0)
+
+    def test_a2_2_timing_handshake_proof(self):
+        """A2.2: Deterministic event handshake proving Thread B returns before Thread A release."""
+        motion_a_started = threading.Event()
+        motion_a_release = threading.Event()
+        motion_b_returned = threading.Event()
+        result_b = {}
+
+        orig_move_joint = self.sim.backend.move_joint
+
+        def blocking_move_joint(*args, **kwargs):
+            motion_a_started.set()
+            motion_a_release.wait(timeout=5.0)
+            return orig_move_joint(*args, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "move_joint", side_effect=blocking_move_joint):
+            t_a = threading.Thread(target=self.sim.runtime_move_joint, args=([0.0, -10.0, 10.0, -20.0, -90.0, 0.0],), daemon=True)
+            t_a.start()
+
+            self.assertTrue(motion_a_started.wait(timeout=2.0))
+
+            def run_b():
+                res = self.sim.runtime_move_joint([5.0, 5.0, 5.0, 5.0, -90.0, 0.0])
+                result_b.update(res)
+                motion_b_returned.set()
+
+            t_b = threading.Thread(target=run_b, daemon=True)
+            t_b.start()
+
+            self.assertTrue(motion_b_returned.wait(timeout=2.0), "Thread B timed out waiting to return!")
+            self.assertFalse(result_b.get("success", True))
+            self.assertEqual(result_b.get("status"), "MOTION_REJECTED_BUSY")
+            self.assertFalse(motion_a_release.is_set(), "Thread B returned only after Thread A released!")
+
+            motion_a_release.set()
+            t_a.join(timeout=3.0)
+            t_b.join(timeout=1.0)
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a2_3_move_joint_vs_jog(self):
+        """A2.3: While MoveJ owns MOTION, runtime_jog_joint and runtime_jog_tcp return MOTION_REJECTED_BUSY immediately."""
+        motion_started = threading.Event()
+        motion_release = threading.Event()
+
+        orig_move_joint = self.sim.backend.move_joint
+
+        def blocking_move_joint(*args, **kwargs):
+            motion_started.set()
+            motion_release.wait(timeout=5.0)
+            return orig_move_joint(*args, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "move_joint", side_effect=blocking_move_joint):
+            t = threading.Thread(target=self.sim.runtime_move_joint, args=([10.0, -20.0, 30.0, -40.0, -90.0, 0.0],), daemon=True)
+            t.start()
+
+            self.assertTrue(motion_started.wait(timeout=2.0))
+            snap_before = self.sim.backend.get_state_snapshot()
+
+            res_jog_j = self.sim.runtime_jog_joint(joint_idx=0, delta_deg=5.0)
+            self.assertFalse(res_jog_j["success"])
+            self.assertEqual(res_jog_j["status"], "MOTION_REJECTED_BUSY")
+
+            res_jog_tcp = self.sim.runtime_jog_tcp(axis="+Z", step_mm=10.0)
+            self.assertFalse(res_jog_tcp["success"])
+            self.assertEqual(res_jog_tcp["status"], "MOTION_REJECTED_BUSY")
+
+            self.assertFalse(motion_release.is_set())
+
+            snap_after = self.sim.backend.get_state_snapshot()
+            np.testing.assert_allclose(snap_before.joints_deg, snap_after.joints_deg, atol=1e-4)
+
+            motion_release.set()
+            t.join(timeout=3.0)
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a2_4_service_move_vs_move_joint(self):
+        """A2.4: While SERVICE_MOVE is active, runtime_move_joint returns MOTION_REJECTED_BUSY immediately."""
+        jog_started = threading.Event()
+        jog_release = threading.Event()
+
+        orig_jog = self.sim.backend.jog_joint
+
+        def blocking_jog(*args, **kwargs):
+            jog_started.set()
+            jog_release.wait(timeout=5.0)
+            return orig_jog(*args, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "jog_joint", side_effect=blocking_jog):
+            t = threading.Thread(target=self.sim.runtime_jog_joint, kwargs={"joint_idx": 0, "delta_deg": 2.0}, daemon=True)
+            t.start()
+
+            self.assertTrue(jog_started.wait(timeout=2.0))
+            self.assertEqual(self.sim.operation_state, RuntimeOperationState.SERVICE_MOVE)
+
+            res_move = self.sim.runtime_move_joint([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            self.assertFalse(res_move["success"])
+            self.assertEqual(res_move["status"], "MOTION_REJECTED_BUSY")
+            self.assertFalse(jog_release.is_set())
+
+            jog_release.set()
+            t.join(timeout=3.0)
+
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a2_5_pick_vs_move_joint(self):
+        """A2.5: While pick_piece owns MOTION, runtime_move_joint returns MOTION_REJECTED_BUSY immediately."""
+        pick_started = threading.Event()
+        pick_release = threading.Event()
+
+        def on_motion_owned():
+            pick_started.set()
+            pick_release.wait(timeout=5.0)
+
+        self.sim._test_hook_motion_owned = on_motion_owned
+
+        with mock.patch.object(self.sim.backend, "move_joint_with_lift_recovery", return_value=True):
+            with mock.patch.object(self.sim.backend, "move_cartesian", return_value=True):
+                with mock.patch.object(self.sim.world, "try_grasp", return_value=True):
+                    piece_id = next(iter(self.sim.world.pieces.keys()))
+                    t = threading.Thread(target=self.sim.pick_piece, args=(piece_id,), daemon=True)
+                    t.start()
+
+                    self.assertTrue(pick_started.wait(timeout=2.0))
+                    self.assertEqual(self.sim.operation_state, RuntimeOperationState.MOTION)
+
+                    res_move = self.sim.runtime_move_joint([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+                    self.assertFalse(res_move["success"])
+                    self.assertEqual(res_move["status"], "MOTION_REJECTED_BUSY")
+                    self.assertFalse(pick_release.is_set())
+
+                    pick_release.set()
+                    t.join(timeout=3.0)
+
+        self.sim._test_hook_motion_owned = None
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a2_6_place_vs_jog(self):
+        """A2.6: While place_piece owns MOTION, runtime_jog_tcp returns MOTION_REJECTED_BUSY immediately."""
+        place_started = threading.Event()
+        place_release = threading.Event()
+
+        def on_motion_owned():
+            place_started.set()
+            place_release.wait(timeout=5.0)
+
+        self.sim._test_hook_motion_owned = on_motion_owned
+
+        with mock.patch.object(self.sim.backend, "move_joint_with_lift_recovery", return_value=True):
+            with mock.patch.object(self.sim.backend, "move_cartesian", return_value=True):
+                t = threading.Thread(target=self.sim.place_piece, kwargs={"col": 0, "row": 0}, daemon=True)
+                t.start()
+
+                self.assertTrue(place_started.wait(timeout=2.0))
+                self.assertEqual(self.sim.operation_state, RuntimeOperationState.MOTION)
+
+                res_jog = self.sim.runtime_jog_tcp(axis="+X", step_mm=5.0)
+                self.assertFalse(res_jog["success"])
+                self.assertEqual(res_jog["status"], "MOTION_REJECTED_BUSY")
+                self.assertFalse(place_release.is_set())
+
+                place_release.set()
+                t.join(timeout=3.0)
+
+        self.sim._test_hook_motion_owned = None
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    def test_a2_7_3stage_trajectory_vs_move_joint(self):
+        """A2.7: While execute_3stage_trajectory owns MOTION, runtime_move_joint returns MOTION_REJECTED_BUSY immediately."""
+        traj_started = threading.Event()
+        traj_release = threading.Event()
+
+        def on_motion_owned():
+            traj_started.set()
+            traj_release.wait(timeout=5.0)
+
+        self.sim._test_hook_motion_owned = on_motion_owned
+
+        with mock.patch.object(self.sim, "_execute_3stage_trajectory_impl", return_value={"success": True, "status": "SUCCESS"}):
+            t = threading.Thread(target=self.sim.execute_3stage_trajectory, args=((0, 0), (0, 1)), daemon=True)
+            t.start()
+
+            self.assertTrue(traj_started.wait(timeout=2.0))
+            self.assertEqual(self.sim.operation_state, RuntimeOperationState.MOTION)
+
+            res_move = self.sim.runtime_move_joint([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            self.assertFalse(res_move["success"])
+            self.assertEqual(res_move["status"], "MOTION_REJECTED_BUSY")
+            self.assertFalse(traj_release.is_set())
+
+            traj_release.set()
+            t.join(timeout=3.0)
+
+        self.sim._test_hook_motion_owned = None
+        self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
 
 if __name__ == "__main__":
     unittest.main()
