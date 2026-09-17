@@ -117,10 +117,10 @@
   1. Updated `virtual_fr3_backend.py` and `runtime.py` to strictly invoke `self.backend.is_connected()`.
   2. Included `PiecePhysicalState.SETTLING` alongside `FALLING` in `evaluate_service_safety()`.
   3. Added strict readiness token validation and fresh physical safety predicate check in `set_board_placement()`, with narrow `internal_reset: bool = False` bypass for reset routines, returning `BOARD_RELOCATION_REJECTED_NOT_READY` and `BOARD_RELOCATION_REJECTED_SERVICE_UNSAFE`.
-  4. Added `test_bc7` and `test_bc8` verifying negative lowering collision detection and complete board, piece, and robot joint state invariance on rejection.
+  4. Added `test_bc7` and `test_bc8` using proven fixture configuration `[0.0, -60.0, 125.0, -135.0, -90.0, 0.0]°` with initial clearance $d_{\text{initial}} = 7.14\text{ mm} > 5.0\text{ mm}$ margin, verifying negative lowering collision triggers at step $k = 1 > 0$ with `BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR` and preserves 100% board, piece, and robot joint state invariance. Updated `test_bc9` to explicitly assert that TCP is $> 39\text{ mm}$ above the service exclusion ceiling while moving arm links encroaching the exclusion zone are detected and rejected.
   5. Implemented `check_service_exclusion_occupancy()` in `world.py` utilizing a temporary PyBullet collision shape box querying all FR3 moving links (0..5) and gripper proxies with deterministic cleanup. In `runtime.py`, dynamically computed bounding box dimensions from `self.geom.board_length_m`, `self.geom.board_width_m`, `self.geom.board_thickness_m`, `self.placement_state.board_height_offset_m`, `DEFAULT_SERVICE_XY_MARGIN_M` (0.030m), and `DEFAULT_SERVICE_VERTICAL_CLEARANCE_M` (0.050m).
 * **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests` (`test_bc1_disconnected_backend_rejects_service_safe` through `test_bc12_supported_envelope_boundary_cases_remain_safe`)
-* **Last Verified Functional HEAD:** 2b50063d446717abff5d89f44e219d270e369230
+* **Last Verified Functional HEAD:** 097490d1ce95ee3ea87f5caa4f2183b189dfeaf4
 
 ---
 
@@ -130,4 +130,4 @@
 * **Affected Files:** `src/hardware/telemetry_publisher.py`
 * **Evidence:** Warning during pytest: `DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated`.
 * **Action:** Low impact, server functions normally. Can be migrated to `websockets.asyncio.server.ServerConnection` in a future dependency cleanup.
-* **Last Verified HEAD:** 2b50063d446717abff5d89f44e219d270e369230
+* **Last Verified HEAD:** 097490d1ce95ee3ea87f5caa4f2183b189dfeaf4
