@@ -1263,40 +1263,46 @@ class Phase3FinalMasterTests(unittest.TestCase):
         self.sim.runtime_go_service_safe()
 
     def test_bc7_negative_board_lowering_into_arm_rejected(self):
-        """B-C7. Real PyBullet swept volume collision: lowering board into obstructing arm is rejected."""
-        r, c = 0, 4
-        z_grasp = self.sim.board_surface_z
-        grasp_m = self.sim.cell_to_robot_xyz_m(r, c, z_grasp)
-        grasp_pose_mm = [grasp_m[0] * 1000.0, grasp_m[1] * 1000.0, grasp_m[2] * 1000.0, 180.0, 0.0, 90.0]
-        ik = self.sim.backend.solve_tcp_ik(grasp_pose_mm, allow_multi_seed=True)
-        if ik.success:
-            self.sim.backend.move_joint(np.degrees(ik.joints_rad).tolist())
-            self.sim.world.sync_robot_runtime_configuration(ik.joints_rad)
+        """B-C7. Real PyBullet swept volume collision: initial clearance > 5mm, collides at step k > 0 on lowering."""
+        # Drive robot to fixture pose where gripper proxy is initially clear of board by > 5mm,
+        # but negative lowering (-10mm) sweeps into the gripper body at step k > 0
+        q_fixture = [0.0, -60.0, 125.0, -135.0, -90.0, 0.0]
+        self.sim.backend.move_joint(q_fixture)
+        self.sim.world.sync_robot_runtime_configuration(np.radians(q_fixture))
 
+        # 1. Verify initial clearance strictly exceeds safety margin (> 5.0 mm)
+        init_dist_m, closest_body = self.sim.world.get_board_to_robot_clearance()
+        self.assertGreater(init_dist_m, 0.005, f"Expected initial clearance > 5mm, got {init_dist_m * 1000.0:.2f}mm")
+        self.assertGreaterEqual(init_dist_m * 1000.0, 7.0)
+
+        # 2. Check swept volume collision: must detect collision during sweep at step > 0
         swept_res = self.sim.world.check_board_swept_volume_collision(
             new_forward_shift_m=0.0,
             new_height_offset_m=-0.010,
         )
         self.assertFalse(swept_res.is_safe, f"Expected swept lowering collision, got safe: {swept_res.reason}")
+        self.assertGreater(swept_res.details["first_blocking_step"], 0, f"Collision must occur at step > 0, got {swept_res.details}")
+        self.assertLessEqual(swept_res.details["minimum_clearance_mm"], 5.0)
 
+        # 3. set_board_placement must reject with BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR and preserve diagnostics
         res = self.sim.set_board_placement(board_height_offset_mm=-10.0)
         self.assertFalse(res["success"])
         self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR")
+        self.assertGreater(res["details"]["first_blocking_step"], 0)
 
         # Restore
         self.sim.reset_robot()
         self.sim.runtime_go_service_safe()
 
     def test_bc8_rejected_lowering_preserves_full_authoritative_state(self):
-        """B-C8. Rejected lowering preserves 100% PyBullet board, pieces, placement state, and joints."""
-        r, c = 0, 4
-        z_grasp = self.sim.board_surface_z
-        grasp_m = self.sim.cell_to_robot_xyz_m(r, c, z_grasp)
-        grasp_pose_mm = [grasp_m[0] * 1000.0, grasp_m[1] * 1000.0, grasp_m[2] * 1000.0, 180.0, 0.0, 90.0]
-        ik = self.sim.backend.solve_tcp_ik(grasp_pose_mm, allow_multi_seed=True)
-        if ik.success:
-            self.sim.backend.move_joint(np.degrees(ik.joints_rad).tolist())
-            self.sim.world.sync_robot_runtime_configuration(ik.joints_rad)
+        """B-C8. Rejected lowering (with d_initial > 5mm, k > 0 collision) preserves 100% PyBullet state."""
+        q_fixture = [0.0, -60.0, 125.0, -135.0, -90.0, 0.0]
+        self.sim.backend.move_joint(q_fixture)
+        self.sim.world.sync_robot_runtime_configuration(np.radians(q_fixture))
+
+        # Initial clearance must be clear (> 5mm)
+        init_dist_m, _ = self.sim.world.get_board_to_robot_clearance()
+        self.assertGreater(init_dist_m, 0.005)
 
         orig_board_pos, orig_board_orn = self.sim.world.get_board_pose()
         orig_state = self.sim.placement_state
@@ -1307,6 +1313,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
         res = self.sim.set_board_placement(board_height_offset_mm=-10.0)
         self.assertFalse(res["success"])
         self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR")
+        self.assertGreater(res["details"]["first_blocking_step"], 0)
 
         new_board_pos, new_board_orn = self.sim.world.get_board_pose()
         np.testing.assert_allclose(orig_board_pos, new_board_pos, atol=1e-5)
@@ -1325,8 +1332,17 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
     def test_bc9_service_exclusion_detects_link_inside_region(self):
         """B-C9. Service exclusion volume detects robot link inside even when TCP is outside."""
-        # At HOME pose [0, -45, 90, -45, -90, 0], link 4 & 5 penetrate the service exclusion volume
-        self.sim.runtime_move_joint([0.0, -45.0, 90.0, -45.0, -90.0, 0.0])
+        # Pose [0, -45, 90, -60, 135, -90] angles wrist upward so TCP is > 100mm high, well above
+        # the service exclusion ceiling (70mm), while link 4/5 encroaches the exclusion volume.
+        q_link_inside = [0.0, -45.0, 90.0, -60.0, 135.0, -90.0]
+        self.sim.runtime_move_joint(q_link_inside)
+
+        snap = self.sim.backend.get_state_snapshot()
+        tcp_z_m = snap.tcp_pose_mm_deg[2] / 1000.0
+        z_max_excl = self.sim.placement_state.board_surface_z_robot_m + (self.sim.geom.piece.height / 1000.0) + self.sim.DEFAULT_SERVICE_VERTICAL_CLEARANCE_M
+        # Assert TCP is explicitly outside (above) the exclusion volume ceiling
+        self.assertGreater(tcp_z_m, z_max_excl, f"TCP (z={tcp_z_m:.3f}m) should be above exclusion ceiling (z={z_max_excl:.3f}m)")
+
         rep = self.sim.evaluate_service_safety()
         self.assertFalse(rep.service_safe)
         self.assertFalse(rep.links_clear)
