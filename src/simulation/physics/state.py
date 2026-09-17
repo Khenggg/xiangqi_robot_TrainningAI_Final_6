@@ -224,3 +224,44 @@ class DropEvent:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class ServiceSafetyReport:
+    """
+    Authoritative physical safety report for SERVICE_SAFE and Board Adjustment Readiness.
+    Evaluates articulated link clearances, gripper state, attachments, and robot conditioning.
+    """
+    service_safe: bool
+    robot_connected: bool
+    robot_idle: bool
+    trajectory_idle: bool
+    gripper_open: bool
+    piece_attached: bool
+    links_clear: bool
+    gripper_clear: bool
+    min_board_clearance_mm: float
+    closest_link_or_proxy: str
+    min_joint_margin_deg: float
+    condition_number: float
+    service_pose_match: bool
+    reasons: List[str]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "service_safe": self.service_safe,
+            "robot_connected": self.robot_connected,
+            "robot_idle": self.robot_idle,
+            "trajectory_idle": self.trajectory_idle,
+            "gripper_open": self.gripper_open,
+            "piece_attached": self.piece_attached,
+            "links_clear": self.links_clear,
+            "gripper_clear": self.gripper_clear,
+            "min_board_clearance_mm": round(self.min_board_clearance_mm, 2),
+            "closest_link_or_proxy": self.closest_link_or_proxy,
+            "min_joint_margin_deg": round(self.min_joint_margin_deg, 2),
+            "condition_number": round(self.condition_number, 2),
+            "service_pose_match": self.service_pose_match,
+            "reasons": list(self.reasons),
+        }
+

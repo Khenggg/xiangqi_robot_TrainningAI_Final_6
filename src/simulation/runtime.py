@@ -39,6 +39,7 @@ from src.simulation.physics.state import (
     GraspStatus,
     PickResult,
     PiecePhysicalState,
+    ServiceSafetyReport,
     WorldStateSnapshot,
 )
 from src.simulation.physics.world import VirtualPhysicalWorld
@@ -160,6 +161,7 @@ class VirtualXiangqiSimulation:
         self._test_hook_routes_owned: Optional[Callable[[], None]] = None
         self._test_hook_motion_owned: Optional[Callable[[], None]] = None
         self._test_hook_service_move_owned: Optional[Callable[[], None]] = None
+        self._board_adjustment_ready: bool = False
 
         # Register listener with backend
         self.backend.add_state_listener(self._on_robot_state_update)
@@ -450,6 +452,7 @@ class VirtualXiangqiSimulation:
         try:
             with self.acquire_operation_state(RuntimeOperationState.MOTION):
                 with self._command_lock:
+                    self._board_adjustment_ready = False
                     piece = self.world.pieces.get(piece_id)
                     if piece is None:
                         return PickResult(success=False, status="PIECE_NOT_FOUND", error=f"Piece {piece_id} not found", piece_id=piece_id)
@@ -567,6 +570,7 @@ class VirtualXiangqiSimulation:
         try:
             with self.acquire_operation_state(RuntimeOperationState.MOTION):
                 with self._command_lock:
+                    self._board_adjustment_ready = False
                     attached = self.world.get_attached_piece()
                     if attached is None:
                         return PlaceResult(success=False, status="INVALID_STATE", error="No piece attached to gripper")
@@ -739,6 +743,7 @@ class VirtualXiangqiSimulation:
                 self._scheduled_drop["target_xyz_m"] = np.array(target_pose_mm_deg[:3], dtype=float) / 1000.0
             self._scheduled_drop["expected_steps"] = samples
 
+        self._board_adjustment_ready = False
         return self.backend.move_cartesian(target_pose_mm_deg, speed_factor=speed_factor, samples=samples)
 
     def force_drop(self) -> Optional[DropEvent]:
@@ -799,99 +804,104 @@ class VirtualXiangqiSimulation:
 
     def set_board_placement(
         self,
-        forward_shift_mm: float,
+        forward_shift_mm: Optional[float] = None,
         safe_transit_height_mm: Optional[float] = None,
         board_height_offset_mm: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        Authoritatively relocate board placement.
+        Dynamically adjust board forward shift, transit height, and surface Z.
         Rejects if robot is moving, active in a trajectory stage, or holding a piece.
         Validates swept volume between current and target placement against arm links.
         """
-        with self._command_lock:
-            if self._operation_state not in (RuntimeOperationState.IDLE, RuntimeOperationState.BOARD_ADJUSTMENT, RuntimeOperationState.RESETTING):
-                err = f"Cannot change board placement while system is in state {self._operation_state.value}"
-                return {"success": False, "status": "BOARD_RELOCATION_REJECTED_BUSY", "error": err}
-            if getattr(self, "_validation_in_progress", False):
-                err = "Cannot change board placement while validation is actively running"
-                return {"success": False, "status": "BOARD_RELOCATION_REJECTED_BUSY", "error": err}
-            snap = self.backend.get_state_snapshot()
-            if snap.motion_state == "MOVING":
-                err = "Cannot change board placement while robot is MOVING"
-                return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ROBOT_MOVING", "error": err}
-            if snap.trajectory_stage not in (None, "IDLE", "COMPLETE"):
-                err = f"Cannot change board placement during active trajectory ({snap.trajectory_stage})"
-                return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ACTIVE_TRAJECTORY", "error": err}
-            cur_h = self.placement_state.safe_transit_height_mm if safe_transit_height_mm is None else float(safe_transit_height_mm)
-            cur_z_off = self.placement_state.board_height_offset_mm if board_height_offset_mm is None else float(board_height_offset_mm)
-
-            # Swept volume collision check between current and candidate placement against arm links
-            is_safe, col_reason = self.world.check_board_swept_volume_collision(
-                new_forward_shift_m=float(forward_shift_mm) / 1000.0,
-                new_height_offset_m=cur_z_off / 1000.0,
-            )
-            if not is_safe:
-                return {
-                    "success": False,
-                    "status": "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR",
-                    "error": f"Board swept volume collision: {col_reason}",
-                }
-
-            if self.world.get_attached_piece() is not None:
-                err = "Cannot change board placement while a piece is attached to gripper"
-                return {
-                    "success": False,
-                    "status": "BOARD_RELOCATION_REJECTED_WORLD_NOT_SETTLED",
-                    "error": err,
-                    "transient_pieces": [{"id": self.world.get_attached_piece().piece_id, "state": "ATTACHED_TO_GRIPPER"}],
-                }
-
-            transient = [
-                p_body for p_body in self.world.pieces.values()
-                if p_body.physical_state in (PiecePhysicalState.ATTACHED_TO_GRIPPER, PiecePhysicalState.FALLING, PiecePhysicalState.SETTLING)
-            ]
-            if transient:
-                err = "Cannot change board placement while world is not settled (pieces falling/settling/attached)"
-                return {
-                    "success": False,
-                    "status": "BOARD_RELOCATION_REJECTED_WORLD_NOT_SETTLED",
-                    "error": err,
-                    "transient_pieces": [{"id": p.piece_id, "state": p.physical_state.value} for p in transient],
-                }
-
+        try:
             with self.acquire_operation_state(RuntimeOperationState.BOARD_ADJUSTMENT):
-                new_version = self.placement_state.placement_version + 1
-                new_state = BoardPlacementState.compute(
-                    forward_shift_mm=float(forward_shift_mm),
-                    safe_transit_height_mm=cur_h,
-                    board_height_offset_mm=cur_z_off,
-                    placement_version=new_version,
-                )
+                with self._command_lock:
+                    snap = self.backend.get_state_snapshot()
+                    if snap.motion_state == "MOVING":
+                        err = "Cannot change board placement while robot is MOVING"
+                        return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ROBOT_MOVING", "error": err}
+                    if snap.trajectory_stage not in (None, "IDLE", "COMPLETE"):
+                        err = f"Cannot change board placement during active trajectory ({snap.trajectory_stage})"
+                        return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ACTIVE_TRAJECTORY", "error": err}
 
-                # Relocate in PyBullet world
-                self.world.relocate_board(
-                    forward_shift_m=new_state.forward_shift_mm / 1000.0,
-                    height_offset_m=new_state.board_height_offset_mm / 1000.0,
-                )
+                    if self.world.get_attached_piece() is not None or self.backend.get_attached_piece_id() is not None:
+                        err = "Cannot change board placement while a piece is attached to gripper"
+                        return {
+                            "success": False,
+                            "status": "BOARD_RELOCATION_REJECTED_WORLD_NOT_SETTLED",
+                            "error": err,
+                            "transient_pieces": [{"id": self.world.get_attached_piece().piece_id if self.world.get_attached_piece() else "attached", "state": "ATTACHED_TO_GRIPPER"}],
+                        }
 
-                self.placement_state = new_state
-                self.grid_origin_robot = list(new_state.grid_origin_robot_m)
-                self.board_surface_z = new_state.grid_origin_robot_m[2]
-                self.backend.set_placement_version(new_version)
+                    transient = [
+                        p_body for p_body in self.world.pieces.values()
+                        if p_body.physical_state in (PiecePhysicalState.ATTACHED_TO_GRIPPER, PiecePhysicalState.FALLING, PiecePhysicalState.SETTLING)
+                    ]
+                    if transient:
+                        err = "Cannot change board placement while world is not settled (pieces falling/settling/attached)"
+                        return {
+                            "success": False,
+                            "status": "BOARD_RELOCATION_REJECTED_WORLD_NOT_SETTLED",
+                            "error": err,
+                            "transient_pieces": [{"id": p.piece_id, "state": p.physical_state.value} for p in transient],
+                        }
 
-                packet = new_state.to_dict()
-                analysis_packet = self.placement_analyzer.compute_geometric_precheck(
-                    forward_shift_mm=new_state.forward_shift_mm,
-                    safe_transit_height_mm=new_state.safe_transit_height_mm,
-                    board_surface_mm=new_state.grid_origin_robot_m[2] * 1000.0,
-                    placement_version=new_version,
-                )
-                if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
-                    self.telemetry.broadcast_custom(packet)
-                    self.telemetry.broadcast_custom(analysis_packet)
-                    self.telemetry.update_world_state(self.world.get_snapshot())
+                    cur_fwd = self.placement_state.forward_shift_mm if forward_shift_mm is None else float(forward_shift_mm)
+                    cur_h = self.placement_state.safe_transit_height_mm if safe_transit_height_mm is None else float(safe_transit_height_mm)
+                    cur_z_off = self.placement_state.board_height_offset_mm if board_height_offset_mm is None else float(board_height_offset_mm)
 
-                return {"success": True, "placement": packet, "analysis": analysis_packet}
+                    # Swept volume collision check between current and candidate placement against arm links
+                    swept_res = self.world.check_board_swept_volume_collision(
+                        new_forward_shift_m=cur_fwd / 1000.0,
+                        new_height_offset_m=cur_z_off / 1000.0,
+                    )
+                    if not swept_res.is_safe:
+                        return {
+                            "success": False,
+                            "status": "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR",
+                            "error": f"Board swept volume collision: {swept_res.reason}",
+                            "details": swept_res.details,
+                        }
+
+                    new_version = self.placement_state.placement_version + 1
+                    new_state = BoardPlacementState.compute(
+                        forward_shift_mm=cur_fwd,
+                        safe_transit_height_mm=cur_h,
+                        board_height_offset_mm=cur_z_off,
+                        placement_version=new_version,
+                    )
+
+                    # Relocate in PyBullet world
+                    self.world.relocate_board(
+                        forward_shift_m=new_state.forward_shift_mm / 1000.0,
+                        height_offset_m=new_state.board_height_offset_mm / 1000.0,
+                    )
+
+                    self.placement_state = new_state
+                    self.grid_origin_robot = list(new_state.grid_origin_robot_m)
+                    self.board_surface_z = new_state.grid_origin_robot_m[2]
+                    self.backend.set_placement_version(new_version)
+                    self._board_adjustment_ready = False
+
+                    packet = new_state.to_dict()
+                    analysis_packet = self.placement_analyzer.compute_geometric_precheck(
+                        forward_shift_mm=new_state.forward_shift_mm,
+                        safe_transit_height_mm=new_state.safe_transit_height_mm,
+                        board_surface_mm=new_state.grid_origin_robot_m[2] * 1000.0,
+                        placement_version=new_version,
+                    )
+                    if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+                        self.telemetry.broadcast_custom(packet)
+                        self.telemetry.broadcast_custom(analysis_packet)
+                        self.telemetry.update_world_state(self.world.get_snapshot())
+
+                    return {"success": True, "placement": packet, "analysis": analysis_packet}
+        except RuntimeOperationBusy as e:
+            return {
+                "success": False,
+                "status": "BOARD_RELOCATION_REJECTED_BUSY",
+                "error": str(e),
+            }
 
     def reset_board_placement(self) -> Dict[str, Any]:
         """Reset board placement to nominal scene configuration."""
@@ -931,6 +941,7 @@ class VirtualXiangqiSimulation:
         """Reset all 32 Xiangqi pieces to standard start layout."""
         with self._command_lock:
             with self.acquire_operation_state(RuntimeOperationState.RESETTING):
+                self._board_adjustment_ready = False
                 self.world.release_attached_piece()
                 self.backend.set_gripper(False)
                 if hasattr(self.world, "reset_pieces"):
@@ -996,51 +1007,239 @@ class VirtualXiangqiSimulation:
                 logger.info("All backend data and simulation state successfully reset.")
                 return {"success": True, "status": "RESET_COMPLETE"}
 
+    def evaluate_service_safety(
+        self,
+        tolerance_deg: float = 2.0,
+        min_clearance_margin_mm: float = 30.0,
+        min_joint_margin_deg: float = 5.0,
+        max_condition_number: float = 50.0,
+    ) -> ServiceSafetyReport:
+        """
+        Authoritative evaluation of the robot's physical SERVICE_SAFE condition.
+        Evaluates:
+        - Robot connected and motion state IDLE
+        - No active trajectory stage
+        - Gripper open
+        - No piece attached (backend & world)
+        - World settled (no transient FALLING/SETTLING pieces)
+        - Moving robot links clear of board workspace (margin >= min_clearance_margin_mm)
+        - Gripper clear of board workspace (margin >= min_clearance_margin_mm)
+        - Joint limit margin >= min_joint_margin_deg
+        - Conditioning / singularity check (condition_number <= max_condition_number)
+        - Joint configuration match within tolerance_deg of SERVICE_SAFE_JOINTS_DEG
+        """
+        reasons = []
+
+        # 1. Connection & Controller State
+        robot_connected = bool(self.backend.is_connected)
+        if not robot_connected:
+            reasons.append("SERVICE_UNSAFE_NOT_CONNECTED")
+
+        snap = self.backend.get_state_snapshot()
+        robot_idle = (snap.motion_state == "IDLE")
+        if not robot_idle:
+            reasons.append("SERVICE_UNSAFE_ROBOT_MOVING")
+
+        trajectory_idle = (snap.trajectory_stage in (None, "IDLE", "COMPLETE"))
+        if not trajectory_idle:
+            reasons.append("SERVICE_UNSAFE_TRAJECTORY_ACTIVE")
+
+        # 2. Gripper & Piece Attachment
+        gripper_open = (not self.backend.is_gripper_closed())
+        if not gripper_open:
+            reasons.append("SERVICE_UNSAFE_GRIPPER_CLOSED")
+
+        piece_attached = (
+            self.world.get_attached_piece() is not None
+            or self.backend.get_attached_piece_id() is not None
+        )
+        if piece_attached:
+            reasons.append("SERVICE_UNSAFE_PIECE_ATTACHED")
+
+        # Transient piece states
+        transient = [
+            p_body for p_body in self.world.pieces.values()
+            if p_body.physical_state in (PiecePhysicalState.ATTACHED_TO_GRIPPER, PiecePhysicalState.FALLING)
+        ]
+        if transient:
+            reasons.append("SERVICE_UNSAFE_WORLD_NOT_SETTLED")
+
+        # 3. Physical Clearance to Board
+        min_clearance_m, closest_body = self.world.get_board_to_robot_clearance()
+        min_board_clearance_mm = min_clearance_m * 1000.0 if math.isfinite(min_clearance_m) else 999.0
+
+        links_clear = True
+        gripper_clear = True
+
+        if min_board_clearance_mm < min_clearance_margin_mm:
+            reasons.append("SERVICE_UNSAFE_CLEARANCE")
+            if closest_body.startswith("gripper_proxy_"):
+                gripper_clear = False
+                reasons.append("SERVICE_UNSAFE_GRIPPER_OVER_BOARD")
+            else:
+                links_clear = False
+                reasons.append("SERVICE_UNSAFE_LINK_OVER_BOARD")
+
+        # Board service exclusion box check
+        nom_cx, nom_cy = self.placement_state.physical_board_center_robot_m[:2]
+        surf_z = self.placement_state.board_surface_z_robot_m
+        excl_x_min = (nom_cx - 0.205 - 0.030) * 1000.0
+        excl_x_max = (nom_cx + 0.205 + 0.030) * 1000.0
+        excl_y_min = (nom_cy - 0.1835 - 0.030) * 1000.0
+        excl_y_max = (nom_cy + 0.1835 + 0.030) * 1000.0
+        excl_z_max = (surf_z + 0.00943 + 0.050) * 1000.0
+
+        tcp_xyz = snap.tcp_pose_mm_deg[:3]
+        if (excl_x_min <= tcp_xyz[0] <= excl_x_max and
+            excl_y_min <= tcp_xyz[1] <= excl_y_max and
+            tcp_xyz[2] <= excl_z_max):
+            gripper_clear = False
+            if "SERVICE_UNSAFE_GRIPPER_OVER_BOARD" not in reasons:
+                reasons.append("SERVICE_UNSAFE_GRIPPER_OVER_BOARD")
+
+        # 4. Joint Limit Margin
+        curr_deg = list(snap.joints_deg)
+        lower_deg = [math.degrees(x) for x in self.backend.kinematics.lower_limits]
+        upper_deg = [math.degrees(x) for x in self.backend.kinematics.upper_limits]
+        margins = [min(curr_deg[i] - lower_deg[i], upper_deg[i] - curr_deg[i]) for i in range(6)]
+        computed_joint_margin = min(margins) if margins else 0.0
+        if computed_joint_margin < min_joint_margin_deg:
+            reasons.append("SERVICE_UNSAFE_JOINT_MARGIN")
+
+        # 5. Singularity & Conditioning
+        q_rad = [math.radians(x) for x in curr_deg]
+        J = self.backend.kinematics.geometric_jacobian(q_rad)
+        cond = self.backend.kinematics.compute_condition_number(J)
+        condition_number = cond if math.isfinite(cond) else 999.0
+        if condition_number > max_condition_number:
+            reasons.append("SERVICE_UNSAFE_SINGULARITY")
+
+        # 6. Service Pose Configuration Match
+        service_pose_match = True
+        for c, target in zip(curr_deg, self.backend.SERVICE_SAFE_JOINTS_DEG):
+            if abs(c - target) > tolerance_deg:
+                service_pose_match = False
+                break
+        if not service_pose_match:
+            reasons.append("SERVICE_UNSAFE_POSE_MISMATCH")
+
+        service_safe = (len(reasons) == 0)
+
+        return ServiceSafetyReport(
+            service_safe=service_safe,
+            robot_connected=robot_connected,
+            robot_idle=robot_idle,
+            trajectory_idle=trajectory_idle,
+            gripper_open=gripper_open,
+            piece_attached=piece_attached,
+            links_clear=links_clear,
+            gripper_clear=gripper_clear,
+            min_board_clearance_mm=min_board_clearance_mm,
+            closest_link_or_proxy=closest_body,
+            min_joint_margin_deg=computed_joint_margin,
+            condition_number=condition_number,
+            service_pose_match=service_pose_match,
+            reasons=reasons,
+        )
+
+    def is_service_safe(self, tolerance_deg: float = 2.0) -> bool:
+        """Physical predicate helper forwarding to evaluate_service_safety()."""
+        rep = self.evaluate_service_safety(tolerance_deg=tolerance_deg)
+        return rep.service_safe
+
+    @property
+    def is_board_adjustment_ready(self) -> bool:
+        """Authoritative live readiness property."""
+        return self._board_adjustment_ready and self.is_service_safe()
+
     def prepare_board_adjustment(self, speed_factor: Optional[float] = None) -> Dict[str, Any]:
         """
-        Ensure robot arm is safely in SERVICE_SAFE pose and board area is clear for adjustment.
+        Strict preparation flow ensuring robot arm is safely parked in SERVICE_SAFE
+        and world is settled before board adjustment.
         """
-        with self._command_lock:
-            if self._operation_state not in (RuntimeOperationState.IDLE, RuntimeOperationState.BOARD_ADJUSTMENT):
-                return {
-                    "success": False,
-                    "status": "BOARD_ADJUSTMENT_REJECTED_BUSY",
-                    "error": f"System currently in state {self._operation_state.value}",
-                }
+        try:
+            with self.acquire_operation_state(RuntimeOperationState.BOARD_ADJUSTMENT):
+                with self._command_lock:
+                    self._board_adjustment_ready = False
 
-            if self.world.get_attached_piece() is not None:
-                return {
-                    "success": False,
-                    "status": "PREPARE_BOARD_ADJUSTMENT_FAILED",
-                    "error": "Cannot prepare board adjustment while piece is attached to gripper. Release piece first.",
-                }
+                    # 1. Conflicting motion / active trajectory
+                    snap = self.backend.get_state_snapshot()
+                    if snap.motion_state == "MOVING":
+                        return {
+                            "success": False,
+                            "status": "PREPARE_BOARD_ADJUSTMENT_FAILED",
+                            "error": "Cannot prepare board adjustment while robot is MOVING",
+                        }
 
-            if not self.backend.is_service_safe():
-                ok = self.backend.go_service_safe(speed_factor=speed_factor)
-                if not ok:
-                    return {
-                        "success": False,
-                        "status": "PREPARE_BOARD_ADJUSTMENT_FAILED",
-                        "error": f"Failed to reach SERVICE_SAFE pose: {self.backend._last_error}",
+                    # 2. Attached piece check
+                    if self.world.get_attached_piece() is not None or self.backend.get_attached_piece_id() is not None:
+                        return {
+                            "success": False,
+                            "status": "PREPARE_BOARD_ADJUSTMENT_FAILED",
+                            "error": "Cannot prepare board adjustment while piece is attached to gripper. Release piece first.",
+                        }
+
+                    # 3. Open gripper if closed
+                    if self.backend.is_gripper_closed():
+                        self.backend.open_gripper()
+                        self.world.release_attached_piece()
+
+                    # 4. Settle world & check transient states
+                    self.world.step_until_settled(max_steps=80)
+                    transient = [
+                        p_body for p_body in self.world.pieces.values()
+                        if p_body.physical_state in (PiecePhysicalState.ATTACHED_TO_GRIPPER, PiecePhysicalState.FALLING, PiecePhysicalState.SETTLING)
+                    ]
+                    if transient:
+                        return {
+                            "success": False,
+                            "status": "PREPARE_BOARD_ADJUSTMENT_FAILED",
+                            "error": "World not settled (pieces falling/settling)",
+                            "transient_pieces": [{"id": p.piece_id, "state": p.physical_state.value} for p in transient],
+                        }
+
+                    # 5. Move toward SERVICE_SAFE if physical predicate not satisfied
+                    report = self.evaluate_service_safety()
+                    if not report.service_safe:
+                        ok = self.backend.go_service_safe(speed_factor=speed_factor)
+                        if not ok:
+                            return {
+                                "success": False,
+                                "status": "PREPARE_BOARD_ADJUSTMENT_FAILED",
+                                "error": f"Failed to reach SERVICE_SAFE pose: {self.backend._last_error}",
+                            }
+                        report = self.evaluate_service_safety()
+                        if not report.service_safe:
+                            return {
+                                "success": False,
+                                "status": "PREPARE_BOARD_ADJUSTMENT_FAILED",
+                                "error": f"Physical safety predicate failed after moving: {', '.join(report.reasons)}",
+                                "service_safety": report.to_dict(),
+                            }
+
+                    self._board_adjustment_ready = True
+                    result_payload = {
+                        "type": "board_adjustment_state",
+                        "success": True,
+                        "status": "BOARD_ADJUSTMENT_READY",
+                        "service_safe": True,
+                        "service_safety": report.to_dict(),
+                        "message": "Robot safely parked in SERVICE_SAFE pose. Ready for board placement adjustment.",
                     }
-
-            self.world.step_until_settled(max_steps=20)
-            transient = [
-                p_body for p_body in self.world.pieces.values()
-                if p_body.physical_state in (PiecePhysicalState.ATTACHED_TO_GRIPPER, PiecePhysicalState.FALLING, PiecePhysicalState.SETTLING)
-            ]
-            if transient:
-                return {
-                    "success": False,
-                    "status": "PREPARE_BOARD_ADJUSTMENT_FAILED",
-                    "error": "World not settled (pieces falling/settling)",
-                }
-
+                    if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+                        self.telemetry.broadcast_custom(result_payload)
+                    return result_payload
+        except RuntimeOperationBusy as e:
             return {
-                "success": True,
-                "status": "READY_FOR_BOARD_ADJUSTMENT",
-                "service_safe": True,
-                "message": "Robot safely parked in SERVICE_SAFE pose. Ready for board placement adjustment.",
+                "success": False,
+                "status": "BOARD_ADJUSTMENT_REJECTED_BUSY",
+                "error": str(e),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "status": "PREPARE_BOARD_ADJUSTMENT_FAILED",
+                "error": str(e),
             }
 
     def runtime_move_joint(
@@ -1055,6 +1254,7 @@ class VirtualXiangqiSimulation:
         try:
             with self.acquire_operation_state(RuntimeOperationState.MOTION):
                 with self._command_lock:
+                    self._board_adjustment_ready = False
                     ok = self.backend.move_joint(target_joints_deg, speed_factor=speed_factor)
                     if not ok:
                         err = self.backend._last_error or "Joint move failed"
@@ -1085,14 +1285,43 @@ class VirtualXiangqiSimulation:
             }
 
     def runtime_go_service_safe(self, speed_factor: Optional[float] = None) -> Dict[str, Any]:
-        """Move arm to SERVICE_SAFE joint configuration."""
+        """Move arm to SERVICE_SAFE joint configuration and verify physical safety predicate."""
         try:
             with self.acquire_operation_state(RuntimeOperationState.SERVICE_MOVE):
                 with self._command_lock:
+                    self._board_adjustment_ready = False
+
+                    # Reject if piece attached
+                    if self.world.get_attached_piece() is not None or self.backend.get_attached_piece_id() is not None:
+                        return {
+                            "success": False,
+                            "status": "SERVICE_SAFE_REJECTED_PIECE_ATTACHED",
+                            "error": "Cannot go to SERVICE_SAFE while piece is attached to gripper. Release piece first.",
+                        }
+
                     ok = self.backend.go_service_safe(speed_factor=speed_factor)
                     if not ok:
-                        return {"success": False, "status": "SERVICE_SAFE_FAILED", "error": self.backend._last_error}
-                    return {"success": True, "status": "SERVICE_SAFE_REACHED"}
+                        return {
+                            "success": False,
+                            "status": "SERVICE_SAFE_FAILED",
+                            "error": self.backend._last_error or "Failed to move to SERVICE_SAFE",
+                        }
+
+                    self.world.step_until_settled(max_steps=10)
+                    report = self.evaluate_service_safety()
+                    if not report.service_safe:
+                        return {
+                            "success": False,
+                            "status": "SERVICE_SAFE_VERIFICATION_FAILED",
+                            "error": f"Physical safety predicate failed: {', '.join(report.reasons)}",
+                            "service_safety": report.to_dict(),
+                        }
+
+                    return {
+                        "success": True,
+                        "status": "SERVICE_SAFE_REACHED",
+                        "service_safety": report.to_dict(),
+                    }
         except RuntimeOperationBusy as e:
             return {
                 "success": False,
@@ -1111,6 +1340,7 @@ class VirtualXiangqiSimulation:
         try:
             with self.acquire_operation_state(RuntimeOperationState.SERVICE_MOVE):
                 with self._command_lock:
+                    self._board_adjustment_ready = False
                     curr_tcp = list(self.backend.get_state_snapshot().tcp_pose_mm_deg)
                     safe_z_mm = (self.board_surface_z + self.placement_state.safe_transit_height_mm / 1000.0) * 1000.0 + 30.0
                     if curr_tcp[2] < safe_z_mm:
@@ -1143,6 +1373,7 @@ class VirtualXiangqiSimulation:
         try:
             with self.acquire_operation_state(RuntimeOperationState.SERVICE_MOVE):
                 with self._command_lock:
+                    self._board_adjustment_ready = False
                     ok = self.backend.jog_joint(joint_idx, delta_deg, speed_factor=speed_factor)
                     if not ok:
                         err = self.backend._last_error or "Jog joint rejected"
@@ -1202,6 +1433,7 @@ class VirtualXiangqiSimulation:
         try:
             with self.acquire_operation_state(RuntimeOperationState.SERVICE_MOVE):
                 with self._command_lock:
+                    self._board_adjustment_ready = False
                     ok = self.backend.jog_tcp([dx, dy, dz], [drx, dry, drz], speed_factor=speed_factor)
                     if not ok:
                         err = self.backend._last_error or "Jog TCP rejected"

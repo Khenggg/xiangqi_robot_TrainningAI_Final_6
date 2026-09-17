@@ -47,7 +47,7 @@ class PlannedTrajectory:
 
 
 DEFAULT_HOME_JOINTS_DEG = [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
-SERVICE_SAFE_JOINTS_DEG = [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
+SERVICE_SAFE_JOINTS_DEG = [0.0, -70.0, 60.0, -80.0, -90.0, 0.0]
 
 
 class VirtualFR3Backend(RobotBackend):
@@ -56,7 +56,7 @@ class VirtualFR3Backend(RobotBackend):
     """
 
     DEFAULT_HOME_JOINTS_DEG = [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
-    SERVICE_SAFE_JOINTS_DEG = [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
+    SERVICE_SAFE_JOINTS_DEG = [0.0, -70.0, 60.0, -80.0, -90.0, 0.0]
 
     def __init__(
         self,
@@ -80,6 +80,7 @@ class VirtualFR3Backend(RobotBackend):
 
         self.collision_guard = None
         self._allowed_grasp_piece_id: Optional[str] = None
+        self._attached_piece_id: Optional[str] = None
 
         self._state_lock = threading.RLock()
         self._connected = False
@@ -168,6 +169,21 @@ class VirtualFR3Backend(RobotBackend):
     @property
     def allowed_grasp_piece_id(self) -> Optional[str]:
         return self._allowed_grasp_piece_id
+
+    def set_attached_piece_id(self, piece_id: Optional[str]) -> None:
+        """Set or clear ID of piece attached to gripper."""
+        with self._state_lock:
+            self._attached_piece_id = piece_id
+
+    def get_attached_piece_id(self) -> Optional[str]:
+        """Return ID of piece currently attached to gripper, or None."""
+        with self._state_lock:
+            return self._attached_piece_id
+
+    @property
+    def attached_piece_id(self) -> Optional[str]:
+        with self._state_lock:
+            return self._attached_piece_id
 
     def set_authoritative_joints(self, joints_deg_or_rad: Sequence[float], is_deg: bool = True) -> None:
         """Directly set authoritative robot joints without motion (for testing/setup)."""
@@ -314,6 +330,14 @@ class VirtualFR3Backend(RobotBackend):
         """Check if gripper virtual actuator is in closed state."""
         with self._state_lock:
             return bool(self._gripper_closed)
+
+    def open_gripper(self) -> bool:
+        """Convenience method to open virtual gripper."""
+        return self.set_gripper(False)
+
+    def close_gripper(self) -> bool:
+        """Convenience method to close virtual gripper."""
+        return self.set_gripper(True)
 
     def move_joint(
         self,
@@ -764,9 +788,17 @@ class VirtualFR3Backend(RobotBackend):
     def is_service_safe(self, tolerance_deg: float = 2.0) -> bool:
         """
         Check if robot is in SERVICE_SAFE pose (within tolerance_deg on all joints)
-        and gripper is open / not attached.
+        and gripper is open / not attached / connected / not moving.
         """
+        if not self.is_connected:
+            return False
         with self._state_lock:
+            if self._motion_state != "IDLE":
+                return False
+            if self._gripper_closed:
+                return False
+            if self._attached_piece_id is not None:
+                return False
             curr = self._current_joints_deg
             for c, target in zip(curr, self.SERVICE_SAFE_JOINTS_DEG):
                 if abs(c - target) > tolerance_deg:
@@ -775,9 +807,10 @@ class VirtualFR3Backend(RobotBackend):
 
     def go_service_safe(self, speed_factor: Optional[float] = None) -> bool:
         """
-        Safely move arm to SERVICE_SAFE joint configuration.
+        Safely move arm to SERVICE_SAFE joint configuration and open gripper.
         Uses lift recovery if near or below transit safe plane.
         """
+        self.open_gripper()
         return self.move_joint_with_lift_recovery(
             self.SERVICE_SAFE_JOINTS_DEG,
             speed_factor=speed_factor,

@@ -10,6 +10,7 @@ Simulates:
 - Out-of-bounds detection and immutable world state snapshots
 """
 
+from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
@@ -38,6 +39,57 @@ from src.simulation.physics.validation import (
     validate_physics_config,
     validate_start_layout,
 )
+
+
+@dataclass
+class SweptVolumeReport:
+    is_safe: bool
+    reason: Optional[str]
+    minimum_clearance_mm: float
+    first_blocking_step: Optional[int]
+    total_steps: int
+    blocking_body: Optional[str]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "is_safe": self.is_safe,
+            "reason": self.reason,
+            "minimum_clearance_mm": round(self.minimum_clearance_mm, 2),
+            "first_blocking_step": self.first_blocking_step,
+            "total_steps": self.total_steps,
+            "blocking_body": self.blocking_body,
+        }
+
+
+class SweptVolumeResult(tuple):
+    def __new__(cls, is_safe: bool, reason: Optional[str], report: Optional[SweptVolumeReport] = None):
+        inst = super().__new__(cls, (is_safe, reason))
+        inst._report = report
+        return inst
+
+    @property
+    def is_safe(self) -> bool:
+        return self[0]
+
+    @property
+    def reason(self) -> Optional[str]:
+        return self[1]
+
+    @property
+    def minimum_clearance_mm(self) -> float:
+        return self._report.minimum_clearance_mm if getattr(self, "_report", None) else float("inf")
+
+    @property
+    def first_blocking_step(self) -> Optional[int]:
+        return self._report.first_blocking_step if getattr(self, "_report", None) else None
+
+    @property
+    def blocking_body(self) -> Optional[str]:
+        return self._report.blocking_body if getattr(self, "_report", None) else None
+
+    @property
+    def details(self) -> Dict[str, Any]:
+        return self._report.to_dict() if getattr(self, "_report", None) else {}
 
 
 class VirtualPhysicalWorld:
@@ -341,19 +393,66 @@ class VirtualPhysicalWorld:
             return np.array(pos), np.array(orn)
         return np.array([self._nominal_board_center[0] - self.current_forward_shift_m, self._nominal_board_center[1], self.board_surface_z - self._board_half_z]), np.array([0.0, 0.0, 0.0, 1.0])
 
+    def get_board_to_robot_clearance(self, query_dist: float = 1.0) -> Tuple[float, str]:
+        """
+        Measure current minimum physical distance from board to moving robot links and gripper.
+        Returns: (min_clearance_m, closest_body_or_link_name).
+        """
+        if self.board_body_id < 0 or self.client_id < 0:
+            return float("inf"), "none"
+
+        with self._physics_lock:
+            min_dist = float("inf")
+            closest_name = "none"
+
+            # Check robot moving links (link 0 to 6; link -1 is fixed base mount)
+            if self.robot_body_id >= 0:
+                contacts = p.getClosestPoints(
+                    self.board_body_id,
+                    self.robot_body_id,
+                    distance=query_dist,
+                    physicsClientId=self.client_id,
+                )
+                for pt in contacts:
+                    link_idx = int(pt[4])
+                    if link_idx >= 0:  # Moving links only
+                        d = float(pt[8])
+                        if d < min_dist:
+                            min_dist = d
+                            closest_name = f"robot_link_{link_idx}"
+
+            # Check gripper proxies
+            for proxy_id in self.gripper.proxy_body_ids:
+                contacts = p.getClosestPoints(
+                    self.board_body_id,
+                    proxy_id,
+                    distance=query_dist,
+                    physicsClientId=self.client_id,
+                )
+                for pt in contacts:
+                    d = float(pt[8])
+                    if d < min_dist:
+                        min_dist = d
+                        closest_name = f"gripper_proxy_{proxy_id}"
+
+            return min_dist, closest_name
+
     def check_board_swept_volume_collision(
         self,
         new_forward_shift_m: float,
         new_height_offset_m: float = 0.0,
         step_size_m: float = 0.005,
-    ) -> Tuple[bool, Optional[str]]:
+        clearance_margin_m: float = 0.005,
+    ) -> SweptVolumeResult:
         """
         Check whether moving the board from current placement to (new_forward_shift_m, new_height_offset_m)
         would collide along the interpolated swept volume against the robot arm or gripper proxies.
-        Returns (is_safe: bool, collision_reason: Optional[str]).
+        Guarantees clearance >= clearance_margin_m (default: 5.0 mm).
+        Returns SweptVolumeResult(is_safe, collision_reason, report) backwards-compatible with (bool, str).
         """
         if self.board_body_id < 0 or self.client_id < 0:
-            return True, None
+            rep = SweptVolumeReport(True, None, float("inf"), None, 0, None)
+            return SweptVolumeResult(True, None, rep)
 
         with self._physics_lock:
             shift_old = self.current_forward_shift_m
@@ -365,6 +464,12 @@ class VirtualPhysicalWorld:
             num_steps = max(2, int(math.ceil(dist / step_size_m)) + 1)
 
             orig_pos, orig_orn = p.getBasePositionAndOrientation(self.board_body_id, physicsClientId=self.client_id)
+            query_dist = max(0.05, clearance_margin_m + 0.01)
+
+            min_clearance_m = float("inf")
+            blocking_body = None
+            first_blocking_step = None
+            collision_reason = None
 
             try:
                 for step_idx in range(num_steps):
@@ -388,29 +493,55 @@ class VirtualPhysicalWorld:
                         contacts = p.getClosestPoints(
                             self.board_body_id,
                             self.robot_body_id,
-                            distance=0.002,
+                            distance=query_dist,
                             physicsClientId=self.client_id,
                         )
                         for pt in contacts:
                             contact_dist = float(pt[8])
-                            if contact_dist <= 0.001:
-                                link_idx = int(pt[4])
-                                return False, f"Board swept volume collides with robot link {link_idx} at step {step_idx}/{num_steps} (distance={contact_dist*1000:.2f}mm)"
+                            link_idx = int(pt[4])
+                            if contact_dist < min_clearance_m:
+                                min_clearance_m = contact_dist
+                            if contact_dist <= clearance_margin_m and collision_reason is None:
+                                first_blocking_step = step_idx
+                                blocking_body = f"robot_link_{link_idx}"
+                                collision_reason = (
+                                    f"Board swept volume collides with robot link {link_idx} "
+                                    f"at step {step_idx}/{num_steps} (clearance={contact_dist*1000.0:.2f}mm <= margin {clearance_margin_m*1000.0:.2f}mm)"
+                                )
 
                     # 2. Check collision against gripper proxy bodies
                     for proxy_id in self.gripper.proxy_body_ids:
                         contacts = p.getClosestPoints(
                             self.board_body_id,
                             proxy_id,
-                            distance=0.002,
+                            distance=query_dist,
                             physicsClientId=self.client_id,
                         )
                         for pt in contacts:
                             contact_dist = float(pt[8])
-                            if contact_dist <= 0.001:
-                                return False, f"Board swept volume collides with gripper proxy at step {step_idx}/{num_steps} (distance={contact_dist*1000:.2f}mm)"
+                            if contact_dist < min_clearance_m:
+                                min_clearance_m = contact_dist
+                            if contact_dist <= clearance_margin_m and collision_reason is None:
+                                first_blocking_step = step_idx
+                                blocking_body = f"gripper_proxy_{proxy_id}"
+                                collision_reason = (
+                                    f"Board swept volume collides with gripper proxy at step {step_idx}/{num_steps} "
+                                    f"(clearance={contact_dist*1000.0:.2f}mm <= margin {clearance_margin_m*1000.0:.2f}mm)"
+                                )
 
-                return True, None
+                    if collision_reason is not None:
+                        break
+
+                is_safe = (collision_reason is None)
+                rep = SweptVolumeReport(
+                    is_safe=is_safe,
+                    reason=collision_reason,
+                    minimum_clearance_mm=min_clearance_m * 1000.0 if math.isfinite(min_clearance_m) else 999.0,
+                    first_blocking_step=first_blocking_step,
+                    total_steps=num_steps,
+                    blocking_body=blocking_body,
+                )
+                return SweptVolumeResult(is_safe, collision_reason, rep)
             finally:
                 p.resetBasePositionAndOrientation(
                     self.board_body_id,

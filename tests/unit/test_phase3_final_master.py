@@ -32,7 +32,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.simulation.physics.state import GraspStatus, GraspResult, PickResult, PlaceResult, PiecePhysicalState
+from src.simulation.physics.state import GraspStatus, GraspResult, PickResult, PlaceResult, PiecePhysicalState, ServiceSafetyReport
 from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.physics.collision_guard import FR3CollisionGuard
 from src.simulation.runtime import VirtualXiangqiSimulation, RuntimeOperationState, RuntimeOperationBusy
@@ -222,7 +222,8 @@ class Phase3FinalMasterTests(unittest.TestCase):
         """10. prepare_board_adjustment() clears grasp and elevates arm to service safe pose."""
         res = self.sim.prepare_board_adjustment()
         self.assertTrue(res["success"])
-        self.assertEqual(res["status"], "READY_FOR_BOARD_ADJUSTMENT")
+        self.assertEqual(res["status"], "BOARD_ADJUSTMENT_READY")
+        self.assertTrue(self.sim.is_board_adjustment_ready)
         self.assertIsNone(self.sim.world.get_attached_piece())
         self.assertFalse(self.sim.backend.is_gripper_closed())
         self.assertTrue(self.sim.backend.is_service_safe())
@@ -897,6 +898,8 @@ class Phase3FinalMasterTests(unittest.TestCase):
                     pick_release.set()
                     t.join(timeout=3.0)
 
+        self.sim.backend.open_gripper()
+        self.sim.world.release_attached_piece()
         self.sim._test_hook_motion_owned = None
         self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
 
@@ -958,6 +961,200 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
         self.sim._test_hook_motion_owned = None
         self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
+
+    # ======================================================================
+    # Pass B: SERVICE_SAFE Physical Predicate & Board Adjustment Safety Tests
+    # ======================================================================
+
+    def test_b1_service_safe_physical_predicate_clear(self):
+        """b1. Full physical predicate passes when arm is safely parked at SERVICE_SAFE."""
+        res = self.sim.runtime_go_service_safe()
+        self.assertTrue(res["success"])
+        self.assertEqual(res["status"], "SERVICE_SAFE_REACHED")
+
+        rep = self.sim.evaluate_service_safety()
+        self.assertTrue(rep.service_safe)
+        self.assertTrue(rep.robot_connected)
+        self.assertTrue(rep.robot_idle)
+        self.assertTrue(rep.trajectory_idle)
+        self.assertTrue(rep.gripper_open)
+        self.assertFalse(rep.piece_attached)
+        self.assertTrue(rep.links_clear)
+        self.assertTrue(rep.gripper_clear)
+        self.assertGreaterEqual(rep.min_board_clearance_mm, 50.0)
+        self.assertGreaterEqual(rep.min_joint_margin_deg, 5.0)
+        self.assertLess(rep.condition_number, 100.0)
+        self.assertEqual(len(rep.reasons), 0)
+        self.assertTrue(self.sim.is_service_safe())
+
+    def test_b2_service_safe_rejected_gripper_closed(self):
+        """b2. Closed gripper (even without piece) rejects service_safe physical predicate."""
+        self.sim.runtime_go_service_safe()
+        self.sim.backend.set_gripper(True)
+        try:
+            rep = self.sim.evaluate_service_safety()
+            self.assertFalse(rep.service_safe)
+            self.assertFalse(rep.gripper_open)
+            self.assertTrue(any("gripper" in r.lower() for r in rep.reasons))
+            self.assertFalse(self.sim.is_service_safe())
+        finally:
+            self.sim.backend.set_gripper(False)
+
+    def test_b3_service_safe_rejected_piece_attached(self):
+        """b3. Attached piece rejects service_safe and runtime_go_service_safe."""
+        self.sim.runtime_go_service_safe()
+        # Simulate piece attached to gripper
+        piece = next(iter(self.sim.world.pieces.values()))
+        self.sim.world.gripper.attached_piece = piece
+        self.sim.backend._attached_piece_id = piece.piece_id
+        try:
+            rep = self.sim.evaluate_service_safety()
+            self.assertFalse(rep.service_safe)
+            self.assertTrue(rep.piece_attached)
+            self.assertTrue(any("piece" in r.lower() for r in rep.reasons))
+            self.assertFalse(self.sim.is_service_safe())
+
+            res = self.sim.runtime_go_service_safe()
+            self.assertFalse(res["success"])
+            self.assertEqual(res["status"], "SERVICE_SAFE_REJECTED_PIECE_ATTACHED")
+        finally:
+            self.sim.world.gripper.attached_piece = None
+            self.sim.backend._attached_piece_id = None
+
+    def test_b4_service_safe_rejected_robot_moving(self):
+        """b4. MOVING robot state rejects service_safe physical predicate."""
+        self.sim.runtime_go_service_safe()
+        orig_motion = self.sim.backend._motion_state
+        self.sim.backend._motion_state = "MOVING"
+        try:
+            rep = self.sim.evaluate_service_safety()
+            self.assertFalse(rep.service_safe)
+            self.assertFalse(rep.robot_idle)
+            self.assertTrue(any("moving" in r.lower() for r in rep.reasons))
+            self.assertFalse(self.sim.is_service_safe())
+        finally:
+            self.sim.backend._motion_state = orig_motion
+
+    def test_b5_home_is_not_service_safe(self):
+        """b5. Candidate 2 (HOME pose) is physically distinct and rejected as SERVICE_SAFE."""
+        # Move to nominal HOME [0, -45, 90, -45, -90, 0]
+        self.sim.runtime_move_joint([0.0, -45.0, 90.0, -45.0, -90.0, 0.0])
+        rep = self.sim.evaluate_service_safety()
+        self.assertFalse(rep.service_safe)
+        self.assertFalse(rep.service_pose_match)
+        self.assertFalse(self.sim.is_service_safe())
+        # Restore to SERVICE_SAFE
+        self.sim.runtime_go_service_safe()
+
+    def test_b6_vertical_board_raise_rejected_when_arm_low(self):
+        """b6. Vertical board raise (+25mm) rejected when arm is in low workspace."""
+        # Lower arm to grasp level near board
+        r, c = 0, 4
+        z_grasp = self.sim.board_surface_z
+        grasp_m = self.sim.cell_to_robot_xyz_m(r, c, z_grasp)
+        grasp_pose_mm = [grasp_m[0] * 1000.0, grasp_m[1] * 1000.0, grasp_m[2] * 1000.0, 180.0, 0.0, 90.0]
+        ik = self.sim.backend.solve_tcp_ik(grasp_pose_mm, allow_multi_seed=True)
+        if ik.success:
+            self.sim.backend.move_joint(np.degrees(ik.joints_rad).tolist())
+            self.sim.world.sync_robot_runtime_configuration(ik.joints_rad)
+
+        orig_z_offset = self.sim.placement_state.board_height_offset_mm
+        orig_version = self.sim.placement_state.placement_version
+
+        swept_res = self.sim.world.check_board_swept_volume_collision(
+            new_forward_shift_m=0.0,
+            new_height_offset_m=0.025,
+        )
+        self.assertFalse(swept_res.is_safe)
+
+        res = self.sim.set_board_placement(board_height_offset_mm=25.0)
+        self.assertFalse(res["success"])
+        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR")
+
+        # 100% state invariance check
+        self.assertEqual(self.sim.placement_state.board_height_offset_mm, orig_z_offset)
+        self.assertEqual(self.sim.placement_state.placement_version, orig_version)
+        self.assertEqual(self.sim.backend.placement_version, orig_version)
+
+        # Restore
+        self.sim.reset_robot()
+        self.sim.runtime_go_service_safe()
+
+    def test_b7_board_lowering_swept_path(self):
+        """b7. Board lowering (-10mm) swept path is completely clear from SERVICE_SAFE."""
+        self.sim.runtime_go_service_safe()
+        swept_res = self.sim.world.check_board_swept_volume_collision(
+            new_forward_shift_m=0.0,
+            new_height_offset_m=-0.010,
+        )
+        self.assertTrue(swept_res.is_safe, f"Board lowering swept check failed: {swept_res.reason}")
+
+        res = self.sim.set_board_placement(board_height_offset_mm=-10.0)
+        self.assertTrue(res["success"])
+        self.assertEqual(self.sim.placement_state.board_height_offset_mm, -10.0)
+        self.sim.reset_board_placement()
+
+    def test_b8_forward_and_backward_shift_swept_path(self):
+        """b8. Pure forward (+40mm) and backward (-20mm) translations pass cleanly from SERVICE_SAFE."""
+        self.sim.runtime_go_service_safe()
+
+        # Forward shift +40mm
+        res_fwd = self.sim.set_board_placement(forward_shift_mm=40.0)
+        self.assertTrue(res_fwd["success"])
+        self.assertEqual(self.sim.placement_state.forward_shift_mm, 40.0)
+
+        # Backward shift -20mm
+        res_bwd = self.sim.set_board_placement(forward_shift_mm=-20.0)
+        self.assertTrue(res_bwd["success"])
+        self.assertEqual(self.sim.placement_state.forward_shift_mm, -20.0)
+
+        self.sim.reset_board_placement()
+
+    def test_b9_combined_diagonal_swept_path(self):
+        """b9. Combined forward (+30mm) and raise (+20mm) diagonal path passes at SERVICE_SAFE."""
+        self.sim.runtime_go_service_safe()
+        swept_res = self.sim.world.check_board_swept_volume_collision(
+            new_forward_shift_m=0.030,
+            new_height_offset_m=0.020,
+        )
+        self.assertTrue(swept_res.is_safe, f"Combined diagonal swept check failed: {swept_res.reason}")
+
+        res = self.sim.set_board_placement(forward_shift_mm=30.0, board_height_offset_mm=20.0)
+        self.assertTrue(res["success"])
+        self.assertEqual(self.sim.placement_state.forward_shift_mm, 30.0)
+        self.assertEqual(self.sim.placement_state.board_height_offset_mm, 20.0)
+
+        self.sim.reset_board_placement()
+
+    def test_b10_prepare_board_adjustment_strict_flow(self):
+        """b10. Strict prepare_board_adjustment flow grants readiness and resets it on relocation."""
+        res = self.sim.prepare_board_adjustment()
+        self.assertTrue(res["success"])
+        self.assertEqual(res["status"], "BOARD_ADJUSTMENT_READY")
+        self.assertTrue(self.sim.is_board_adjustment_ready)
+        self.assertTrue(self.sim.backend.is_service_safe())
+
+        # Perform relocation
+        res_reloc = self.sim.set_board_placement(forward_shift_mm=15.0)
+        self.assertTrue(res_reloc["success"])
+
+        # Token consumed
+        self.assertFalse(self.sim.is_board_adjustment_ready)
+
+        self.sim.reset_board_placement()
+
+    def test_b11_jog_invalidates_service_safe(self):
+        """b11. Jogging joint or TCP invalidates board adjustment readiness."""
+        self.sim.prepare_board_adjustment()
+        self.assertTrue(self.sim.is_board_adjustment_ready)
+
+        # Jog joint 0 slightly
+        res_jog = self.sim.runtime_jog_joint(0, 5.0)
+        self.assertTrue(res_jog["success"])
+        self.assertFalse(self.sim.is_board_adjustment_ready)
+
+        # Restore
+        self.sim.runtime_go_service_safe()
 
 
 if __name__ == "__main__":
