@@ -81,9 +81,35 @@ class FR3CollisionGuard:
         self_collision_margin_m: Optional[float] = None,
         restore_state: bool = False,
     ) -> CollisionResult:
-        """
-        Validate whether a single joint configuration is collision-free.
-        """
+        physics_lock = getattr(self.world, "_physics_lock", None)
+        if physics_lock is not None:
+            with physics_lock:
+                return self._validate_configuration_locked(
+                    joints_rad=joints_rad,
+                    allowed_grasp_piece_id=allowed_grasp_piece_id,
+                    safety_margin_m=safety_margin_m,
+                    gripper_board_margin_m=gripper_board_margin_m,
+                    self_collision_margin_m=self_collision_margin_m,
+                    restore_state=restore_state,
+                )
+        return self._validate_configuration_locked(
+            joints_rad=joints_rad,
+            allowed_grasp_piece_id=allowed_grasp_piece_id,
+            safety_margin_m=safety_margin_m,
+            gripper_board_margin_m=gripper_board_margin_m,
+            self_collision_margin_m=self_collision_margin_m,
+            restore_state=restore_state,
+        )
+
+    def _validate_configuration_locked(
+        self,
+        joints_rad: Sequence[float],
+        allowed_grasp_piece_id: Optional[str] = None,
+        safety_margin_m: Optional[float] = None,
+        gripper_board_margin_m: Optional[float] = None,
+        self_collision_margin_m: Optional[float] = None,
+        restore_state: bool = False,
+    ) -> CollisionResult:
         margin = safety_margin_m if safety_margin_m is not None else self.safety_margin_m
         gb_margin = gripper_board_margin_m if gripper_board_margin_m is not None else self.gripper_board_margin_m
         self_margin = self_collision_margin_m if self_collision_margin_m is not None else self.self_collision_margin_m
@@ -108,7 +134,9 @@ class FR3CollisionGuard:
             )
         finally:
             if q_bullet_orig is not None:
-                self.world.sync_robot_configuration(q_bullet_orig)
+                sync_fn = getattr(self.world, "sync_robot_collision_configuration", getattr(self.world, "sync_robot_configuration", None))
+                if sync_fn:
+                    sync_fn(q_bullet_orig)
 
     def _validate_configuration_internal(
         self,
@@ -121,8 +149,10 @@ class FR3CollisionGuard:
         robot_id: int,
         board_id: int,
     ) -> CollisionResult:
-        # 1. Sync PyBullet robot and gripper proxies to candidate q
-        self.world.sync_robot_configuration(joints_rad)
+        # 1. Side-effect-free sync of PyBullet robot and gripper proxies to candidate q
+        sync_fn = getattr(self.world, "sync_robot_collision_configuration", getattr(self.world, "sync_robot_configuration", None))
+        if sync_fn:
+            sync_fn(joints_rad)
         p.performCollisionDetection(physicsClientId=client)
 
         # 2. Check FR3 links <-> board
@@ -281,6 +311,35 @@ class FR3CollisionGuard:
         if not q_samples:
             return CollisionResult(safe=True)
 
+        physics_lock = getattr(self.world, "_physics_lock", None)
+        if physics_lock is not None:
+            with physics_lock:
+                return self._validate_trajectory_locked(
+                    q_samples=q_samples,
+                    allowed_grasp_piece_id=allowed_grasp_piece_id,
+                    safety_margin_m=safety_margin_m,
+                    max_subdivision_step_rad=max_subdivision_step_rad,
+                    self_collision_margin_m=self_collision_margin_m,
+                    restore_state=restore_state,
+                )
+        return self._validate_trajectory_locked(
+            q_samples=q_samples,
+            allowed_grasp_piece_id=allowed_grasp_piece_id,
+            safety_margin_m=safety_margin_m,
+            max_subdivision_step_rad=max_subdivision_step_rad,
+            self_collision_margin_m=self_collision_margin_m,
+            restore_state=restore_state,
+        )
+
+    def _validate_trajectory_locked(
+        self,
+        q_samples: Sequence[Sequence[float]],
+        allowed_grasp_piece_id: Optional[str] = None,
+        safety_margin_m: Optional[float] = None,
+        max_subdivision_step_rad: float = 0.0174533,
+        self_collision_margin_m: Optional[float] = None,
+        restore_state: bool = False,
+    ) -> CollisionResult:
         q_bullet_orig = None
         if restore_state:
             q_bullet_orig = [p.getJointState(self.world.robot_body_id, j, physicsClientId=self.world.client_id)[0] for j in range(6)]
@@ -295,7 +354,9 @@ class FR3CollisionGuard:
             )
         finally:
             if q_bullet_orig is not None:
-                self.world.sync_robot_configuration(q_bullet_orig)
+                sync_fn = getattr(self.world, "sync_robot_collision_configuration", getattr(self.world, "sync_robot_configuration", None))
+                if sync_fn:
+                    sync_fn(q_bullet_orig)
 
     def _validate_trajectory_internal(
         self,

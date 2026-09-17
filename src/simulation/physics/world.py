@@ -14,6 +14,7 @@ import json
 import math
 from pathlib import Path
 import time
+import threading
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pybullet as p
@@ -117,6 +118,8 @@ class VirtualPhysicalWorld:
             self._spawn_board()
             self._spawn_pieces()
 
+            self._physics_lock = threading.RLock()
+
             # Gripper proxy and PyBullet collision bodies
             self.gripper = VirtualGripper(profile_path=self.gripper_profile_path)
             self._spawn_gripper_proxies()
@@ -154,36 +157,65 @@ class VirtualPhysicalWorld:
         # Initialize robot to scene home pose and hold joints with position control
         home_deg = self.scene_cfg.get("home_pose", {}).get("joints_deg", [0.0, -45.0, 90.0, -45.0, -90.0, 0.0])
         home_rad = np.deg2rad(home_deg)
-        self.sync_robot_configuration(home_rad)
+        self.sync_robot_runtime_configuration(home_rad)
 
-    def sync_robot_configuration(self, joints_rad: Sequence[float]) -> None:
+    def sync_robot_collision_configuration(self, joints_rad: Sequence[float]) -> None:
         """
-        Mirror robot joint configuration into PyBullet FR3 model and update gripper proxies.
+        Side-effect-free mirror of robot joint configuration into PyBullet FR3 model for collision checks only.
+        Updates gripper collision proxies without mutating runtime TCP pose, history, or attached pieces.
         """
         if self.robot_body_id < 0 or self.client_id < 0:
             return
-        for j_idx in range(min(6, len(joints_rad))):
-            target_pos = float(joints_rad[j_idx])
-            p.resetJointState(self.robot_body_id, j_idx, target_pos, targetVelocity=0.0, physicsClientId=self.client_id)
-            p.setJointMotorControl2(
-                self.robot_body_id,
-                j_idx,
-                p.POSITION_CONTROL,
-                targetPosition=target_pos,
-                force=500.0,
-                physicsClientId=self.client_id,
-            )
+        with self._physics_lock:
+            for j_idx in range(min(6, len(joints_rad))):
+                target_pos = float(joints_rad[j_idx])
+                p.resetJointState(self.robot_body_id, j_idx, target_pos, targetVelocity=0.0, physicsClientId=self.client_id)
 
-        # Flange link 5 (wrist3_link)
-        link_state = p.getLinkState(self.robot_body_id, 5, computeForwardKinematics=True, physicsClientId=self.client_id)
-        flange_pos = np.array(link_state[4], dtype=float)
-        flange_quat = np.array(link_state[5], dtype=float)
+            # Flange link 5 (wrist3_link)
+            link_state = p.getLinkState(self.robot_body_id, 5, computeForwardKinematics=True, physicsClientId=self.client_id)
+            flange_pos = np.array(link_state[4], dtype=float)
+            flange_quat = np.array(link_state[5], dtype=float)
 
-        R_flange = quat_to_rot_matrix(flange_quat)
-        tool_cfg = self.scene_cfg.get("tool_transform", {})
-        tool_offset = np.array(tool_cfg.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.218]), dtype=float)
-        p_tcp = flange_pos + R_flange @ tool_offset
-        self.gripper.set_tcp_pose(p_tcp, flange_quat)
+            R_flange = quat_to_rot_matrix(flange_quat)
+            tool_cfg = self.scene_cfg.get("tool_transform", {})
+            tool_offset = np.array(tool_cfg.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.218]), dtype=float)
+            p_tcp = flange_pos + R_flange @ tool_offset
+            self.gripper.set_collision_proxy_pose(p_tcp, flange_quat)
+
+    def sync_robot_runtime_configuration(self, joints_rad: Sequence[float]) -> None:
+        """
+        Authoritative runtime mirror of robot joint configuration into PyBullet FR3 model.
+        Updates PyBullet motors, authoritative gripper TCP pose, history, and attached piece transforms.
+        """
+        if self.robot_body_id < 0 or self.client_id < 0:
+            return
+        with self._physics_lock:
+            for j_idx in range(min(6, len(joints_rad))):
+                target_pos = float(joints_rad[j_idx])
+                p.resetJointState(self.robot_body_id, j_idx, target_pos, targetVelocity=0.0, physicsClientId=self.client_id)
+                p.setJointMotorControl2(
+                    self.robot_body_id,
+                    j_idx,
+                    p.POSITION_CONTROL,
+                    targetPosition=target_pos,
+                    force=500.0,
+                    physicsClientId=self.client_id,
+                )
+
+            # Flange link 5 (wrist3_link)
+            link_state = p.getLinkState(self.robot_body_id, 5, computeForwardKinematics=True, physicsClientId=self.client_id)
+            flange_pos = np.array(link_state[4], dtype=float)
+            flange_quat = np.array(link_state[5], dtype=float)
+
+            R_flange = quat_to_rot_matrix(flange_quat)
+            tool_cfg = self.scene_cfg.get("tool_transform", {})
+            tool_offset = np.array(tool_cfg.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.218]), dtype=float)
+            p_tcp = flange_pos + R_flange @ tool_offset
+            self.gripper.set_tcp_pose(p_tcp, flange_quat)
+
+    def sync_robot_configuration(self, joints_rad: Sequence[float]) -> None:
+        """Backwards-compatible alias for authoritative runtime synchronization."""
+        self.sync_robot_runtime_configuration(joints_rad)
 
     def _spawn_board(self) -> None:
         """Create finite static board box collider."""
@@ -285,7 +317,7 @@ class VirtualPhysicalWorld:
         new_origin = (nom_origin[0] - shift_m, nom_origin[1], new_surface_z)
 
         for p_body in self.pieces.values():
-            if p_body.physical_state in (PiecePhysicalState.ON_BOARD, PiecePhysicalState.SETTLING, PiecePhysicalState.RESTING):
+            if p_body.physical_state in (PiecePhysicalState.ON_BOARD, PiecePhysicalState.RESTING):
                 pos, orn = p_body.get_pose_robot_base()
                 new_pos = pos + delta
                 p_body.set_pose_robot_base(new_pos, orn)
@@ -485,6 +517,10 @@ class VirtualPhysicalWorld:
 
     def get_attached_piece(self) -> Optional[XiangqiPieceBody]:
         return self.gripper.attached_piece
+
+    def get_piece(self, piece_id: str) -> Optional[XiangqiPieceBody]:
+        """Lookup piece body by its identifier."""
+        return self.pieces.get(piece_id)
 
     def get_snapshot(self) -> WorldStateSnapshot:
         """Return immutable snapshot of authoritative physics state."""

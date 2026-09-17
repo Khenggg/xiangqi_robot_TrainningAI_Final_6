@@ -60,6 +60,10 @@ class XiangqiPieceBody:
         )
         return np.array(pos, dtype=float), np.array(orn, dtype=float)
 
+    def get_position_robot(self) -> np.ndarray:
+        """Return position [3] in robot_base frame."""
+        return self.get_pose_robot_base()[0]
+
     def get_velocity(self) -> Tuple[np.ndarray, np.ndarray]:
         """Return (linear_velocity [3], angular_velocity [3]) in robot_base."""
         lin, ang = p.getBaseVelocity(self.body_id, physicsClientId=self.client_id)

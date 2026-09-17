@@ -152,17 +152,27 @@ class VirtualGripper:
         self.left_jaw_body_id = -1
         self.right_jaw_body_id = -1
 
-    def _update_proxy_poses(self) -> None:
-        """Synchronize kinematic PyBullet proxy bodies to current TCP pose and jaw width."""
+    def set_collision_proxy_pose(
+        self,
+        pos_m: Sequence[float],
+        quat: Sequence[float],
+        jaw_width: Optional[float] = None,
+    ) -> None:
+        """
+        Side-effect-free update of kinematic PyBullet proxy bodies for collision checking only.
+        Does NOT update runtime tcp_pos/quat, grasp_pos/quat, _history, velocity, or attached piece!
+        """
         if self.client_id < 0 or self.palm_body_id < 0:
             return
 
-        R_tcp = quat_to_rot_matrix(self.tcp_quat)
-        p_tcp = self.tcp_pos
+        p_tcp = np.asarray(pos_m, dtype=float)
+        q_tcp = np.asarray(quat, dtype=float)
+        R_tcp = quat_to_rot_matrix(q_tcp)
 
         palm_dz = float(self.palm_dimensions_m[2])
         jaw_dz = float(self.jaw_dimensions_m[2])
-        half_w = float(self.jaw_width_m) / 2.0
+        w = float(jaw_width) if jaw_width is not None else float(self.jaw_width_m)
+        half_w = w / 2.0
 
         # TCP is at the midpoint of the finger tips at Z=0.
         # Jaws extend backwards (towards flange) along -Z from Z=0 to -jaw_dz.
@@ -171,7 +181,7 @@ class VirtualGripper:
         p.resetBasePositionAndOrientation(
             self.palm_body_id,
             p_palm.tolist(),
-            list(self.tcp_quat),
+            list(q_tcp),
             physicsClientId=self.client_id,
         )
 
@@ -191,15 +201,19 @@ class VirtualGripper:
         p.resetBasePositionAndOrientation(
             self.left_jaw_body_id,
             p_left.tolist(),
-            list(self.tcp_quat),
+            list(q_tcp),
             physicsClientId=self.client_id,
         )
         p.resetBasePositionAndOrientation(
             self.right_jaw_body_id,
             p_right.tolist(),
-            list(self.tcp_quat),
+            list(q_tcp),
             physicsClientId=self.client_id,
         )
+
+    def _update_proxy_poses(self) -> None:
+        """Synchronize kinematic PyBullet proxy bodies to current TCP pose and jaw width."""
+        self.set_collision_proxy_pose(self.tcp_pos, self.tcp_quat, self.jaw_width_m)
 
     def set_tcp_pose(
         self,

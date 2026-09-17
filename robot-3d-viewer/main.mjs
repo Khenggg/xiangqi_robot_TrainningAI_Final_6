@@ -900,6 +900,7 @@ export function applyAuthoritativeBoardPlacement(packet) {
   state.forwardShiftMm = d;
   state.safeTransitHeightMm = h;
   state.boardHeightOffsetMm = zOff;
+  state.boardSurfaceHeightM = Number(packet.board_surface_z_m ?? packet.board_surface_z_robot_m ?? (0.0105 + zOff / 1000.0));
   state.placementVersion = ver;
 
   // Sync placement control UI
@@ -1451,30 +1452,43 @@ function handleBackendTrajectoryStage(stage, payload) {
     }
   } else if (stage === "LIFT") {
     updateStepperUI("stepLift", []);
+    const zBoard_mm = (state.boardSurfaceHeightM ?? (0.0105 + (state.boardHeightOffsetMm ?? 0.0) / 1000.0)) * 1000.0;
+    const safeH_mm = state.safeTransitHeightMm ?? 70.0;
+    const zSafe_mm = zBoard_mm + safeH_mm;
+    const zSafe_m = (zSafe_mm / 1000.0).toFixed(4);
     if (badge) {
       badge.className = "badge-warn";
-      badge.textContent = "🛫 1. ĐANG NHẤC LÊN (+70mm)";
+      badge.textContent = `🛫 1. ĐANG NHẤC LÊN (+${safeH_mm.toFixed(1)}mm)`;
     }
     if (expl) {
-      expl.innerHTML = `🛫 <strong>Giai đoạn 1 (Nhấc lên):</strong> Cánh tay nâng thẳng đứng ngàm kẹp lên cao độ an toàn <strong>+70mm</strong> ($Z = 0.0805\\text{m}$, $\\Delta XY \\le 1.0\\text{mm}$, tilt $\\le 0.5^\\circ$).`;
+      expl.innerHTML = `🛫 <strong>Giai đoạn 1 (Nhấc lên):</strong> Cánh tay nâng thẳng đứng ngàm kẹp lên cao độ an toàn <strong>+${safeH_mm.toFixed(1)}mm</strong> ($Z = ${zSafe_m}\\text{m}$, $\\Delta XY \\le 1.0\\text{mm}$, tilt $\\le 0.5^\\circ$).`;
     }
   } else if (stage === "TRANSIT") {
     updateStepperUI("stepTransit", ["stepLift"]);
+    const zBoard_mm = (state.boardSurfaceHeightM ?? (0.0105 + (state.boardHeightOffsetMm ?? 0.0) / 1000.0)) * 1000.0;
+    const safeH_mm = state.safeTransitHeightMm ?? 70.0;
+    const zSafe_mm = zBoard_mm + safeH_mm;
+    const zSafe_m = (zSafe_mm / 1000.0).toFixed(4);
     if (badge) {
       badge.className = "badge-transit";
-      badge.textContent = "✈️ 2. ĐANG BAY NGANG (+70mm)";
+      badge.textContent = `✈️ 2. ĐANG BAY NGANG (+${safeH_mm.toFixed(1)}mm)`;
     }
     if (expl) {
-      expl.innerHTML = `✈️ <strong>Giai đoạn 2 (Bay ngang):</strong> Robot di chuyển ngang trên mặt phẳng an toàn $Z = 0.0805\\text{m}$ (dung sai $\\pm 1.0\\text{mm}$, tilt $\\le 0.5^\\circ$).`;
+      expl.innerHTML = `✈️ <strong>Giai đoạn 2 (Bay ngang):</strong> Robot di chuyển ngang trên mặt phẳng an toàn $Z = ${zSafe_m}\\text{m}$ (dung sai $\\pm 1.0\\text{mm}$, tilt $\\le 0.5^\\circ$).`;
     }
   } else if (stage === "LAND") {
     updateStepperUI("stepLand", ["stepLift", "stepTransit"]);
+    const zBoard_mm = (state.boardSurfaceHeightM ?? (0.0105 + (state.boardHeightOffsetMm ?? 0.0) / 1000.0)) * 1000.0;
+    const pieceH_mm = physicalGeometryRef?.piece_height_mm ?? 9.43;
+    const graspRel_mm = pieceH_mm / 2.0;
+    const zGrasp_mm = zBoard_mm + graspRel_mm;
+    const zGrasp_m = (zGrasp_mm / 1000.0).toFixed(6);
     if (badge) {
       badge.className = "badge-land";
-      badge.textContent = "🛬 3. ĐANG HẠ CÁNH (+4.715mm)";
+      badge.textContent = `🛬 3. ĐANG HẠ CÁNH (+${graspRel_mm.toFixed(3)}mm)`;
     }
     if (expl) {
-      expl.innerHTML = `🛬 <strong>Giai đoạn 3 (Hạ cánh):</strong> Ngàm kẹp hạ cánh thẳng đứng xuống cao độ gắp $Z = 0.015215\\text{m}$ ($+4.715\\text{mm}$ tâm quân cờ, $\\Delta XY \\le 1.0\\text{mm}$, tilt $\\le 0.5^\\circ$).`;
+      expl.innerHTML = `🛬 <strong>Giai đoạn 3 (Hạ cánh):</strong> Ngàm kẹp hạ cánh thẳng đứng xuống cao độ gắp $Z = ${zGrasp_m}\\text{m}$ ($+${graspRel_mm.toFixed(3)}\\text{mm}$ tâm quân cờ, $\\Delta XY \\le 1.0\\text{mm}$, tilt $\\le 0.5^\\circ$).`;
     }
   } else if (stage === "COMPLETE") {
     updateStepperUI(null, ["stepLift", "stepTransit", "stepLand"]);

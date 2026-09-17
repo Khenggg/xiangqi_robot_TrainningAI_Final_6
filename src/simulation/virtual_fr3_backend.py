@@ -349,6 +349,7 @@ class VirtualFR3Backend(RobotBackend):
             col_res = self.collision_guard.validate_trajectory(
                 q_samples,
                 allowed_grasp_piece_id=self._allowed_grasp_piece_id,
+                restore_state=True,
             )
             if not col_res.safe:
                 with self._state_lock:
@@ -417,7 +418,8 @@ class VirtualFR3Backend(RobotBackend):
         self,
         target_joints_deg: Sequence[float],
         speed_factor: Optional[float] = None,
-        min_safe_z_m: float = 0.0805,
+        safe_plane_z_m: Optional[float] = None,
+        min_safe_z_m: Optional[float] = None,
         lift_delta_m: float = 0.065,
     ) -> bool:
         """
@@ -445,7 +447,14 @@ class VirtualFR3Backend(RobotBackend):
         lift_success = False
 
         # Strategy A: Vertical Cartesian lift if tool is over board / downward oriented
-        target_lift_z_m = max(curr_z_m + lift_delta_m, min_safe_z_m)
+        effective_safe_z = safe_plane_z_m if safe_plane_z_m is not None else min_safe_z_m
+        if effective_safe_z is not None:
+            target_lift_z_m = max(curr_z_m + lift_delta_m, effective_safe_z)
+        else:
+            target_lift_z_m = curr_z_m + lift_delta_m
+
+        # Cap recovery lift within feasible workspace reach
+        target_lift_z_m = min(target_lift_z_m, 0.40)
         lift_tcp_mm = list(curr_tcp)
         lift_tcp_mm[2] = target_lift_z_m * 1000.0
 

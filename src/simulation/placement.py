@@ -10,11 +10,19 @@ Enforces:
     z_board = board surface height
 - Exact analytical reach prechecks (d_max(H), H_max(d))
 - Quality scoring across 90 cells (joint limits, condition number, manipulability, clearance)
-- Continuous safe interval search and recommended operating interval determination
+
+NOTE on Continuous Interval Search / Automated Optimization:
+Continuous parameter optimization of board placement (e.g. automated Nelder-Mead / gradient
+interval search) is currently TODO / NOT IMPLEMENTED.
+The parameter pair (forward_shift_mm=28.5, safe_transit_height_mm=40.0) represents a
+previously tested candidate / known regression candidate, NOT a globally optimized or
+physically calibrated placement.
 """
 
 from dataclasses import asdict, dataclass, field
+import json
 import math
+from pathlib import Path
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
@@ -23,19 +31,55 @@ from src.domain.geometry import get_physical_geometry
 from src.simulation.kinematics.fr3 import FR3Kinematics, IKResult
 
 
+def load_nominal_scene_placement(scene_config_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Load nominal placement parameters from shared/virtual_fr3_scene.json."""
+    if scene_config_path is None:
+        scene_config_path = Path(__file__).resolve().parent.parent.parent / "shared" / "virtual_fr3_scene.json"
+    if scene_config_path.is_file():
+        try:
+            with open(scene_config_path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            return data.get("virtual_board_placement", {})
+        except Exception:
+            pass
+    return {
+        "grid_origin_in_robot_base_m": [-0.18, -0.16, 0.0105],
+        "board_center_in_robot_base_m": [-0.36, 0.0, 0.0105],
+        "grid_origin_in_3d_world_m": [0.16, 0.0105, 0.18],
+        "board_center_in_3d_world_m": [0.0, 0.0105, 0.36],
+        "board_surface_height_m": 0.0105,
+    }
+
+
 @dataclass
 class BoardPlacementState:
     """
     Authoritative runtime state for Xiangqi board placement.
+    Disambiguates:
+      - physical_board_center_robot_m: Center of board physical box in robot base {B}
+      - physical_board_center_world_m: Center of board physical box in Three.js world {W}
+      - board_surface_z_robot_m: Height of board playing surface in {B}
+      - board_visual_root_world_m: Visual root placement in Three.js {W}
+      - grid_origin_robot_m: Intersection of (row 0, col 0) in {B}
+      - board_center_robot_m / board_center_world_m: Backward-compatible aliases
     """
     forward_shift_mm: float = 0.0
     safe_transit_height_mm: float = 70.0
     board_height_offset_mm: float = 0.0
     grid_origin_robot_m: List[float] = field(default_factory=lambda: [-0.180, -0.160, 0.0105])
+    physical_board_center_robot_m: List[float] = field(default_factory=lambda: [-0.360, 0.0, 0.00525])
+    physical_board_center_world_m: List[float] = field(default_factory=lambda: [0.0, 0.00525, 0.360])
+    board_surface_z_robot_m: float = 0.0105
+    board_visual_root_world_m: List[float] = field(default_factory=lambda: [0.0, 0.0105, 0.360])
+    # Backward compatible aliases
     board_center_robot_m: List[float] = field(default_factory=lambda: [-0.360, 0.0, 0.00525])
     board_center_world_m: List[float] = field(default_factory=lambda: [0.0, 0.0105, 0.360])
     placement_version: int = 1
     timestamp: float = field(default_factory=time.time)
+
+    @property
+    def board_surface_z_m(self) -> float:
+        return self.board_surface_z_robot_m
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -44,6 +88,11 @@ class BoardPlacementState:
             "safe_transit_height_mm": round(self.safe_transit_height_mm, 2),
             "board_height_offset_mm": round(self.board_height_offset_mm, 2),
             "grid_origin_robot_m": [round(v, 5) for v in self.grid_origin_robot_m],
+            "physical_board_center_robot_m": [round(v, 5) for v in self.physical_board_center_robot_m],
+            "physical_board_center_world_m": [round(v, 5) for v in self.physical_board_center_world_m],
+            "board_surface_z_robot_m": round(self.board_surface_z_robot_m, 5),
+            "board_surface_z_m": round(self.board_surface_z_robot_m, 5),
+            "board_visual_root_world_m": [round(v, 5) for v in self.board_visual_root_world_m],
             "board_center_robot_m": [round(v, 5) for v in self.board_center_robot_m],
             "board_center_world_m": [round(v, 5) for v in self.board_center_world_m],
             "placement_version": self.placement_version,
@@ -56,8 +105,9 @@ class BoardPlacementState:
         forward_shift_mm: float,
         safe_transit_height_mm: float = 70.0,
         board_height_offset_mm: float = 0.0,
-        nominal_grid_origin_m: Sequence[float] = (-0.180, -0.160, 0.0105),
-        nominal_board_center_robot_m: Sequence[float] = (-0.360, 0.0, 0.00525),
+        nominal_grid_origin_m: Optional[Sequence[float]] = None,
+        nominal_board_center_robot_m: Optional[Sequence[float]] = None,
+        nominal_board_surface_z_m: Optional[float] = None,
         placement_version: int = 1,
     ) -> "BoardPlacementState":
         """
@@ -66,6 +116,16 @@ class BoardPlacementState:
         """
         d_m = float(forward_shift_mm) / 1000.0
         h_offset_m = float(board_height_offset_mm) / 1000.0
+
+        if nominal_grid_origin_m is None or nominal_board_center_robot_m is None or nominal_board_surface_z_m is None:
+            nom_cfg = load_nominal_scene_placement()
+            if nominal_grid_origin_m is None:
+                nominal_grid_origin_m = nom_cfg.get("grid_origin_in_robot_base_m", [-0.180, -0.160, 0.0105])
+            if nominal_board_surface_z_m is None:
+                nominal_board_surface_z_m = nom_cfg.get("board_surface_height_m", 0.0105)
+            if nominal_board_center_robot_m is None:
+                bc = nom_cfg.get("board_center_in_robot_base_m", [-0.360, 0.0, 0.0105])
+                nominal_board_center_robot_m = [bc[0], bc[1], nominal_board_surface_z_m / 2.0]
 
         orig_x0, orig_y0, orig_z = nominal_grid_origin_m
         nom_cx, nom_cy, nom_cz = nominal_board_center_robot_m
@@ -76,21 +136,28 @@ class BoardPlacementState:
             round(orig_z + h_offset_m, 6),
         ]
 
-        board_center_robot_m = [
+        physical_board_center_robot_m = [
             round(nom_cx - d_m, 6),
             round(nom_cy, 6),
             round(nom_cz + h_offset_m, 6),
         ]
 
-        # Mapping to Three.js:
+        board_surface_z_robot_m = round(nominal_board_surface_z_m + h_offset_m, 6)
+
+        # Mapping to Three.js world:
         # world_x = -robot_y
-        # world_y = +robot_z (board surface height)
+        # world_y = +robot_z
         # world_z = -robot_x
-        board_surface_z = grid_origin_robot_m[2]
-        board_center_world_m = [
-            round(-board_center_robot_m[1], 6),
-            round(board_surface_z, 6),
-            round(-board_center_robot_m[0], 6),
+        physical_board_center_world_m = [
+            round(-physical_board_center_robot_m[1], 6),
+            round(physical_board_center_robot_m[2], 6),
+            round(-physical_board_center_robot_m[0], 6),
+        ]
+
+        board_visual_root_world_m = [
+            round(-physical_board_center_robot_m[1], 6),
+            round(board_surface_z_robot_m, 6),
+            round(-physical_board_center_robot_m[0], 6),
         ]
 
         return cls(
@@ -98,8 +165,12 @@ class BoardPlacementState:
             safe_transit_height_mm=float(safe_transit_height_mm),
             board_height_offset_mm=float(board_height_offset_mm),
             grid_origin_robot_m=grid_origin_robot_m,
-            board_center_robot_m=board_center_robot_m,
-            board_center_world_m=board_center_world_m,
+            physical_board_center_robot_m=physical_board_center_robot_m,
+            physical_board_center_world_m=physical_board_center_world_m,
+            board_surface_z_robot_m=board_surface_z_robot_m,
+            board_visual_root_world_m=board_visual_root_world_m,
+            board_center_robot_m=physical_board_center_robot_m,
+            board_center_world_m=board_visual_root_world_m,
             placement_version=int(placement_version),
             timestamp=time.time(),
         )
@@ -125,6 +196,20 @@ def canonical_cell_to_robot_xyz_m(
     y = nominal_y0 + float(col) * col_spacing_m
     z = float(z_m)
     return round(x, 6), round(y, 6), round(z, 6)
+
+
+def find_nearest_cell(
+    pos_robot_m: Sequence[float],
+    grid_origin_robot_m: Sequence[float] = (-0.180, -0.160, 0.0105),
+    row_spacing_m: float = 0.040,
+    col_spacing_m: float = 0.040,
+) -> Tuple[int, int]:
+    """Map a 3D position in robot_base to nearest board grid (row, col)."""
+    px, py = float(pos_robot_m[0]), float(pos_robot_m[1])
+    x0, y0 = float(grid_origin_robot_m[0]), float(grid_origin_robot_m[1])
+    row = int(round((x0 - px) / row_spacing_m))
+    col = int(round((py - y0) / col_spacing_m))
+    return max(0, min(9, row)), max(0, min(8, col))
 
 
 class BoardPlacementAnalyzer:

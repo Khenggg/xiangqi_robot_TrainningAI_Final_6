@@ -9,6 +9,7 @@ Coordinates:
 
 from dataclasses import dataclass
 import json
+import logging
 import math
 from pathlib import Path
 import threading
@@ -16,6 +17,8 @@ import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pybullet as p
+
+logger = logging.getLogger(__name__)
 
 from src.hardware.backends.base import RobotStateSnapshot
 from src.hardware.telemetry_publisher import TelemetryPublisher
@@ -33,6 +36,42 @@ from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.placement import BoardPlacementAnalyzer, BoardPlacementState, canonical_cell_to_robot_xyz_m
 from src.simulation.virtual_fr3_backend import VirtualFR3Backend
 from src.domain.geometry import get_physical_geometry
+
+
+class PlaceResult(dict):
+    """Structured result for place_piece operation with backwards-compatible boolean behavior."""
+    def __init__(
+        self,
+        success: bool,
+        status: str,
+        error: Optional[str] = None,
+        piece_id: Optional[str] = None,
+        target_cell: Optional[Tuple[int, int]] = None,
+    ):
+        super().__init__(success=success, status=status, error=error, piece_id=piece_id, target_cell=target_cell)
+
+    def __bool__(self) -> bool:
+        return bool(self.get("success", False))
+
+    @property
+    def success(self) -> bool:
+        return bool(self.get("success", False))
+
+    @property
+    def status(self) -> str:
+        return str(self.get("status", "UNKNOWN"))
+
+    @property
+    def error(self) -> Optional[str]:
+        return self.get("error")
+
+    @property
+    def piece_id(self) -> Optional[str]:
+        return self.get("piece_id")
+
+    @property
+    def target_cell(self) -> Optional[Tuple[int, int]]:
+        return self.get("target_cell")
 
 
 class VirtualXiangqiSimulation:
@@ -86,6 +125,8 @@ class VirtualXiangqiSimulation:
         self.last_drop_event: Optional[DropEvent] = None
 
         self._command_lock = threading.Lock()
+        self._physics_query_lock = getattr(self.world, "_physics_lock", threading.RLock())
+        self._validation_in_progress = False
 
         # Register listener with backend
         self.backend.add_state_listener(self._on_robot_state_update)
@@ -96,6 +137,8 @@ class VirtualXiangqiSimulation:
 
         # Initial gripper sync to TCP
         self._sync_gripper_to_tcp(self.backend.get_state_snapshot())
+        if hasattr(self.world, "step_until_settled"):
+            self.world.step_until_settled(max_steps=20)
 
     def _load_scene_config(self):
         if self.scene_config_path.is_file():
@@ -143,7 +186,7 @@ class VirtualXiangqiSimulation:
     def find_nearest_cell(self, pos_robot_m: Sequence[float]) -> Tuple[int, int]:
         """Map a 3D position in robot_base to nearest board grid (row, col)."""
         px, py = float(pos_robot_m[0]), float(pos_robot_m[1])
-        x0, y0, _ = self.grid_origin_robot
+        x0, y0 = float(self.placement_state.grid_origin_robot_m[0]), float(self.placement_state.grid_origin_robot_m[1])
         col_sp = self.geom.board.column_spacing / 1000.0
         row_sp = self.geom.board.row_spacing / 1000.0
         row = int(round((x0 - px) / row_sp))
@@ -264,15 +307,15 @@ class VirtualXiangqiSimulation:
     def pick_piece(
         self,
         piece_id: str,
-        hover_height_m: float = 0.060,
+        hover_height_m: Optional[float] = None,
         speed_factor: float = 50.0,
     ) -> GraspResult:
         """
-        Execute pick trajectory over piece:
+        Execute pick trajectory over piece with strict fail-fast validation:
         1. Open gripper
-        2. Move above piece (hover)
+        2. Move above piece (hover) using current placement IK (dataset q is SEED only)
         3. Descend to grasp center
-        4. Close gripper (grasp)
+        4. Close gripper & verify grasp
         5. Lift back to hover
         """
         piece = self.world.pieces.get(piece_id)
@@ -282,90 +325,168 @@ class VirtualXiangqiSimulation:
         pos_robot, _ = piece.get_pose_robot_base()
         px, py, pz = pos_robot
 
-        # Open gripper
+        # Default hover height derives from authoritative dynamic placement
+        safe_h_m = (self.placement_state.safe_transit_height_mm / 1000.0) if hasattr(self, "placement_state") else 0.070
+        eff_hover_h = hover_height_m if hover_height_m is not None else safe_h_m
+        safe_plane_z = self.board_surface_z + safe_h_m
+
+        # 1. Open gripper
         self.backend.set_gripper(False)
 
-        # Target orientations
         rx, ry, rz = self.target_tool_euler_deg
+        hover_pose = [px * 1000.0, py * 1000.0, (pz + eff_hover_h) * 1000.0, rx, ry, rz]
 
-        # Nearest cell verified approach
+        # Use dataset approach joints STRICTLY as IK seed, never as direct motion target
         r, c = self.find_nearest_cell(pos_robot)
         cell_info = self.reachability_dataset.get((r, c))
+        seed_joints = np.radians(cell_info["approach_joints_deg"]) if cell_info and "approach_joints_deg" in cell_info else None
 
-        hover_pose = [px * 1000.0, py * 1000.0, (pz + hover_height_m) * 1000.0, rx, ry, rz]
-        if cell_info and "approach_joints_deg" in cell_info:
-            self.backend.move_joint_with_lift_recovery(cell_info["approach_joints_deg"], speed_factor=speed_factor)
-            self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
-        else:
-            ik = self.backend.solve_tcp_ik(hover_pose, allow_multi_seed=True)
-            if ik.success:
-                self.backend.move_joint_with_lift_recovery(np.degrees(ik.joints_rad), speed_factor=speed_factor)
+        ik_hover = self.backend.solve_tcp_ik(hover_pose, seed_joints=seed_joints, allow_multi_seed=True)
+        if not ik_hover.success:
+            return GraspResult(success=False, status=None, reason="Hover pose unreachable")
+
+        # 2. Preposition / Hover
+        ok_hover = self.backend.move_joint_with_lift_recovery(
+            np.degrees(ik_hover.joints_rad),
+            speed_factor=speed_factor,
+            safe_plane_z_m=safe_plane_z,
+        )
+        if not ok_hover:
+            return GraspResult(success=False, status=None, reason=f"Hover approach rejected: {self.backend._last_error}")
+
+        if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
+            return GraspResult(success=False, status=None, reason=f"Hover Cartesian alignment rejected: {self.backend._last_error}")
+
+        try:
+            self.backend.set_allowed_grasp_piece_id(piece_id)
+
+            # 3. Descend to grasp (TCP at piece center)
+            grasp_pose = [px * 1000.0, py * 1000.0, pz * 1000.0, rx, ry, rz]
+            if not self.backend.move_cartesian(grasp_pose, speed_factor=speed_factor):
+                return GraspResult(success=False, status=None, reason=f"Grasp descent rejected: {self.backend._last_error}")
+
+            # 4. Close gripper (triggers try_grasp)
+            self.backend.set_gripper(True)
+            attached = self.world.get_attached_piece()
+            if attached is not None and attached.piece_id == piece_id:
+                grasp_res = GraspResult(success=True, status=GraspStatus.SUCCESS, piece_id=attached.piece_id)
             else:
-                return GraspResult(success=False, status=None, reason="Hover pose unreachable")
+                raw_res = self.world.try_grasp(target_piece_id=piece_id)
+                if isinstance(raw_res, GraspResult):
+                    grasp_res = raw_res
+                elif isinstance(raw_res, bool):
+                    grasp_res = GraspResult(
+                        success=raw_res,
+                        status=GraspStatus.SUCCESS if raw_res else None,
+                        piece_id=piece_id if raw_res else None,
+                        reason=None if raw_res else "Grasp failed",
+                    )
+                elif hasattr(raw_res, "success"):
+                    grasp_res = raw_res
+                else:
+                    grasp_res = GraspResult(success=bool(raw_res), status=GraspStatus.SUCCESS if raw_res else None)
 
-        # Descend to grasp (TCP directly at piece center)
-        grasp_pose = [px * 1000.0, py * 1000.0, pz * 1000.0, rx, ry, rz]
-        self.backend.set_allowed_grasp_piece_id(piece_id)
-        if not self.backend.move_cartesian(grasp_pose, speed_factor=speed_factor):
+            if not grasp_res.success:
+                logger.warning(f"Grasp verification failed for {piece_id}: {grasp_res.reason}")
+                return grasp_res
+
+            # 5. Lift back to hover
+            if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
+                return GraspResult(success=False, status=GraspStatus.PARTIAL, reason=f"Lift after grasp failed: {self.backend._last_error}")
+
+            return grasp_res
+        finally:
             self.backend.set_allowed_grasp_piece_id(None)
-            return GraspResult(success=False, status=None, reason=f"Grasp descent rejected: {self.backend._last_error}")
-
-        # Close gripper (triggers _on_robot_state_update -> try_grasp)
-        self.backend.set_gripper(True)
-        attached = self.world.get_attached_piece()
-        if attached is not None:
-            res = GraspResult(success=True, status=GraspStatus.SUCCESS, piece_id=attached.piece_id)
-        else:
-            res = self.world.try_grasp()
-
-        # Lift back to hover
-        self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
-        self.backend.set_allowed_grasp_piece_id(None)
-
-        return res
 
     def place_piece(
         self,
-        col: int,
-        row: int,
-        hover_height_m: float = 0.060,
+        *args: Any,
+        col: Optional[int] = None,
+        row: Optional[int] = None,
+        target_cell: Optional[Tuple[int, int]] = None,
+        hover_height_m: Optional[float] = None,
         speed_factor: float = 50.0,
-    ) -> bool:
+        **kwargs: Any,
+    ) -> PlaceResult:
         """
-        Execute place trajectory to target board cell:
-        1. Move to hover above cell
-        2. Descend to board surface + piece thickness / 2
-        3. Open gripper (release)
-        4. Lift back to hover
+        Execute place trajectory to target board cell with strict fail-fast semantics:
+        1. Verify piece is currently attached
+        2. Move to hover above cell
+        3. Descend to land pose (surface + piece thickness / 2)
+        4. VERIFY LAND SUCCESS - IF FAILED: DO NOT OPEN GRIPPER, DO NOT RELEASE PIECE!
+        5. Open gripper & release piece
+        6. Settle
+        7. Lift back to hover
         """
-        tx, ty, tz = self.cell_to_robot_xyz(col, row)
+        attached = self.world.get_attached_piece()
+        if attached is None:
+            return PlaceResult(success=False, status="INVALID_STATE", error="No piece attached to gripper")
+
+        # Resolve destination coordinates across flexible invocation patterns:
+        # e.g.: place_piece(col, row), place_piece("piece_id", target_cell=(r, c)), place_piece(target_cell=(r, c))
+        if target_cell is None and "target_cell" in kwargs:
+            target_cell = kwargs["target_cell"]
+
+        if target_cell is not None:
+            r_target, c_target = int(target_cell[0]), int(target_cell[1])
+            tx, ty, tz = self.cell_to_robot_xyz_m(r_target, c_target)
+        else:
+            positional = [a for a in args if not isinstance(a, str)]
+            if len(positional) >= 2:
+                c_val, r_val = int(positional[0]), int(positional[1])
+                tx, ty, tz = self.cell_to_robot_xyz(c_val, r_val)
+            elif col is not None and row is not None:
+                tx, ty, tz = self.cell_to_robot_xyz(int(col), int(row))
+            else:
+                return PlaceResult(success=False, status="INVALID_ARGS", error="Missing destination cell or (col, row)")
+
         piece_h = self.geom.piece_height_mm / 1000.0
         piece_z = tz + piece_h / 2.0
 
-        rx, ry, rz = self.target_tool_euler_deg
+        safe_h_m = (self.placement_state.safe_transit_height_mm / 1000.0) if hasattr(self, "placement_state") else 0.070
+        eff_hover_h = hover_height_m if hover_height_m is not None else safe_h_m
+        safe_plane_z = self.board_surface_z + safe_h_m
 
-        hover_pose = [tx * 1000.0, ty * 1000.0, (piece_z + hover_height_m) * 1000.0, rx, ry, rz]
+        rx, ry, rz = self.target_tool_euler_deg
+        hover_pose = [tx * 1000.0, ty * 1000.0, (piece_z + eff_hover_h) * 1000.0, rx, ry, rz]
         place_pose = [tx * 1000.0, ty * 1000.0, piece_z * 1000.0, rx, ry, rz]
 
         # 1. Move to hover
         if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
             ik = self.backend.solve_tcp_ik(hover_pose, allow_multi_seed=True)
             if ik.success:
-                self.backend.move_joint_with_lift_recovery(np.degrees(ik.joints_rad), speed_factor=speed_factor)
+                ok_app = self.backend.move_joint_with_lift_recovery(
+                    np.degrees(ik.joints_rad),
+                    speed_factor=speed_factor,
+                    safe_plane_z_m=safe_plane_z,
+                )
+                if not ok_app:
+                    return PlaceResult(success=False, status="APPROACH_FAILED", error=f"Approach failed: {self.backend._last_error}")
             else:
-                return False
+                return PlaceResult(success=False, status="APPROACH_FAILED", error="Hover pose unreachable")
 
-        # 2. Descend to place
-        self.backend.move_cartesian(place_pose, speed_factor=speed_factor)
+        # 2. Descend to place (LAND)
+        land_ok = self.backend.move_cartesian(place_pose, speed_factor=speed_factor)
+        if not land_ok:
+            # CRITICAL FAIL-FAST INVARIANT: DO NOT OPEN GRIPPER, DO NOT RELEASE PIECE!
+            logger.error("place_piece LAND failed. Preserving grasp; piece NOT released.")
+            return PlaceResult(success=False, status="LAND_FAILED", error=f"Landing rejected: {self.backend._last_error}")
 
-        # 3. Open gripper (release)
+        # Verify piece is still attached before release
+        if self.world.get_attached_piece() is None:
+            return PlaceResult(success=False, status="INVALID_STATE", error="Piece lost before release")
+
+        # 3. Open gripper & release piece
         self.backend.set_gripper(False)
         self.world.release_attached_piece()
         self.world.step_until_settled(max_steps=20)
 
         # 4. Lift back to hover
-        self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
-        return True
+        lift_ok = self.backend.move_cartesian(hover_pose, speed_factor=speed_factor)
+        if not lift_ok:
+            return PlaceResult(success=True, status="LIFT_FAILED_AFTER_RELEASE", error=f"Lift after release failed: {self.backend._last_error}")
+
+        return PlaceResult(success=True, status="SUCCESS", error=None)
 
     def schedule_force_drop(
         self,
@@ -496,18 +617,21 @@ class VirtualXiangqiSimulation:
 
         return event
 
-    def cell_to_robot_xyz_m(self, row: int, col: int, z_m: float) -> List[float]:
+    def cell_to_robot_xyz_m(self, row: int, col: int, z_m: Optional[float] = None) -> List[float]:
         """Convert board cell (row, col) and altitude z_m to robot base XYZ coordinates."""
         d = self.placement_state.forward_shift_mm
+        effective_z = self.board_surface_z if z_m is None else float(z_m)
         r_sp = self.geom.grid_cell_length_mm / 1000.0
         c_sp = self.geom.grid_cell_width_mm / 1000.0
+        nom_x0 = self.placement_state.grid_origin_robot_m[0] + (d / 1000.0)
+        nom_y0 = self.placement_state.grid_origin_robot_m[1]
         x, y, z = canonical_cell_to_robot_xyz_m(
             row=row,
             col=col,
             forward_shift_mm=d,
-            z_m=z_m,
-            nominal_x0=-0.180,
-            nominal_y0=-0.160,
+            z_m=effective_z,
+            nominal_x0=nom_x0,
+            nominal_y0=nom_y0,
             row_spacing_m=r_sp,
             col_spacing_m=c_sp,
         )
@@ -524,16 +648,37 @@ class VirtualXiangqiSimulation:
         Rejects if robot is moving, active in a trajectory stage, or holding a piece.
         """
         with self._command_lock:
+            if getattr(self, "_validation_in_progress", False):
+                err = "Cannot change board placement while validation is actively running"
+                return {"success": False, "status": "BOARD_RELOCATION_REJECTED_BUSY", "error": err}
             snap = self.backend.get_state_snapshot()
             if snap.motion_state == "MOVING":
                 err = "Cannot change board placement while robot is MOVING"
-                return {"success": False, "error": err}
+                return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ROBOT_MOVING", "error": err}
             if snap.trajectory_stage not in (None, "IDLE", "COMPLETE"):
                 err = f"Cannot change board placement during active trajectory ({snap.trajectory_stage})"
-                return {"success": False, "error": err}
+                return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ACTIVE_TRAJECTORY", "error": err}
             if self.world.get_attached_piece() is not None:
                 err = "Cannot change board placement while a piece is attached to gripper"
-                return {"success": False, "error": err}
+                return {
+                    "success": False,
+                    "status": "BOARD_RELOCATION_REJECTED_WORLD_NOT_SETTLED",
+                    "error": err,
+                    "transient_pieces": [{"id": self.world.get_attached_piece().piece_id, "state": "ATTACHED_TO_GRIPPER"}],
+                }
+
+            transient = [
+                p_body for p_body in self.world.pieces.values()
+                if p_body.physical_state in (PiecePhysicalState.ATTACHED_TO_GRIPPER, PiecePhysicalState.FALLING, PiecePhysicalState.SETTLING)
+            ]
+            if transient:
+                err = "Cannot change board placement while world is not settled (pieces falling/settling/attached)"
+                return {
+                    "success": False,
+                    "status": "BOARD_RELOCATION_REJECTED_WORLD_NOT_SETTLED",
+                    "error": err,
+                    "transient_pieces": [{"id": p.piece_id, "state": p.physical_state.value} for p in transient],
+                }
 
             cur_h = self.placement_state.safe_transit_height_mm if safe_transit_height_mm is None else float(safe_transit_height_mm)
             cur_z_off = self.placement_state.board_height_offset_mm if board_height_offset_mm is None else float(board_height_offset_mm)
@@ -613,6 +758,26 @@ class VirtualXiangqiSimulation:
                 self.telemetry.broadcast_custom(stale_res)
             return stale_res
 
+        # Concurrency mutual exclusion: reject if robot is moving or active in trajectory
+        is_busy = (
+            getattr(self.backend, "_motion_state", None) == "MOVING"
+            or getattr(self.backend, "_trajectory_stage", None) not in (None, "IDLE", "COMPLETE")
+        )
+        if is_busy:
+            busy_res = {
+                "type": "placement_validation_result",
+                "success": False,
+                "status": "VALIDATION_REJECTED_BUSY",
+                "error": "Robot is currently moving; validation rejected to prevent concurrent physics mutation",
+                "reason": "Robot is currently moving; validation rejected to prevent concurrent physics mutation",
+                "placement_version": self.placement_state.placement_version,
+                "all_passed": False,
+                "total_cells": 90,
+            }
+            if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+                self.telemetry.broadcast_custom(busy_res)
+            return busy_res
+
         v_start = self.placement_state.placement_version
         d = self.placement_state.forward_shift_mm
         H = self.placement_state.safe_transit_height_mm
@@ -629,6 +794,8 @@ class VirtualXiangqiSimulation:
         snap_orig = self.backend.get_state_snapshot()
         backend_q_orig = np.array(self.backend._current_joints_rad, copy=True)
 
+        self._validation_in_progress = True
+        self._physics_query_lock.acquire()
         try:
             grasp_ik_ok = 0
             app_ik_ok = 0
@@ -819,14 +986,17 @@ class VirtualXiangqiSimulation:
             return res
 
         finally:
-            # Guaranteed state restoration (Section K)
-            world.sync_robot_configuration(q_bullet_orig)
-            self.backend._current_joints_rad = np.array(backend_q_orig, copy=True)
-            self.backend._current_joints_deg = [round(math.degrees(float(val)), 3) for val in backend_q_orig]
-            self.backend._flange_pose_mm_deg = self.backend._compute_flange_pose_mm_deg(backend_q_orig)
-            self.backend._tcp_pose_mm_deg = list(snap_orig.tcp_pose_mm_deg)
-            self.backend._motion_state = snap_orig.motion_state
-            self._sync_gripper_to_tcp(snap_orig)
+            try:
+                # Guaranteed state restoration without mutating gripper history
+                world.sync_robot_collision_configuration(q_bullet_orig)
+                self.backend._current_joints_rad = np.array(backend_q_orig, copy=True)
+                self.backend._current_joints_deg = [round(math.degrees(float(val)), 3) for val in backend_q_orig]
+                self.backend._flange_pose_mm_deg = self.backend._compute_flange_pose_mm_deg(backend_q_orig)
+                self.backend._tcp_pose_mm_deg = list(snap_orig.tcp_pose_mm_deg)
+                self.backend._motion_state = snap_orig.motion_state
+            finally:
+                self._validation_in_progress = False
+                self._physics_query_lock.release()
 
     def validate_full_board_routes(
         self,
@@ -839,6 +1009,27 @@ class VirtualXiangqiSimulation:
         Uses plan_cartesian() without state commit.
         Leaves PyBullet and backend robot state 100% unchanged.
         """
+        # Concurrency mutual exclusion: reject if robot is moving or active in trajectory
+        is_busy = (
+            getattr(self.backend, "_motion_state", None) == "MOVING"
+            or getattr(self.backend, "_trajectory_stage", None) not in (None, "IDLE", "COMPLETE")
+        )
+        if is_busy:
+            busy_res = {
+                "type": "full_route_validation_result",
+                "success": False,
+                "status": "VALIDATION_REJECTED_BUSY",
+                "error": "Robot is currently moving; validation rejected to prevent concurrent physics mutation",
+                "reason": "Robot is currently moving; validation rejected to prevent concurrent physics mutation",
+                "placement_version": self.placement_state.placement_version,
+                "all_passed": False,
+                "all_routes_safe": False,
+                "total_routes": 0,
+            }
+            if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
+                self.telemetry.broadcast_custom(busy_res)
+            return busy_res
+
         v_start = self.placement_state.placement_version
         world = self.world
         client = world.client_id
@@ -846,6 +1037,8 @@ class VirtualXiangqiSimulation:
         snap_orig = self.backend.get_state_snapshot()
         backend_q_orig = np.array(self.backend._current_joints_rad, copy=True)
 
+        self._validation_in_progress = True
+        self._physics_query_lock.acquire()
         try:
             board_z = self.board_surface_z
             piece_h = self.geom.piece_height_mm / 1000.0
@@ -987,13 +1180,17 @@ class VirtualXiangqiSimulation:
             return res
 
         finally:
-            world.sync_robot_configuration(q_bullet_orig)
-            self.backend._current_joints_rad = np.array(backend_q_orig, copy=True)
-            self.backend._current_joints_deg = [round(math.degrees(float(val)), 3) for val in backend_q_orig]
-            self.backend._flange_pose_mm_deg = self.backend._compute_flange_pose_mm_deg(backend_q_orig)
-            self.backend._tcp_pose_mm_deg = list(snap_orig.tcp_pose_mm_deg)
-            self.backend._motion_state = snap_orig.motion_state
-            self._sync_gripper_to_tcp(snap_orig)
+            try:
+                # Guaranteed state restoration without mutating gripper history
+                world.sync_robot_collision_configuration(q_bullet_orig)
+                self.backend._current_joints_rad = np.array(backend_q_orig, copy=True)
+                self.backend._current_joints_deg = [round(math.degrees(float(val)), 3) for val in backend_q_orig]
+                self.backend._flange_pose_mm_deg = self.backend._compute_flange_pose_mm_deg(backend_q_orig)
+                self.backend._tcp_pose_mm_deg = list(snap_orig.tcp_pose_mm_deg)
+                self.backend._motion_state = snap_orig.motion_state
+            finally:
+                self._validation_in_progress = False
+                self._physics_query_lock.release()
 
     def set_telemetry(self, telemetry: TelemetryPublisher) -> None:
         """Attach telemetry publisher and register incoming command callback."""
@@ -1102,6 +1299,15 @@ class VirtualXiangqiSimulation:
         solves on-demand IK, and guarantees allowed_grasp_piece_id cleanup.
         """
         with self._command_lock:
+            if getattr(self, "_validation_in_progress", False):
+                err_msg = "Validation actively in progress"
+                self.backend._last_error = err_msg
+                return {
+                    "success": False,
+                    "failed_stage": "PREPOSITION",
+                    "error": err_msg,
+                    "placement_version": self.placement_state.placement_version,
+                }
             current_ver = self.placement_state.placement_version
             if planned_placement_version is not None and planned_placement_version != current_ver:
                 err_msg = (
@@ -1205,7 +1411,7 @@ class VirtualXiangqiSimulation:
                     ok_app = self.backend.move_joint_with_lift_recovery(
                         target_app_deg,
                         speed_factor=speed_factor,
-                        min_safe_z_m=z_transit,
+                        safe_plane_z_m=z_transit,
                     )
                     if not ok_app:
                         err_msg = self.backend._last_error or f"Preposition approach to {src_cell} failed"
