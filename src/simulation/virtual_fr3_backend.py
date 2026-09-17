@@ -790,7 +790,7 @@ class VirtualFR3Backend(RobotBackend):
         Check if robot is in SERVICE_SAFE pose (within tolerance_deg on all joints)
         and gripper is open / not attached / connected / not moving.
         """
-        if not self.is_connected:
+        if not self.is_connected():
             return False
         with self._state_lock:
             if self._motion_state != "IDLE":

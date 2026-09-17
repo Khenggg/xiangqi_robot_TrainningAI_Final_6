@@ -171,6 +171,7 @@ class Phase3IsolationAndFailFastTests(unittest.TestCase):
     def test_pick_piece_uses_current_placement_not_nominal_dataset(self):
         """Pick piece must compute fresh IK for shifted position; dataset q is strictly an IK seed."""
         # Shift board forward by 30mm
+        self.sim.prepare_board_adjustment()
         self.sim.set_board_placement(forward_shift_mm=30.0)
         piece = self.world.get_piece("red_king_0")
         self.assertIsNotNone(piece)
@@ -343,6 +344,7 @@ class Phase3IsolationAndFailFastTests(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_nearest_cell_consistency_after_shift(self):
         """find_nearest_cell must round-trip accurately under forward shift."""
+        self.sim.prepare_board_adjustment()
         self.sim.set_board_placement(forward_shift_mm=30.0)
 
         test_cells = [(0, 0), (0, 4), (4, 4), (9, 0), (9, 8)]
@@ -364,6 +366,7 @@ class Phase3IsolationAndFailFastTests(unittest.TestCase):
     def test_reset_all_backend_data(self):
         """Verify full reset restores robot HOME, canonical piece positions, and nominal board placement."""
         # 1. Mutate state: shift board, move robot, attach piece
+        self.sim.prepare_board_adjustment()
         self.sim.set_board_placement(forward_shift_mm=30.0)
         piece = self.world.get_piece("red_king_0")
         self.world.gripper.attached_piece = piece

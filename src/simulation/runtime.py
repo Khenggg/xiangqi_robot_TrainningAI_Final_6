@@ -106,6 +106,9 @@ class VirtualXiangqiSimulation:
     the PyBullet Virtual Physical World and Telemetry streaming.
     """
 
+    DEFAULT_SERVICE_XY_MARGIN_M: float = 0.030
+    DEFAULT_SERVICE_VERTICAL_CLEARANCE_M: float = 0.050
+
     def __init__(
         self,
         backend: Optional[VirtualFR3Backend] = None,
@@ -807,10 +810,12 @@ class VirtualXiangqiSimulation:
         forward_shift_mm: Optional[float] = None,
         safe_transit_height_mm: Optional[float] = None,
         board_height_offset_mm: Optional[float] = None,
+        internal_reset: bool = False,
     ) -> Dict[str, Any]:
         """
         Dynamically adjust board forward shift, transit height, and surface Z.
-        Rejects if robot is moving, active in a trajectory stage, or holding a piece.
+        Requires prior preparation (BOARD_ADJUSTMENT_READY) and fresh physical
+        SERVICE_SAFE verification unless internal_reset is True.
         Validates swept volume between current and target placement against arm links.
         """
         try:
@@ -863,6 +868,23 @@ class VirtualXiangqiSimulation:
                             "details": swept_res.details,
                         }
 
+                    if not internal_reset:
+                        if not self._board_adjustment_ready:
+                            return {
+                                "success": False,
+                                "status": "BOARD_RELOCATION_REJECTED_NOT_READY",
+                                "error": "Board adjustment not prepared. Call prepare_board_adjustment() first.",
+                            }
+                        fresh_report = self.evaluate_service_safety()
+                        if not fresh_report.service_safe:
+                            self._board_adjustment_ready = False
+                            return {
+                                "success": False,
+                                "status": "BOARD_RELOCATION_REJECTED_SERVICE_UNSAFE",
+                                "error": f"Physical service safety predicate failed: {', '.join(fresh_report.reasons)}",
+                                "service_safety": fresh_report.to_dict(),
+                            }
+
                     new_version = self.placement_state.placement_version + 1
                     new_state = BoardPlacementState.compute(
                         forward_shift_mm=cur_fwd,
@@ -905,7 +927,12 @@ class VirtualXiangqiSimulation:
 
     def reset_board_placement(self) -> Dict[str, Any]:
         """Reset board placement to nominal scene configuration."""
-        return self.set_board_placement(forward_shift_mm=0.0, safe_transit_height_mm=70.0, board_height_offset_mm=0.0)
+        return self.set_board_placement(
+            forward_shift_mm=0.0,
+            safe_transit_height_mm=70.0,
+            board_height_offset_mm=0.0,
+            internal_reset=True,
+        )
 
     def clear_error(self) -> Dict[str, Any]:
         """Clear error state on robot backend."""
@@ -1031,7 +1058,7 @@ class VirtualXiangqiSimulation:
         reasons = []
 
         # 1. Connection & Controller State
-        robot_connected = bool(self.backend.is_connected)
+        robot_connected = bool(self.backend.is_connected())
         if not robot_connected:
             reasons.append("SERVICE_UNSAFE_NOT_CONNECTED")
 
@@ -1056,10 +1083,14 @@ class VirtualXiangqiSimulation:
         if piece_attached:
             reasons.append("SERVICE_UNSAFE_PIECE_ATTACHED")
 
-        # Transient piece states
+        # Transient piece states (ATTACHED_TO_GRIPPER, FALLING, or SETTLING)
         transient = [
             p_body for p_body in self.world.pieces.values()
-            if p_body.physical_state in (PiecePhysicalState.ATTACHED_TO_GRIPPER, PiecePhysicalState.FALLING)
+            if p_body.physical_state in (
+                PiecePhysicalState.ATTACHED_TO_GRIPPER,
+                PiecePhysicalState.FALLING,
+                PiecePhysicalState.SETTLING,
+            )
         ]
         if transient:
             reasons.append("SERVICE_UNSAFE_WORLD_NOT_SETTLED")
@@ -1075,19 +1106,44 @@ class VirtualXiangqiSimulation:
             reasons.append("SERVICE_UNSAFE_CLEARANCE")
             if closest_body.startswith("gripper_proxy_"):
                 gripper_clear = False
-                reasons.append("SERVICE_UNSAFE_GRIPPER_OVER_BOARD")
             else:
                 links_clear = False
+
+        # Full-geometry board service exclusion volume check using authoritative dimensions
+        half_length_m = (self.geom.board.outer_length / 2.0) / 1000.0
+        half_width_m = (self.geom.board.outer_width / 2.0) / 1000.0
+        board_thickness_m = self.geom.board.thickness / 1000.0
+        piece_height_m = self.geom.piece.height / 1000.0
+        board_cx, board_cy = self.placement_state.physical_board_center_robot_m[:2]
+        board_surface_z = self.placement_state.board_surface_z_robot_m
+
+        excl_report = self.world.check_service_exclusion_occupancy(
+            board_center_xy=(board_cx, board_cy),
+            board_surface_z=board_surface_z,
+            half_length_m=half_length_m,
+            half_width_m=half_width_m,
+            board_thickness_m=board_thickness_m,
+            piece_height_m=piece_height_m,
+            xy_margin_m=self.DEFAULT_SERVICE_XY_MARGIN_M,
+            vertical_clearance_m=self.DEFAULT_SERVICE_VERTICAL_CLEARANCE_M,
+        )
+
+        if excl_report["link_inside"]:
+            links_clear = False
+            if "SERVICE_UNSAFE_LINK_OVER_BOARD" not in reasons:
                 reasons.append("SERVICE_UNSAFE_LINK_OVER_BOARD")
 
-        # Board service exclusion box check
-        nom_cx, nom_cy = self.placement_state.physical_board_center_robot_m[:2]
-        surf_z = self.placement_state.board_surface_z_robot_m
-        excl_x_min = (nom_cx - 0.205 - 0.030) * 1000.0
-        excl_x_max = (nom_cx + 0.205 + 0.030) * 1000.0
-        excl_y_min = (nom_cy - 0.1835 - 0.030) * 1000.0
-        excl_y_max = (nom_cy + 0.1835 + 0.030) * 1000.0
-        excl_z_max = (surf_z + 0.00943 + 0.050) * 1000.0
+        if excl_report["gripper_inside"]:
+            gripper_clear = False
+            if "SERVICE_UNSAFE_GRIPPER_OVER_BOARD" not in reasons:
+                reasons.append("SERVICE_UNSAFE_GRIPPER_OVER_BOARD")
+
+        # Supplementary TCP Cartesian check
+        excl_x_min = (board_cx - half_length_m - self.DEFAULT_SERVICE_XY_MARGIN_M) * 1000.0
+        excl_x_max = (board_cx + half_length_m + self.DEFAULT_SERVICE_XY_MARGIN_M) * 1000.0
+        excl_y_min = (board_cy - half_width_m - self.DEFAULT_SERVICE_XY_MARGIN_M) * 1000.0
+        excl_y_max = (board_cy + half_width_m + self.DEFAULT_SERVICE_XY_MARGIN_M) * 1000.0
+        excl_z_max = (board_surface_z + piece_height_m + self.DEFAULT_SERVICE_VERTICAL_CLEARANCE_M) * 1000.0
 
         tcp_xyz = snap.tcp_pose_mm_deg[:3]
         if (excl_x_min <= tcp_xyz[0] <= excl_x_max and
@@ -1307,7 +1363,7 @@ class VirtualXiangqiSimulation:
                             "error": self.backend._last_error or "Failed to move to SERVICE_SAFE",
                         }
 
-                    self.world.step_until_settled(max_steps=10)
+                    self.world.step_until_settled(max_steps=80)
                     report = self.evaluate_service_safety()
                     if not report.service_safe:
                         return {

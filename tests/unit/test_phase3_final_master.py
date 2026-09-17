@@ -37,6 +37,7 @@ from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.physics.collision_guard import FR3CollisionGuard
 from src.simulation.runtime import VirtualXiangqiSimulation, RuntimeOperationState, RuntimeOperationBusy
 from src.simulation.virtual_fr3_backend import VirtualFR3Backend, SERVICE_SAFE_JOINTS_DEG
+from src.simulation.placement import BoardPlacementState
 
 
 class Phase3FinalMasterTests(unittest.TestCase):
@@ -258,7 +259,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
     def test_12_swept_volume_collision_clear_path(self):
         """12. Swept-volume check passes and relocates cleanly when arm is at service safe pose."""
-        self.sim.runtime_go_service_safe()
+        self.sim.prepare_board_adjustment()
         self.assertTrue(self.sim.backend.is_service_safe())
 
         # When at service safe pose, relocating board by 10mm should be completely clear
@@ -308,7 +309,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
         self.assertIsNone(self.sim.backend._last_error)
 
         # 2. reset_board
-        self.sim.runtime_go_service_safe()
+        self.sim.prepare_board_adjustment()
         self.sim.set_board_placement(forward_shift_mm=15.0)
         self.assertEqual(self.sim.placement_state.forward_shift_mm, 15.0)
         res_b = self.sim.reset_board()
@@ -342,7 +343,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
     def test_17_full_system_reset_in_process(self):
         """17. full_reset() restores complete system state without restarting Python process."""
         # Mutate system state: go service safe, change board placement, inject error
-        self.sim.runtime_go_service_safe()
+        self.sim.prepare_board_adjustment()
         self.sim.set_board_placement(forward_shift_mm=20.0)
         self.sim.backend._last_error = "Injected failure"
 
@@ -1082,7 +1083,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
     def test_b7_board_lowering_swept_path(self):
         """b7. Board lowering (-10mm) swept path is completely clear from SERVICE_SAFE."""
-        self.sim.runtime_go_service_safe()
+        self.sim.prepare_board_adjustment()
         swept_res = self.sim.world.check_board_swept_volume_collision(
             new_forward_shift_m=0.0,
             new_height_offset_m=-0.010,
@@ -1096,14 +1097,15 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
     def test_b8_forward_and_backward_shift_swept_path(self):
         """b8. Pure forward (+40mm) and backward (-20mm) translations pass cleanly from SERVICE_SAFE."""
-        self.sim.runtime_go_service_safe()
+        self.sim.prepare_board_adjustment()
 
         # Forward shift +40mm
         res_fwd = self.sim.set_board_placement(forward_shift_mm=40.0)
         self.assertTrue(res_fwd["success"])
         self.assertEqual(self.sim.placement_state.forward_shift_mm, 40.0)
 
-        # Backward shift -20mm
+        # Backward shift -20mm (prepare new one-shot token)
+        self.sim.prepare_board_adjustment()
         res_bwd = self.sim.set_board_placement(forward_shift_mm=-20.0)
         self.assertTrue(res_bwd["success"])
         self.assertEqual(self.sim.placement_state.forward_shift_mm, -20.0)
@@ -1112,7 +1114,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
     def test_b9_combined_diagonal_swept_path(self):
         """b9. Combined forward (+30mm) and raise (+20mm) diagonal path passes at SERVICE_SAFE."""
-        self.sim.runtime_go_service_safe()
+        self.sim.prepare_board_adjustment()
         swept_res = self.sim.world.check_board_swept_volume_collision(
             new_forward_shift_m=0.030,
             new_height_offset_m=0.020,
@@ -1155,6 +1157,255 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
         # Restore
         self.sim.runtime_go_service_safe()
+
+    # -------------------------------------------------------------------------
+    # PASS B CORRECTIVE TEST MATRIX (B-C1 to B-C12)
+    # -------------------------------------------------------------------------
+
+    def test_bc1_disconnected_backend_rejects_service_safe(self):
+        """B-C1. Disconnected backend evaluates robot_connected=False and service_safe=False."""
+        self.sim.runtime_go_service_safe()
+        try:
+            self.sim.backend.disconnect()
+            self.assertFalse(self.sim.backend.is_connected())
+            rep = self.sim.evaluate_service_safety()
+            self.assertFalse(rep.robot_connected)
+            self.assertFalse(rep.service_safe)
+            self.assertIn("SERVICE_UNSAFE_NOT_CONNECTED", rep.reasons)
+        finally:
+            self.sim.backend.connect()
+            self.sim.runtime_go_service_safe()
+
+    def test_bc2_backend_is_service_safe_rejects_disconnected(self):
+        """B-C2. VirtualFR3Backend.is_service_safe() properly rejects disconnected state."""
+        self.sim.backend.go_service_safe()
+        self.assertTrue(self.sim.backend.is_service_safe())
+        try:
+            self.sim.backend.disconnect()
+            self.assertFalse(self.sim.backend.is_connected())
+            self.assertFalse(self.sim.backend.is_service_safe())
+        finally:
+            self.sim.backend.connect()
+            self.sim.backend.go_service_safe()
+
+    def test_bc3_settling_invalidates_service_safe(self):
+        """B-C3. SETTLING piece physical state invalidates ServiceSafetyReport."""
+        self.sim.runtime_go_service_safe()
+        rep_before = self.sim.evaluate_service_safety()
+        self.assertTrue(rep_before.service_safe)
+
+        piece = next(iter(self.sim.world.pieces.values()))
+        orig_state = piece.physical_state
+        piece.physical_state = PiecePhysicalState.SETTLING
+        try:
+            rep_after = self.sim.evaluate_service_safety()
+            self.assertFalse(rep_after.service_safe)
+            self.assertIn("SERVICE_UNSAFE_WORLD_NOT_SETTLED", rep_after.reasons)
+            self.assertFalse(self.sim.is_service_safe())
+        finally:
+            piece.physical_state = orig_state
+
+    def test_bc4_settling_invalidates_board_readiness(self):
+        """B-C4. SETTLING piece invalidates live is_board_adjustment_ready property."""
+        res = self.sim.prepare_board_adjustment()
+        self.assertTrue(res["success"])
+        self.assertTrue(self.sim.is_board_adjustment_ready)
+
+        piece = next(iter(self.sim.world.pieces.values()))
+        orig_state = piece.physical_state
+        piece.physical_state = PiecePhysicalState.SETTLING
+        try:
+            self.assertFalse(self.sim.is_board_adjustment_ready)
+            self.assertFalse(self.sim.evaluate_service_safety().service_safe)
+        finally:
+            piece.physical_state = orig_state
+
+    def test_bc5_direct_relocation_without_prepare_rejected(self):
+        """B-C5. set_board_placement() directly without PREPARE_BOARD_ADJUSTMENT is rejected."""
+        self.sim.runtime_go_service_safe()
+        self.sim._board_adjustment_ready = False
+
+        res = self.sim.set_board_placement(forward_shift_mm=10.0)
+        self.assertFalse(res["success"])
+        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_NOT_READY")
+
+    def test_bc6_stale_readiness_token_with_unsafe_robot_rejected(self):
+        """B-C6. Stale readiness token + unsafe robot state is rejected with 100% state invariance."""
+        self.sim.prepare_board_adjustment()
+        self.assertTrue(self.sim._board_adjustment_ready)
+
+        # Mutate robot state: close gripper
+        self.sim.backend.close_gripper()
+        self.assertFalse(self.sim.evaluate_service_safety().service_safe)
+
+        # Record authoritative state before relocation attempt
+        orig_pos, orig_orn = self.sim.world.get_board_pose()
+        orig_placement_state = self.sim.placement_state
+        orig_version = self.sim.placement_state.placement_version
+        orig_joints = list(self.sim.backend.get_state_snapshot().joints_deg)
+
+        res = self.sim.set_board_placement(forward_shift_mm=10.0)
+        self.assertFalse(res["success"])
+        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_SERVICE_UNSAFE")
+        self.assertFalse(self.sim._board_adjustment_ready)  # Token invalidated!
+
+        # Verify 100% state invariance
+        new_pos, new_orn = self.sim.world.get_board_pose()
+        np.testing.assert_allclose(orig_pos, new_pos, atol=1e-5)
+        np.testing.assert_allclose(orig_orn, new_orn, atol=1e-5)
+        self.assertEqual(self.sim.placement_state, orig_placement_state)
+        self.assertEqual(self.sim.placement_state.placement_version, orig_version)
+        self.assertEqual(self.sim.backend.placement_version, orig_version)
+        np.testing.assert_allclose(orig_joints, self.sim.backend.get_state_snapshot().joints_deg, atol=1e-5)
+
+        # Restore
+        self.sim.backend.open_gripper()
+        self.sim.runtime_go_service_safe()
+
+    def test_bc7_negative_board_lowering_into_arm_rejected(self):
+        """B-C7. Real PyBullet swept volume collision: lowering board into obstructing arm is rejected."""
+        r, c = 0, 4
+        z_grasp = self.sim.board_surface_z
+        grasp_m = self.sim.cell_to_robot_xyz_m(r, c, z_grasp)
+        grasp_pose_mm = [grasp_m[0] * 1000.0, grasp_m[1] * 1000.0, grasp_m[2] * 1000.0, 180.0, 0.0, 90.0]
+        ik = self.sim.backend.solve_tcp_ik(grasp_pose_mm, allow_multi_seed=True)
+        if ik.success:
+            self.sim.backend.move_joint(np.degrees(ik.joints_rad).tolist())
+            self.sim.world.sync_robot_runtime_configuration(ik.joints_rad)
+
+        swept_res = self.sim.world.check_board_swept_volume_collision(
+            new_forward_shift_m=0.0,
+            new_height_offset_m=-0.010,
+        )
+        self.assertFalse(swept_res.is_safe, f"Expected swept lowering collision, got safe: {swept_res.reason}")
+
+        res = self.sim.set_board_placement(board_height_offset_mm=-10.0)
+        self.assertFalse(res["success"])
+        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR")
+
+        # Restore
+        self.sim.reset_robot()
+        self.sim.runtime_go_service_safe()
+
+    def test_bc8_rejected_lowering_preserves_full_authoritative_state(self):
+        """B-C8. Rejected lowering preserves 100% PyBullet board, pieces, placement state, and joints."""
+        r, c = 0, 4
+        z_grasp = self.sim.board_surface_z
+        grasp_m = self.sim.cell_to_robot_xyz_m(r, c, z_grasp)
+        grasp_pose_mm = [grasp_m[0] * 1000.0, grasp_m[1] * 1000.0, grasp_m[2] * 1000.0, 180.0, 0.0, 90.0]
+        ik = self.sim.backend.solve_tcp_ik(grasp_pose_mm, allow_multi_seed=True)
+        if ik.success:
+            self.sim.backend.move_joint(np.degrees(ik.joints_rad).tolist())
+            self.sim.world.sync_robot_runtime_configuration(ik.joints_rad)
+
+        orig_board_pos, orig_board_orn = self.sim.world.get_board_pose()
+        orig_state = self.sim.placement_state
+        orig_version = self.sim.placement_state.placement_version
+        orig_joints = list(self.sim.backend.get_state_snapshot().joints_deg)
+        orig_piece_poses = {pid: p.get_pose_robot_base() for pid, p in self.sim.world.pieces.items()}
+
+        res = self.sim.set_board_placement(board_height_offset_mm=-10.0)
+        self.assertFalse(res["success"])
+        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR")
+
+        new_board_pos, new_board_orn = self.sim.world.get_board_pose()
+        np.testing.assert_allclose(orig_board_pos, new_board_pos, atol=1e-5)
+        np.testing.assert_allclose(orig_board_orn, new_board_orn, atol=1e-5)
+        self.assertEqual(self.sim.placement_state, orig_state)
+        self.assertEqual(self.sim.placement_state.placement_version, orig_version)
+        self.assertEqual(self.sim.backend.placement_version, orig_version)
+        np.testing.assert_allclose(orig_joints, self.sim.backend.get_state_snapshot().joints_deg, atol=1e-5)
+        for pid, p in self.sim.world.pieces.items():
+            pos, orn = p.get_pose_robot_base()
+            np.testing.assert_allclose(orig_piece_poses[pid][0], pos, atol=1e-4)
+
+        # Restore
+        self.sim.reset_robot()
+        self.sim.runtime_go_service_safe()
+
+    def test_bc9_service_exclusion_detects_link_inside_region(self):
+        """B-C9. Service exclusion volume detects robot link inside even when TCP is outside."""
+        # At HOME pose [0, -45, 90, -45, -90, 0], link 4 & 5 penetrate the service exclusion volume
+        self.sim.runtime_move_joint([0.0, -45.0, 90.0, -45.0, -90.0, 0.0])
+        rep = self.sim.evaluate_service_safety()
+        self.assertFalse(rep.service_safe)
+        self.assertFalse(rep.links_clear)
+        self.assertIn("SERVICE_UNSAFE_LINK_OVER_BOARD", rep.reasons)
+
+        self.sim.runtime_go_service_safe()
+
+    def test_bc10_service_exclusion_detects_gripper_proxy(self):
+        """B-C10. Service exclusion volume detects gripper proxy occupancy."""
+        # Place TCP at low pose where gripper proxy penetrates exclusion volume
+        r, c = 0, 4
+        z_grasp = self.sim.board_surface_z
+        grasp_m = self.sim.cell_to_robot_xyz_m(r, c, z_grasp)
+        grasp_pose_mm = [grasp_m[0] * 1000.0, grasp_m[1] * 1000.0, grasp_m[2] * 1000.0, 180.0, 0.0, 90.0]
+        ik = self.sim.backend.solve_tcp_ik(grasp_pose_mm, allow_multi_seed=True)
+        if ik.success:
+            self.sim.backend.move_joint(np.degrees(ik.joints_rad).tolist())
+            self.sim.world.sync_robot_runtime_configuration(ik.joints_rad)
+
+        rep = self.sim.evaluate_service_safety()
+        self.assertFalse(rep.service_safe)
+        self.assertFalse(rep.gripper_clear)
+        self.assertIn("SERVICE_UNSAFE_GRIPPER_OVER_BOARD", rep.reasons)
+
+        self.sim.runtime_go_service_safe()
+
+    def test_bc11_authoritative_service_safe_candidate_passes_corrected_predicate(self):
+        """B-C11. Authoritative candidate [0, -70, 60, -80, -90, 0] passes corrected predicate with high clearance."""
+        self.sim.runtime_go_service_safe()
+        rep = self.sim.evaluate_service_safety()
+
+        self.assertTrue(rep.service_safe)
+        self.assertEqual(len(rep.reasons), 0)
+        self.assertTrue(rep.robot_connected)
+        self.assertTrue(rep.robot_idle)
+        self.assertTrue(rep.trajectory_idle)
+        self.assertTrue(rep.gripper_open)
+        self.assertFalse(rep.piece_attached)
+        self.assertTrue(rep.links_clear)
+        self.assertTrue(rep.gripper_clear)
+        self.assertGreaterEqual(rep.min_board_clearance_mm, 50.0)
+        self.assertGreaterEqual(rep.min_joint_margin_deg, 10.0)
+        self.assertLessEqual(rep.condition_number, 50.0)
+        self.assertTrue(rep.service_pose_match)
+        self.assertTrue(self.sim.is_service_safe())
+
+    def test_bc12_supported_envelope_boundary_cases_remain_safe(self):
+        """B-C12. SERVICE_SAFE pose remains physically safe across all boundary corners of supported envelope."""
+        self.sim.runtime_go_service_safe()
+        envelope_corners = [
+            (-20.0, -10.0),
+            (-20.0, 30.0),
+            (60.0, -10.0),
+            (60.0, 30.0),
+        ]
+        half_l = (self.sim.geom.board.outer_length / 2.0) / 1000.0
+        half_w = (self.sim.geom.board.outer_width / 2.0) / 1000.0
+        piece_h = self.sim.geom.piece.height / 1000.0
+        thick = self.sim.geom.board.thickness / 1000.0
+
+        for fwd, z_off in envelope_corners:
+            st = BoardPlacementState.compute(forward_shift_mm=fwd, board_height_offset_mm=z_off)
+            cx, cy = st.physical_board_center_robot_m[:2]
+            surf_z = st.board_surface_z_robot_m
+
+            excl = self.sim.world.check_service_exclusion_occupancy(
+                board_center_xy=(cx, cy),
+                board_surface_z=surf_z,
+                half_length_m=half_l,
+                half_width_m=half_w,
+                board_thickness_m=thick,
+                piece_height_m=piece_h,
+                xy_margin_m=self.sim.DEFAULT_SERVICE_XY_MARGIN_M,
+                vertical_clearance_m=self.sim.DEFAULT_SERVICE_VERTICAL_CLEARANCE_M,
+            )
+            self.assertFalse(excl["link_inside"], f"Corner ({fwd}, {z_off}) link encroached: {excl}")
+            self.assertFalse(excl["gripper_inside"], f"Corner ({fwd}, {z_off}) gripper encroached: {excl}")
+            self.assertGreater(excl["min_moving_link_dist_m"], 0.05, f"Corner ({fwd}, {z_off}) link margin < 50mm")
+            self.assertGreater(excl["min_gripper_proxy_dist_m"], 0.10, f"Corner ({fwd}, {z_off}) proxy margin < 100mm")
 
 
 if __name__ == "__main__":

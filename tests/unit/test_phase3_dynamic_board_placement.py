@@ -103,6 +103,9 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         init_ver = sim.placement_state.placement_version
         init_board_pos = sim.world.get_board_pose()[0]
 
+        # Prepare board adjustment
+        sim.prepare_board_adjustment()
+
         # Record piece positions before relocation
         piece_p_before = {}
         for pid, p in sim.world.pieces.items():
@@ -144,6 +147,7 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         v1 = sim.placement_state.placement_version
 
         # Move board to 28mm -> Version 2
+        sim.prepare_board_adjustment()
         sim.set_board_placement(forward_shift_mm=28.0, safe_transit_height_mm=40.0)
         v2 = sim.placement_state.placement_version
         self.assertEqual(v2, v1 + 1)
@@ -309,6 +313,7 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         self.assertIn("link 3", sim.backend._last_error)
 
         # Step 2: Relocate to recommended operating region (d = 28.5mm, H = 40mm)
+        sim.prepare_board_adjustment()
         res_reloc = sim.set_board_placement(forward_shift_mm=28.5, safe_transit_height_mm=40.0)
         self.assertTrue(res_reloc["success"])
 
@@ -374,6 +379,7 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         """
         sim = VirtualXiangqiSimulation()
         sim.start()
+        sim.prepare_board_adjustment()
         sim.set_board_placement(forward_shift_mm=28.5, safe_transit_height_mm=40.0)
 
         routes = [
@@ -495,6 +501,7 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         """
         sim = VirtualXiangqiSimulation()
         sim.start()
+        sim.prepare_board_adjustment()
         sim.set_board_placement(forward_shift_mm=28.5, safe_transit_height_mm=40.0)
 
         res = sim.validate_board_placement()
@@ -515,6 +522,7 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         """
         sim = VirtualXiangqiSimulation()
         sim.start()
+        sim.prepare_board_adjustment()
         sim.set_board_placement(forward_shift_mm=28.5, safe_transit_height_mm=40.0)
 
         res = sim.validate_full_board_routes(sample_limit=8)

@@ -437,6 +437,106 @@ class VirtualPhysicalWorld:
 
             return min_dist, closest_name
 
+    def check_service_exclusion_occupancy(
+        self,
+        board_center_xy: Sequence[float],
+        board_surface_z: float,
+        half_length_m: float,
+        half_width_m: float,
+        board_thickness_m: float,
+        piece_height_m: float,
+        xy_margin_m: float = 0.030,
+        vertical_clearance_m: float = 0.050,
+    ) -> Dict[str, Any]:
+        """
+        Evaluate full physical occupancy of the board service exclusion volume
+        against moving robot links (0..5) and gripper proxies using PyBullet collision detection.
+        No permanent side-effects; cleans up temporary collision body in finally block.
+        """
+        if self.client_id < 0 or self.robot_body_id < 0:
+            return {
+                "link_inside": False,
+                "gripper_inside": False,
+                "intruding_links": [],
+                "intruding_proxies": [],
+                "min_moving_link_dist_m": float("inf"),
+                "min_gripper_proxy_dist_m": float("inf"),
+            }
+
+        with self._physics_lock:
+            hx = float(half_length_m) + float(xy_margin_m)
+            hy = float(half_width_m) + float(xy_margin_m)
+            hz = (float(board_thickness_m) + float(piece_height_m) + float(vertical_clearance_m) + float(xy_margin_m)) / 2.0
+            box_cz = float(board_surface_z) + float(piece_height_m) + float(vertical_clearance_m) - hz
+            cx = float(board_center_xy[0])
+            cy = float(board_center_xy[1])
+
+            col_shape = p.createCollisionShape(
+                p.GEOM_BOX,
+                halfExtents=[hx, hy, hz],
+                physicsClientId=self.client_id,
+            )
+            body_id = p.createMultiBody(
+                baseMass=0,
+                baseCollisionShapeIndex=col_shape,
+                basePosition=[cx, cy, box_cz],
+                physicsClientId=self.client_id,
+            )
+
+            link_inside = False
+            gripper_inside = False
+            intruding_links = []
+            intruding_proxies = []
+            min_moving_link_dist = float("inf")
+            min_gripper_proxy_dist = float("inf")
+
+            try:
+                # 1. Query robot moving links (link 0 to 5)
+                pts = p.getClosestPoints(
+                    body_id,
+                    self.robot_body_id,
+                    distance=0.5,
+                    physicsClientId=self.client_id,
+                )
+                for pt in pts:
+                    link_idx = int(pt[4])
+                    if link_idx >= 0:  # moving link
+                        dist = float(pt[8])
+                        if dist < min_moving_link_dist:
+                            min_moving_link_dist = dist
+                        if dist <= 0.0:
+                            link_inside = True
+                            if link_idx not in intruding_links:
+                                intruding_links.append(link_idx)
+
+                # 2. Query gripper proxies
+                for proxy_id in self.gripper.proxy_body_ids:
+                    pts_g = p.getClosestPoints(
+                        body_id,
+                        proxy_id,
+                        distance=0.5,
+                        physicsClientId=self.client_id,
+                    )
+                    for pt in pts_g:
+                        dist = float(pt[8])
+                        if dist < min_gripper_proxy_dist:
+                            min_gripper_proxy_dist = dist
+                        if dist <= 0.0:
+                            gripper_inside = True
+                            if proxy_id not in intruding_proxies:
+                                intruding_proxies.append(proxy_id)
+            finally:
+                p.removeBody(body_id, physicsClientId=self.client_id)
+
+            return {
+                "link_inside": link_inside,
+                "gripper_inside": gripper_inside,
+                "intruding_links": intruding_links,
+                "intruding_proxies": intruding_proxies,
+                "min_moving_link_dist_m": min_moving_link_dist,
+                "min_gripper_proxy_dist_m": min_gripper_proxy_dist,
+            }
+
     def check_board_swept_volume_collision(
         self,
         new_forward_shift_m: float,
