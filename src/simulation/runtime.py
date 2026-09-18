@@ -2829,18 +2829,35 @@ class VirtualXiangqiSimulation:
                             piece_at_dst = p_id
 
                 # Determine whether this trajectory executes a pick & place or an arm transit:
-                # - If grasp_piece is explicitly True: requires empty dst_cell and valid piece_at_src.
+                # - If grasp_piece is explicitly True: requires valid piece_at_src and empty dst_cell.
                 # - If grasp_piece is None: pick & place if piece_at_src is present AND dst_cell is empty;
                 #   if dst_cell is occupied, treat as arm-only transit to avoid colliding into dst piece.
                 # - If grasp_piece is False: arm-only transit.
                 should_grasp = False
                 if grasp_piece is True:
+                    if piece_at_src is None:
+                        err_msg = f"Pick & place rejected: Source cell {src_cell} has no piece to grasp"
+                        self.backend._last_error = err_msg
+                        self.backend.set_trajectory_stage("IDLE")
+                        return {
+                            "success": False,
+                            "status": "PRECHECK_NO_SOURCE_PIECE",
+                            "failed_stage": "PRECHECK",
+                            "error": err_msg,
+                            "placement_version": current_ver,
+                        }
                     if piece_at_dst is not None:
                         err_msg = f"Cannot pick and place to occupied destination cell {dst_cell} (occupied by {piece_at_dst})"
                         self.backend._last_error = err_msg
                         self.backend.set_trajectory_stage("IDLE")
-                        return {"success": False, "failed_stage": "PRECHECK", "error": err_msg, "placement_version": current_ver}
-                    should_grasp = (piece_at_src is not None)
+                        return {
+                            "success": False,
+                            "status": "PRECHECK_DESTINATION_OCCUPIED",
+                            "failed_stage": "PRECHECK",
+                            "error": err_msg,
+                            "placement_version": current_ver,
+                        }
+                    should_grasp = True
                 elif grasp_piece is None:
                     should_grasp = (piece_at_src is not None and piece_at_dst is None)
                 else:
@@ -2889,8 +2906,31 @@ class VirtualXiangqiSimulation:
 
                 # Grasp piece if present at src_cell and should_grasp is True
                 if should_grasp and piece_at_src:
+                    self.backend.set_trajectory_stage("GRASP")
                     self.backend.set_gripper(True)
-                    self.world.try_grasp(target_piece_id=piece_at_src)
+                    attached = self.world.get_attached_piece()
+                    if attached is not None and attached.piece_id == piece_at_src:
+                        grasp_res = GraspResult(success=True, status=GraspStatus.SUCCESS, piece_id=attached.piece_id)
+                    else:
+                        grasp_res = self.world.try_grasp(target_piece_id=piece_at_src)
+                    world_attached = self.world.get_attached_piece()
+                    if not (grasp_res.success and world_attached is not None and world_attached.piece_id == piece_at_src):
+                        self.backend.set_trajectory_stage("FAILED")
+                        self.backend.set_gripper(False)
+                        self.world.release_attached_piece()
+                        self.backend.set_attached_piece_id(None)
+                        status_name = grasp_res.status.name if hasattr(grasp_res, "status") and hasattr(grasp_res.status, "name") else str(getattr(grasp_res, "status", "GRASP_FAILED"))
+                        err_msg = f"GRASP stage failed: Could not grasp piece {piece_at_src} at source cell {src_cell} ({status_name})"
+                        self.backend._last_error = err_msg
+                        return {
+                            "success": False,
+                            "status": "GRASP_FAILED",
+                            "failed_stage": "GRASP",
+                            "error": err_msg,
+                            "service_safe": False,
+                            "requires_recovery": True,
+                            "placement_version": current_ver,
+                        }
                     self.backend.set_attached_piece_id(piece_at_src)
                 else:
                     self.backend.set_gripper(False)
@@ -2900,8 +2940,17 @@ class VirtualXiangqiSimulation:
                 ok1 = self.move_cartesian(to_mm_deg(src_app_m), speed_factor=speed_factor, samples=samples_per_stage)
                 if not ok1:
                     err_msg = self.backend._last_error or "LIFT stage failed"
-                    self.backend.set_trajectory_stage("IDLE")
-                    return {"success": False, "failed_stage": "LIFT", "error": err_msg, "placement_version": current_ver}
+                    self.backend.set_trajectory_stage("FAILED")
+                    attached_now = (self.world.get_attached_piece() is not None)
+                    return {
+                        "success": False,
+                        "status": "LIFT_FAILED",
+                        "failed_stage": "LIFT",
+                        "error": err_msg,
+                        "service_safe": False,
+                        "requires_recovery": attached_now or should_grasp,
+                        "placement_version": current_ver,
+                    }
 
                 # If piece was grasped, verify payload clearance
                 if should_grasp and piece_at_src:
@@ -2914,6 +2963,7 @@ class VirtualXiangqiSimulation:
                         self.backend.set_trajectory_stage("FAILED")
                         return {
                             "success": False,
+                            "status": "PAYLOAD_CLEAR_FAILED",
                             "failed_stage": "LIFT",
                             "error": err_msg,
                             "service_safe": False,
@@ -2926,16 +2976,34 @@ class VirtualXiangqiSimulation:
                 ok2 = self.move_cartesian(to_mm_deg(dst_app_m), speed_factor=speed_factor, samples=samples_per_stage)
                 if not ok2:
                     err_msg = self.backend._last_error or "TRANSIT stage failed"
-                    self.backend.set_trajectory_stage("IDLE")
-                    return {"success": False, "failed_stage": "TRANSIT", "error": err_msg, "placement_version": current_ver}
+                    self.backend.set_trajectory_stage("FAILED")
+                    attached_now = (self.world.get_attached_piece() is not None)
+                    return {
+                        "success": False,
+                        "status": "TRANSIT_FAILED",
+                        "failed_stage": "TRANSIT",
+                        "error": err_msg,
+                        "service_safe": False,
+                        "requires_recovery": attached_now or should_grasp,
+                        "placement_version": current_ver,
+                    }
 
                 # --- Stage 3: LAND (vertical MoveL from safe transit height down to grasp target) ---
                 self.backend.set_trajectory_stage("LAND")
                 ok3 = self.move_cartesian(to_mm_deg(dst_grasp_m), speed_factor=speed_factor, samples=samples_per_stage)
                 if not ok3:
                     err_msg = self.backend._last_error or "LAND stage failed"
-                    self.backend.set_trajectory_stage("IDLE")
-                    return {"success": False, "failed_stage": "LAND", "error": err_msg, "placement_version": current_ver}
+                    self.backend.set_trajectory_stage("FAILED")
+                    attached_now = (self.world.get_attached_piece() is not None)
+                    return {
+                        "success": False,
+                        "status": "LAND_FAILED",
+                        "failed_stage": "LAND",
+                        "error": err_msg,
+                        "service_safe": False,
+                        "requires_recovery": attached_now or should_grasp,
+                        "placement_version": current_ver,
+                    }
 
                 # --- Stage 4: Release & Settle (if piece was grasped) ---
                 piece_placed = False
@@ -2979,6 +3047,7 @@ class VirtualXiangqiSimulation:
                     err_msg = self.backend._last_error or "Post-release lift failed"
                     return {
                         "success": False,
+                        "status": "POST_RELEASE_LIFT_FAILED",
                         "failed_stage": "POST_RELEASE_LIFT",
                         "error": err_msg,
                         "service_safe": False,
@@ -2992,6 +3061,7 @@ class VirtualXiangqiSimulation:
                 self.backend.set_trajectory_stage("CLEAR_BOARD")
                 clear_z_mm = (z_transit + 0.030) * 1000.0
                 curr_tcp = list(self.backend.get_state_snapshot().tcp_pose_mm_deg)
+                ok_clear = True
                 if curr_tcp[2] < clear_z_mm:
                     clear_tcp = list(curr_tcp)
                     clear_tcp[2] = clear_z_mm
@@ -2999,7 +3069,26 @@ class VirtualXiangqiSimulation:
                     if not ok_clear:
                         ik_clear = self.backend.solve_tcp_ik(clear_tcp, allow_multi_seed=True)
                         if ik_clear.success:
-                            self.backend.move_joint(np.degrees(ik_clear.joints_rad).tolist(), speed_factor=speed_factor)
+                            ok_clear = self.backend.move_joint(np.degrees(ik_clear.joints_rad).tolist(), speed_factor=speed_factor)
+                        else:
+                            ok_clear = False
+
+                if not ok_clear:
+                    self.backend.set_trajectory_stage("FAILED")
+                    err_msg = self.backend._last_error or "Clear board stage failed"
+                    rep = self.evaluate_service_safety()
+                    return {
+                        "success": False,
+                        "status": "CLEAR_BOARD_FAILED",
+                        "failed_stage": "CLEAR_BOARD",
+                        "error": err_msg,
+                        "service_safe": False,
+                        "requires_recovery": True,
+                        "piece_placed": piece_placed,
+                        "piece_released": piece_released,
+                        "service_safety": rep,
+                        "placement_version": current_ver,
+                    }
 
                 # 5.3 SERVICE_RETREAT: Move to authoritative SERVICE_SAFE_JOINTS_DEG
                 self.backend.set_trajectory_stage("SERVICE_RETREAT")
@@ -3011,14 +3100,17 @@ class VirtualXiangqiSimulation:
                 if not ok_retreat:
                     self.backend.set_trajectory_stage("FAILED")
                     err_msg = self.backend._last_error or "Retreat to SERVICE_SAFE failed"
+                    rep = self.evaluate_service_safety()
                     return {
                         "success": False,
+                        "status": "SERVICE_RETREAT_FAILED",
                         "failed_stage": "SERVICE_RETREAT",
                         "error": err_msg,
                         "service_safe": False,
                         "requires_recovery": True,
                         "piece_placed": piece_placed,
                         "piece_released": piece_released,
+                        "service_safety": rep,
                         "placement_version": current_ver,
                     }
 
@@ -3029,6 +3121,7 @@ class VirtualXiangqiSimulation:
                     err_msg = f"Physical service safety predicate failed after retreat: {', '.join(rep.reasons)}"
                     return {
                         "success": False,
+                        "status": "SERVICE_SAFETY_UNVERIFIED",
                         "failed_stage": "SERVICE_RETREAT",
                         "error": err_msg,
                         "service_safe": False,
@@ -3044,6 +3137,7 @@ class VirtualXiangqiSimulation:
                     self.backend.set_trajectory_stage("FAILED")
                     return {
                         "success": False,
+                        "status": "PIECE_PLACEMENT_UNVERIFIED",
                         "failed_stage": "VERIFY_PLACEMENT",
                         "error": f"Piece {piece_at_src} placement could not be physically verified at destination cell {dst_cell}",
                         "service_safe": True,
@@ -3053,6 +3147,7 @@ class VirtualXiangqiSimulation:
                         "service_safety": rep,
                         "placement_version": current_ver,
                     }
+
 
                 # --- COMPLETE ---
                 self.backend.set_trajectory_stage("COMPLETE")

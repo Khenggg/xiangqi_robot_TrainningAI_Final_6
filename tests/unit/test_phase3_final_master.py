@@ -1936,6 +1936,104 @@ class Phase3FinalMasterTests(unittest.TestCase):
         self.sim.reset_pieces()
         self.sim.runtime_go_service_safe()
 
+    def test_c16_execute_3stage_explicit_grasp_rejects_empty_source(self):
+        """C16. execute_3stage_trajectory with grasp_piece=True strictly rejects empty source and occupied target."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        self.sim.reset_pieces()
+
+        # 1. Empty source cell (4, 4) with explicit grasp_piece=True -> fail fast at PRECHECK
+        res_empty = self.sim.execute_3stage_trajectory((4, 4), (5, 5), grasp_piece=True)
+        self.assertFalse(res_empty.get("success"))
+        self.assertEqual(res_empty.get("failed_stage"), "PRECHECK")
+        self.assertEqual(res_empty.get("status"), "PRECHECK_NO_SOURCE_PIECE")
+        self.assertIn("no piece to grasp", res_empty.get("error", "").lower())
+
+        # 2. Occupied source (2, 1) to occupied destination (0, 0) with explicit grasp_piece=True -> fail fast at PRECHECK
+        res_occ = self.sim.execute_3stage_trajectory((2, 1), (0, 0), grasp_piece=True)
+        self.assertFalse(res_occ.get("success"))
+        self.assertEqual(res_occ.get("failed_stage"), "PRECHECK")
+        self.assertEqual(res_occ.get("status"), "PRECHECK_DESTINATION_OCCUPIED")
+        self.assertIn("occupied destination", res_occ.get("error", "").lower())
+
+        # Clean up
+        self.sim.clear_error()
+        self.sim.reset_pieces()
+        self.sim.runtime_go_service_safe()
+
+    def test_c17_execute_3stage_clear_board_failure_halts_immediately(self):
+        """C17. execute_3stage_trajectory halts immediately with CLEAR_BOARD_FAILED if clearance motion fails."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        self.sim.reset_pieces()
+
+        orig_move_cartesian = self.sim.backend.move_cartesian
+        orig_solve_ik = self.sim.backend.solve_tcp_ik
+
+        def selective_cartesian(pose, **kwargs):
+            if self.sim.backend.get_trajectory_stage() == "CLEAR_BOARD":
+                self.sim.backend._last_error = "CLEAR_BOARD IK/Cartesian unreachable"
+                return False
+            return orig_move_cartesian(pose, **kwargs)
+
+        def selective_solve_ik(pose, **kwargs):
+            if self.sim.backend.get_trajectory_stage() == "CLEAR_BOARD":
+                from src.simulation.kinematics.fr3 import IKResult, IKStatus
+                return IKResult(
+                    status=IKStatus.UNREACHABLE,
+                    success=False,
+                    joints_rad=None,
+                    joints_deg=None,
+                    position_error_mm=999.0,
+                    orientation_error_deg=999.0,
+                    iterations=0,
+                    condition_number=0.0,
+                    failure_reason="CLEAR_BOARD IK unreachable",
+                )
+            return orig_solve_ik(pose, **kwargs)
+
+        with mock.patch.object(self.sim.backend, "move_cartesian", side_effect=selective_cartesian), \
+             mock.patch.object(self.sim.backend, "solve_tcp_ik", side_effect=selective_solve_ik):
+            res = self.sim.execute_3stage_trajectory((4, 4), (5, 5))
+
+        self.assertFalse(res.get("success"))
+        self.assertEqual(res.get("status"), "CLEAR_BOARD_FAILED")
+        self.assertEqual(res.get("failed_stage"), "CLEAR_BOARD")
+        self.assertTrue(res.get("requires_recovery"))
+        self.assertFalse(res.get("service_safe"))
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
+
+        # Clean up
+        self.sim.clear_error()
+        self.sim.reset_pieces()
+        self.sim.runtime_go_service_safe()
+
+    def test_c18_execute_3stage_grasp_failure_halts_at_grasp_stage(self):
+        """C18. execute_3stage_trajectory halts at GRASP stage if gripper fails to grasp piece."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        self.sim.reset_pieces()
+
+        from src.simulation.physics.state import GraspResult, GraspStatus
+
+        # Mock try_grasp returning failure
+        with mock.patch.object(self.sim.world, "try_grasp", return_value=GraspResult(success=False, status=GraspStatus.NO_CANDIDATE, reason="Simulated grasp slipped")):
+            with mock.patch.object(self.sim.world, "get_attached_piece", return_value=None):
+                res = self.sim.execute_3stage_trajectory((2, 1), (4, 1))
+
+        self.assertFalse(res.get("success"))
+        self.assertEqual(res.get("failed_stage"), "GRASP")
+        self.assertEqual(res.get("status"), "GRASP_FAILED")
+        self.assertTrue(res.get("requires_recovery"))
+        self.assertFalse(res.get("service_safe"))
+        self.assertEqual(self.sim.backend.get_trajectory_stage(), "FAILED")
+
+        # Clean up
+        self.sim.clear_error()
+        self.sim.reset_pieces()
+        self.sim.runtime_go_service_safe()
+
 
 if __name__ == "__main__":
     unittest.main()
+
