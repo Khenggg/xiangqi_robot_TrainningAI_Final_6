@@ -128,6 +128,7 @@ class CameraMonitor:
             except Exception:
                 pass
 
+
             with self._lock:
                 self._last_detections = detections
 
@@ -217,6 +218,7 @@ class CameraMonitor:
                 results = self.model.predict(
                     frame_rgb, conf=self.conf, iou=0.35,
                     imgsz=640, device=self.device, verbose=False
+
                 )
                 for box in results[0].boxes:
                     cls_id = int(box.cls[0])

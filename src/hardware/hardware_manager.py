@@ -222,28 +222,41 @@ class HardwareManager:
 
     # --- WRAPPER VISION UTILS ---
     def get_visual_pick_targets(self, expected_cells):
-        """Take one fresh pre-motion snapshot and estimate requested pick points.
-
-        ``expected_cells`` maps labels (normally ``moving``/``captured``) to
-        ``(col, row)`` logical cells. Every missing/unsafe result is ``None`` so
-        the robot retains its existing center-of-cell fallback.
+        """Lấy snapshot trước khi robot di chuyển và ước lượng điểm gắp thực tế.
+        Bọc phòng thủ toàn diện: Mọi ngoại lệ đều tự động fallback về None (tâm ô lý thuyết).
         """
         targets = {name: None for name in expected_cells}
-        if not self.pick_estimator or not self.cam_monitor:
-            print("[VISUAL PICK] Fallback: estimator or camera monitor unavailable.")
+        if not self.pick_estimator:
+            print("[VISUAL PICK] Fallback: pick_estimator chưa được khởi tạo.")
             return targets
 
-        _frame, detections = self.cam_monitor.get_fresh_snapshot()
-        if _frame is None:
-            print("[VISUAL PICK] Fallback: fresh camera snapshot unavailable.")
+        if not self.cam_monitor:
+            print("[VISUAL PICK] Fallback: cam_monitor chưa được khởi tạo.")
             return targets
 
+        # 1. Bọc an toàn khi lấy snapshot từ camera
+        try:
+            if not hasattr(self.cam_monitor, "get_fresh_snapshot"):
+                print("[VISUAL PICK] ⚠️ cam_monitor thiếu method 'get_fresh_snapshot'. Dùng fallback tâm ô.")
+                return targets
+
+            _frame, detections = self.cam_monitor.get_fresh_snapshot()
+            if _frame is None:
+                print("[VISUAL PICK] ⚠️ Không lấy được frame mới từ camera. Dùng fallback tâm ô.")
+                return targets
+        except Exception as e:
+            print(f"[VISUAL PICK] ⚠️ Ngoại lệ khi snapshot camera: {e}. Dùng fallback tâm ô.")
+            return targets
+
+        # 2. Bọc an toàn khi ước lượng từng ô cờ
         for name, cell in expected_cells.items():
             try:
                 col, row = cell
                 targets[name] = self.pick_estimator.estimate_pick_target(detections, col, row)
-            except (TypeError, ValueError) as e:
-                print(f"[VISUAL PICK] Fallback for {name}: invalid expected cell {cell!r}: {e}")
+            except Exception as e:
+                print(f"[VISUAL PICK] ⚠️ Lỗi ước lượng cho {name} tại {cell!r}: {e}. Fallback ô này.")
+                targets[name] = None
+
         return targets
 
     def capture_baseline_if_needed(self, force_delay=0.0):

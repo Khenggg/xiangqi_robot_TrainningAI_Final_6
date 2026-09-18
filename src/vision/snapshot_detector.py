@@ -150,12 +150,13 @@ class SnapshotDetector:
             if w <= 0 or h <= 0:
                 continue
 
-            # Quân cờ nhìn từ camera có bounding box gần vuông.
+            # 1. BỘ LỌC TỶ LỆ KHUNG HÌNH (Aspect Ratio)
+            # Quân cờ tròn nhìn từ góc xiên camera nằm trong khoảng 0.55 - 1.80
             aspect_ratio = float(w) / float(h)
             if aspect_ratio < 0.55 or aspect_ratio > 1.80:
                 continue
 
-            # Điểm tiếp xúc của quân với mặt bàn.
+            # Điểm chân quân cờ tiếp xúc mặt bàn (foot_point)
             cx = (x1 + x2) / 2
             cy = y1 + h * 0.85
 
@@ -166,13 +167,18 @@ class SnapshotDetector:
                 c_raw, r_raw = dst[0], dst[1]
                 c, r = int(round(c_raw)), int(round(r_raw))
 
-                # Do not clamp detections outside the board onto an edge cell.
+                # 2. BỘ LỌC BIÊN BÀN CỜ NGHIÊM NGẶT (Strict Boundary Check)
+                # Chỉ chấp nhận nếu điểm rơi vào trong phạm vi hợp lệ 0..8 và 0..9
+                # Tuyệt đối không clamp các vật thể ngoài biên vào cột 0 / hàng 0
                 if 0 <= c < self.num_cols and 0 <= r < self.num_rows:
+                    # 3. BỘ LỌC KHOẢNG CÁCH TỚI GIAO ĐIỂM (Distance-to-Intersection Gate)
+                    # Tính khoảng cách Euclide giữa vị trí thực tế và giao điểm cờ nguyên
                     dist = ((c_raw - c) ** 2 + (r_raw - r) ** 2) ** 0.5
                     if dist <= self.max_dist_threshold:
                         grid[r][c] = True
             except (cv2.error, TypeError, ValueError):
                 continue
+
 
         return grid
 

@@ -20,10 +20,15 @@ import subprocess
 import traceback
 import pygame  # type: ignore
 
+from src.ui.debug_dashboard import DebugDashboard
+
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _BASE_DIR)
 
 import config  # type: ignore
+debug_dashboard = DebugDashboard(config.DRY_RUN) if config.DEBUG_DASHBOARD else None
+if debug_dashboard:
+    atexit.register(debug_dashboard.close)
 from src.core import xiangqi  # type: ignore
 
 from src.core.game_state import GameState  # type: ignore
@@ -66,11 +71,18 @@ pygame.display.set_caption(f"Xiangqi Robot VIP - { _mode_label }")
 renderer = BoardRenderer(screen)
 
 # Khởi tạo các module quản lý SRP
-hw = HardwareManager(config, _BASE_DIR).initialize_all()
+hw = HardwareManager(config, _BASE_DIR)
+if debug_dashboard:
+    debug_dashboard.robot = hw.robot
+hw.initialize_all()
 state = GameState(allow_mouse_move=config.DRY_RUN)
+if debug_dashboard:
+    debug_dashboard.activity = "Running"
 input_mgr = InputHandler(state, hw)
 
 def _cleanup_all():
+    if debug_dashboard:
+        debug_dashboard.close()
     print("\n[CLEANUP] Đang dọn dẹp hệ thống...")
     # [API] Force Kết thúc trận đấu khi thoát chương trình
     try:
