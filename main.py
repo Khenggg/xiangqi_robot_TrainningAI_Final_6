@@ -64,7 +64,8 @@ pygame.init()
 pygame.font.init()
 
 from src.ui.board_renderer import (  # type: ignore
-    BoardRenderer, SCREEN_WIDTH, SCREEN_HEIGHT, BTN_VS_ROBOT_RECT,
+    BoardRenderer, SCREEN_WIDTH, SCREEN_HEIGHT, BTN_HOME_RECT, BTN_VS_ROBOT_RECT,
+    BTN_SETTINGS_RECT, DEBUG_STATUS_RECT, SETTINGS_BACK_RECT,
 )
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption(f"Xiangqi Robot VIP - { _mode_label }")
@@ -79,6 +80,22 @@ state = GameState(allow_mouse_move=config.DRY_RUN)
 if debug_dashboard:
     debug_dashboard.activity = "Running"
 input_mgr = InputHandler(state, hw)
+
+
+def set_debug_dashboard(enabled):
+    """Apply the menu setting to the optional dashboard for this app session."""
+    global debug_dashboard
+    config.DEBUG_DASHBOARD = enabled
+
+    if enabled and debug_dashboard is None:
+        debug_dashboard = DebugDashboard(config.DRY_RUN)
+        debug_dashboard.robot = hw.robot
+        debug_dashboard.activity = "Running"
+        print("[DEBUG] Dashboard enabled.")
+    elif not enabled and debug_dashboard is not None:
+        debug_dashboard.close()
+        debug_dashboard = None
+        print("[DEBUG] Dashboard disabled.")
 
 def _cleanup_all():
     if debug_dashboard:
@@ -107,12 +124,18 @@ def start_vs_robot():
     """Start a real match only after the player confirms the board is ready."""
     global screen_mode
     print("\n[GAME] === VS ROBOT STARTED ===")
-    print(f"[FEN] {state.current_fen}")
-    hw.capture_baseline_if_needed(force_delay=1.0)
 
-    # [API] Create the live match at game start, not while the menu is open.
-    if not config.DRY_RUN:
-        state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
+    # Returning home keeps the finished board visible until a new match is chosen.
+    # Reset it here so the menu's VS ROBOT action always starts a fresh game.
+    if state.game_over:
+        state.reset_game(hw)
+    else:
+        hw.capture_baseline_if_needed(force_delay=1.0)
+        # [API] Create the live match at game start, not while the menu is open.
+        if not config.DRY_RUN:
+            state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
+
+    print(f"[FEN] {state.current_fen}")
     screen_mode = "GAME"
 
 # Khởi chạy main loop (Đã bỏ Chọn độ khó)
@@ -121,6 +144,8 @@ try:
         # 2a. Vẽ khung hình
         if screen_mode == "MENU":
             renderer.draw_main_menu()
+        elif screen_mode == "SETTINGS":
+            renderer.draw_settings_menu(config.DEBUG_DASHBOARD)
         else:
             renderer.draw_ui(state.get_render_state())
             renderer.draw_pieces(state.board)
@@ -139,6 +164,15 @@ try:
                 if screen_mode == "MENU":
                     if BTN_VS_ROBOT_RECT.collidepoint(event.pos):
                         start_vs_robot()
+                    elif BTN_SETTINGS_RECT.collidepoint(event.pos):
+                        screen_mode = "SETTINGS"
+                elif screen_mode == "SETTINGS":
+                    if SETTINGS_BACK_RECT.collidepoint(event.pos):
+                        screen_mode = "MENU"
+                    elif DEBUG_STATUS_RECT.collidepoint(event.pos):
+                        set_debug_dashboard(not config.DEBUG_DASHBOARD)
+                elif state.game_over and BTN_HOME_RECT.collidepoint(event.pos):
+                    screen_mode = "MENU"
                 else:
                     input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
 

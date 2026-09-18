@@ -4,6 +4,7 @@
 # =============================================================================
 import time
 import unicodedata
+import math
 import pygame
 from src.core import xiangqi
 
@@ -26,7 +27,13 @@ BTN_COLOR = (200, 50, 50)
 BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT - 60, 120, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(SCREEN_WIDTH / 2 + 30, SCREEN_HEIGHT - 60, 120, 40)
+# Reuse the inactive surrender-button position for Home after a match ends.
+BTN_HOME_RECT = BTN_SURRENDER_RECT.copy()
 BTN_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 110, 350, 220, 56)
+BTN_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 58, 18, 40, 40)
+# These are intentionally only hit areas; the settings page renders text only.
+DEBUG_STATUS_RECT = pygame.Rect(190, 138, 180, 34)
+SETTINGS_BACK_RECT = pygame.Rect(24, 22, 100, 32)
 
 PIECE_DISPLAY_NAMES = {
     "r_K": "帥", "r_A": "仕", "r_E": "相", "r_R": "俥",
@@ -92,6 +99,36 @@ class BoardRenderer:
         button = button_font.render("VS ROBOT", True, (255, 255, 255))
         self.screen.blit(button, button.get_rect(center=BTN_VS_ROBOT_RECT.center))
 
+        # A simple drawn gear avoids relying on emoji font availability.
+        gear_center = BTN_SETTINGS_RECT.center
+        pygame.draw.circle(self.screen, (55, 80, 95), gear_center, 12, width=3)
+        pygame.draw.circle(self.screen, (55, 80, 95), gear_center, 4)
+        for angle in range(0, 360, 45):
+            radians = math.radians(angle)
+            dx = int(15 * math.cos(radians))
+            dy = int(15 * math.sin(radians))
+            pygame.draw.circle(self.screen, (55, 80, 95), (gear_center[0] + dx, gear_center[1] + dy), 3)
+
+    def draw_settings_menu(self, debug_enabled):
+        """Draw the small text-first settings screen."""
+        self.screen.fill(BOARD_COLOR)
+
+        title_font = pygame.font.SysFont("segoe ui", 32, bold=True)
+        label_font = pygame.font.SysFont("segoe ui", 22, bold=False)
+        value_font = pygame.font.SysFont("segoe ui", 22, bold=True)
+
+        back = label_font.render("< HOME", True, (55, 80, 95))
+        self.screen.blit(back, back.get_rect(midleft=SETTINGS_BACK_RECT.midleft))
+        title = title_font.render("SETTINGS", True, (0, 0, 0))
+        self.screen.blit(title, title.get_rect(topleft=(32, 76)))
+
+        label = label_font.render("Debug menu", True, (0, 0, 0))
+        self.screen.blit(label, label.get_rect(midleft=(48, DEBUG_STATUS_RECT.centery)))
+        status = "Enabled" if debug_enabled else "Disabled"
+        color = (30, 140, 55) if debug_enabled else (190, 45, 45)
+        status_text = value_font.render(status, True, color)
+        self.screen.blit(status_text, status_text.get_rect(midleft=(190, DEBUG_STATUS_RECT.centery)))
+
     # --- Chuyển đổi tọa độ ---
     @staticmethod
     def grid_to_pixel(col, row):
@@ -134,6 +171,11 @@ class BoardRenderer:
                 hint = self._render_ui_text("[SPACE] Bấm SPACE sau khi đi xong", (0, 100, 0))
                 self.screen.blit(hint, (SCREEN_WIDTH - 280, 10))
         else:
+            # The home action is intentionally available only once the match ends.
+            pygame.draw.rect(self.screen, BTN_NEW_GAME_COLOR, BTN_HOME_RECT, border_radius=8)
+            txt_home = self._render_ui_text("HOME", (255, 255, 255))
+            self.screen.blit(txt_home, txt_home.get_rect(center=BTN_HOME_RECT.center))
+
             pygame.draw.rect(self.screen, BTN_NEW_GAME_COLOR, BTN_NEW_GAME_RECT, border_radius=8)
             txt_new = self._render_ui_text("NEW GAME", (255, 255, 255))
             self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
