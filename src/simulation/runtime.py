@@ -2321,6 +2321,7 @@ class VirtualXiangqiSimulation:
                         busy_reason = f"active trajectory ({getattr(self.backend, '_trajectory_stage', None)})"
                     else:
                         busy_reason = f"system currently in state {self._operation_state.value}"
+                    is_exh = (sample_limit is None)
                     busy_res = {
                         "type": "full_route_validation_result",
                         "success": False,
@@ -2330,7 +2331,14 @@ class VirtualXiangqiSimulation:
                         "placement_version": self.placement_state.placement_version,
                         "all_passed": False,
                         "all_routes_safe": False,
+                        "validation_mode": "EXHAUSTIVE" if is_exh else "SAMPLED",
+                        "possible_ordered_routes": 8010,
+                        "tested_routes": 0,
                         "total_routes": 0,
+                        "passed_routes": 0,
+                        "failed_routes": 0,
+                        "coverage_fraction": 0.0,
+                        "exhaustive": is_exh,
                     }
                     if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
                         self.telemetry.broadcast_custom(busy_res)
@@ -2352,16 +2360,22 @@ class VirtualXiangqiSimulation:
 
                     # Step 1: Determine routes to test
                     all_cells = [(r, c) for r in range(10) for c in range(9)]
+                    possible_ordered_routes = 8010  # 90 * 89
                     routes_to_test = []
                     for src in all_cells:
                         for dst in all_cells:
                             if src != dst:
                                 routes_to_test.append((src, dst))
 
+                    is_exhaustive = (sample_limit is None or sample_limit >= len(routes_to_test))
                     if sample_limit is not None and sample_limit < len(routes_to_test):
                         # Sample evenly across the route set
                         step = len(routes_to_test) // sample_limit
                         routes_to_test = routes_to_test[::step][:sample_limit]
+
+                    tested_routes = len(routes_to_test)
+                    coverage_fraction = float(tested_routes) / float(possible_ordered_routes)
+                    validation_mode = "EXHAUSTIVE" if is_exhaustive else "SAMPLED"
 
                     needed_cells = {c for pair in routes_to_test for c in pair}
 
@@ -2494,7 +2508,20 @@ class VirtualXiangqiSimulation:
                                 allowed_grasp_piece_id=None,
                                 check_collision=True,
                             )
-                            q_after_clear = clear_plan.final_q if (clear_plan and clear_plan.success) else q_after_post_lift
+                            if not (clear_plan and clear_plan.success):
+                                failed_routes += 1
+                                if worst_route is None:
+                                    worst_route = {
+                                        "src": list(src),
+                                        "dst": list(dst),
+                                        "stage": "CLEAR_BOARD",
+                                        "failure_reason": clear_plan.failure_reason if clear_plan else "CLEAR_BOARD planning failed",
+                                        "colliding_links_or_bodies": clear_plan.colliding_links_or_bodies if clear_plan else None,
+                                    }
+                                    first_col_stage = "CLEAR_BOARD"
+                                    col_pair = clear_plan.colliding_links_or_bodies if clear_plan else "CLEAR_BOARD failed"
+                                continue
+                            q_after_clear = clear_plan.final_q
                         else:
                             q_after_clear = q_after_post_lift
 
@@ -2528,16 +2555,26 @@ class VirtualXiangqiSimulation:
                         if land_plan.worst_condition_number is not None:
                             worst_cond = max(worst_cond, land_plan.worst_condition_number)
 
-                    all_routes_safe = (passed_routes == total_routes and total_routes > 0)
+                    all_routes_safe = (passed_routes == tested_routes and tested_routes > 0)
+                    if all_routes_safe:
+                        status = "FULL_BOARD_ROUTES_EXHAUSTIVE_SAFE" if is_exhaustive else "FULL_BOARD_ROUTES_SAMPLE_SAFE"
+                    else:
+                        status = "FULL_BOARD_ROUTES_FAILED"
+
                     res = {
                         "type": "full_route_validation_result",
                         "validation_scope": "full_board_routes",
                         "validation_label": "FULL_CHAINED_ROUTE_VALIDATION",
-                        "total_routes": total_routes,
+                        "validation_mode": validation_mode,
+                        "possible_ordered_routes": possible_ordered_routes,
+                        "tested_routes": tested_routes,
+                        "total_routes": tested_routes,
                         "passed_routes": passed_routes,
                         "failed_routes": failed_routes,
+                        "coverage_fraction": round(coverage_fraction, 6),
+                        "exhaustive": is_exhaustive,
                         "all_routes_safe": all_routes_safe,
-                        "status": "FULL_BOARD_ROUTE_SAFE" if all_routes_safe else "FAIL",
+                        "status": status,
                         "worst_route": worst_route,
                         "first_collision_stage": first_col_stage,
                         "collision_pair": col_pair,

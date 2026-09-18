@@ -313,7 +313,7 @@ class TestPhase3BoardOrientation90(unittest.TestCase):
         sim.set_board_placement(forward_shift_mm=15.0, safe_transit_height_mm=40.0)
 
         res = sim.validate_full_board_routes(sample_limit=4)
-        self.assertIn(res["status"], ("FULL_BOARD_ROUTE_SAFE", "FULL_BOARD_ROUTE_COLLISION", "ROUTE_VALIDATION_REJECTED_BUSY"))
+        self.assertIn(res["status"], ("FULL_BOARD_ROUTES_SAMPLE_SAFE", "FULL_BOARD_ROUTE_SAFE", "FULL_BOARD_ROUTE_COLLISION", "ROUTE_VALIDATION_REJECTED_BUSY"))
         sim.stop()
 
     def test_g90_17_near_side_center_cells_no_link1_link3_collision(self):
