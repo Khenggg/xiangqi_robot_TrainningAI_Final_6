@@ -186,7 +186,7 @@ Dự-án-gốc/
 
 - **[R1]** YOLO nhấp nháy → Pattern filter xử lý (Recall 99.2%, ít xảy ra)
 - **[R2]** Xếp bàn cờ ban đầu sai → Xếp đúng chuẩn
-- **[R3]** Perspective calibrate sai → Bấm V để calibrate lại
+- **[R3]** Perspective calibrate sai → Trong cửa sổ chọn góc thủ công, bấm `V` để thử lại AI calibration
 - **[R4]** Ăn quân (ambiguous) → Blind Capture Resolution (pixel absdiff)
 - **[R5]** Bấm SPACE trước khi đi xong → Bỏ qua, hiển thị thông báo
 - **[R6]** Khi ăn quân, YOLO detect quân đỏ tại ô đích → occupancy không đổi
@@ -627,7 +627,7 @@ Camera cần được hiệu chỉnh để chuyển đổi pixel → tọa độ
 - Click chính xác vào tâm góc bàn cờ
 - Đảm bảo ánh sáng đủ
 - Không có bóng đổ lên bàn cờ
-- Không có phím `V` để calibrate giữa chừng (khác với mô tả cũ)
+- Trong cửa sổ chọn 4 góc thủ công, bấm `V` để thử lại AI Auto-Calibration; `R` chỉ xóa các góc đã chọn, `S` lưu, và `Q` hủy.
 
 #### 4.2.5. Kiểm tra YOLO Model
 

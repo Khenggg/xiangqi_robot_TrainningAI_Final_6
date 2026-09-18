@@ -61,7 +61,7 @@ class InputHandler:
         # Z KEY: Rollback
         if key == pygame.K_z:
             self.state.handle_rollback(self.hw)
-            
+
         # SPACE KEY: Trigger YOLO Detection
         elif key == pygame.K_SPACE:
             self._handle_space_key()

@@ -11,6 +11,10 @@ import queue
 import config
 
 
+# Returned to the calibration flow when the operator wants another AI attempt.
+RETRY_AUTO_CALIBRATION = object()
+
+
 def calibrate_perspective_camera(cap, save_path):
     """Hiệu chỉnh perspective camera bằng cách click 4 góc bàn cờ.
     
@@ -72,7 +76,7 @@ def calibrate_perspective_camera(cap, save_path):
     print("   3️⃣  Góc Xe Đỏ (Phải)")
     print("   4️⃣  Góc Xe Đỏ (Trái)")
     print("---------------------------------------------")
-    print("⌨️  Phím tắt: 'R'=Làm lại | 'S'=Lưu file | 'Q'=Thoát")
+    print("⌨️  Phím tắt: 'R'=Xóa điểm | 'V'=Thử lại AI | 'S'=Lưu file | 'Q'=Thoát")
 
     import os
     M = None
@@ -129,7 +133,7 @@ def calibrate_perspective_camera(cap, save_path):
                     cv2.line(display, (int(p1[0]), int(p1[1])),
                              (int(p2[0]), int(p2[1])), (0, 255, 255), 1)
 
-                prompt_text = "OK? Bam 'S' de Luu / Dung lai"
+                prompt_text = "S: Luu | R: Xoa diem | V: Thu AI lai | Q: Huy"
                 cv2.putText(display, prompt_text, (20, 45),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             except:
@@ -145,12 +149,17 @@ def calibrate_perspective_camera(cap, save_path):
             points.clear()
             M = None
             print("🔄 Đã xóa điểm, hãy click lại.")
+        elif key == ord('v'):
+            M = RETRY_AUTO_CALIBRATION
+            print("🔄 Đang thử lại AI Auto-Calibration...")
+            break
         elif key == ord('s') and M is not None:
             np.save(save_path, M)
             print(f"✅ ĐÃ LƯU THÀNH CÔNG: {save_path}")
             break
 
     cal_stop[0] = True
-    cal_thread.join(timeout=1.0)
+    # Do not let a retry read the same camera until this worker has exited.
+    cal_thread.join()
     cv2.destroyWindow(window)
     return M
