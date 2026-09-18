@@ -206,6 +206,28 @@
 
 ---
 
+## B14 — Phase 3 90° Coordinate Semantics & Backend Contract Corrective (S90)
+* **Status:** FIXED
+* **Severity:** BLOCKER
+* **Affected Files:** `src/simulation/placement.py`, `src/simulation/physics/transforms.py`, `src/simulation/physics/piece.py`, `src/simulation/runtime.py`, `robot-3d-viewer/board.mjs`, `robot-3d-viewer/main.mjs`, `robot-3d-viewer/index.html`, `tests/unit/test_phase3_coordinate_semantics_contract.py`, `tests/unit/test_viewer_coordinate_contract.mjs`
+* **Evidence:**
+  1. `runtime.py` had conflicting methods: `cell_to_robot_xyz(col, row)` vs `cell_to_robot_xyz_m(row, col)`, causing confusion and transposition bugs across callers.
+  2. `robot_xyz_to_nearest_cell` returned `(c, r, dist)`, which forced all call sites across `runtime.py` and test files to manually perform a tuple swap `r, c = c, r`.
+  3. UI DOM IDs `#readoutRow0Dist` and `#readoutRow9Dist` and select dropdown options still described `row 0 = near robot` and `row 9 = far robot`, which contradicts the canonical 90° rotation where column 0 is the near side and column 8 is the far side.
+  4. Frontend `boardPointToXYZ` hardcoded axis swaps without directly consuming authoritative `BoardPose` (`TRobotFromBoard`, `board_yaw_deg`).
+* **Fix Summary:**
+  1. Introduced frozen dataclass `BoardCell` with bounds validation $[0..9] \times [0..8]$, sequence indexing, and unpackability.
+  2. Standardized public API signature everywhere strictly as `(row, col)` with $row \in [0, 9]$ (0 = Black home side, 9 = Red home side - game meaning only) and $col \in [0, 8]$ (col 0 = near side of robot, col 8 = far side of robot).
+  3. Aligned `robot_xyz_to_nearest_cell` to return `(nearest_r, nearest_c, dist_m)` in canonical order, eliminating manual swaps across `runtime.py` and tests.
+  4. Added `T_robot_from_board` (4x4 SE(3) matrix) to `BoardPlacementState.to_dict()` and aliased `to_telemetry_dict`.
+  5. Updated `robot-3d-viewer/board.mjs` (`boardPointToXYZ` and `setScenePlacement`) to directly consume authoritative `T_robot_from_board` and `board_yaw_deg`, eliminating hardcoded axis swaps.
+  6. Renamed UI elements to `#readoutNearGridDepth` and `#readoutFarGridDepth`, and updated selection dropdowns to honest base/depth labels.
+  7. Added comprehensive regression suite `tests/unit/test_phase3_coordinate_semantics_contract.py` (11/11 tests PASSED) and expanded `tests/unit/test_viewer_coordinate_contract.mjs` (8/8 tests PASSED).
+* **Regression Test:** `tests/unit/test_phase3_coordinate_semantics_contract.py`, `tests/unit/test_viewer_coordinate_contract.mjs`, `tests/unit/test_phase3_board_orientation_90.py`, `tests/unit/test_phase3_final_master.py`, `tests/unit/test_viewer_browser_smoke.mjs`
+* **Last Verified Functional HEAD:** 953b77d
+
+---
+
 ## I01 — Deprecated `WebSocketServerProtocol` Import in Telemetry Publisher
 * **Status:** OPEN (Benign warning)
 * **Severity:** LOW

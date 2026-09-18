@@ -6,9 +6,9 @@
 
 ## METADATA
 * **CURRENT_BRANCH:** `feature/virtual-robot-3d-simulator`
-* **STARTING_REMOTE_HEAD:** `6a477d77a65969f6342075adac0f190318585318`
-* **LAST_REVIEWED_HEAD:** `1196f90d1f4b8cf65f02bc0f7e4dfbf6b3fcb590`
-* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `1196f90d1f4b8cf65f02bc0f7e4dfbf6b3fcb590`
+* **STARTING_REMOTE_HEAD:** `ad91f5d5e40f0eae0819ad6932130578a380dda4`
+* **LAST_REVIEWED_HEAD:** `953b77d`
+* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `953b77d`
 * **PASS_A_RUNTIME_AUTHORITY:** `PASS`
 * **PASS_A1_REENTRANT_LOCK:** `PASS`
 * **PASS_A2_NO_SILENT_QUEUE:** `PASS`
@@ -16,6 +16,7 @@
 * **PASS_C_POST_OP_RETREAT:** `PASS`
 * **CORRECTIVE_GEOMETRY_G90:** `PASS`
 * **CORRECTIVE_VIEWER_BOOT_AND_COORDINATES:** `PASS`
+* **CORRECTIVE_G90_SEMANTIC_CONTRACT:** `PASS`
 * **SELECTED_PLACEMENT_CANDIDATE:** `d = 15.0 mm, H = 40.0 mm, Z = 0.0 mm`
 * **PHASE:** `PHASE_3_SIMULATION_VIRTUAL_TWIN`
 * **PHASE_STATUS:** `PARTIAL`
@@ -78,6 +79,15 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
     - Updated `robot-3d-viewer/ruler.mjs` special Z markers (Cột 0: 200mm, Tâm: 360mm, Cột 8: 520mm) and 4-edge hit proxies (Near: 176.5mm, Far: 543.5mm along Z; Left: -205mm, Right: +205mm along X).
     - Verified complete 90-cell parity and 32-piece layout placement in `tests/unit/test_viewer_coordinate_contract.mjs`.
     - Verified live browser boot and WebGL render pipeline via automated headless Chrome CDP test in `tests/unit/test_viewer_browser_smoke.mjs`.
+16. **[B14] Phase 3 90° Coordinate Semantics & Backend Contract Corrective (S90 Corrective Gate):**
+    - Eliminated remaining legacy row/col semantic inversions across backend, frontend, physics, and telemetry.
+    - Defined `BoardCell` frozen dataclass with strict Xiangqi bounds validation $[0..9] \times [0..8]$, sequence indexing, and unpackability.
+    - Standardized public API signature everywhere strictly as `(row, col)` with $row \in [0, 9]$ (0 = Black home side, 9 = Red home side - game meaning only) and $col \in [0, 8]$ (col 0 = near side of robot, col 8 = far side of robot).
+    - Normalized `robot_xyz_to_nearest_cell` to return canonical `(nearest_r, nearest_c, dist_m)`, eliminating manual coordinate swaps across `runtime.py` and unit tests.
+    - Exported `T_robot_from_board` (4x4 SE(3) matrix) in `BoardPlacementState.to_dict()` and aliased `to_telemetry_dict`.
+    - Updated `robot-3d-viewer/board.mjs` (`boardPointToXYZ` and `setScenePlacement`) to directly consume authoritative `T_robot_from_board` and `board_yaw_deg`, eliminating hardcoded axis swaps.
+    - Renamed DOM readout IDs in `index.html` and `main.mjs` to `#readoutNearGridDepth` and `#readoutFarGridDepth`, and updated selection dropdowns to honest base/depth labels.
+    - Created comprehensive regression suite `tests/unit/test_phase3_coordinate_semantics_contract.py` (11/11 tests PASSED) and expanded `tests/unit/test_viewer_coordinate_contract.mjs` (8/8 tests PASSED).
 
 ---
 
@@ -96,7 +106,8 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 ---
 
 ## TEST_EVIDENCE
-* **Python Unit Tests:** 140/140 Phase 3 specific tests PASSED (100% pass rate)
+* **Python Unit Tests:** 151/151 Phase 3 specific tests PASSED (100% pass rate)
+  * `tests/unit/test_phase3_coordinate_semantics_contract.py`: 11 passed (S90-01 to S90-13)
   * `tests/unit/test_phase3_board_orientation_90.py`: 25 passed (G90-01 to G90-25)
   * `tests/unit/test_phase3_final_master.py`: 79 passed (including Pass A/A.1/A.2 tests, Pass B/B-Corr tests, and Pass C tests c1–c20)
   * `tests/unit/test_phase3_final_closure.py`: 11 passed
@@ -108,8 +119,8 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
   * `test_viewer_coordinate_ruler.mjs`: PASSED
   * `test_viewer_gripper_and_telemetry.mjs`: PASSED
   * `test_viewer_canvas_api.mjs`: PASSED
-  * `test_viewer_coordinate_contract.mjs`: PASSED
-  * `test_viewer_browser_smoke.mjs`: PASSED
+  * `test_viewer_coordinate_contract.mjs`: PASSED (8 tests)
+  * `test_viewer_browser_smoke.mjs`: PASSED (V90-01 to V90-05)
 
 ---
 
