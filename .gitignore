@@ -29,3 +29,6 @@ VENV/
 # Generated PyBullet URDFs
 fairino3_v6_pybullet.urdf
 
+# Node.js dependencies
+node_modules/
+

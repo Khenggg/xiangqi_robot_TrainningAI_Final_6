@@ -340,11 +340,11 @@ export function buildCoordinateRulerGroup(options = {}) {
     }
   }
 
-  // Các mốc đặc biệt trên trục Z
+  // Các mốc đặc biệt trên trục Z (tương ứng trục Cột trong góc quay 90°)
   const specialZMarkers = [
-    { z: 0.18, label: "H0: 180mm", color: "#38bdf8" },
+    { z: 0.20, label: "Cột 0: 200mm", color: "#38bdf8" },
     { z: 0.36, label: "Tâm: 360mm", color: "#fbbf24" },
-    { z: 0.54, label: "H9: 540mm", color: "#f87171" },
+    { z: 0.52, label: "Cột 8: 520mm", color: "#f87171" },
   ];
   specialZMarkers.forEach((m) => {
     const sprite = createTextSprite(`📍 ${m.label}`, {
@@ -503,8 +503,11 @@ export function buildCoordinateRulerGroup(options = {}) {
   group.add(boardEdgesGroup);
 
   const boardCenterZ = 0.36;
-  const boardHalfW = 0.367 / 2; // 0.1835m
-  const boardHalfL = 0.410 / 2; // 0.205m
+  // Trong góc quay 90°:
+  // - Trục Z (world) / -X (robot): chiều ngang bàn cờ outer_width = 0.367m -> nửa rộng = 0.1835m
+  // - Trục X (world) / -Y (robot): chiều dài bàn cờ outer_length = 0.410m -> nửa dài = 0.205m
+  const boardHalfZ = 0.367 / 2; // 0.1835m (độ sâu theo Z)
+  const boardHalfX = 0.410 / 2; // 0.205m (chiều ngang theo X)
 
   const makeEdgeProxy = (w, h, d, x, y, z, edgeName) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), hitProxyMat);
@@ -514,14 +517,14 @@ export function buildCoordinateRulerGroup(options = {}) {
     boardEdgesGroup.add(mesh);
   };
 
-  // Cạnh trước (Near - Hàng 0)
-  makeEdgeProxy(0.38, 0.025, 0.03, 0, yFloor + 0.01, boardCenterZ - boardHalfL, "NEAR");
-  // Cạnh sau (Far - Hàng 9)
-  makeEdgeProxy(0.38, 0.025, 0.03, 0, yFloor + 0.01, boardCenterZ + boardHalfL, "FAR");
-  // Cạnh trái (Col 8)
-  makeEdgeProxy(0.03, 0.025, 0.42, -boardHalfW, yFloor + 0.01, boardCenterZ, "LEFT");
-  // Cạnh phải (Col 0)
-  makeEdgeProxy(0.03, 0.025, 0.42, boardHalfW, yFloor + 0.01, boardCenterZ, "RIGHT");
+  // Cạnh trước (Near - mép gần robot trên trục Z: 360 - 183.5 = 176.5mm)
+  makeEdgeProxy(0.42, 0.025, 0.03, 0, yFloor + 0.01, boardCenterZ - boardHalfZ, "NEAR");
+  // Cạnh sau (Far - mép xa robot trên trục Z: 360 + 183.5 = 543.5mm)
+  makeEdgeProxy(0.42, 0.025, 0.03, 0, yFloor + 0.01, boardCenterZ + boardHalfZ, "FAR");
+  // Cạnh trái (-X: -205mm)
+  makeEdgeProxy(0.03, 0.025, 0.38, -boardHalfX, yFloor + 0.01, boardCenterZ, "LEFT");
+  // Cạnh phải (+X: +205mm)
+  makeEdgeProxy(0.03, 0.025, 0.38, boardHalfX, yFloor + 0.01, boardCenterZ, "RIGHT");
 
   // -------------------------------------------------------------------------
   // CÁC HÀM TIỆN ÍCH QUẢN LÝ HIỂN THỊ TỌA ĐỘ KHI CLICK (API)

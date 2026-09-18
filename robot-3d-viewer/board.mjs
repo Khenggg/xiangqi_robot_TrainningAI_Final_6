@@ -88,7 +88,26 @@ export function getActiveGeometry() {
   return _activeGeometry;
 }
 
-export function boardPointToXYZ(col, row, geometry = null) {
+export function boardPointToXYZ(rowOrCell, colOrGeometry = null, maybeGeometry = null) {
+  let row, col, geometry;
+
+  if (typeof rowOrCell === "object" && rowOrCell !== null) {
+    row = Number(rowOrCell.row);
+    col = Number(rowOrCell.col);
+    geometry = colOrGeometry;
+  } else {
+    if (colOrGeometry === null || colOrGeometry === undefined) {
+      throw new Error(`Invalid board coordinates in boardPointToXYZ: column not provided`);
+    }
+    row = Number(rowOrCell);
+    col = Number(colOrGeometry);
+    geometry = maybeGeometry;
+  }
+
+  if (isNaN(row) || isNaN(col)) {
+    throw new Error(`Invalid board coordinates in boardPointToXYZ: row=${rowOrCell}, col=${colOrGeometry}`);
+  }
+
   const geo = geometry || getActiveGeometry();
   const placement = getScenePlacement();
   const colM = geo.cellM || 0.040;
@@ -96,8 +115,8 @@ export function boardPointToXYZ(col, row, geometry = null) {
   // Under canonical 90 deg orientation:
   // Column axis (span -160mm to +160mm) -> +Z_world (-X_robot)
   // Row axis (span -180mm to +180mm)    -> +X_world (-Y_robot)
-  const u = (Number(col) - 4.0) * colM;
-  const v = (Number(row) - 4.5) * rowM;
+  const u = (col - 4.0) * colM;
+  const v = (row - 4.5) * rowM;
   return new THREE.Vector3(
     placement.boardCenterX + v,
     placement.boardSurfaceY,
@@ -427,7 +446,7 @@ export function buildPieces(geometry = null, layoutOrPieces = START_LAYOUT) {
 
     const label = side === "r" ? LABEL_RED[type] : LABEL_BLACK[type];
     const mesh = new THREE.Mesh(cylinderGeometry, makePieceMaterials(label, side));
-    const pos = boardPointToXYZ(col, row, geo);
+    const pos = boardPointToXYZ(row, col, geo);
 
     mesh.position.set(pos.x, pos.y + height / 2.0, pos.z);
     // Canonical upright piece orientation in 3d_world
@@ -479,9 +498,19 @@ export function updatePiecesFromWorldState(piecesGroup, piecesDict, piecesList) 
   }
 }
 
-export function movePieceTo(mesh, col, row, geometry = null) {
+export function movePieceTo(mesh, rowOrCell, colOrGeometry = null, maybeGeometry = null) {
+  let row, col, geometry;
+  if (typeof rowOrCell === "object" && rowOrCell !== null) {
+    row = Number(rowOrCell.row);
+    col = Number(rowOrCell.col);
+    geometry = colOrGeometry;
+  } else {
+    row = Number(rowOrCell);
+    col = Number(colOrGeometry);
+    geometry = maybeGeometry;
+  }
   const geo = geometry || getActiveGeometry();
-  const pos = boardPointToXYZ(col, row, geo);
+  const pos = boardPointToXYZ(row, col, geo);
   mesh.position.set(pos.x, mesh.position.y, pos.z);
   mesh.userData.col = col;
   mesh.userData.row = row;

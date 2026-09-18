@@ -837,15 +837,18 @@ function computeGeometricPrecheck(d_mm, H_mm, z_board_mm = 10.5) {
   const z_flange_grasp = z_tcp_grasp + L_tool;    // 233.215 mm
   const z_flange_app = z_board_mm + H_mm + L_tool; // 228.5 + H mm
 
-  const X_far = 540.0 + d_mm;
-  const Y_far = 160.0;
+  // Canonical 90 deg orientation:
+  // Column axis along -X_robot: col 0 is at 200 + d_mm, col 8 is at 520 + d_mm (farthest depth)
+  // Row axis along -Y_robot: row 0 is at +180 mm, row 9 is at -180 mm (lateral extremes)
+  const X_far = 520.0 + d_mm;
+  const Y_far = 180.0;
 
   const D_far_grasp = Math.hypot(X_far, Y_far, z_flange_grasp);
   const D_far_app = Math.hypot(X_far, Y_far, z_flange_app);
 
   // d_max(H)
   const rad_d = R * R - Y_far * Y_far - z_flange_app * z_flange_app;
-  const d_max = rad_d >= 0 ? Math.sqrt(rad_d) - 540.0 : null;
+  const d_max = rad_d >= 0 ? Math.sqrt(rad_d) - 520.0 : null;
 
   // H_max(d)
   const rad_h = R * R - Y_far * Y_far - X_far * X_far;
@@ -882,11 +885,11 @@ function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0) {
   const badge = document.getElementById("geomPrecheckBadge");
 
   if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
-  if (elRow0) elRow0.textContent = `${(180.0 + d_mm).toFixed(1)} mm`;
-  if (elRow9) elRow9.textContent = `${(540.0 + d_mm).toFixed(1)} mm`;
-  if (elNear) elNear.textContent = `${(180.0 + d_mm - 25.0).toFixed(1)} mm`;
+  if (elRow0) elRow0.textContent = `${(200.0 + d_mm).toFixed(1)} mm`;
+  if (elRow9) elRow9.textContent = `${(520.0 + d_mm).toFixed(1)} mm`;
+  if (elNear) elNear.textContent = `${(176.5 + d_mm).toFixed(1)} mm`;
   if (elCenter) elCenter.textContent = `${(360.0 + d_mm).toFixed(1)} mm`;
-  if (elFar) elFar.textContent = `${(540.0 + d_mm + 25.0).toFixed(1)} mm`;
+  if (elFar) elFar.textContent = `${(543.5 + d_mm).toFixed(1)} mm`;
   if (elH) elH.textContent = `${H_mm.toFixed(1)} mm`;
 
   if (elFarGrasp) elFarGrasp.textContent = `${res.D_far_grasp.toFixed(1)} mm`;
@@ -944,6 +947,9 @@ export function applyAuthoritativeBoardPlacement(packet) {
     }
   }
 
+  // Atomically update geometric precheck UI readouts
+  updateGeometricPrecheckUI(d, h, zOff);
+
   // 7 & 8. Atomically update board coordinate ruler edges and ruler labels
   const centerWorldZ = packet.board_center_world_m?.[2] ?? (0.36 + d / 1000.0);
   const surfaceWorldY = packet.board_center_world_m?.[1] ?? (0.0105 + zOff / 1000.0);
@@ -955,7 +961,7 @@ export function applyAuthoritativeBoardPlacement(packet) {
   if (state.selectedCell) {
     const { row, col } = state.selectedCell;
     const ring = getOrCreateTargetRing();
-    const pt = boardPointToXYZ(col, row, physicalGeometryRef);
+    const pt = boardPointToXYZ(row, col, physicalGeometryRef);
     ring.position.set(pt.x, pt.y + 0.001, pt.z);
 
     if (activeDimensionTape) {
@@ -966,7 +972,7 @@ export function applyAuthoritativeBoardPlacement(packet) {
     activeDimensionTape = createDimensionTape(
       new THREE.Vector3(0, 0.002, 0),
       new THREE.Vector3(pt.x, 0.002, pt.z),
-      `R = ${distMm}mm (Ô ${col},${row})`
+      `R = ${distMm}mm (Ô row=${row}, col=${col})`
     );
     if (coordinateRulerGroup) {
       activeDimensionTape.visible = coordinateRulerGroup.visible;
@@ -1001,12 +1007,13 @@ export function applyAuthoritativeBoardPlacement(packet) {
     }
     const cellLabel = document.getElementById("diagCellLabel");
     if (cellLabel) {
-      cellLabel.textContent = `Cột ${col}, Hàng ${row} (X=${robX.toFixed(3)}m, Y=${robY.toFixed(3)}m, Z=${robZ.toFixed(3)}m)`;
+      cellLabel.textContent = `Hàng ${row}, Cột ${col} (X=${robX.toFixed(3)}m, Y=${robY.toFixed(3)}m, Z=${robZ.toFixed(3)}m)`;
     }
   }
 }
 window.applyAuthoritativeBoardPlacement = applyAuthoritativeBoardPlacement;
 window.setScenePlacement = setScenePlacement;
+window.applyPlacementAnalysisUI = applyPlacementAnalysisUI;
 
 export function applyPlacementAnalysisUI(data) {
   if (!data) return;
@@ -1693,14 +1700,18 @@ function goToCell(row, col) {
   state.selectedCell = { row, col };
 
   const d_mm = Number(state.forwardShiftMm || 0.0);
-  const robX = -0.180 - (d_mm / 1000.0) - (row * 0.040);
-  const robY = -0.160 + (col * 0.040);
-  const cell = { row, col, x_m: robX, y_m: robY };
+  const z_off_mm = Number(state.boardHeightOffsetMm || 0.0);
+  const u = (col - 4.0) * 0.040;
+  const v = (row - 4.5) * 0.040;
+  const robX = -0.360 - (d_mm / 1000.0) - u;
+  const robY = -v;
+  const robZ = 0.0105 + (z_off_mm / 1000.0);
+  const cell = { row, col, x_m: robX, y_m: robY, z_m: robZ };
 
   // Update 3D ring marker & coordinates
   const ring = getOrCreateTargetRing();
   if (physicalGeometryRef) {
-    const pt = boardPointToXYZ(col, row, physicalGeometryRef);
+    const pt = boardPointToXYZ(row, col, physicalGeometryRef);
     ring.position.set(pt.x, pt.y + 0.001, pt.z);
     ring.material.color.setHex(0x58a6ff);
 
@@ -1710,7 +1721,7 @@ function goToCell(row, col) {
 
     const robX_mm = (robX * 1000).toFixed(1);
     const robY_mm = (robY * 1000).toFixed(1);
-    const robZ_mm = ((state.boardHeightOffsetMm ? 0.0105 + state.boardHeightOffsetMm / 1000.0 : 0.0105) * 1000).toFixed(1);
+    const robZ_mm = (robZ * 1000).toFixed(1);
 
     const coordReadoutEl = document.getElementById("coordReadout");
     if (coordReadoutEl) {
@@ -1734,7 +1745,7 @@ function goToCell(row, col) {
     activeDimensionTape = createDimensionTape(
       new THREE.Vector3(0, 0.002, 0),
       new THREE.Vector3(pt.x, 0.002, pt.z),
-      `R = ${distMm}mm (Ô ${col},${row})`
+      `R = ${distMm}mm (Ô row=${row}, col=${col})`
     );
     if (coordinateRulerGroup) {
       activeDimensionTape.visible = coordinateRulerGroup.visible;
@@ -1749,7 +1760,7 @@ function goToCell(row, col) {
   if (colSelect) colSelect.value = String(col);
 
   const cellLabel = document.getElementById("diagCellLabel");
-  if (cellLabel) cellLabel.textContent = `Cột ${col}, Hàng ${row} (X=${cell.x_m.toFixed(3)}m, Y=${cell.y_m.toFixed(3)}m)`;
+  if (cellLabel) cellLabel.textContent = `Hàng ${row}, Cột ${col} (X=${cell.x_m.toFixed(3)}m, Y=${cell.y_m.toFixed(3)}m, Z=${cell.z_m.toFixed(3)}m)`;
 
   state.targetDestinationCell = cell;
 
