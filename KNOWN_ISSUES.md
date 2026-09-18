@@ -228,6 +228,26 @@
 
 ---
 
+## B15 — Full Chained Route Fail-Fast Integrity, Coverage Telemetry & Authoritative Placement Extrema (G90 Final Corrective)
+* **Status:** FIXED
+* **Severity:** BLOCKER
+* **Affected Files:** `src/simulation/runtime.py`, `src/simulation/placement.py`, `robot-3d-viewer/main.mjs`, `robot-3d-viewer/index.html`, `tests/unit/test_phase3_final_g90_corrective.py`
+* **Evidence:**
+  1. `CLEAR_BOARD` Fail-Fast Violation: In `VirtualXiangqiSimulation.validate_full_board_routes()` (`src/simulation/runtime.py`), if `CLEAR_BOARD` stage failed, the validator silently fell back to `q_curr = q_after_post_lift` and proceeded to attempt `SERVICE_RETREAT`. If retreat succeeded, `passed_routes` was incremented, masking clear-board failures.
+  2. Missing Coverage Telemetry & Dual Modes: Full board route validation only tested an ad-hoc 20-route sample without reporting validation mode (`SAMPLED` vs `EXHAUSTIVE`), total possible ordered routes (8010), coverage fraction, or enforcing the invariant `passed_routes + failed_routes == tested_routes`.
+  3. Hardcoded Extrema in Viewer Diagnostics: Frontend `robot-3d-viewer/main.mjs` hardcoded extrema formulas (`520 + d`, `180`, `200 + d`, `176.5 + d`, `543.5 + d`) in `computeGeometricPrecheck()` instead of dynamically evaluating transformed `BoardCells` and physical corners via authoritative `BoardPose`.
+  4. Metric Wording Imprecision: The 625.1 mm reach metric (which is flange-to-base approach distance) was colloquially described as "Max TCP distance".
+* **Fix Summary:**
+  1. Enforced strict fail-fast in `validate_full_board_routes()`: if `CLEAR_BOARD` fails, the route fails immediately with `route_passed = False`, `failed_routes += 1`, `worst_route` records stage `"CLEAR_BOARD"`, and `SERVICE_RETREAT` is never evaluated or executed.
+  2. Implemented dual validation modes: `SAMPLED` (`exhaustive=False`, status `FULL_BOARD_ROUTES_SAMPLE_SAFE`) and `EXHAUSTIVE` (`exhaustive=True`, status `FULL_BOARD_ROUTES_EXHAUSTIVE_SAFE`). Added explicit telemetry fields (`validation_mode`, `possible_ordered_routes` = 8010, `tested_routes`, `passed_routes`, `failed_routes`, `coverage_fraction`, `exhaustive`, `all_routes_safe`) and enforced accounting invariant `passed_routes + failed_routes == tested_routes`.
+  3. Refactored `computeGeometricPrecheck()` in `robot-3d-viewer/main.mjs` and `compute_geometric_precheck()` in `src/simulation/placement.py` to evaluate all 90 cells and 4 board corners dynamically via authoritative `BoardPose` transformations, computing dynamic $d_{\text{max}}$, $H_{\text{max}}$, `near_grid_depth_mm`, and `far_grid_depth_mm`.
+  4. Corrected metric wording in `index.html` and documentation: labeled 625.1 mm strictly as "Max flange approach distance" ($D_{\text{flange\_app}} = 625.1\text{ mm} < 650.0\text{ mm}$), distinct from TCP distance ($550.3\text{ mm}$).
+  5. Implemented comprehensive test suite `tests/unit/test_phase3_final_g90_corrective.py` covering G90F-01 through G90F-14 (14/14 tests PASSED).
+* **Regression Test:** `tests/unit/test_phase3_final_g90_corrective.py` (14/14 tests PASSED), all 7 Node.js viewer tests PASSED.
+* **Last Verified Functional HEAD:** e8ac273
+
+---
+
 ## I01 — Deprecated `WebSocketServerProtocol` Import in Telemetry Publisher
 * **Status:** OPEN (Benign warning)
 * **Severity:** LOW

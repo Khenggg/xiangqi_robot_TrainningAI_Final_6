@@ -6,9 +6,9 @@
 
 ## METADATA
 * **CURRENT_BRANCH:** `feature/virtual-robot-3d-simulator`
-* **STARTING_REMOTE_HEAD:** `ad91f5d5e40f0eae0819ad6932130578a380dda4`
-* **LAST_REVIEWED_HEAD:** `953b77d`
-* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `953b77d`
+* **STARTING_REMOTE_HEAD:** `52ae176a6a0a72478693dd32a9b20256c42f6b86`
+* **LAST_REVIEWED_HEAD:** `e8ac273`
+* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `e8ac273`
 * **PASS_A_RUNTIME_AUTHORITY:** `PASS`
 * **PASS_A1_REENTRANT_LOCK:** `PASS`
 * **PASS_A2_NO_SILENT_QUEUE:** `PASS`
@@ -17,6 +17,7 @@
 * **CORRECTIVE_GEOMETRY_G90:** `PASS`
 * **CORRECTIVE_VIEWER_BOOT_AND_COORDINATES:** `PASS`
 * **CORRECTIVE_G90_SEMANTIC_CONTRACT:** `PASS`
+* **CORRECTIVE_G90_FINAL:** `PASS`
 * **SELECTED_PLACEMENT_CANDIDATE:** `d = 15.0 mm, H = 40.0 mm, Z = 0.0 mm`
 * **PHASE:** `PHASE_3_SIMULATION_VIRTUAL_TWIN`
 * **PHASE_STATUS:** `PARTIAL`
@@ -28,7 +29,7 @@
 * **Board Yaw:** `+90.0°` around `+Z_robot` ($R = \begin{bmatrix}-1&0&0\\0&-1&0\\0&0&1\end{bmatrix}$, quat `[0.0, 0.0, 1.0, 0.0]`)
 * **Axis Alignment:** Column axis (span 320 mm) $\to -X_{\text{robot}}$; Row axis (span 360 mm) $\to -Y_{\text{robot}}$
 * **Selected Placement:** Forward shift $d = 15.0\text{ mm}$, Safe transit height $H = 40.0\text{ mm}$, Height offset $Z = 0.0\text{ mm}$
-* **Reach Margin:** `+24.9 mm` (Max TCP distance $625.1\text{ mm} < 650.0\text{ mm}$ kinematic reach limit)
+* **Reach Margin:** `+24.9 mm` (Max flange approach distance $625.1\text{ mm} < 650.0\text{ mm}$ kinematic reach limit; Max TCP distance $550.3\text{ mm}$)
 * **Link Collision Clearance:** `7.69 mm` (Link 1 <-> Link 3 distance at near cells, threshold $0.5\text{ mm}$; zero arm self-collisions)
 * **Kinematic Conditioning:** Max Jacobian condition number `21.79` (Well conditioned across all 90 cells, threshold $< 40.0$)
 * **Joint Limit Margin:** `9.23°` (Minimum clearance to any joint software limit, threshold $> 5.0^\circ$)
@@ -88,6 +89,14 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
     - Updated `robot-3d-viewer/board.mjs` (`boardPointToXYZ` and `setScenePlacement`) to directly consume authoritative `T_robot_from_board` and `board_yaw_deg`, eliminating hardcoded axis swaps.
     - Renamed DOM readout IDs in `index.html` and `main.mjs` to `#readoutNearGridDepth` and `#readoutFarGridDepth`, and updated selection dropdowns to honest base/depth labels.
     - Created comprehensive regression suite `tests/unit/test_phase3_coordinate_semantics_contract.py` (11/11 tests PASSED) and expanded `tests/unit/test_viewer_coordinate_contract.mjs` (8/8 tests PASSED).
+17. **[B15] Phase 3 Final G90 Corrective: Full Route Fail-Fast Integrity, Exhaustive Coverage Reporting & Authoritative Placement Extrema:**
+    - Enforced strict fail-fast in `validate_full_board_routes()`: if `CLEAR_BOARD` stage fails, the route terminates immediately with `route_passed = False`, `failed_routes += 1`, `worst_route` records stage `"CLEAR_BOARD"`, and `SERVICE_RETREAT` is never evaluated or executed.
+    - Implemented explicit validation modes in `validate_full_board_routes()`: `SAMPLED` (`exhaustive=False`, status `FULL_BOARD_ROUTES_SAMPLE_SAFE`) and `EXHAUSTIVE` (`exhaustive=True`, status `FULL_BOARD_ROUTES_EXHAUSTIVE_SAFE`).
+    - Added full coverage telemetry fields: `validation_mode`, `possible_ordered_routes` (8010), `tested_routes`, `passed_routes`, `failed_routes`, `coverage_fraction`, `exhaustive`, `all_routes_safe`. Enforced accounting invariant `passed_routes + failed_routes == tested_routes`.
+    - Eliminated hardcoded extrema (`520 + d`, `180`, `200 + d`, `176.5 + d`, `543.5 + d`) from `robot-3d-viewer/main.mjs`, dynamically computing extrema from transformed cell coordinates and board corners via authoritative `BoardPose`.
+    - Added dynamic `d_max_for_current_h_mm`, `h_max_for_current_d_mm`, `near_grid_depth_mm`, and `far_grid_depth_mm` to `BoardPlacementAnalyzer.compute_geometric_precheck()`.
+    - Corrected reach metric description in `index.html`, viewer, and documentation: strictly labeled 625.1 mm as "Max flange approach distance" ($D_{\text{flange\_app}} = 625.1\text{ mm} < 650.0\text{ mm}$), distinct from TCP distance ($550.3\text{ mm}$).
+    - Added comprehensive test suite `tests/unit/test_phase3_final_g90_corrective.py` covering G90F-01 through G90F-14 (14/14 tests PASSED).
 
 ---
 
@@ -106,7 +115,8 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 ---
 
 ## TEST_EVIDENCE
-* **Python Unit Tests:** 151/151 Phase 3 specific tests PASSED (100% pass rate)
+* **Python Unit Tests:** 165/165 Phase 3 specific tests PASSED (100% pass rate)
+  * `tests/unit/test_phase3_final_g90_corrective.py`: 14 passed (G90F-01 to G90F-14)
   * `tests/unit/test_phase3_coordinate_semantics_contract.py`: 11 passed (S90-01 to S90-13)
   * `tests/unit/test_phase3_board_orientation_90.py`: 25 passed (G90-01 to G90-25)
   * `tests/unit/test_phase3_final_master.py`: 79 passed (including Pass A/A.1/A.2 tests, Pass B/B-Corr tests, and Pass C tests c1–c20)
