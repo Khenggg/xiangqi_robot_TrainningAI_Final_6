@@ -90,9 +90,22 @@ class InputHandler:
         b_time = self.hw.yolo_detector._baseline_time
         self.state.save_rollback_state(occ, b_time)
 
+        # CCHESS ONNX Recognition (nếu đã kích hoạt)
+        cchess_result = None
+        if getattr(self.hw, "cchess_recognizer", None) is not None and frame is not None:
+            try:
+                print("[SPACE] 🧠 Chạy CChess ONNX Recognition (Cross-validation)...")
+                cchess_result = self.hw.recognize_board_state(frame)
+                if cchess_result and cchess_result.get("success"):
+                    print("[CChess ONNX] ✅ Nhận diện bàn cờ & quân cờ thành công!")
+            except Exception as e:
+                print(f"[CChess ONNX] ⚠️ Lỗi khi nhận diện CChess: {e}")
+
         # Perform Detection
         print("[SPACE] 🔍 Chạy YOLO Detector...")
-        src, dst, piece = self.hw.yolo_detector.detect_move(frame, detections, self.state.board)
+        src, dst, piece = self.hw.yolo_detector.detect_move(
+            frame, detections, self.state.board, cchess_result=cchess_result
+        )
         
         if src:
             # Note: Vietnamese name resolution skipped here for brevity, handled by detector UI largely
