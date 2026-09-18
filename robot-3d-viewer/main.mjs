@@ -829,46 +829,122 @@ function syncAllJointSliders() {
 // ---------------------------------------------------------------------------
 // 5.6) PHÂN TÍCH & ĐIỀU KHIỂN VỊ TRÍ BÀN CỜ ĐỘNG (DYNAMIC BOARD PLACEMENT)
 // ---------------------------------------------------------------------------
-function computeGeometricPrecheck(d_mm, H_mm, z_board_mm = 10.5) {
+export function computeGeometricPrecheck(d_mm, H_mm, z_board_mm = 10.5, yaw_deg = 90.0) {
   const R = 650.0;
   const L_tool = 218.0;
   const piece_h = 9.43;
-  const z_tcp_grasp = z_board_mm + piece_h / 2.0; // 15.215 mm
-  const z_flange_grasp = z_tcp_grasp + L_tool;    // 233.215 mm
-  const z_flange_app = z_board_mm + H_mm + L_tool; // 228.5 + H mm
+  const z_tcp_grasp = z_board_mm + piece_h / 2.0;
+  const z_flange_grasp = z_tcp_grasp + L_tool;
+  const z_flange_app = z_board_mm + H_mm + L_tool;
 
-  // Canonical 90 deg orientation:
-  // Column axis along -X_robot: col 0 is at 200 + d_mm, col 8 is at 520 + d_mm (farthest depth)
-  // Row axis along -Y_robot: row 0 is at +180 mm, row 9 is at -180 mm (lateral extremes)
-  const X_far = 520.0 + d_mm;
-  const Y_far = 180.0;
+  const theta = (yaw_deg * Math.PI) / 180.0;
+  const sinT = Math.sin(theta);
+  const cosT = Math.cos(theta);
 
-  const D_far_grasp = Math.hypot(X_far, Y_far, z_flange_grasp);
-  const D_far_app = Math.hypot(X_far, Y_far, z_flange_app);
+  const robCenterX_mm = -(360.0 + d_mm);
+  const robCenterY_mm = 0.0;
 
-  // d_max(H)
-  const rad_d = R * R - Y_far * Y_far - z_flange_app * z_flange_app;
-  const d_max = rad_d >= 0 ? Math.sqrt(rad_d) - 520.0 : null;
+  // Evaluate all 90 cells to find extrema dynamically via BoardPose
+  let maxFlangeAppDist = 0.0;
+  let maxFlangeGraspDist = 0.0;
+  let maxGridDist = 0.0;
+  let minGridDist = Infinity;
+  let minGridDepth = Infinity;
+  let maxGridDepth = 0.0;
+  let farthestCell = [0, 8];
+  let nearestCell = [4, 0];
+  let farX = -(520.0 + d_mm);
+  let farY = 180.0;
 
-  // H_max(d)
-  const rad_h = R * R - Y_far * Y_far - X_far * X_far;
+  for (let r = 0; r < 10; r++) {
+    for (let c = 0; c < 9; c++) {
+      const u_mm = (c - 4.0) * 40.0;
+      const v_mm = (r - 4.5) * 40.0;
+      const cellX_mm = -sinT * u_mm - cosT * v_mm + robCenterX_mm;
+      const cellY_mm =  cosT * u_mm - sinT * v_mm + robCenterY_mm;
+
+      const gridDist = Math.hypot(cellX_mm, cellY_mm);
+      const gridDepth = Math.abs(cellX_mm);
+      const flangeGraspDist = Math.hypot(cellX_mm, cellY_mm, z_flange_grasp);
+      const flangeAppDist = Math.hypot(cellX_mm, cellY_mm, z_flange_app);
+
+      if (gridDist < minGridDist) {
+        minGridDist = gridDist;
+        nearestCell = [r, c];
+      }
+      if (gridDist > maxGridDist) {
+        maxGridDist = gridDist;
+      }
+      if (gridDepth < minGridDepth) {
+        minGridDepth = gridDepth;
+      }
+      if (gridDepth > maxGridDepth) {
+        maxGridDepth = gridDepth;
+      }
+      if (flangeAppDist > maxFlangeAppDist) {
+        maxFlangeAppDist = flangeAppDist;
+        farthestCell = [r, c];
+        farX = cellX_mm;
+        farY = cellY_mm;
+      }
+      if (flangeGraspDist > maxFlangeGraspDist) {
+        maxFlangeGraspDist = flangeGraspDist;
+      }
+    }
+  }
+
+  // Physical board corners (width 367mm along u, length 410mm along v)
+  const hw_mm = 367.0 / 2.0;
+  const hl_mm = 410.0 / 2.0;
+  const corners = [
+    [-hw_mm, -hl_mm],
+    [-hw_mm,  hl_mm],
+    [ hw_mm, -hl_mm],
+    [ hw_mm,  hl_mm],
+  ];
+  let nearEdgeDist = Infinity;
+  let farEdgeDist = 0.0;
+  for (const [cu, cv] of corners) {
+    const cx = -sinT * cu - cosT * cv + robCenterX_mm;
+    const absX = Math.abs(cx);
+    if (absX < nearEdgeDist) nearEdgeDist = absX;
+    if (absX > farEdgeDist) farEdgeDist = absX;
+  }
+  const boardCenterDist = Math.abs(robCenterX_mm);
+
+  // Dynamic d_max and H_max derived from farthest transformed cell
+  const rad_d = R * R - farY * farY - z_flange_app * z_flange_app;
+  const x_base_far = Math.abs(farX) - d_mm;
+  const d_max = rad_d >= 0 ? Math.sqrt(rad_d) - x_base_far : null;
+
+  const rad_h = R * R - farY * farY - farX * farX;
   const H_max = rad_h >= 0 ? Math.sqrt(rad_h) - z_board_mm - L_tool : null;
 
-  const pass = D_far_grasp <= R && D_far_app <= R;
+  const pass = maxFlangeGraspDist <= R && maxFlangeAppDist <= R && d_mm >= -20.0;
+
   return {
-    D_far_grasp,
-    D_far_app,
-    grasp_margin: R - D_far_grasp,
-    app_margin: R - D_far_app,
+    D_far_grasp: maxFlangeGraspDist,
+    D_far_app: maxFlangeAppDist,
+    grasp_margin: R - maxFlangeGraspDist,
+    app_margin: R - maxFlangeAppDist,
     d_max,
     H_max,
     pass,
+    nearest_cell: nearestCell,
+    nearest_cell_distance_mm: minGridDist,
+    farthest_cell: farthestCell,
+    farthest_cell_distance_mm: maxGridDist,
+    near_grid_depth_mm: minGridDepth,
+    far_grid_depth_mm: maxGridDepth,
+    near_board_edge_distance_mm: nearEdgeDist,
+    far_board_edge_distance_mm: farEdgeDist,
+    board_center_distance_mm: boardCenterDist,
   };
 }
 
-function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0) {
+function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0, yaw_deg = 90.0) {
   const z_board = 10.5 + z_off_mm;
-  const res = computeGeometricPrecheck(d_mm, H_mm, z_board);
+  const res = computeGeometricPrecheck(d_mm, H_mm, z_board, yaw_deg);
   const elD = document.getElementById("readoutShiftD");
   const elNearGrid = document.getElementById("readoutNearGridDepth") || document.getElementById("readoutRow0Dist");
   const elFarGrid = document.getElementById("readoutFarGridDepth") || document.getElementById("readoutRow9Dist");
@@ -885,11 +961,11 @@ function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0) {
   const badge = document.getElementById("geomPrecheckBadge");
 
   if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
-  if (elNearGrid) elNearGrid.textContent = `${(200.0 + d_mm).toFixed(1)} mm`;
-  if (elFarGrid) elFarGrid.textContent = `${(520.0 + d_mm).toFixed(1)} mm`;
-  if (elNear) elNear.textContent = `${(176.5 + d_mm).toFixed(1)} mm`;
-  if (elCenter) elCenter.textContent = `${(360.0 + d_mm).toFixed(1)} mm`;
-  if (elFar) elFar.textContent = `${(543.5 + d_mm).toFixed(1)} mm`;
+  if (elNearGrid) elNearGrid.textContent = `${res.near_grid_depth_mm.toFixed(1)} mm`;
+  if (elFarGrid) elFarGrid.textContent = `${res.far_grid_depth_mm.toFixed(1)} mm`;
+  if (elNear) elNear.textContent = `${res.near_board_edge_distance_mm.toFixed(1)} mm`;
+  if (elCenter) elCenter.textContent = `${res.board_center_distance_mm.toFixed(1)} mm`;
+  if (elFar) elFar.textContent = `${res.far_board_edge_distance_mm.toFixed(1)} mm`;
   if (elH) elH.textContent = `${H_mm.toFixed(1)} mm`;
 
   if (elFarGrasp) elFarGrasp.textContent = `${res.D_far_grasp.toFixed(1)} mm`;
@@ -1035,25 +1111,26 @@ export function applyPlacementAnalysisUI(data) {
   const elHMax = document.getElementById("readoutHMax");
   const badge = document.getElementById("geomPrecheckBadge");
 
+  const preview = computeGeometricPrecheck(d_mm, H_mm, 10.5 + z_off_mm, data.board_yaw_deg ?? 90.0);
   if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
-  if (elNearGrid) elNearGrid.textContent = data.nearest_cell_distance_mm !== undefined ? `${data.nearest_cell_distance_mm.toFixed(1)} mm` : (data.near_grid_depth_mm !== undefined ? `${data.near_grid_depth_mm.toFixed(1)} mm` : `${(200.0 + d_mm).toFixed(1)} mm`);
-  if (elFarGrid) elFarGrid.textContent = data.farthest_cell_distance_mm !== undefined ? `${data.farthest_cell_distance_mm.toFixed(1)} mm` : (data.far_grid_depth_mm !== undefined ? `${data.far_grid_depth_mm.toFixed(1)} mm` : `${(520.0 + d_mm).toFixed(1)} mm`);
-  if (elNear) elNear.textContent = data.near_board_edge_distance_mm !== undefined ? `${data.near_board_edge_distance_mm.toFixed(1)} mm` : `${(200.0 + d_mm - 23.5).toFixed(1)} mm`;
-  if (elCenter) elCenter.textContent = data.board_center_distance_mm !== undefined ? `${data.board_center_distance_mm.toFixed(1)} mm` : `${(360.0 + d_mm).toFixed(1)} mm`;
-  if (elFar) elFar.textContent = data.far_board_edge_distance_mm !== undefined ? `${data.far_board_edge_distance_mm.toFixed(1)} mm` : `${(520.0 + d_mm + 23.5).toFixed(1)} mm`;
+  if (elNearGrid) elNearGrid.textContent = data.near_grid_depth_mm !== undefined ? `${data.near_grid_depth_mm.toFixed(1)} mm` : (data.nearest_cell_distance_mm !== undefined ? `${data.nearest_cell_distance_mm.toFixed(1)} mm` : `${preview.near_grid_depth_mm.toFixed(1)} mm`);
+  if (elFarGrid) elFarGrid.textContent = data.far_grid_depth_mm !== undefined ? `${data.far_grid_depth_mm.toFixed(1)} mm` : (data.farthest_cell_distance_mm !== undefined ? `${data.farthest_cell_distance_mm.toFixed(1)} mm` : `${preview.far_grid_depth_mm.toFixed(1)} mm`);
+  if (elNear) elNear.textContent = data.near_board_edge_distance_mm !== undefined ? `${data.near_board_edge_distance_mm.toFixed(1)} mm` : `${preview.near_board_edge_distance_mm.toFixed(1)} mm`;
+  if (elCenter) elCenter.textContent = data.board_center_distance_mm !== undefined ? `${data.board_center_distance_mm.toFixed(1)} mm` : `${preview.board_center_distance_mm.toFixed(1)} mm`;
+  if (elFar) elFar.textContent = data.far_board_edge_distance_mm !== undefined ? `${data.far_board_edge_distance_mm.toFixed(1)} mm` : `${preview.far_board_edge_distance_mm.toFixed(1)} mm`;
   const elYaw = document.getElementById("readoutBoardYaw");
   if (elYaw) elYaw.textContent = `+${Number(data.board_yaw_deg ?? 90.0).toFixed(1)}° (col=-X, row=-Y)`;
   if (elH) elH.textContent = `${H_mm.toFixed(1)} mm`;
 
-  if (elFarGrasp && data.far_grasp_distance_mm !== undefined) elFarGrasp.textContent = `${data.far_grasp_distance_mm.toFixed(1)} mm`;
-  if (elFarApp && data.far_approach_distance_mm !== undefined) elFarApp.textContent = `${data.far_approach_distance_mm.toFixed(1)} mm`;
-  if (elGraspMargin && data.grasp_reach_margin_mm !== undefined) elGraspMargin.textContent = `${data.grasp_reach_margin_mm.toFixed(1)} mm`;
-  if (elAppMargin && data.approach_reach_margin_mm !== undefined) elAppMargin.textContent = `${data.approach_reach_margin_mm.toFixed(1)} mm`;
-  if (elDMax) elDMax.textContent = data.d_max_for_current_h_mm !== null && data.d_max_for_current_h_mm !== undefined ? `${data.d_max_for_current_h_mm.toFixed(1)} mm` : "VÔ NGHIỆM";
-  if (elHMax) elHMax.textContent = data.h_max_for_current_d_mm !== null && data.h_max_for_current_d_mm !== undefined ? `${data.h_max_for_current_d_mm.toFixed(1)} mm` : "VÔ NGHIỆM";
+  if (elFarGrasp) elFarGrasp.textContent = data.far_grasp_distance_mm !== undefined ? `${data.far_grasp_distance_mm.toFixed(1)} mm` : `${preview.D_far_grasp.toFixed(1)} mm`;
+  if (elFarApp) elFarApp.textContent = data.far_approach_distance_mm !== undefined ? `${data.far_approach_distance_mm.toFixed(1)} mm` : `${preview.D_far_app.toFixed(1)} mm`;
+  if (elGraspMargin) elGraspMargin.textContent = data.grasp_reach_margin_mm !== undefined ? `${data.grasp_reach_margin_mm.toFixed(1)} mm` : `${preview.grasp_margin.toFixed(1)} mm`;
+  if (elAppMargin) elAppMargin.textContent = data.approach_reach_margin_mm !== undefined ? `${data.approach_reach_margin_mm.toFixed(1)} mm` : `${preview.app_margin.toFixed(1)} mm`;
+  if (elDMax) elDMax.textContent = data.d_max_for_current_h_mm !== null && data.d_max_for_current_h_mm !== undefined ? `${data.d_max_for_current_h_mm.toFixed(1)} mm` : (preview.d_max !== null ? `${preview.d_max.toFixed(1)} mm` : "VÔ NGHIỆM");
+  if (elHMax) elHMax.textContent = data.h_max_for_current_d_mm !== null && data.h_max_for_current_d_mm !== undefined ? `${data.h_max_for_current_d_mm.toFixed(1)} mm` : (preview.H_max !== null ? `${preview.H_max.toFixed(1)} mm` : "VÔ NGHIỆM");
 
   if (badge) {
-    const isPass = Boolean(data.is_geometric_pass);
+    const isPass = Boolean(data.is_geometric_pass !== undefined ? data.is_geometric_pass : preview.pass);
     badge.className = isPass ? "badge-safe" : "badge-warn";
     badge.textContent = isPass ? "GEOMETRIC PASS" : "GEOMETRIC FAIL";
   }
@@ -1064,10 +1141,10 @@ export function updateFullRouteValidationResultUI(res) {
   if (!valBadge) return;
   if (res.all_routes_safe) {
     valBadge.className = "badge-safe";
-    valBadge.textContent = "FULL BOARD ROUTE SAFE";
+    valBadge.textContent = res.status || "FULL BOARD ROUTE SAFE";
   } else {
     valBadge.className = "badge-warn";
-    valBadge.textContent = `THẤT BẠI ${res.failed_routes}/${res.total_routes} TUYẾN (${res.worst_route?.stage || "LỖI"})`;
+    valBadge.textContent = `${res.status || "THẤT BẠI"} ${res.failed_routes}/${res.tested_routes || res.total_routes} TUYẾN (${res.worst_route?.stage || "LỖI"})`;
   }
 }
 

@@ -533,6 +533,9 @@ class BoardPlacementAnalyzer:
         min_tcp_reach_dist_mm = float("inf")
         farthest_cell = (0, 0)
         nearest_cell = (0, 0)
+        p_flange_ap_far = None
+        min_grid_depth_mm = float("inf")
+        max_grid_depth_mm = 0.0
 
         # Evaluate across all 90 cells
         for r in range(10):
@@ -546,10 +549,17 @@ class BoardPlacementAnalyzer:
                 d_flange_gr = float(np.linalg.norm(p_flange_gr)) * 1000.0
                 d_flange_ap = float(np.linalg.norm(p_flange_ap)) * 1000.0
                 d_tcp = float(np.linalg.norm(p_gr[:2])) * 1000.0
+                grid_depth = abs(p_gr[0]) * 1000.0
+
+                if grid_depth < min_grid_depth_mm:
+                    min_grid_depth_mm = grid_depth
+                if grid_depth > max_grid_depth_mm:
+                    max_grid_depth_mm = grid_depth
 
                 if d_flange_ap > max_flange_approach_dist_mm:
                     max_flange_approach_dist_mm = d_flange_ap
                     farthest_cell = (r, c)
+                    p_flange_ap_far = p_flange_ap
                 if d_flange_gr > max_flange_grasp_dist_mm:
                     max_flange_grasp_dist_mm = d_flange_gr
                 if d_tcp > max_tcp_reach_dist_mm:
@@ -574,6 +584,20 @@ class BoardPlacementAnalyzer:
         far_board_edge_dist = abs(far_edge_x) * 1000.0
         board_center_dist = abs(state.board_center_robot_m[0]) * 1000.0
 
+        # Dynamic d_max and h_max derived from farthest transformed cell
+        d_max_mm = None
+        h_max_mm = None
+        if p_flange_ap_far is not None:
+            x_far_mm = p_flange_ap_far[0] * 1000.0
+            y_far_mm = p_flange_ap_far[1] * 1000.0
+            z_flange_app_mm = p_flange_ap_far[2] * 1000.0
+            rad_d = self.R_precheck_mm**2 - y_far_mm**2 - z_flange_app_mm**2
+            x_base_far_mm = abs(x_far_mm) - d
+            d_max_mm = math.sqrt(rad_d) - x_base_far_mm if rad_d >= 0.0 else None
+
+            rad_h = self.R_precheck_mm**2 - y_far_mm**2 - x_far_mm**2
+            h_max_mm = math.sqrt(rad_h) - z_board - self.tool_length_mm if rad_h >= 0.0 else None
+
         is_geometric_pass = (approach_margin_mm >= 0.0) and (grasp_margin_mm >= 0.0) and (d >= -20.0)
 
         return {
@@ -586,6 +610,8 @@ class BoardPlacementAnalyzer:
             "board_center_distance_mm": round(board_center_dist, 2),
             "near_board_edge_distance_mm": round(near_board_edge_dist, 2),
             "far_board_edge_distance_mm": round(far_board_edge_dist, 2),
+            "near_grid_depth_mm": round(min_grid_depth_mm, 2),
+            "far_grid_depth_mm": round(max_grid_depth_mm, 2),
             "nearest_grid_cell": list(nearest_cell),
             "nearest_grid_cell_distance_mm": round(min_tcp_reach_dist_mm, 2),
             "farthest_grid_cell": list(farthest_cell),
@@ -595,6 +621,8 @@ class BoardPlacementAnalyzer:
             "r_precheck_mm": round(self.R_precheck_mm, 2),
             "grasp_reach_margin_mm": round(grasp_margin_mm, 2),
             "approach_reach_margin_mm": round(approach_margin_mm, 2),
+            "d_max_for_current_h_mm": round(d_max_mm, 2) if d_max_mm is not None else None,
+            "h_max_for_current_d_mm": round(h_max_mm, 2) if h_max_mm is not None else None,
             "status": "GEOMETRIC PASS" if is_geometric_pass else "GEOMETRIC FAIL",
             "is_geometric_pass": is_geometric_pass,
             "placement_version": int(placement_version),

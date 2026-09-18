@@ -375,6 +375,15 @@ class Phase3FinalG90CorrectiveTests(unittest.TestCase):
         self.assertAlmostEqual(near_dist, 191.5, delta=1.0)
         self.assertAlmostEqual(far_dist, 558.5, delta=1.0)
 
+    def test_g90f_07_no_hardcoded_extrema_in_viewer_authoritative_logic(self):
+        """G90F-07: AST / text audit to verify robot-3d-viewer/main.mjs does not hardcode 520.0 + d_mm as authoritative."""
+        viewer_path = _PROJECT_ROOT / "robot-3d-viewer" / "main.mjs"
+        content = viewer_path.read_text(encoding="utf-8")
+
+        # Must not have "const X_far = 520.0 + d_mm;" or "const Y_far = 180.0;"
+        self.assertNotIn("const X_far = 520.0 + d_mm", content)
+        self.assertNotIn("const Y_far = 180.0", content)
+
 
 if __name__ == "__main__":
     unittest.main()
