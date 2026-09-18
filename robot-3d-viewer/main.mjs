@@ -1758,6 +1758,7 @@ function goToCell(row, col) {
       src: [srcRow, srcCol],
       dst: [row, col],
       placement_version: state.placementVersion || 1,
+      grasp_piece: false,
     };
     state.liveSocket.send(JSON.stringify(cmd));
     const badge = document.getElementById("diagStatusBadge");

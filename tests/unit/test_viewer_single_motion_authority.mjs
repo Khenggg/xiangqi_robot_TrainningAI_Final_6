@@ -44,6 +44,10 @@ assert.ok(
   "main.mjs must dispatch authoritative command 'EXECUTE_3STAGE' over WebSocket"
 );
 assert.ok(
+  mainMjsContent.includes("grasp_piece: false"),
+  "main.mjs must explicitly specify grasp_piece: false for goToCell diagnostic navigation"
+);
+assert.ok(
   mainMjsContent.includes("handleBackendTrajectoryStage"),
   "main.mjs must consume backend trajectory_stage telemetry"
 );

@@ -1887,7 +1887,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
         self.sim.reset_pieces()
 
         # Cell (2, 1) has black_cannon_0 in default layout; cell (4, 1) is empty
-        res = self.sim.execute_3stage_trajectory((2, 1), (4, 1))
+        res = self.sim.execute_3stage_trajectory((2, 1), (4, 1), grasp_piece=True)
         self.assertTrue(res.get("success"), f"Pick & place trajectory failed: {res}")
         self.assertEqual(res.get("status"), "SUCCESS")
         self.assertTrue(res.get("piece_placed"))
@@ -2019,7 +2019,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
         # Mock try_grasp returning failure
         with mock.patch.object(self.sim.world, "try_grasp", return_value=GraspResult(success=False, status=GraspStatus.NO_CANDIDATE, reason="Simulated grasp slipped")):
             with mock.patch.object(self.sim.world, "get_attached_piece", return_value=None):
-                res = self.sim.execute_3stage_trajectory((2, 1), (4, 1))
+                res = self.sim.execute_3stage_trajectory((2, 1), (4, 1), grasp_piece=True)
 
         self.assertFalse(res.get("success"))
         self.assertEqual(res.get("failed_stage"), "GRASP")
@@ -2030,6 +2030,61 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
         # Clean up
         self.sim.clear_error()
+        self.sim.reset_pieces()
+        self.sim.runtime_go_service_safe()
+
+    def test_c19_execute_3stage_omitted_grasp_flag_defaults_to_arm_only(self):
+        """C19. EXECUTE_3STAGE without grasp flag on occupied source defaults to arm-only transit (no piece moved)."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        self.sim.reset_pieces()
+
+        p_before = self.sim.world.pieces["black_cannon_0"].get_pose_robot_base()[0]
+        # (2, 1) has black_cannon_0, (4, 1) is empty. Do not pass grasp flag.
+        res = self.sim.execute_3stage_trajectory((2, 1), (4, 1))
+
+        self.assertTrue(res.get("success"), f"Arm-only trajectory failed: {res}")
+        self.assertEqual(res.get("status"), "SUCCESS")
+        self.assertFalse(res.get("piece_placed"))
+        self.assertFalse(res.get("piece_released"))
+        self.assertTrue(res.get("service_safe"))
+        self.assertIsNone(self.sim.world.get_attached_piece())
+
+        # Verify piece is completely undisturbed at (2, 1)
+        p_after = self.sim.world.pieces["black_cannon_0"].get_pose_robot_base()[0]
+        diff_m = float(np.linalg.norm(np.array(p_after) - np.array(p_before)))
+        self.assertLess(diff_m, 0.001, f"Piece moved by {diff_m}m despite arm-only trajectory")
+        p_obj = self.sim.world.pieces["black_cannon_0"]
+        c_p, r_p, d_p = p_obj.get_nearest_intersection()
+        self.assertEqual((r_p, c_p), (2, 1))
+
+        # Clean up
+        self.sim.reset_pieces()
+        self.sim.runtime_go_service_safe()
+
+    def test_c20_execute_3stage_explicit_grasp_executes_pick_and_place(self):
+        """C20. EXECUTE_3STAGE with grasp_piece=True executes full pick & place, moving piece to destination."""
+        self.sim.runtime_go_service_safe()
+        self.sim.world.step_until_settled(max_steps=30)
+        self.sim.reset_pieces()
+
+        # (2, 1) has black_cannon_0, (4, 1) is empty. Pass explicit grasp_piece=True.
+        res = self.sim.execute_3stage_trajectory((2, 1), (4, 1), grasp_piece=True)
+
+        self.assertTrue(res.get("success"), f"Pick & place trajectory failed: {res}")
+        self.assertEqual(res.get("status"), "SUCCESS")
+        self.assertTrue(res.get("piece_placed"))
+        self.assertTrue(res.get("piece_released"))
+        self.assertTrue(res.get("service_safe"))
+        self.assertIsNone(self.sim.world.get_attached_piece())
+
+        # Verify piece is physically resting at target cell (4, 1)
+        p_obj = self.sim.world.pieces["black_cannon_0"]
+        c_p, r_p, d_p = p_obj.get_nearest_intersection()
+        self.assertEqual((r_p, c_p), (4, 1))
+        self.assertLess(d_p, 0.025)
+
+        # Clean up
         self.sim.reset_pieces()
         self.sim.runtime_go_service_safe()
 

@@ -2557,10 +2557,12 @@ class VirtualXiangqiSimulation:
             grasp = cmd.get("grasp")
             if grasp is None:
                 grasp = cmd.get("grasp_piece")
+            # Strict fail-safe default: missing grasp flag defaults to False (arm-only transit)
+            grasp_piece_bool = bool(grasp) if grasp is not None else False
             if src is not None and dst is not None and len(src) == 2 and len(dst) == 2:
                 threading.Thread(
                     target=self._run_trajectory_async,
-                    args=((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1])), p_ver, grasp),
+                    args=((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1])), p_ver, grasp_piece_bool),
                     daemon=True,
                 ).start()
         elif action == "SET_GRIPPER":
@@ -2668,7 +2670,7 @@ class VirtualXiangqiSimulation:
         src: Tuple[int, int],
         dst: Tuple[int, int],
         planned_version: Optional[int] = None,
-        grasp_piece: Optional[bool] = None,
+        grasp_piece: Optional[bool] = False,
     ) -> None:
         """Execute trajectory asynchronously and broadcast authoritative completion packet."""
         res = self.execute_3stage_trajectory(src, dst, planned_placement_version=planned_version, grasp_piece=grasp_piece)
@@ -2692,7 +2694,7 @@ class VirtualXiangqiSimulation:
         speed_factor: Optional[float] = None,
         samples_per_stage: int = 20,
         planned_placement_version: Optional[int] = None,
-        grasp_piece: Optional[bool] = None,
+        grasp_piece: Optional[bool] = False,
     ) -> Dict[str, Any]:
         """
         Execute authoritative 3-stage Pick & Place Cartesian trajectory with Pass C Safe Retreat:
@@ -2747,7 +2749,7 @@ class VirtualXiangqiSimulation:
         speed_factor: Optional[float] = None,
         samples_per_stage: int = 20,
         planned_placement_version: Optional[int] = None,
-        grasp_piece: Optional[bool] = None,
+        grasp_piece: Optional[bool] = False,
     ) -> Dict[str, Any]:
             current_ver = self.placement_state.placement_version
             if planned_placement_version is not None and planned_placement_version != current_ver:
@@ -2830,9 +2832,8 @@ class VirtualXiangqiSimulation:
 
                 # Determine whether this trajectory executes a pick & place or an arm transit:
                 # - If grasp_piece is explicitly True: requires valid piece_at_src and empty dst_cell.
-                # - If grasp_piece is None: pick & place if piece_at_src is present AND dst_cell is empty;
-                #   if dst_cell is occupied, treat as arm-only transit to avoid colliding into dst piece.
-                # - If grasp_piece is False: arm-only transit.
+                # - If grasp_piece is False or None (default): strictly arm-only transit.
+                #   Lack of explicit grasp flag is never interpreted as permission to manipulate pieces.
                 should_grasp = False
                 if grasp_piece is True:
                     if piece_at_src is None:
@@ -2858,8 +2859,6 @@ class VirtualXiangqiSimulation:
                             "placement_version": current_ver,
                         }
                     should_grasp = True
-                elif grasp_piece is None:
-                    should_grasp = (piece_at_src is not None and piece_at_dst is None)
                 else:
                     should_grasp = False
 
