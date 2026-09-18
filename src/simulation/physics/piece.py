@@ -77,7 +77,7 @@ class XiangqiPieceBody:
         return tilt_angle_deg(orn)
 
     def get_continuous_board_coord(self) -> Tuple[float, float]:
-        """Return continuous (col, row) on board plane."""
+        """Return continuous (row, col) on board plane."""
         pos, _ = self.get_pose_robot_base()
         return continuous_board_coord(
             pos,
@@ -88,12 +88,12 @@ class XiangqiPieceBody:
         )
 
     def get_nearest_intersection(self) -> Tuple[int, int, float]:
-        """Return (nearest_col, nearest_row, distance_to_target_m)."""
+        """Return (nearest_row, nearest_col, distance_to_target_m)."""
         pos, _ = self.get_pose_robot_base()
-        c_float, r_float = self.get_continuous_board_coord()
+        r_float, c_float = self.get_continuous_board_coord()
         return nearest_intersection_metrics(
-            c_float,
             r_float,
+            c_float,
             pos,
             grid_origin_robot=self.grid_origin_robot,
             col_spacing_m=self.col_spacing_m,
@@ -136,8 +136,8 @@ class XiangqiPieceBody:
         pos_world = transform_point_robot_to_world(pos_robot)
         quat_world = transform_quat_robot_to_world(quat_robot)
 
-        col_float, row_float = self.get_continuous_board_coord()
-        nearest_c, nearest_r, dist_m = self.get_nearest_intersection()
+        row_float, col_float = self.get_continuous_board_coord()
+        nearest_r, nearest_c, dist_m = self.get_nearest_intersection()
 
         return PieceSnapshot(
             id=self.piece_id,

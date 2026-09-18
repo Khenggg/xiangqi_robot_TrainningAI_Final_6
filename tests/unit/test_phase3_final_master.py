@@ -2055,7 +2055,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
         diff_m = float(np.linalg.norm(np.array(p_after) - np.array(p_before)))
         self.assertLess(diff_m, 0.001, f"Piece moved by {diff_m}m despite arm-only trajectory")
         p_obj = self.sim.world.pieces["black_cannon_0"]
-        c_p, r_p, d_p = p_obj.get_nearest_intersection()
+        r_p, c_p, d_p = p_obj.get_nearest_intersection()
         self.assertEqual((r_p, c_p), (2, 1))
 
         # Clean up
@@ -2080,7 +2080,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
         # Verify piece is physically resting at target cell (4, 1)
         p_obj = self.sim.world.pieces["black_cannon_0"]
-        c_p, r_p, d_p = p_obj.get_nearest_intersection()
+        r_p, c_p, d_p = p_obj.get_nearest_intersection()
         self.assertEqual((r_p, c_p), (4, 1))
         self.assertLess(d_p, 0.025)
 

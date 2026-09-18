@@ -40,8 +40,8 @@ def run_normal_scenario(sim: VirtualXiangqiSimulation, speed_factor: float = 50.
 
     piece_id = "black_cannon_0"
     piece = sim.world.pieces[piece_id]
-    c_init, r_init, _ = piece.get_nearest_intersection()
-    print(f"Target piece: {piece_id} at initial intersection (col={c_init}, row={r_init})")
+    r_init, c_init, _ = piece.get_nearest_intersection()
+    print(f"Target piece: {piece_id} at initial intersection (row={r_init}, col={c_init})")
 
     print("[1] Executing pick trajectory...")
     res = sim.pick_piece(piece_id, hover_height_m=0.06, speed_factor=speed_factor)
@@ -50,19 +50,19 @@ def run_normal_scenario(sim: VirtualXiangqiSimulation, speed_factor: float = 50.
         return False
     print(f"[+] Pick succeeded! Grasped: {res.piece_id}")
 
-    target_col, target_row = 1, 4
-    print(f"[2] Placing at target board cell (col={target_col}, row={target_row})...")
-    ok = sim.place_piece(target_col, target_row, hover_height_m=0.06, speed_factor=speed_factor)
+    target_row, target_col = 4, 1
+    print(f"[2] Placing at target board cell (row={target_row}, col={target_col})...")
+    ok = sim.place_piece(target_row, target_col, hover_height_m=0.06, speed_factor=speed_factor)
     if not ok:
         print("[-] Place motion failed")
         return False
 
     sim.settle(max_steps=60)
-    c_final, r_final, dist = piece.get_nearest_intersection()
-    print(f"[+] Placed and settled at (col={c_final}, row={r_final}), residual={dist*1000:.2f} mm")
+    r_final, c_final, dist = piece.get_nearest_intersection()
+    print(f"[+] Placed and settled at (row={r_final}, col={c_final}), residual={dist*1000:.2f} mm")
     print(f"[+] Piece state: {piece.physical_state.value}, tilt: {piece.tilt_angle_deg:.2f} deg")
 
-    success = (c_final == target_col and r_final == target_row and dist < 0.005)
+    success = (r_final == target_row and c_final == target_col and dist < 0.005)
     print(f"--> Result: {'SUCCESS' if success else 'FAILED'}")
     return success
 
@@ -86,8 +86,8 @@ def run_drop_scenario(sim: VirtualXiangqiSimulation, speed_factor: float = 50.0)
     sim.schedule_force_drop(progress_threshold=0.5, target_piece_id=piece_id)
 
     print("[3] Executing horizontal Cartesian transport across the board...")
-    # Move towards (col=3, row=2)
-    tx, ty, tz = sim.cell_to_robot_xyz(3, 2, z_height_m=0.10)
+    # Move towards (row=2, col=3)
+    tx, ty, tz = sim.cell_to_robot_xyz(2, 3, z_height_m=0.10)
     rx, ry, rz = sim.target_tool_euler_deg
     sim.move_cartesian([tx * 1000, ty * 1000, tz * 1000, rx, ry, rz], speed_factor=speed_factor)
 
@@ -110,8 +110,8 @@ def run_drop_scenario(sim: VirtualXiangqiSimulation, speed_factor: float = 50.0)
     print("[4] Stepping physics until piece settles on board...")
     steps = sim.world.step_until_settled(max_steps=120)
     print(f"[+] Settled in {steps} steps at {piece.physical_state.value}")
-    c_settle, r_settle, dist = piece.get_nearest_intersection()
-    print(f"[+] Settled location: near (col={c_settle}, row={r_settle}), tilt={piece.tilt_angle_deg:.2f} deg")
+    r_settle, c_settle, dist = piece.get_nearest_intersection()
+    print(f"[+] Settled location: near (row={r_settle}, col={c_settle}), tilt={piece.tilt_angle_deg:.2f} deg")
 
     settled_ok = piece.physical_state in (PiecePhysicalState.RESTING, PiecePhysicalState.ON_BOARD)
     success = (motion_ok and speed_ok and detached_ok and settled_ok)

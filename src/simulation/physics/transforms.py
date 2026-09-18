@@ -229,8 +229,10 @@ def continuous_board_coord(
     board_yaw_deg: float = 90.0,
 ) -> Tuple[float, float]:
     """
-    Derive continuous floating-point (col, row) on the board from a robot_base point
+    Derive continuous floating-point (row, col) on the board from a robot_base point
     using authoritative inverse board transform.
+    Returns:
+        (row_float, col_float) in canonical Xiangqi order.
     """
     if board_placement_state is not None:
         state = board_placement_state
@@ -244,13 +246,13 @@ def continuous_board_coord(
                 state = BoardPlacementState.compute(forward_shift_mm=d_m * 1000.0, board_yaw_deg=board_yaw_deg)
 
     p_local = state.robot_to_board_local(p_robot)
-    c_float, r_float = state.board_local_to_cell(p_local[0], p_local[1])
-    return float(c_float), float(r_float)
+    r_float, c_float = state.board_local_to_cell(p_local[0], p_local[1])
+    return float(r_float), float(c_float)
 
 
 def nearest_intersection_metrics(
-    col_float: float,
     row_float: float,
+    col_float: float,
     p_robot: Sequence[float],
     grid_origin_robot: Optional[Sequence[float]] = None,
     col_spacing_m: float = 0.040,
@@ -261,8 +263,10 @@ def nearest_intersection_metrics(
     board_yaw_deg: float = 90.0,
 ) -> Tuple[int, int, float]:
     """
-    Calculate nearest intersection (nearest_col, nearest_row) and distance in meters
+    Calculate nearest intersection (nearest_row, nearest_col) and distance in meters
     using authoritative inverse board transform.
+    Returns:
+        (nearest_row, nearest_col, dist_m) in canonical Xiangqi order.
     """
     if board_placement_state is not None:
         state = board_placement_state
@@ -275,6 +279,6 @@ def nearest_intersection_metrics(
             if abs(d_m) > 1e-4:
                 state = BoardPlacementState.compute(forward_shift_mm=d_m * 1000.0, board_yaw_deg=board_yaw_deg)
 
-    nearest_c, nearest_r, dist_m = state.robot_xyz_to_nearest_cell(p_robot)
-    return int(nearest_c), int(nearest_r), float(dist_m)
+    nearest_r, nearest_c, dist_m = state.robot_xyz_to_nearest_cell(p_robot)
+    return int(nearest_r), int(nearest_c), float(dist_m)
 

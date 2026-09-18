@@ -29,6 +29,52 @@ from src.domain.geometry import get_physical_geometry
 from src.simulation.kinematics.fr3 import FR3Kinematics, IKResult
 
 
+@dataclass(frozen=True)
+class BoardCell:
+    """
+    Authoritative canonical typed Xiangqi board cell representation.
+    Order is strictly (row, col) where:
+      row in [0, 9] (0 = Black home side, 9 = Red home side)
+      col in [0, 8] (0 = Near side of robot, 8 = Far side of robot under +90 deg orientation)
+    """
+    row: int
+    col: int
+
+    def __post_init__(self):
+        r = int(self.row)
+        c = int(self.col)
+        if not (0 <= r <= 9):
+            raise ValueError(f"BoardCell row {r} out of valid Xiangqi bounds [0, 9]")
+        if not (0 <= c <= 8):
+            raise ValueError(f"BoardCell col {c} out of valid Xiangqi bounds [0, 8]")
+        object.__setattr__(self, "row", r)
+        object.__setattr__(self, "col", c)
+
+    def to_tuple(self) -> Tuple[int, int]:
+        return (self.row, self.col)
+
+    def __iter__(self):
+        yield self.row
+        yield self.col
+
+    def __getitem__(self, index: int) -> int:
+        if index == 0:
+            return self.row
+        elif index == 1:
+            return self.col
+        raise IndexError(f"BoardCell index {index} out of range (must be 0 for row or 1 for col)")
+
+    def __repr__(self) -> str:
+        return f"BoardCell(row={self.row}, col={self.col})"
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, BoardCell):
+            return self.row == other.row and self.col == other.col
+        if isinstance(other, (tuple, list)) and len(other) == 2:
+            return self.row == other[0] and self.col == other[1]
+        return False
+
+
 def rot_matrix_to_quat(R: np.ndarray) -> np.ndarray:
     """
     Convert a 3x3 orthonormal rotation matrix to quaternion [x, y, z, w].
@@ -213,13 +259,15 @@ class BoardPlacementState:
 
     def board_local_to_cell(self, u_m: float, v_m: float) -> Tuple[float, float]:
         """
-        Convert board-local (u, v) in meters back to continuous semantic (col, row).
-        col = u / 0.040 + 4.0
-        row = v / 0.040 + 4.5
+        Convert board-local (u, v) in meters back to continuous semantic (row, col).
+        u = (col - 4.0) * 0.040 -> col = u / 0.040 + 4.0
+        v = (row - 4.5) * 0.040 -> row = v / 0.040 + 4.5
+        Returns:
+            (row, col) in canonical Xiangqi order.
         """
         col = float(u_m) / 0.040 + 4.0
         row = float(v_m) / 0.040 + 4.5
-        return col, row
+        return row, col
 
     def board_local_to_robot(
         self, u_m: float, v_m: float, z_rel_m: float = 0.0
@@ -265,17 +313,19 @@ class BoardPlacementState:
         self, pos_robot_m: Sequence[float]
     ) -> Tuple[int, int, float]:
         """
-        Map a 3D position in robot base {B} to nearest valid board intersection (nearest_col, nearest_row, dist_m).
+        Map a 3D position in robot base {B} to nearest valid board intersection.
+        Returns:
+            (nearest_row, nearest_col, dist_m) in canonical Xiangqi order.
         """
         p_local = self.robot_to_board_local(pos_robot_m)
-        c_float, r_float = self.board_local_to_cell(p_local[0], p_local[1])
-        nearest_c = max(0, min(8, int(round(c_float))))
+        r_float, c_float = self.board_local_to_cell(p_local[0], p_local[1])
         nearest_r = max(0, min(9, int(round(r_float))))
+        nearest_c = max(0, min(8, int(round(c_float))))
         p_target = self.cell_to_robot_xyz(nearest_r, nearest_c, z_rel_m=0.0)
         dx = float(pos_robot_m[0]) - float(p_target[0])
         dy = float(pos_robot_m[1]) - float(p_target[1])
         dist_m = math.hypot(dx, dy)
-        return nearest_c, nearest_r, dist_m
+        return nearest_r, nearest_c, dist_m
 
     def is_in_bounds_board_local(
         self, u_m: float, v_m: float, xy_margin_m: float = 0.0
@@ -313,9 +363,12 @@ class BoardPlacementState:
             "board_center_world_m": [round(v, 5) for v in self.board_center_world_m],
             "quat_robot_from_board": [round(v, 5) for v in self.quat_robot_from_board],
             "quat_world": [round(v, 5) for v in self.quat_world],
+            "T_robot_from_board": [[round(float(v), 5) for v in row] for row in self.T_robot_from_board.tolist()],
             "placement_version": self.placement_version,
             "timestamp": self.timestamp,
         }
+
+    to_telemetry_dict = to_dict
 
     @classmethod
     def compute(
@@ -422,7 +475,7 @@ def find_nearest_cell(
         forward_shift_mm=fwd,
         board_yaw_deg=board_yaw_deg,
     )
-    c, r, _ = state.robot_xyz_to_nearest_cell(pos_robot_m)
+    r, c, _ = state.robot_xyz_to_nearest_cell(pos_robot_m)
     return r, c
 
 

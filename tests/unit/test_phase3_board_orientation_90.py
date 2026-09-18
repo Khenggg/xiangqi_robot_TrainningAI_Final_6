@@ -105,7 +105,7 @@ class TestPhase3BoardOrientation90(unittest.TestCase):
         for r in range(10):
             for c in range(9):
                 p_rob = state.cell_to_robot_xyz(r, c, 0.0)
-                nearest_c, nearest_r, dist_m = state.robot_xyz_to_nearest_cell(p_rob)
+                nearest_r, nearest_c, dist_m = state.robot_xyz_to_nearest_cell(p_rob)
                 self.assertEqual(nearest_r, r, f"Row mismatch at ({r}, {c})")
                 self.assertEqual(nearest_c, c, f"Col mismatch at ({r}, {c})")
                 self.assertLess(dist_m, 1e-4, f"Distance residual non-zero at ({r}, {c})")
@@ -169,7 +169,7 @@ class TestPhase3BoardOrientation90(unittest.TestCase):
         state_init = sim.placement_state
         for pid, p in sim.world.pieces.items():
             if p.physical_state == PiecePhysicalState.ON_BOARD:
-                c, r, _ = p.get_nearest_intersection()
+                r, c, _ = p.get_nearest_intersection()
                 expected_p = state_init.cell_to_robot_xyz(r, c, z_rel_m=self.geom.piece.height / 2000.0)
                 actual_p, _ = p.get_pose_robot_base()
                 self.assertAlmostEqual(actual_p[0], expected_p[0], places=3)
@@ -181,7 +181,7 @@ class TestPhase3BoardOrientation90(unittest.TestCase):
         state_shifted = sim.placement_state
         for pid, p in sim.world.pieces.items():
             if p.physical_state == PiecePhysicalState.ON_BOARD:
-                c, r, _ = p.get_nearest_intersection()
+                r, c, _ = p.get_nearest_intersection()
                 expected_p = state_shifted.cell_to_robot_xyz(r, c, z_rel_m=self.geom.piece.height / 2000.0)
                 actual_p, _ = p.get_pose_robot_base()
                 self.assertAlmostEqual(actual_p[0], expected_p[0], places=3)
@@ -195,7 +195,7 @@ class TestPhase3BoardOrientation90(unittest.TestCase):
         # Point slightly offset from cell (3, 3)
         p_exact = state.cell_to_robot_xyz(3, 3, 0.0)
         p_offset = p_exact + np.array([0.005, -0.005, 0.0])
-        c, r, dist = state.robot_xyz_to_nearest_cell(p_offset)
+        r, c, dist = state.robot_xyz_to_nearest_cell(p_offset)
         self.assertEqual((r, c), (3, 3))
         self.assertAlmostEqual(dist, math.hypot(0.005, 0.005), places=4)
 

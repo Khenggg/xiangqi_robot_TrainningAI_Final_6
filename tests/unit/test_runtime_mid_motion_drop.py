@@ -51,7 +51,7 @@ class RuntimeMidMotionDropTests(unittest.TestCase):
         pos_init, _ = piece.get_pose_robot_base()
 
         # 1. Pick piece
-        pick_res = self.runtime.pick_piece(piece_id, hover_height_m=0.04)
+        pick_res = self.runtime.pick_piece(piece_id)
         self.assertTrue(pick_res.success, f"Failed to pick {piece_id}: {pick_res.reason}")
         self.assertTrue(self.world.gripper.is_attached)
         self.assertEqual(self.world.gripper.attached_piece_id, piece_id)
@@ -59,11 +59,11 @@ class RuntimeMidMotionDropTests(unittest.TestCase):
         # 2. Schedule force drop at 50% trajectory progress
         self.runtime.schedule_force_drop(progress_threshold=0.5, target_piece_id=piece_id)
 
-        # 3. Move across board towards (col=4, row=3)
-        tx, ty, tz = self.runtime.cell_to_robot_xyz(4, 3)
+        # 3. Move across board towards (row=3, col=4)
+        tx, ty, tz = self.runtime.cell_to_robot_xyz(3, 4)
         rx, ry, rz = self.runtime.target_tool_euler_deg
         grasp_center_offset = self.world.gripper.tcp_to_grasp_center[2]
-        hover_z = pos_init[2] + grasp_center_offset + 0.04
+        hover_z = pos_init[2] + grasp_center_offset + 0.070
         target_pose = [tx * 1000.0, ty * 1000.0, hover_z * 1000.0, rx, ry, rz]
 
         move_res = self.runtime.move_cartesian(target_pose, speed_factor=1.0)

@@ -282,7 +282,7 @@ class VirtualXiangqiSimulation:
 
     def find_nearest_cell(self, pos_robot_m: Sequence[float]) -> Tuple[int, int]:
         """Map a 3D position in robot_base to nearest board grid (row, col)."""
-        c, r, _ = self.placement_state.robot_xyz_to_nearest_cell(pos_robot_m)
+        r, c, _ = self.placement_state.robot_xyz_to_nearest_cell(pos_robot_m)
         return r, c
 
     def _sync_gripper_to_tcp(self, snapshot: RobotStateSnapshot):
@@ -389,8 +389,8 @@ class VirtualXiangqiSimulation:
     def get_robot_snapshot(self) -> RobotStateSnapshot:
         return self.backend.get_state_snapshot()
 
-    def cell_to_robot_xyz(self, col: int, row: int, z_height_m: Optional[float] = None) -> Tuple[float, float, float]:
-        """Convert board cell (col, row) to robot_base (x, y, z) in meters."""
+    def cell_to_robot_xyz(self, row: int, col: int, z_height_m: Optional[float] = None) -> Tuple[float, float, float]:
+        """Convert board cell (row, col) to robot_base (x, y, z) in meters."""
         effective_z = self.board_surface_z if z_height_m is None else float(z_height_m)
         z_rel = effective_z - self.placement_state.board_surface_z_robot_m
         p = self.placement_state.cell_to_robot_xyz(row=row, col=col, z_rel_m=z_rel)
@@ -686,18 +686,21 @@ class VirtualXiangqiSimulation:
                     else:
                         positional = [a for a in args if not isinstance(a, str)]
                         if len(positional) >= 2:
-                            c_val, r_val = int(positional[0]), int(positional[1])
-                            tx, ty, tz = self.cell_to_robot_xyz(c_val, r_val)
+                            r_val, c_val = int(positional[0]), int(positional[1])
+                            tx, ty, tz = self.cell_to_robot_xyz_m(r_val, c_val)
                             r_target, c_target = r_val, c_val
-                        elif col is not None and row is not None:
-                            tx, ty, tz = self.cell_to_robot_xyz(int(col), int(row))
+                        elif row is not None and col is not None:
+                            tx, ty, tz = self.cell_to_robot_xyz_m(int(row), int(col))
                             r_target, c_target = int(row), int(col)
+                        elif col is not None and row is None:
+                            # Private legacy keyword fallback: if called with only col/row
+                            raise ValueError("place_piece requires both row and col")
                         else:
                             self.backend.set_trajectory_stage("FAILED")
                             return PlaceResult(
                                 success=False,
                                 status="INVALID_ARGS",
-                                error="Missing destination cell or (col, row)",
+                                error="Missing destination cell or (row, col)",
                                 piece_placed=False,
                                 piece_released=False,
                                 post_release_lift_complete=False,
@@ -821,7 +824,7 @@ class VirtualXiangqiSimulation:
                             PiecePhysicalState.FALLING,
                             PiecePhysicalState.SETTLING,
                         )
-                        c_p, r_p, d_p = p_obj.get_nearest_intersection()
+                        r_p, c_p, d_p = p_obj.get_nearest_intersection()
                         cell_match = True
                         if target_cell_tuple is not None:
                             cell_match = (r_p, c_p) == target_cell_tuple and d_p < 0.025
@@ -2872,7 +2875,7 @@ class VirtualXiangqiSimulation:
                     for p_id, p_body in self.world.pieces.items():
                         if p_body.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
                             continue
-                        c_p, r_p, d_p = p_body.get_nearest_intersection()
+                        r_p, c_p, d_p = p_body.get_nearest_intersection()
                         if (r_p, c_p) == (r_src, c_src) and d_p < 0.025:
                             piece_at_src = p_id
                         elif (r_p, c_p) == (r_dst, c_dst) and d_p < 0.025:
@@ -3075,7 +3078,7 @@ class VirtualXiangqiSimulation:
                             PiecePhysicalState.FALLING,
                             PiecePhysicalState.SETTLING,
                         )
-                        c_p, r_p, d_p = p_obj.get_nearest_intersection()
+                        r_p, c_p, d_p = p_obj.get_nearest_intersection()
                         cell_match = (r_p, c_p) == (r_dst, c_dst) and d_p < 0.025
                         pos_m, _ = p_obj.get_pose_robot_base()
                         expected_z = board_z + (self.geom.piece_height_mm / 2000.0)
