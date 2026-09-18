@@ -158,6 +158,31 @@
 
 ---
 
+## B12 — Phase 3 Board Orientation 90° Geometry Redesign (G90)
+* **Status:** FIXED
+* **Severity:** BLOCKER
+* **Affected Files:** `src/simulation/placement.py`, `src/simulation/physics/transforms.py`, `src/simulation/physics/piece.py`, `src/simulation/physics/world.py`, `src/simulation/runtime.py`, `robot-3d-viewer/board.mjs`, `shared/cell_reachability_dataset.json`, `shared/virtual_fr3_scene.json`
+* **Evidence:**
+  1. Under the nominal 0° orientation, the 10 rows (360 mm span) were oriented along $-X_{\text{robot}}$ and 9 columns (320 mm span) laterally.
+  2. Near-side center cells ((4, 0) and (5, 0)) forced link 3 into collision with link 1 during LAND descent at nominal $d = 0$ (clearance $< 0.5\text{ mm}$ self-collision limit).
+  3. Positive forward shifts ($d \ge 15\text{ mm}$) to clear link collision pushed far-side row 9 cells close to the robot kinematic reach limit ($650\text{ mm}$), leaving inadequate safety margins.
+* **Fix Summary:**
+  1. Rotated the Xiangqi board authoritatively by $+90.0^\circ$ around $+Z_{\text{robot}}$ ($R = \begin{bmatrix}-1&0&0\\0&-1&0\\0&0&1\end{bmatrix}$, quat `[0.0, 0.0, 1.0, 0.0]`).
+  2. The 9-column axis (320 mm playable span) now maps along $-X_{\text{robot}}$, and the 10-row axis (360 mm playable span) maps along $-Y_{\text{robot}}$, substantially reducing the required reach depth along the arm extension axis.
+  3. Conducted exhaustive candidate placement evaluation across $(d, H, Z)$ combinations and selected $d = 15.0\text{ mm}, H = 40.0\text{ mm}, Z = 0.0\text{ mm}$.
+  4. Selected placement achieves:
+     - Kinematic reach margin: $+24.9\text{ mm}$ ($625.1\text{ mm} < 650.0\text{ mm}$)
+     - Collision clearance: $7.69\text{ mm}$ (link 1 <-> link 3, safely above $0.5\text{ mm}$ margin)
+     - Jacobian condition number: $21.79$ (well conditioned across all 90 cells, $< 40.0$)
+     - Joint limit margin: $9.23^\circ$ (above $5.0^\circ$ limit)
+  5. Regenerated `shared/cell_reachability_dataset.json` with 90/90 cells solved and 0 collisions.
+  6. Updated physics collision bodies, piece placement, PyBullet world relocation, runtime coordinate transforms, viewer 3D board geometry, canvas texture, and dimension tape.
+  7. Implemented dedicated unit test suite G90-01 through G90-25 in `tests/unit/test_phase3_board_orientation_90.py`.
+* **Regression Test:** `tests/unit/test_phase3_board_orientation_90.py` (25/25 tests), `tests/unit/test_phase3_dynamic_board_placement.py` (13/13 tests)
+* **Last Verified Functional HEAD:** b0027e744ccacc3e4dd21f6150271c0fc6f7c2cf
+
+---
+
 ## I01 — Deprecated `WebSocketServerProtocol` Import in Telemetry Publisher
 * **Status:** OPEN (Benign warning)
 * **Severity:** LOW

@@ -6,16 +6,31 @@
 
 ## METADATA
 * **CURRENT_BRANCH:** `feature/virtual-robot-3d-simulator`
-* **LAST_REVIEWED_HEAD:** `88dc791ee8b409d6895746557264382f9957b067`
-* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `88dc791ee8b409d6895746557264382f9957b067`
+* **STARTING_REMOTE_HEAD:** `f0d28e49404a7d5e32a0b197e207a0d27d5c38cd`
+* **LAST_REVIEWED_HEAD:** `b0027e744ccacc3e4dd21f6150271c0fc6f7c2cf`
+* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `b0027e744ccacc3e4dd21f6150271c0fc6f7c2cf`
 * **PASS_A_RUNTIME_AUTHORITY:** `PASS`
 * **PASS_A1_REENTRANT_LOCK:** `PASS`
 * **PASS_A2_NO_SILENT_QUEUE:** `PASS`
 * **PASS_B_SERVICE_SAFE:** `PASS`
 * **PASS_C_POST_OP_RETREAT:** `PASS`
+* **CORRECTIVE_GEOMETRY_G90:** `PASS`
+* **SELECTED_PLACEMENT_CANDIDATE:** `d = 15.0 mm, H = 40.0 mm, Z = 0.0 mm`
 * **PHASE:** `PHASE_3_SIMULATION_VIRTUAL_TWIN`
 * **PHASE_STATUS:** `PARTIAL`
 * **CI_STATUS:** `LOCAL_VERIFIED_GREEN`
+
+---
+
+## KEY_GEOMETRY_METRICS
+* **Board Yaw:** `+90.0°` around `+Z_robot` ($R = \begin{bmatrix}-1&0&0\\0&-1&0\\0&0&1\end{bmatrix}$, quat `[0.0, 0.0, 1.0, 0.0]`)
+* **Axis Alignment:** Column axis (span 320 mm) $\to -X_{\text{robot}}$; Row axis (span 360 mm) $\to -Y_{\text{robot}}$
+* **Selected Placement:** Forward shift $d = 15.0\text{ mm}$, Safe transit height $H = 40.0\text{ mm}$, Height offset $Z = 0.0\text{ mm}$
+* **Reach Margin:** `+24.9 mm` (Max TCP distance $625.1\text{ mm} < 650.0\text{ mm}$ kinematic reach limit)
+* **Link Collision Clearance:** `7.69 mm` (Link 1 <-> Link 3 distance at near cells, threshold $0.5\text{ mm}$; zero arm self-collisions)
+* **Kinematic Conditioning:** Max Jacobian condition number `21.79` (Well conditioned across all 90 cells, threshold $< 40.0$)
+* **Joint Limit Margin:** `9.23°` (Minimum clearance to any joint software limit, threshold $> 5.0^\circ$)
+* **Reachability Dataset:** `shared/cell_reachability_dataset.json` (90/90 cells solved, 0 collisions)
 
 ---
 
@@ -46,7 +61,14 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
    - Enforced physical piece placement verification in both `place_piece()` and `execute_3stage_trajectory()`: piece must be in `ON_BOARD` or `RESTING` physical state, not in transient states (`OUT_OF_BOUNDS`, `FALLING`, `SETTLING`), nearest cell matches target destination within $25\text{ mm}$, and Z altitude matches board surface within $15\text{ mm}$ before declaring `piece_placed = True`. If piece tumbles or is lost during settle, returns `status = "PIECE_PLACEMENT_UNVERIFIED"`, `piece_placed = False`, `service_safe = True`, `requires_recovery = True`.
    - Converted `test_c9_retreat_collision` into a true PyBullet physical collision fixture with a zero-mass obstacle piece `black_cannon_0` positioned at `[-0.434, -0.102, 0.227]`, triggering physical contact detection in `CollisionGuard` during retreat and halting safely with `PLACE_SERVICE_RETREAT_FAILED`, `requires_recovery = True`, `service_safe = False`.
    - Enforced explicit non-manipulation default contract across `EXECUTE_3STAGE` and viewer `goToCell()`: missing/None grasp flags fail-safe strictly to `False` (`should_grasp = False`), preventing unintended piece manipulation when navigating diagnostic cells. Diagnostic `goToCell()` explicitly dispatches `grasp_piece: false`.
-   - Added tests `test_c13` through `test_c20`. (Verified by `test_c1_normal_pick_retreat` through `test_c20_execute_3stage_explicit_grasp_executes_pick_and_place`).
+    - Added tests `test_c13` through `test_c20`. (Verified by `test_c1_normal_pick_retreat` through `test_c20_execute_3stage_explicit_grasp_executes_pick_and_place`).
+14. **[B12] Phase 3 Board Orientation 90° Geometry Redesign (Corrective Geometry Gate):**
+    - Authoritative 90° board rotation around $+Z_{\text{robot}}$ ($R = \begin{bmatrix}-1&0&0\\0&-1&0\\0&0&1\end{bmatrix}$, quat `[0.0, 0.0, 1.0, 0.0]`).
+    - Aligned 9-column axis (320 mm) along $-X_{\text{robot}}$ and 10-row axis (360 mm) along $-Y_{\text{robot}}$.
+    - Selected placement candidate $(d=15.0\text{ mm}, H=40.0\text{ mm}, Z=0.0\text{ mm})$ via exhaustive candidate evaluation: reach margin $+24.9\text{ mm}$ ($625.1\text{ mm} < 650.0\text{ mm}$), arm link clearance $7.69\text{ mm}$ (link 1 <-> link 3), condition number $21.79$, joint limit margin $9.23^\circ$.
+    - Regenerated `shared/cell_reachability_dataset.json` with 90/90 cells solved and 0 collisions.
+    - Updated physics transform engine, piece poses, world relocation, runtime cell mapping, viewer mesh, canvas texture, and dimension tape.
+    - Implemented dedicated G90-01 through G90-25 test suite in `tests/unit/test_phase3_board_orientation_90.py`. (Verified by `test_phase3_board_orientation_90.py` 25/25 PASSED, `test_phase3_dynamic_board_placement.py` 13/13 PASSED).
 
 ---
 
@@ -65,12 +87,13 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 ---
 
 ## TEST_EVIDENCE
-* **Python Unit Tests:** 115/115 Phase 3 specific tests PASSED (100% pass rate)
+* **Python Unit Tests:** 140/140 Phase 3 specific tests PASSED (100% pass rate)
+  * `tests/unit/test_phase3_board_orientation_90.py`: 25 passed (G90-01 to G90-25)
   * `tests/unit/test_phase3_final_master.py`: 79 passed (including Pass A/A.1/A.2 tests, Pass B/B-Corr tests, and Pass C tests c1–c20)
   * `tests/unit/test_phase3_final_closure.py`: 11 passed
   * `tests/unit/test_phase3_isolation_and_fail_fast.py`: 12 passed
   * `tests/unit/test_phase3_dynamic_board_placement.py`: 13 passed
-* **Node.js Viewer Tests:** 4/4 suites PASSED
+* **Node.js Viewer Tests:** 4/4 suites PASSED (100% pass rate)
   * `test_viewer_single_motion_authority.mjs`: PASSED
   * `test_viewer_coordinate_ruler.mjs`: PASSED
   * `test_viewer_gripper_and_telemetry.mjs`: PASSED
