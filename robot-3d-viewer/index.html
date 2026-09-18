@@ -66,29 +66,29 @@
             <div class="cell-inputs-row">
               <label>Hàng (Row):
                 <select id="cellRowSelect">
-                  <option value="0">0 (Sát robot)</option>
+                  <option value="0">0 (Đen / Black side)</option>
                   <option value="1">1</option>
                   <option value="2">2</option>
                   <option value="3">3</option>
-                  <option value="4" selected>4 (Bờ sông ta)</option>
-                  <option value="5">5 (Bờ sông bạn)</option>
+                  <option value="4" selected>4 (Bờ sông Đen)</option>
+                  <option value="5">5 (Bờ sông Đỏ)</option>
                   <option value="6">6</option>
                   <option value="7">7</option>
                   <option value="8">8</option>
-                  <option value="9">9 (Xa nhất)</option>
+                  <option value="9">9 (Đỏ / Red side)</option>
                 </select>
               </label>
               <label>Cột (Col):
                 <select id="cellColSelect">
-                  <option value="0">0 (Biên trái)</option>
+                  <option value="0">0 (Gần robot / Near side)</option>
                   <option value="1">1</option>
                   <option value="2">2</option>
                   <option value="3">3</option>
-                  <option value="4" selected>4 (Trung lộ)</option>
+                  <option value="4" selected>4 (Trung lộ / Mid-depth)</option>
                   <option value="5">5</option>
                   <option value="6">6</option>
                   <option value="7">7</option>
-                  <option value="8">8 (Biên phải)</option>
+                  <option value="8">8 (Xa robot / Far side)</option>
                 </select>
               </label>
               <button id="reachCellBtn" class="action-btn primary-action">🚀 Đi Tới</button>
@@ -265,12 +265,12 @@
                 <strong id="readoutBoardYaw" style="color: #4ade80">+90.0° (col=-X, row=-Y)</strong>
               </div>
               <div class="diag-row">
-                <span>Nearest cell distance:</span>
-                <strong id="readoutRow0Dist">200.0 mm</strong>
+                <span>Near-side grid depth:</span>
+                <strong id="readoutNearGridDepth">200.0 mm</strong>
               </div>
               <div class="diag-row">
-                <span>Farthest cell distance:</span>
-                <strong id="readoutRow9Dist">520.0 mm</strong>
+                <span>Far-side grid depth:</span>
+                <strong id="readoutFarGridDepth">520.0 mm</strong>
               </div>
               <div class="diag-row">
                 <span>Mép bàn gần (Near edge):</span>

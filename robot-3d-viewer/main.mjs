@@ -870,8 +870,8 @@ function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0) {
   const z_board = 10.5 + z_off_mm;
   const res = computeGeometricPrecheck(d_mm, H_mm, z_board);
   const elD = document.getElementById("readoutShiftD");
-  const elRow0 = document.getElementById("readoutRow0Dist");
-  const elRow9 = document.getElementById("readoutRow9Dist");
+  const elNearGrid = document.getElementById("readoutNearGridDepth") || document.getElementById("readoutRow0Dist");
+  const elFarGrid = document.getElementById("readoutFarGridDepth") || document.getElementById("readoutRow9Dist");
   const elNear = document.getElementById("readoutNearEdgeDist");
   const elCenter = document.getElementById("readoutCenterDist");
   const elFar = document.getElementById("readoutFarEdgeDist");
@@ -885,8 +885,8 @@ function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0) {
   const badge = document.getElementById("geomPrecheckBadge");
 
   if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
-  if (elRow0) elRow0.textContent = `${(200.0 + d_mm).toFixed(1)} mm`;
-  if (elRow9) elRow9.textContent = `${(520.0 + d_mm).toFixed(1)} mm`;
+  if (elNearGrid) elNearGrid.textContent = `${(200.0 + d_mm).toFixed(1)} mm`;
+  if (elFarGrid) elFarGrid.textContent = `${(520.0 + d_mm).toFixed(1)} mm`;
   if (elNear) elNear.textContent = `${(176.5 + d_mm).toFixed(1)} mm`;
   if (elCenter) elCenter.textContent = `${(360.0 + d_mm).toFixed(1)} mm`;
   if (elFar) elFar.textContent = `${(543.5 + d_mm).toFixed(1)} mm`;
@@ -1021,8 +1021,8 @@ export function applyPlacementAnalysisUI(data) {
   const H_mm = Number(data.safe_transit_height_mm ?? 70);
 
   const elD = document.getElementById("readoutShiftD");
-  const elRow0 = document.getElementById("readoutRow0Dist");
-  const elRow9 = document.getElementById("readoutRow9Dist");
+  const elNearGrid = document.getElementById("readoutNearGridDepth") || document.getElementById("readoutRow0Dist");
+  const elFarGrid = document.getElementById("readoutFarGridDepth") || document.getElementById("readoutRow9Dist");
   const elNear = document.getElementById("readoutNearEdgeDist");
   const elCenter = document.getElementById("readoutCenterDist");
   const elFar = document.getElementById("readoutFarEdgeDist");
@@ -1036,8 +1036,8 @@ export function applyPlacementAnalysisUI(data) {
   const badge = document.getElementById("geomPrecheckBadge");
 
   if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
-  if (elRow0) elRow0.textContent = data.nearest_cell_distance_mm !== undefined ? `${data.nearest_cell_distance_mm.toFixed(1)} mm` : (data.row0_center_distance_mm !== undefined ? `${data.row0_center_distance_mm.toFixed(1)} mm` : `${(200.0 + d_mm).toFixed(1)} mm`);
-  if (elRow9) elRow9.textContent = data.farthest_cell_distance_mm !== undefined ? `${data.farthest_cell_distance_mm.toFixed(1)} mm` : (data.far_row_center_distance_mm !== undefined ? `${data.far_row_center_distance_mm.toFixed(1)} mm` : `${(520.0 + d_mm).toFixed(1)} mm`);
+  if (elNearGrid) elNearGrid.textContent = data.nearest_cell_distance_mm !== undefined ? `${data.nearest_cell_distance_mm.toFixed(1)} mm` : (data.near_grid_depth_mm !== undefined ? `${data.near_grid_depth_mm.toFixed(1)} mm` : `${(200.0 + d_mm).toFixed(1)} mm`);
+  if (elFarGrid) elFarGrid.textContent = data.farthest_cell_distance_mm !== undefined ? `${data.farthest_cell_distance_mm.toFixed(1)} mm` : (data.far_grid_depth_mm !== undefined ? `${data.far_grid_depth_mm.toFixed(1)} mm` : `${(520.0 + d_mm).toFixed(1)} mm`);
   if (elNear) elNear.textContent = data.near_board_edge_distance_mm !== undefined ? `${data.near_board_edge_distance_mm.toFixed(1)} mm` : `${(200.0 + d_mm - 23.5).toFixed(1)} mm`;
   if (elCenter) elCenter.textContent = data.board_center_distance_mm !== undefined ? `${data.board_center_distance_mm.toFixed(1)} mm` : `${(360.0 + d_mm).toFixed(1)} mm`;
   if (elFar) elFar.textContent = data.far_board_edge_distance_mm !== undefined ? `${data.far_board_edge_distance_mm.toFixed(1)} mm` : `${(520.0 + d_mm + 23.5).toFixed(1)} mm`;
@@ -1699,21 +1699,19 @@ function handleBackendError(errMsg) {
 function goToCell(row, col) {
   state.selectedCell = { row, col };
 
-  const d_mm = Number(state.forwardShiftMm || 0.0);
-  const z_off_mm = Number(state.boardHeightOffsetMm || 0.0);
-  const u = (col - 4.0) * 0.040;
-  const v = (row - 4.5) * 0.040;
-  const robX = -0.360 - (d_mm / 1000.0) - u;
-  const robY = -v;
-  const robZ = 0.0105 + (z_off_mm / 1000.0);
-  const cell = { row, col, x_m: robX, y_m: robY, z_m: robZ };
-
   // Update 3D ring marker & coordinates
   const ring = getOrCreateTargetRing();
   if (physicalGeometryRef) {
     const pt = boardPointToXYZ(row, col, physicalGeometryRef);
     ring.position.set(pt.x, pt.y + 0.001, pt.z);
     ring.material.color.setHex(0x58a6ff);
+
+    // Map Three.js world frame to robot base frame:
+    // X_robot = -Z_world, Y_robot = -X_world, Z_robot = +Y_world
+    const robX = -pt.z;
+    const robY = -pt.x;
+    const robZ = pt.y;
+    const cell = { row, col, x_m: robX, y_m: robY, z_m: robZ };
 
     const worldX_mm = (pt.x * 1000).toFixed(1);
     const worldY_mm = (pt.y * 1000).toFixed(1);

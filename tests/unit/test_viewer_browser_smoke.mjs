@@ -141,11 +141,11 @@ try {
   const yawText = await evaluate("document.querySelector('#readoutBoardYaw')?.textContent");
   assert.ok(yawText && yawText.includes("+90.0°"), `Board Yaw must display +90.0°, got: '${yawText}'`);
 
-  const nearestDist = await evaluate("document.querySelector('#readoutRow0Dist')?.textContent");
-  assert.ok(nearestDist && nearestDist.includes("200.0 mm"), `Nearest cell distance must be 200.0 mm, got: '${nearestDist}'`);
+  const nearestDist = await evaluate("document.querySelector('#readoutNearGridDepth, #readoutRow0Dist')?.textContent");
+  assert.ok(nearestDist && nearestDist.includes("200.0 mm"), `Nearest grid depth must be 200.0 mm, got: '${nearestDist}'`);
 
-  const farthestDist = await evaluate("document.querySelector('#readoutRow9Dist')?.textContent");
-  assert.ok(farthestDist && farthestDist.includes("520.0 mm"), `Farthest cell distance must be 520.0 mm, got: '${farthestDist}'`);
+  const farthestDist = await evaluate("document.querySelector('#readoutFarGridDepth, #readoutRow9Dist')?.textContent");
+  assert.ok(farthestDist && farthestDist.includes("520.0 mm"), `Farthest grid depth must be 520.0 mm, got: '${farthestDist}'`);
 
   const badgeText = await evaluate("document.querySelector('#geomPrecheckBadge')?.textContent");
   assert.ok(badgeText && (badgeText.includes("PASS") || badgeText.includes("GEOMETRIC PASS")), `Geometric precheck must pass, got: '${badgeText}'`);
@@ -172,11 +172,11 @@ try {
   const updatedD = await evaluate("document.querySelector('#readoutShiftD')?.textContent");
   assert.ok(updatedD && updatedD.includes("15.0 mm"), `readoutShiftD must be 15.0 mm, got: '${updatedD}'`);
 
-  const updatedRow0 = await evaluate("document.querySelector('#readoutRow0Dist')?.textContent");
-  assert.ok(updatedRow0 && updatedRow0.includes("215.0 mm"), `readoutRow0Dist must be 215.0 mm after +15mm shift, got: '${updatedRow0}'`);
+  const updatedRow0 = await evaluate("document.querySelector('#readoutNearGridDepth, #readoutRow0Dist')?.textContent");
+  assert.ok(updatedRow0 && updatedRow0.includes("215.0 mm"), `readoutNearGridDepth must be 215.0 mm after +15mm shift, got: '${updatedRow0}'`);
 
-  const updatedRow9 = await evaluate("document.querySelector('#readoutRow9Dist')?.textContent");
-  assert.ok(updatedRow9 && updatedRow9.includes("535.0 mm"), `readoutRow9Dist must be 535.0 mm after +15mm shift, got: '${updatedRow9}'`);
+  const updatedRow9 = await evaluate("document.querySelector('#readoutFarGridDepth, #readoutRow9Dist')?.textContent");
+  assert.ok(updatedRow9 && updatedRow9.includes("535.0 mm"), `readoutFarGridDepth must be 535.0 mm after +15mm shift, got: '${updatedRow9}'`);
   console.log("  [PASS] V90-05: Dynamic placement packet updates UI readouts with 90° shift math.");
 
   ws.close();

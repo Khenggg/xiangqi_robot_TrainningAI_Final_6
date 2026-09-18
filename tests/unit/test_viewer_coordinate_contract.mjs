@@ -1,4 +1,4 @@
-﻿// tests/unit/test_viewer_coordinate_contract.mjs
+// tests/unit/test_viewer_coordinate_contract.mjs
 // Verifies:
 // 1. BoardCell (row, col) normalization: boardPointToXYZ accepts both (row, col) and { row, col }.
 // 2. Canonical 90° orientation math: +col -> -X_robot (+Z_world), +row -> -Y_robot (+X_world).
@@ -216,4 +216,50 @@ assert.ok(Math.abs(shiftedP27.y - (0.0105 + 0.030)) < 1e-6, "Shift Y must reflec
 assert.ok(Math.abs(shiftedP27.z - (0.480 + 0.015)) < 1e-6, "Shift Z must reflect +15mm forward shift");
 
 console.log("  [PASS] Dynamic board placement shift is translation-invariant across axes.");
+
+// 7. Direct authoritative T_robot_from_board matrix consumption
+const customT = [
+  [-1.0,  0.0, 0.0, -0.375],
+  [ 0.0, -1.0, 0.0,  0.0  ],
+  [ 0.0,  0.0, 1.0,  0.0105],
+  [ 0.0,  0.0, 0.0,  1.0  ],
+];
+setScenePlacement({
+  boardCenterX: 0.0,
+  boardSurfaceY: 0.0105,
+  boardCenterZ: 0.375,
+  forward_shift_mm: 15.0,
+  safe_transit_height_mm: 50.0,
+  board_height_offset_mm: 0.0,
+  placement_version: 3,
+  T_robot_from_board: customT,
+});
+
+const tP27 = boardPointToXYZ(2, 7, geometry);
+// u = +0.120, v = -0.100
+// robX = -1.0*(0.120) - 0.375 = -0.495
+// robY = -1.0*(-0.100) = +0.100
+// robZ = 0.0105
+// World: X = -robY = -0.100, Y = 0.0105, Z = -robX = 0.495
+assert.ok(Math.abs(tP27.x - (-0.100)) < 1e-6);
+assert.ok(Math.abs(tP27.y - 0.0105) < 1e-6);
+assert.ok(Math.abs(tP27.z - 0.495) < 1e-6);
+console.log("  [PASS] Direct T_robot_from_board 4x4 matrix correctly transforms board points.");
+
+// 8. Arbitrary board yaw perturbation (89.0 deg)
+setScenePlacement({
+  boardCenterX: 0.0,
+  boardSurfaceY: 0.0105,
+  boardCenterZ: 0.360,
+  board_yaw_deg: 89.0,
+  forward_shift_mm: 0.0,
+  safe_transit_height_mm: 70.0,
+  board_height_offset_mm: 0.0,
+  placement_version: 4,
+});
+const yaw89P44 = boardPointToXYZ(4.5, 4.0, geometry); // Board center
+assert.ok(Math.abs(yaw89P44.x - 0.0) < 1e-6);
+assert.ok(Math.abs(yaw89P44.z - 0.360) < 1e-6);
+console.log("  [PASS] Perturbed yaw respects SE(3) transformation mathematics.");
+
 console.log("ALL VIEWER COORDINATE CONTRACT TESTS PASSED SUCCESSFULLY!");

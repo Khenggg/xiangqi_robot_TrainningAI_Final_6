@@ -51,6 +51,9 @@ export function setScenePlacement(placement) {
     safeTransitHeightMm: Number(placement.safe_transit_height_mm ?? 70.0),
     boardHeightOffsetMm: Number(placement.board_height_offset_mm ?? 0.0),
     placementVersion: Number(placement.placement_version ?? 1),
+    boardYawDeg: Number(placement.board_yaw_deg ?? 90.0),
+    boardOrientationQuatWorld: placement.board_orientation_quat_world || placement.quat_world || null,
+    TRobotFromBoard: placement.T_robot_from_board || null,
   };
 
   if (_activeBoardGroup) {
@@ -59,6 +62,8 @@ export function setScenePlacement(placement) {
       _activeScenePlacement.boardSurfaceY,
       _activeScenePlacement.boardCenterZ
     );
+    const yawOffsetRad = ((_activeScenePlacement.boardYawDeg - 90.0) * Math.PI) / 180.0;
+    _activeBoardGroup.rotation.y = yawOffsetRad;
   }
 }
 
@@ -112,16 +117,36 @@ export function boardPointToXYZ(rowOrCell, colOrGeometry = null, maybeGeometry =
   const placement = getScenePlacement();
   const colM = geo.cellM || 0.040;
   const rowM = geo.rowSpacingM || 0.040;
-  // Under canonical 90 deg orientation:
-  // Column axis (span -160mm to +160mm) -> +Z_world (-X_robot)
-  // Row axis (span -180mm to +180mm)    -> +X_world (-Y_robot)
   const u = (col - 4.0) * colM;
   const v = (row - 4.5) * rowM;
-  return new THREE.Vector3(
-    placement.boardCenterX + v,
-    placement.boardSurfaceY,
-    placement.boardCenterZ + u
-  );
+
+  // Authoritative BoardPose transformation:
+  // 1. If 4x4 transform T_robot_from_board is available, apply directly
+  if (placement.TRobotFromBoard) {
+    const T = placement.TRobotFromBoard;
+    const robX = T[0][0] * u + T[0][1] * v + T[0][3];
+    const robY = T[1][0] * u + T[1][1] * v + T[1][3];
+    const robZ = T[2][0] * u + T[2][1] * v + T[2][3];
+    // Map from robot base frame to Three.js world frame:
+    // X_world = -Y_robot, Y_world = +Z_robot, Z_world = -X_robot
+    return new THREE.Vector3(-robY, robZ, -robX);
+  }
+
+  // 2. Otherwise derive SE(3) transformation from authoritative boardYawDeg and center
+  const yawDeg = placement.boardYawDeg ?? 90.0;
+  const theta = (yawDeg * Math.PI) / 180.0;
+  const sinT = Math.sin(theta);
+  const cosT = Math.cos(theta);
+
+  // Canonical rotation: R = R_z(theta) @ R_0
+  // robCenter is (-placement.boardCenterZ, -placement.boardCenterX, placement.boardSurfaceY)
+  const robCenterX = -placement.boardCenterZ;
+  const robCenterY = -placement.boardCenterX;
+  const robX = -sinT * u - cosT * v + robCenterX;
+  const robY =  cosT * u - sinT * v + robCenterY;
+  const robZ = placement.boardSurfaceY;
+
+  return new THREE.Vector3(-robY, robZ, -robX);
 }
 
 export function computeBoardOrigin(geometry = null) {
