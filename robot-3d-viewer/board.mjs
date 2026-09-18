@@ -258,17 +258,17 @@ function createBoardTexture(geometry = null) {
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(paddingX - 12, y);
-      ctx.lineTo(paddingX - 21);
+      ctx.lineTo(paddingX - 21, y);
       ctx.moveTo(canvas.width - paddingX + 12, y);
-      ctx.lineTo(canvas.width - paddingX + 21);
+      ctx.lineTo(canvas.width - paddingX + 21, y);
       ctx.stroke();
     } else if (mm % 2 === 0) {
       ctx.lineWidth = 0.8;
       ctx.beginPath();
       ctx.moveTo(paddingX - 12, y);
-      ctx.lineTo(paddingX - 17);
+      ctx.lineTo(paddingX - 17, y);
       ctx.moveTo(canvas.width - paddingX + 12, y);
-      ctx.lineTo(canvas.width - paddingX + 17);
+      ctx.lineTo(canvas.width - paddingX + 17, y);
       ctx.stroke();
     }
   }
