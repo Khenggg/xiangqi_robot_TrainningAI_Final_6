@@ -51,7 +51,8 @@ def calibrate_perspective_camera(cap, save_path):
                 cal_q.put(frm)
             time.sleep(0.005)
 
-    threading.Thread(target=_cal_capture, daemon=True).start()
+    cal_thread = threading.Thread(target=_cal_capture, daemon=True)
+    cal_thread.start()
 
     # --- Xử lý click chuột ---
     points = []
@@ -73,7 +74,15 @@ def calibrate_perspective_camera(cap, save_path):
     print("---------------------------------------------")
     print("⌨️  Phím tắt: 'R'=Làm lại | 'S'=Lưu file | 'Q'=Thoát")
 
+    import os
     M = None
+    if os.path.exists(save_path):
+        try:
+            M = np.load(save_path)
+            print(f"ℹ️ Đã nạp perspective cũ từ {save_path}. Bấm 'S' để giữ nguyên hoặc click 4 góc để tạo lại.")
+        except Exception:
+            M = None
+
     while True:
         try:
             frame = cal_q.get(timeout=0.1)
@@ -99,6 +108,8 @@ def calibrate_perspective_camera(cap, save_path):
             ], dtype=np.float32)
             M = cv2.getPerspectiveTransform(src, dst)
 
+        # Vẽ lưới perspective nếu đã có M
+        if M is not None:
             try:
                 inv_M = np.linalg.inv(M)
                 # Vẽ 10 hàng ngang
@@ -118,8 +129,9 @@ def calibrate_perspective_camera(cap, save_path):
                     cv2.line(display, (int(p1[0]), int(p1[1])),
                              (int(p2[0]), int(p2[1])), (0, 255, 255), 1)
 
-                cv2.putText(display, "OK? Bam 'S' de Luu", (20, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                prompt_text = "OK? Bam 'S' de Luu / Dung lai"
+                cv2.putText(display, prompt_text, (20, 45),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             except:
                 pass
 
@@ -139,5 +151,6 @@ def calibrate_perspective_camera(cap, save_path):
             break
 
     cal_stop[0] = True
+    cal_thread.join(timeout=1.0)
     cv2.destroyWindow(window)
     return M

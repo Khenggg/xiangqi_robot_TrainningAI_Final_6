@@ -1,4 +1,13 @@
+import sys
 import requests
+
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 
 class TuongKyDaiSuClient:
     def __init__(self, base_url, token):

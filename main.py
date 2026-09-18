@@ -3,6 +3,15 @@
 # ===================================================================================
 import sys
 import os
+
+# Đảm bảo in tiếng Việt không bị lỗi font/crash UnicodeEncodeError trên Windows console
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 import time
 import random
 import threading
@@ -70,7 +79,6 @@ def _cleanup_all():
     try: pygame.quit()
     except: pass
     print("[CLEANUP] ✅ Xong!")
-    sys.exit(0)
 
 atexit.register(_cleanup_all)
 
@@ -82,8 +90,6 @@ clock = pygame.time.Clock()
 
 print(f"\n[GAME] === GAME STARTED ===")
 print(f"[FEN] {state.current_fen}")
-
-hw.capture_baseline_if_needed(force_delay=1.0)
 
 hw.capture_baseline_if_needed(force_delay=1.0)
 
@@ -167,7 +173,18 @@ try:
                             if hw.robot.connected:
                                 print(f"[AI] Robot executing move: {s}->{d}")
                                 try:
-                                    hw.robot.move_piece(s[0], s[1], d[0], d[1], is_cap)
+                                    pick_targets = {"moving": None, "captured": None}
+                                    if getattr(config, "VISUAL_PICK_ENABLED", False):
+                                        expected_cells = {"moving": s}
+                                        if is_cap:
+                                            expected_cells["captured"] = d
+                                        # Snapshot happens before the robot enters the board.
+                                        pick_targets = hw.get_visual_pick_targets(expected_cells)
+                                    hw.robot.move_piece(
+                                        s[0], s[1], d[0], d[1], is_cap,
+                                        moving_visual_target=pick_targets.get("moving"),
+                                        captured_visual_target=pick_targets.get("captured"),
+                                    )
                                 except Exception as e:
                                     error_str = str(e)
                                     print(f"⚠️ Robot error: {error_str}")

@@ -157,7 +157,7 @@ class SnapshotDetector:
             if aspect_ratio < 0.55 or aspect_ratio > 1.80:
                 continue
 
-            # Điểm chân quân cờ tiếp xúc mặt bàn
+            # Điểm chân quân cờ tiếp xúc mặt bàn (foot_point)
             cx = (x1 + x2) / 2
             cy = y1 + h * 0.85
 
@@ -187,9 +187,9 @@ class SnapshotDetector:
                     dist = ((c_raw - c) ** 2 + (r_raw - r) ** 2) ** 0.5
                     if dist <= self.max_dist_threshold:
                         grid[r][c] = True
+            except (cv2.error, TypeError, ValueError):
+                continue
 
-            except:
-                pass
 
         return grid
 

@@ -7,3 +7,4 @@ Thư mục chứa các mô hình Deep Learning dạng ONNX phục vụ nhận di
 
 Nguồn: [TheOne1006/chinese-chess-recognition](https://github.com/TheOne1006/chinese-chess-recognition)
 HuggingFace: [yolo12138/Chinese_Chess_Recognition](https://huggingface.co/spaces/yolo12138/Chinese_Chess_Recognition/tree/main/onnx)
+

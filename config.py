@@ -32,9 +32,9 @@ CAPTURE_BIN_Y = 225.024
 CAPTURE_BIN_Z = 291.68  # [QUAN TRỌNG] Độ cao khi thả quân vào thùng
 
 # Độ cao an toàn (mm)
-SAFE_Z  = 210.0    # Độ cao an toàn khi di chuyển giữa các ô (tăng lên để tránh hất quân)
-PICK_Z  = 185.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
-PLACE_Z = 190.0   # Hạ xuống đặt
+SAFE_Z  = 290.0    # Độ cao an toàn khi di chuyển giữa các ô (tăng lên để tránh hất quân)
+PICK_Z  = 190.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
+PLACE_Z = 195.0   # Hạ xuống đặt
 
 # Cấu hình Kẹp (Gripper) - Tùy chỉnh theo loại van của bạn
 GRIPPER_CLOSE = 1
@@ -42,15 +42,34 @@ GRIPPER_OPEN = 0
 MOVE_SPEED = 50
 
 # Góc xoay của đầu Robot (Rx, Ry, Rz)
-ROTATION = [89.658,-0.394, 174.148] 
+ROTATION = [-179.164, -3.047, -26.304] 
+
+# --- PHYSICAL PICK / PLACE MOTION PROFILE ---
+# Các pose Cartesian FR5 gồm [X, Y, Z, Rx, Ry, Rz]. XY được nội suy từ R1-R4;
+# ba góc dưới đây là tư thế tool đã được dạy để ngàm kẹp hướng đúng xuống quân.
+#
+# Để đổi hướng ngàm thật: đưa robot đến một ô trống ở SAFE_Z bằng pendant,
+# xoay wrist/tool tới hướng kẹp đúng và chép Rx/Ry/Rz hiển thị vào PICK_TOOL_ROTATION.
+# Không sửa tool frame/TCP trong code. Khi chưa dạy lại, giữ nguyên ROTATION hiện tại.
+PICK_TOOL_ROTATION = list(ROTATION)
+# Thông thường đặt dùng cùng hướng với gắp; tách biến để có thể hiệu chỉnh sau này.
+PLACE_TOOL_ROTATION = list(ROTATION)
 
 # Kết nối Robot
 ROBOT_IP = "192.168.58.2"
 DRY_RUN = False # Đổi thành True nếu muốn test code mà không cần bật Robot
 
-# Camera index (0 = built-in webcam, 1 = USB cam, etc.)
-# main.py will auto-try 0, 1, 2 if this index fails.
-VIDEO_SOURCE = 1
+# Camera index (0 = built-in webcam, 1 = USB cam, 2 = DroidCam, etc.)
+# main.py will auto-try configured index first, then others if it fails.
+VIDEO_SOURCE = 2
+
+# --- VISUAL PICK CORRECTION ---
+# Chỉ bù vị trí gắp khi snapshot mới từ camera xác nhận quân nằm gần ô logic.
+# Tắt cờ này để trở lại hoàn toàn hành vi gắp tại tâm ô như trước đây.
+VISUAL_PICK_ENABLED = True
+VISUAL_PICK_MIN_CONFIDENCE = 0.45
+VISUAL_PICK_MAX_OFFSET_CELLS = 0.25
+VISUAL_PICK_FOOT_RATIO = 0.85
 
 # --- THÔNG SỐ AI ---
 AI_THINK_TIME = 10  # Time per move in seconds — AI gets 10s after subtracting TIME_BUFFER (0.5)

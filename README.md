@@ -60,7 +60,8 @@ Repository này có thể hoạt động ĐỘC LẬP không cần phụ thuộc
 
 [BƯỚC 1] CÀI ĐẶT THƯ VIỆN PYTHON
 ```bash
-pip install pygame numpy opencv-python ultralytics
+pip install -r requirements.txt
+# hoặc: pip install pygame numpy opencv-python requests ultralytics
 ```
 
 [BƯỚC 2] TẢI MÔ HÌNH NHẬN DIỆN BÀN CỜ (YOLO)
