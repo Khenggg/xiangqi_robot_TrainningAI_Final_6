@@ -35,6 +35,7 @@ class HardwareManager:
         self.model = None
         self.cam_monitor = None
         self.yolo_detector = None
+        self.cchess_recognizer = None
         self.perspective_path = Path(project_dir) / "perspective.npy"
         
         self.class_id_to_name = {
@@ -132,6 +133,20 @@ class HardwareManager:
         self.ai_ctrl = AIController(local_engine, cloud_engine, self.config)
 
     def _init_camera(self):
+        # Initialize CChessRecognizer (ONNX)
+        if getattr(self.config, "CCHESS_RECOGNITION_ENABLED", True):
+            try:
+                from src.vision.cchess_recognizer import CChessRecognizer
+                pose_onnx = Path(self.project_dir) / "models" / "cchess" / "pose_4_v6.onnx"
+                layout_onnx = Path(self.project_dir) / "models" / "cchess" / "layout_nano_v3.onnx"
+                if pose_onnx.exists() and layout_onnx.exists():
+                    self.cchess_recognizer = CChessRecognizer(pose_onnx, layout_onnx)
+                    print("[INIT] [CChess] CChessRecognizer loaded successfully (pose + layout ONNX).")
+                else:
+                    print("[INIT] [CChess] ONNX models not found in models/cchess/.")
+            except Exception as e:
+                print(f"[INIT] [CChess] Could not initialize CChessRecognizer: {e}")
+
         if self.dry_run:
             return
 
@@ -217,3 +232,23 @@ class HardwareManager:
         if self.yolo_detector and occ is not None:
             self.yolo_detector._baseline_occ = [row[:] for row in occ]
             self.yolo_detector._baseline_time = baseline_time
+
+    def recognize_board_state(self, frame=None):
+        """Nhận diện toàn bộ bàn cờ (10x9) bằng CChessRecognizer ONNX models.
+        
+        Args:
+            frame: OpenCV BGR frame. Nếu None, sẽ lấy từ CameraMonitor.
+            
+        Returns:
+            dict kết quả từ CChessRecognizer.full_recognize() hoặc None nếu không khả dụng.
+        """
+        if self.cchess_recognizer is None:
+            return None
+
+        if frame is None and self.cam_monitor is not None:
+            frame, _ = self.cam_monitor.get_latest_frame_and_detections()
+
+        if frame is None:
+            return None
+
+        return self.cchess_recognizer.full_recognize(frame)

@@ -16,3 +16,4 @@ runs/
 outputs/
 *.zip
 hand_detection/
+models/cchess/*.onnx
