@@ -22,20 +22,23 @@ class CameraMonitor:
     Các module khác (SnapshotDetector) nhận frame + detections từ đây.
     """
 
-    def __init__(self, cap, model, perspective_path, window_name="Camera Monitor", conf=0.45):
+    def __init__(self, cap, model, perspective_path, window_name="Camera Monitor", conf=0.35):
         """
         Args:
             cap: cv2.VideoCapture đã mở
             model: YOLO model đã load
             perspective_path: đường dẫn file perspective.npy
             window_name: tên cửa sổ OpenCV
-            conf: ngưỡng confidence phát hiện quân cờ (default: 0.45)
+            conf: ngưỡng confidence phát hiện quân cờ (default: 0.35)
+                  Giữ thấp để không bỏ sót quân — false positives ngoài bàn cờ
+                  đã được chặn bởi ROI polygon filter (_filter_by_board).
         """
         self.cap = cap
         self.model = model
         self.perspective_path = str(perspective_path)
         self.window_name = window_name
         self.conf = conf
+
         self._M = None  # perspective matrix (camera → grid)
         self._inv_M = None  # inverse (grid → camera pixel, để vẽ lưới)
         self._last_frame = None
