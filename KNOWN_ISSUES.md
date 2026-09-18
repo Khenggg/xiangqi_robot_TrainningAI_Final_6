@@ -138,6 +138,7 @@
   7. `execute_3stage_trajectory(..., grasp_piece=True)` on an empty source cell silently fell back to an arm-only transit (`should_grasp = False`) instead of rejecting fast at `PRECHECK`.
   8. `CLEAR_BOARD` motion failure in `_execute_3stage_trajectory_impl()` did not assign fallback `move_joint()` to `ok_clear` or check `ok_clear`, silently falling through to `SERVICE_RETREAT`.
   9. `_execute_3stage_trajectory_impl()` did not verify `try_grasp()` outcome or verify that the requested piece was attached before proceeding to `LIFT`.
+  10. `goToCell()` / `EXECUTE_3STAGE` previously inferred grasp intention from board occupancy when `grasp_piece` was missing or `None` (`should_grasp = piece_at_src is not None and piece_at_dst is None`), causing unintended manipulation during diagnostic cell navigation.
 * **Fix Summary:**
   1. Defined `PayloadSafetyReport` dataclass and `evaluate_payload_clearance()` runtime predicate ($z_{\text{piece}} > z_{\text{board}} + 20\text{ mm}$).
   2. Extended `PickResult` and `PlaceResult` with typed physical/safety outcome fields, recovery flags, and report objects while preserving dictionary/boolean fallback.
@@ -150,9 +151,10 @@
   9. Enforced explicit grasp precheck in `execute_3stage_trajectory()`: if `grasp_piece is True` and `piece_at_src is None`, immediately returns `status = "PRECHECK_NO_SOURCE_PIECE"`, `failed_stage = "PRECHECK"`. If `piece_at_dst is not None`, returns `status = "PRECHECK_DESTINATION_OCCUPIED"`.
   10. Enforced strict fail-fast check on `CLEAR_BOARD`: validates both Cartesian and joint IK fallback, halting with `status = "CLEAR_BOARD_FAILED"`, `failed_stage = "CLEAR_BOARD"`, `requires_recovery = True`, `service_safe = False`.
   11. Added explicit `GRASP` stage verification in `_execute_3stage_trajectory_impl()`, checking `try_grasp` and physical attachment before `LIFT`, halting with `status = "GRASP_FAILED"`, `failed_stage = "GRASP"`, `requires_recovery = True`.
-  12. Added `test_c13` through `test_c18`.
-* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests` (`test_c1_normal_pick_retreat` through `test_c18_execute_3stage_grasp_failure_halts_at_grasp_stage`)
-* **Last Verified Functional HEAD:** 7f7e159bdeb9e180ae4e42a96762398540e70d5f
+  12. Enforced explicit non-manipulation default contract: `goToCell()` in `robot-3d-viewer/main.mjs` explicitly dispatches `grasp_piece: false`. In `runtime.py`, `_handle_client_command` and trajectory implementations strictly default missing/None grasp flags to `False` (`should_grasp = False`), never guessing grasp intention based on board occupancy. Added regression tests `test_c19_execute_3stage_omitted_grasp_flag_defaults_to_arm_only` (verifying piece unmoved $< 1\text{ mm}$, $d_p < 0.025$, `piece_placed=False`) and `test_c20_execute_3stage_explicit_grasp_executes_pick_and_place`.
+  13. Added `test_c13` through `test_c20`.
+* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests` (`test_c1_normal_pick_retreat` through `test_c20_execute_3stage_explicit_grasp_executes_pick_and_place`)
+* **Last Verified Functional HEAD:** 88dc791ee8b409d6895746557264382f9957b067
 
 ---
 
