@@ -135,6 +135,9 @@
   4. Post-release retreat stages (`POST_RELEASE_LIFT` -> `CLEAR_BOARD` -> `SERVICE_RETREAT`) were not monitored in `place_piece()`, and were entirely bypassed in `execute_3stage_trajectory()` / WebSocket `EXECUTE_3STAGE`, leaving the robot at `LAND` or low altitude before reporting `success = True`.
   5. `place_piece()` set `piece_placed = True` without physical position and state verification after release and settle.
   6. `test_c9_retreat_collision` previously used a mock rather than a real physical PyBullet collision fixture.
+  7. `execute_3stage_trajectory(..., grasp_piece=True)` on an empty source cell silently fell back to an arm-only transit (`should_grasp = False`) instead of rejecting fast at `PRECHECK`.
+  8. `CLEAR_BOARD` motion failure in `_execute_3stage_trajectory_impl()` did not assign fallback `move_joint()` to `ok_clear` or check `ok_clear`, silently falling through to `SERVICE_RETREAT`.
+  9. `_execute_3stage_trajectory_impl()` did not verify `try_grasp()` outcome or verify that the requested piece was attached before proceeding to `LIFT`.
 * **Fix Summary:**
   1. Defined `PayloadSafetyReport` dataclass and `evaluate_payload_clearance()` runtime predicate ($z_{\text{piece}} > z_{\text{board}} + 20\text{ mm}$).
   2. Extended `PickResult` and `PlaceResult` with typed physical/safety outcome fields, recovery flags, and report objects while preserving dictionary/boolean fallback.
@@ -144,9 +147,12 @@
   6. Integrated full Pass C retreat pipeline (`POST_RELEASE_LIFT` -> `CLEAR_BOARD` -> `SERVICE_RETREAT` -> `evaluate_service_safety()`) into `execute_3stage_trajectory()` and WebSocket `EXECUTE_3STAGE`, supporting both pick & place and arm-only transit without leaving the arm in an unretreated state.
   7. Implemented physical placement verification: verifies piece is in `ON_BOARD` or `RESTING` physical state, within $25\text{ mm}$ of target cell intersection and within $15\text{ mm}$ of board surface altitude. Returns `status = "PIECE_PLACEMENT_UNVERIFIED"` if piece tumbles or is lost.
   8. Converted `test_c9_retreat_collision` into a true physical PyBullet collision fixture with a zero-mass obstacle piece `black_cannon_0` at `[-0.434, -0.102, 0.227]`, halting safely with `PLACE_SERVICE_RETREAT_FAILED`, `requires_recovery = True`, `service_safe = False`.
-  9. Added `test_c13`, `test_c14`, and `test_c15`.
-* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests` (`test_c1_normal_pick_retreat` through `test_c15_place_piece_unverified_if_piece_tumbles_or_lost`)
-* **Last Verified Functional HEAD:** 35fbbef053aa0e8bace0c4a74776cc753a0aa026
+  9. Enforced explicit grasp precheck in `execute_3stage_trajectory()`: if `grasp_piece is True` and `piece_at_src is None`, immediately returns `status = "PRECHECK_NO_SOURCE_PIECE"`, `failed_stage = "PRECHECK"`. If `piece_at_dst is not None`, returns `status = "PRECHECK_DESTINATION_OCCUPIED"`.
+  10. Enforced strict fail-fast check on `CLEAR_BOARD`: validates both Cartesian and joint IK fallback, halting with `status = "CLEAR_BOARD_FAILED"`, `failed_stage = "CLEAR_BOARD"`, `requires_recovery = True`, `service_safe = False`.
+  11. Added explicit `GRASP` stage verification in `_execute_3stage_trajectory_impl()`, checking `try_grasp` and physical attachment before `LIFT`, halting with `status = "GRASP_FAILED"`, `failed_stage = "GRASP"`, `requires_recovery = True`.
+  12. Added `test_c13` through `test_c18`.
+* **Regression Test:** `tests/unit/test_phase3_final_master.py::Phase3FinalMasterTests` (`test_c1_normal_pick_retreat` through `test_c18_execute_3stage_grasp_failure_halts_at_grasp_stage`)
+* **Last Verified Functional HEAD:** 7f7e159bdeb9e180ae4e42a96762398540e70d5f
 
 ---
 

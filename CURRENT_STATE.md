@@ -6,8 +6,8 @@
 
 ## METADATA
 * **CURRENT_BRANCH:** `feature/virtual-robot-3d-simulator`
-* **LAST_REVIEWED_HEAD:** `35fbbef053aa0e8bace0c4a74776cc753a0aa026`
-* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `35fbbef053aa0e8bace0c4a74776cc753a0aa026`
+* **LAST_REVIEWED_HEAD:** `7f7e159bdeb9e180ae4e42a96762398540e70d5f`
+* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `7f7e159bdeb9e180ae4e42a96762398540e70d5f`
 * **PASS_A_RUNTIME_AUTHORITY:** `PASS`
 * **PASS_A1_REENTRANT_LOCK:** `PASS`
 * **PASS_A2_NO_SILENT_QUEUE:** `PASS`
@@ -40,9 +40,12 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
    - Enforced 3-stage post-release retreat on `place_piece()` (`APPROACH` -> `LAND` -> `RELEASE` -> `SETTLE` -> `POST_RELEASE_LIFT` -> `CLEAR_BOARD` -> `SERVICE_RETREAT` -> `COMPLETE`), evaluating physical predicate `evaluate_service_safety()`.
    - Decoupled physical piece placement success from post-operation retreat safety so that if piece release succeeds but post-release lift or service retreat fails, `success = False`, `piece_placed = True`, `piece_released = True`, `service_safe = False`, and `requires_recovery = True`.
    - Integrated full Pass C retreat pipeline into `execute_3stage_trajectory()` and WebSocket `EXECUTE_3STAGE`, guaranteeing that manipulation operations never terminate control at `LAND` or low altitude, enforcing `POST_RELEASE_LIFT` -> `CLEAR_BOARD` -> `SERVICE_RETREAT` -> `evaluate_service_safety()`.
+   - Enforced explicit grasp precheck on `execute_3stage_trajectory(..., grasp_piece=True)`: strictly requires piece at source cell and empty destination cell; fails fast at `PRECHECK` with `status = "PRECHECK_NO_SOURCE_PIECE"` or `status = "PRECHECK_DESTINATION_OCCUPIED"`; never silently downgrades to arm-only transit.
+   - Enforced strict fail-fast verification during `CLEAR_BOARD` in `_execute_3stage_trajectory_impl()`: checks return value of Cartesian elevation and joint IK fallback, halts immediately upon motion failure with `status = "CLEAR_BOARD_FAILED"`, `failed_stage = "CLEAR_BOARD"`, `requires_recovery = True`, `service_safe = False`.
+   - Enforced strict `GRASP` stage verification in `_execute_3stage_trajectory_impl()`: evaluates grasp success, handles state-update attachment, verifies physical attachment of requested piece, and halts immediately with `status = "GRASP_FAILED"`, `failed_stage = "GRASP"`, `requires_recovery = True`, `service_safe = False` if grasp fails.
    - Enforced physical piece placement verification in both `place_piece()` and `execute_3stage_trajectory()`: piece must be in `ON_BOARD` or `RESTING` physical state, not in transient states (`OUT_OF_BOUNDS`, `FALLING`, `SETTLING`), nearest cell matches target destination within $25\text{ mm}$, and Z altitude matches board surface within $15\text{ mm}$ before declaring `piece_placed = True`. If piece tumbles or is lost during settle, returns `status = "PIECE_PLACEMENT_UNVERIFIED"`, `piece_placed = False`, `service_safe = True`, `requires_recovery = True`.
    - Converted `test_c9_retreat_collision` into a true PyBullet physical collision fixture with a zero-mass obstacle piece `black_cannon_0` positioned at `[-0.434, -0.102, 0.227]`, triggering physical contact detection in `CollisionGuard` during retreat and halting safely with `PLACE_SERVICE_RETREAT_FAILED`, `requires_recovery = True`, `service_safe = False`.
-   - Added tests `test_c13_execute_3stage_enforces_service_safe_retreat`, `test_c14_execute_3stage_pick_place_and_retreat`, and `test_c15_place_piece_unverified_if_piece_tumbles_or_lost`. (Verified by `test_c1_normal_pick_retreat` through `test_c15_place_piece_unverified_if_piece_tumbles_or_lost`).
+   - Added tests `test_c13_execute_3stage_enforces_service_safe_retreat`, `test_c14_execute_3stage_pick_place_and_retreat`, `test_c15_place_piece_unverified_if_piece_tumbles_or_lost`, `test_c16_execute_3stage_explicit_grasp_rejects_empty_source`, `test_c17_execute_3stage_clear_board_failure_halts_immediately`, and `test_c18_execute_3stage_grasp_failure_halts_at_grasp_stage`. (Verified by `test_c1_normal_pick_retreat` through `test_c18_execute_3stage_grasp_failure_halts_at_grasp_stage`).
 
 ---
 
@@ -61,8 +64,8 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 ---
 
 ## TEST_EVIDENCE
-* **Python Unit Tests:** 110/110 Phase 3 specific tests PASSED (100% pass rate)
-  * `tests/unit/test_phase3_final_master.py`: 74 passed (including Pass A/A.1/A.2 tests, Pass B/B-Corr tests, and Pass C tests c1–c15)
+* **Python Unit Tests:** 113/113 Phase 3 specific tests PASSED (100% pass rate)
+  * `tests/unit/test_phase3_final_master.py`: 77 passed (including Pass A/A.1/A.2 tests, Pass B/B-Corr tests, and Pass C tests c1–c18)
   * `tests/unit/test_phase3_final_closure.py`: 11 passed
   * `tests/unit/test_phase3_isolation_and_fail_fast.py`: 12 passed
   * `tests/unit/test_phase3_dynamic_board_placement.py`: 13 passed
