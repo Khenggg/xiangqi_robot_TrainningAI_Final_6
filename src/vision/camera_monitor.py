@@ -22,7 +22,7 @@ class CameraMonitor:
     Các module khác (SnapshotDetector) nhận frame + detections từ đây.
     """
 
-    def __init__(self, cap, model, perspective_path, window_name="Camera Monitor", conf=0.35):
+    def __init__(self, cap, model, perspective_path, window_name="Camera Monitor", conf=0.25):
         """
         Args:
             cap: cv2.VideoCapture đã mở
@@ -72,11 +72,15 @@ class CameraMonitor:
         """Reload perspective sau khi calibrate lại."""
         self._load_perspective()
 
-    def _compute_board_polygon(self):
+    def _compute_board_polygon(self, expand_px=20):
         """Tính và cache đa giác bàn cờ trong không gian pixel (4 góc tứ giác).
 
         Dùng inv_M để map 4 góc lưới (0,0)→(8,0)→(8,9)→(0,9) về pixel.
-        Kết quả cache vào self._board_polygon để tránh tính lại mỗi frame.
+        Giãn polygon ra ngoài expand_px pixel để đảm bảo quân ở biên bàn không bị cắt
+        khi perspective hơi lệch so với thực tế.
+
+        Args:
+            expand_px: số pixel giãn ra ngoài mỗi cạnh (default: 20)
 
         Returns:
             np.ndarray shape (4,1,2) float32 hoặc None nếu không có perspective.
@@ -93,10 +97,27 @@ class CameraMonitor:
                 [[0.0, 9.0]],   # Góc dưới-trái (Red, left)
             ], dtype=np.float32)
             corners_px = cv2.perspectiveTransform(corners_grid, self._inv_M)
-            self._board_polygon = corners_px.reshape(-1, 1, 2).astype(np.float32)
+            pts = corners_px.reshape(-1, 2)
+
+            # Giãn polygon: dịch chuyển mỗi điểm ra ngoài tính từ tâm
+            cx = pts[:, 0].mean()
+            cy = pts[:, 1].mean()
+            expanded = []
+            for (px, py) in pts:
+                dx = px - cx
+                dy = py - cy
+                dist = (dx**2 + dy**2) ** 0.5
+                if dist > 0:
+                    expanded.append([px + dx / dist * expand_px,
+                                     py + dy / dist * expand_px])
+                else:
+                    expanded.append([px, py])
+
+            self._board_polygon = np.array(expanded, dtype=np.float32).reshape(-1, 1, 2)
             return self._board_polygon
         except Exception:
             return None
+
 
     def _filter_by_board(self, detections):
         """Lọc danh sách detections: chỉ giữ lại những detection có contact point
