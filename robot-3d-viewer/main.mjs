@@ -973,8 +973,10 @@ export function applyAuthoritativeBoardPlacement(packet) {
     }
     scene.add(activeDimensionTape);
 
-    const robX = -0.180 - (d / 1000.0) - (row * 0.040);
-    const robY = -0.160 + (col * 0.040);
+    const u = (col - 4.0) * 0.040;
+    const v = (row - 4.5) * 0.040;
+    const robX = -0.360 - (d / 1000.0) - u;
+    const robY = -v;
     const robZ = 0.0105 + (zOff / 1000.0);
 
     const worldX_mm = (pt.x * 1000).toFixed(1);
@@ -1027,11 +1029,13 @@ export function applyPlacementAnalysisUI(data) {
   const badge = document.getElementById("geomPrecheckBadge");
 
   if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
-  if (elRow0) elRow0.textContent = data.row0_center_distance_mm !== undefined ? `${data.row0_center_distance_mm.toFixed(1)} mm` : `${(180.0 + d_mm).toFixed(1)} mm`;
-  if (elRow9) elRow9.textContent = data.far_row_center_distance_mm !== undefined ? `${data.far_row_center_distance_mm.toFixed(1)} mm` : `${(540.0 + d_mm).toFixed(1)} mm`;
-  if (elNear) elNear.textContent = data.near_board_edge_distance_mm !== undefined ? `${data.near_board_edge_distance_mm.toFixed(1)} mm` : `${(180.0 + d_mm - 25.0).toFixed(1)} mm`;
+  if (elRow0) elRow0.textContent = data.nearest_cell_distance_mm !== undefined ? `${data.nearest_cell_distance_mm.toFixed(1)} mm` : (data.row0_center_distance_mm !== undefined ? `${data.row0_center_distance_mm.toFixed(1)} mm` : `${(200.0 + d_mm).toFixed(1)} mm`);
+  if (elRow9) elRow9.textContent = data.farthest_cell_distance_mm !== undefined ? `${data.farthest_cell_distance_mm.toFixed(1)} mm` : (data.far_row_center_distance_mm !== undefined ? `${data.far_row_center_distance_mm.toFixed(1)} mm` : `${(520.0 + d_mm).toFixed(1)} mm`);
+  if (elNear) elNear.textContent = data.near_board_edge_distance_mm !== undefined ? `${data.near_board_edge_distance_mm.toFixed(1)} mm` : `${(200.0 + d_mm - 23.5).toFixed(1)} mm`;
   if (elCenter) elCenter.textContent = data.board_center_distance_mm !== undefined ? `${data.board_center_distance_mm.toFixed(1)} mm` : `${(360.0 + d_mm).toFixed(1)} mm`;
-  if (elFar) elFar.textContent = data.far_board_edge_distance_mm !== undefined ? `${data.far_board_edge_distance_mm.toFixed(1)} mm` : `${(540.0 + d_mm + 25.0).toFixed(1)} mm`;
+  if (elFar) elFar.textContent = data.far_board_edge_distance_mm !== undefined ? `${data.far_board_edge_distance_mm.toFixed(1)} mm` : `${(520.0 + d_mm + 23.5).toFixed(1)} mm`;
+  const elYaw = document.getElementById("readoutBoardYaw");
+  if (elYaw) elYaw.textContent = `+${Number(data.board_yaw_deg ?? 90.0).toFixed(1)}° (col=-X, row=-Y)`;
   if (elH) elH.textContent = `${H_mm.toFixed(1)} mm`;
 
   if (elFarGrasp && data.far_grasp_distance_mm !== undefined) elFarGrasp.textContent = `${data.far_grasp_distance_mm.toFixed(1)} mm`;

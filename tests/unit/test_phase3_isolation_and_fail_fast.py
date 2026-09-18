@@ -192,11 +192,11 @@ class Phase3IsolationAndFailFastTests(unittest.TestCase):
                     with patch.object(self.world, "try_grasp", return_value=True):
                         self.sim.pick_piece("red_king_0")
 
-            # Check that IK was called with the shifted X coordinate (-210 mm), NOT nominal (-180 mm)
+            # Check that IK was called with the shifted X coordinate (-390 mm), NOT nominal (-360 mm)
             ik_calls = mock_ik.call_args_list
             self.assertGreater(len(ik_calls), 0)
             hover_target = ik_calls[0][0][0]  # target_tcp_pose_mm_deg
-            self.assertAlmostEqual(hover_target[0], -210.0, delta=2.0)
+            self.assertAlmostEqual(hover_target[0], -390.0, delta=2.0)
 
     # -------------------------------------------------------------------------
     # Test 5 (Section 31): Pick piece fail-fast cleanup
@@ -306,11 +306,10 @@ class Phase3IsolationAndFailFastTests(unittest.TestCase):
             nominal_grid_origin_m=calibrated_origin,
             nominal_board_surface_z_m=0.0120,
         )
-        # Shifted x0 = -0.195 - 0.015 = -0.210
-        # Shifted y0 = -0.155
+        # Shifted x0 = -0.360 - 0.015 + 0.160 = -0.215
+        # Shifted y0 = 0.0 - (-0.180) = 0.180
         # Shifted z0 = 0.0120 + 0.002 = 0.0140
-        self.assertAlmostEqual(state.grid_origin_robot_m[0], -0.210, places=4)
-        self.assertAlmostEqual(state.grid_origin_robot_m[1], -0.155, places=4)
+        self.assertAlmostEqual(state.grid_origin_robot_m[0], -0.215, places=4)
         self.assertAlmostEqual(state.grid_origin_robot_m[2], 0.0140, places=4)
         self.assertAlmostEqual(state.board_surface_z_robot_m, 0.0140, places=4)
 
@@ -322,7 +321,7 @@ class Phase3IsolationAndFailFastTests(unittest.TestCase):
         state = BoardPlacementState.compute(
             forward_shift_mm=0.0,
             board_height_offset_mm=0.0,
-            nominal_grid_origin_m=[-0.180, -0.160, 0.0105],
+            nominal_grid_origin_m=[-0.200, 0.180, 0.0105],
             nominal_board_center_robot_m=[-0.360, 0.0, 0.00525],
             nominal_board_surface_z_m=0.0105,
         )
@@ -380,16 +379,16 @@ class Phase3IsolationAndFailFastTests(unittest.TestCase):
         # 3. Assertions
         # Board placement restored to nominal (d=0)
         self.assertAlmostEqual(self.sim.placement_state.forward_shift_mm, 0.0)
-        self.assertAlmostEqual(self.sim.placement_state.grid_origin_robot_m[0], -0.180, places=4)
+        self.assertAlmostEqual(self.sim.placement_state.grid_origin_robot_m[0], -0.200, places=4)
         # Gripper open and piece detached
         self.assertFalse(self.backend.get_state_snapshot().gripper_closed)
         self.assertIsNone(self.world.get_attached_piece())
         # Robot returned to HOME pose
         self.assertTrue(np.allclose(self.backend.get_state_snapshot().joints_deg, [0.0, -45.0, 90.0, -45.0, -90.0, 0.0], atol=1e-2))
-        # Piece position restored to canonical grid (red_king_0 is at row 9, col 4: x = -0.540, y = 0.0)
+        # Piece position restored to canonical grid (red_king_0 is at row 9, col 4: x = -0.360, y = -0.180)
         pos, _ = piece.get_pose_robot_base()
-        self.assertAlmostEqual(pos[0], -0.540, delta=0.01)
-        self.assertAlmostEqual(pos[1], 0.0, delta=0.01)
+        self.assertAlmostEqual(pos[0], -0.360, delta=0.01)
+        self.assertAlmostEqual(pos[1], -0.180, delta=0.01)
         self.assertIn(piece.physical_state, (PiecePhysicalState.ON_BOARD, PiecePhysicalState.RESTING))
 
 

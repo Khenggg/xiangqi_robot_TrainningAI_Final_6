@@ -21,6 +21,7 @@ import numpy as np
 import pybullet as p
 
 from src.domain.geometry import get_physical_geometry
+from src.simulation.placement import BoardPlacementState
 from src.simulation.physics.gripper import VirtualGripper
 from src.simulation.physics.piece import XiangqiPieceBody
 from src.simulation.physics.state import (
@@ -127,7 +128,20 @@ class VirtualPhysicalWorld:
         validate_start_layout(self.layout_cfg)
 
         self.geom = get_physical_geometry()
-        self.board_cfg = self.scene_cfg["virtual_board_placement"]
+        self.board_cfg = self.scene_cfg.get("virtual_board_placement", {})
+        yaw_deg = float(self.board_cfg.get("board_yaw_deg", 90.0))
+        d_mm = float(self.board_cfg.get("forward_shift_mm", 0.0))
+        h_mm = float(self.board_cfg.get("board_height_offset_mm", 0.0))
+        nom_surf_z = float(self.board_cfg.get("board_surface_height_m", 0.0105))
+        nom_center = list(self.board_cfg.get("board_center_in_robot_base_m", [-0.360, 0.0, 0.0105]))
+        self.board_placement_state = BoardPlacementState.compute(
+            forward_shift_mm=d_mm,
+            safe_transit_height_mm=float(self.board_cfg.get("safe_transit_height_mm", 70.0)),
+            board_height_offset_mm=h_mm,
+            board_yaw_deg=yaw_deg,
+            nominal_board_center_robot_m=[nom_center[0], nom_center[1], nom_surf_z / 2.0],
+            nominal_board_surface_z_m=nom_surf_z,
+        )
 
         self.client_id = -1
         try:
@@ -282,30 +296,31 @@ class VirtualPhysicalWorld:
         # Canonical board thickness strictly derived from shared/physical_geometry.json (0.0105m)
         thickness_m = self.geom.thickness_mm / 1000.0
 
-        # Dimensions from canonical physical geometry
-        outer_length_m = self.geom.outer_length_mm / 1000.0  # Along X in robot_base (410 mm)
-        outer_width_m = self.geom.outer_width_mm / 1000.0    # Along Y in robot_base (367 mm)
+        # Canonical physical dimensions:
+        # Board-local u-axis (width): 367 mm
+        # Board-local v-axis (length): 410 mm
+        outer_length_m = self.geom.outer_length_mm / 1000.0  # 410 mm (along v)
+        outer_width_m = self.geom.outer_width_mm / 1000.0    # 367 mm (along u)
 
-        half_x = outer_length_m / 2.0
-        half_y = outer_width_m / 2.0
-        half_z = thickness_m / 2.0
+        half_u = outer_width_m / 2.0   # 0.1835 m
+        half_v = outer_length_m / 2.0  # 0.2050 m
+        half_z = thickness_m / 2.0     # 0.00525 m
 
-        board_center = self.board_cfg["board_center_in_robot_base_m"]
-        surface_height = float(self.board_cfg.get("board_surface_height_m", 0.0105))
-
-        # Box center is placed such that its top surface is at surface_height
-        box_center = [board_center[0], board_center[1], surface_height - half_z]
-
+        # Box collision shape with local halfExtents [half_u, half_v, half_z]
         col_shape = p.createCollisionShape(
             p.GEOM_BOX,
-            halfExtents=[half_x, half_y, half_z],
+            halfExtents=[half_u, half_v, half_z],
             physicsClientId=self.client_id,
         )
+
+        box_center = list(self.board_placement_state.board_center_robot_m)
+        box_orn = list(self.board_placement_state.quat_robot_from_board)
 
         self.board_body_id = p.createMultiBody(
             baseMass=0.0,  # Static body
             baseCollisionShapeIndex=col_shape,
             basePosition=box_center,
+            baseOrientation=box_orn,
             physicsClientId=self.client_id,
         )
 
@@ -322,20 +337,27 @@ class VirtualPhysicalWorld:
             physicsClientId=self.client_id,
         )
 
-        # Store board bounding box for out-of-bounds check
-        self._nominal_board_center = list(board_center)
-        self._nominal_surface_height = surface_height
-        self._board_half_x = half_x
-        self._board_half_y = half_y
+        # Store board bounding box for out-of-bounds check and backward compatibility
+        nom_center = self.board_cfg.get("board_center_in_robot_base_m", [-0.360, 0.0, 0.0105])
+        self._nominal_board_center = [nom_center[0], nom_center[1], box_center[2]]
+        self._nominal_surface_height = self.board_placement_state.board_surface_z_robot_m
+        self._board_half_u = half_u
+        self._board_half_v = half_v
         self._board_half_z = half_z
-        self.current_forward_shift_m = 0.0
-        self.current_height_offset_m = 0.0
+        # Along robot X and Y (with yaw = 90 deg: u maps to X, v maps to Y)
+        self._board_half_x = half_u if abs(self.board_placement_state.board_yaw_deg - 90.0) < 1.0 else half_v
+        self._board_half_y = half_v if abs(self.board_placement_state.board_yaw_deg - 90.0) < 1.0 else half_u
 
-        self.board_x_min = board_center[0] - half_x
-        self.board_x_max = board_center[0] + half_x
-        self.board_y_min = board_center[1] - half_y
-        self.board_y_max = board_center[1] + half_y
-        self.board_surface_z = surface_height
+        self.current_forward_shift_m = self.board_placement_state.forward_shift_mm / 1000.0
+        self.current_height_offset_m = self.board_placement_state.board_height_offset_mm / 1000.0
+
+        cx = self.board_placement_state.board_center_robot_m[0]
+        cy = self.board_placement_state.board_center_robot_m[1]
+        self.board_x_min = cx - self._board_half_x
+        self.board_x_max = cx + self._board_half_x
+        self.board_y_min = cy - self._board_half_y
+        self.board_y_max = cy + self._board_half_y
+        self.board_surface_z = self.board_placement_state.board_surface_z_robot_m
 
     def relocate_board(self, forward_shift_m: float, height_offset_m: float = 0.0) -> bool:
         """
@@ -351,36 +373,44 @@ class VirtualPhysicalWorld:
         delta_z = h_off_m - self.current_height_offset_m
         delta = np.array([delta_x, delta_y, delta_z], dtype=float)
 
-        # New board center and surface Z
-        new_cx = self._nominal_board_center[0] - shift_m
-        new_cy = self._nominal_board_center[1]
-        new_surface_z = self._nominal_surface_height + h_off_m
-        new_box_cz = new_surface_z - self._board_half_z
+        # Recompute authoritative placement state
+        self.board_placement_state = BoardPlacementState.compute(
+            forward_shift_mm=shift_m * 1000.0,
+            safe_transit_height_mm=self.board_placement_state.safe_transit_height_mm,
+            board_height_offset_mm=h_off_m * 1000.0,
+            board_yaw_deg=self.board_placement_state.board_yaw_deg,
+            nominal_board_center_robot_m=self._nominal_board_center,
+            nominal_board_surface_z_m=self._nominal_surface_height,
+            placement_version=self.board_placement_state.placement_version + 1,
+        )
 
         if self.board_body_id >= 0 and self.client_id >= 0:
             p.resetBasePositionAndOrientation(
                 self.board_body_id,
-                [new_cx, new_cy, new_box_cz],
-                [0.0, 0.0, 0.0, 1.0],
+                self.board_placement_state.board_center_robot_m,
+                self.board_placement_state.quat_robot_from_board,
                 physicsClientId=self.client_id,
             )
 
-        self.board_x_min = new_cx - self._board_half_x
-        self.board_x_max = new_cx + self._board_half_x
-        self.board_y_min = new_cy - self._board_half_y
-        self.board_y_max = new_cy + self._board_half_y
-        self.board_surface_z = new_surface_z
+        cx = self.board_placement_state.board_center_robot_m[0]
+        cy = self.board_placement_state.board_center_robot_m[1]
+        self.board_x_min = cx - self._board_half_x
+        self.board_x_max = cx + self._board_half_x
+        self.board_y_min = cy - self._board_half_y
+        self.board_y_max = cy + self._board_half_y
+        self.board_surface_z = self.board_placement_state.board_surface_z_robot_m
 
         # Relocate resting/on-board pieces
-        nom_origin = self.board_cfg.get("grid_origin_in_robot_base_m", [-0.180, -0.160, 0.0105])
-        new_origin = (nom_origin[0] - shift_m, nom_origin[1], new_surface_z)
-
         for p_body in self.pieces.values():
             if p_body.physical_state in (PiecePhysicalState.ON_BOARD, PiecePhysicalState.RESTING):
                 pos, orn = p_body.get_pose_robot_base()
                 new_pos = pos + delta
                 p_body.set_pose_robot_base(new_pos, orn)
-                p_body.grid_origin_robot = new_origin
+                p_body.set_velocity([0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
+                p_body.physical_state = PiecePhysicalState.RESTING
+                p_body._consecutive_settled_steps = self.required_settled_steps
+            p_body.board_placement_state = self.board_placement_state
+            p_body.grid_origin_robot = tuple(self.board_placement_state.grid_origin_robot_m)
 
         self.current_forward_shift_m = shift_m
         self.current_height_offset_m = h_off_m
@@ -391,7 +421,10 @@ class VirtualPhysicalWorld:
         if self.board_body_id >= 0 and self.client_id >= 0:
             pos, orn = p.getBasePositionAndOrientation(self.board_body_id, physicsClientId=self.client_id)
             return np.array(pos), np.array(orn)
-        return np.array([self._nominal_board_center[0] - self.current_forward_shift_m, self._nominal_board_center[1], self.board_surface_z - self._board_half_z]), np.array([0.0, 0.0, 0.0, 1.0])
+        return (
+            np.array(self.board_placement_state.board_center_robot_m),
+            np.array(self.board_placement_state.quat_robot_from_board),
+        )
 
     def get_board_to_robot_clearance(self, query_dist: float = 1.0) -> Tuple[float, str]:
         """
@@ -464,8 +497,8 @@ class VirtualPhysicalWorld:
             }
 
         with self._physics_lock:
-            hx = float(half_length_m) + float(xy_margin_m)
-            hy = float(half_width_m) + float(xy_margin_m)
+            hu = float(half_width_m) + float(xy_margin_m)
+            hv = float(half_length_m) + float(xy_margin_m)
             hz = (float(board_thickness_m) + float(piece_height_m) + float(vertical_clearance_m) + float(xy_margin_m)) / 2.0
             box_cz = float(board_surface_z) + float(piece_height_m) + float(vertical_clearance_m) - hz
             cx = float(board_center_xy[0])
@@ -473,13 +506,14 @@ class VirtualPhysicalWorld:
 
             col_shape = p.createCollisionShape(
                 p.GEOM_BOX,
-                halfExtents=[hx, hy, hz],
+                halfExtents=[hu, hv, hz],
                 physicsClientId=self.client_id,
             )
             body_id = p.createMultiBody(
                 baseMass=0,
                 baseCollisionShapeIndex=col_shape,
                 basePosition=[cx, cy, box_cz],
+                baseOrientation=self.board_placement_state.quat_robot_from_board,
                 physicsClientId=self.client_id,
             )
 
@@ -584,7 +618,7 @@ class VirtualPhysicalWorld:
                     p.resetBasePositionAndOrientation(
                         self.board_body_id,
                         [cx, cy, cz],
-                        [0.0, 0.0, 0.0, 1.0],
+                        self.board_placement_state.quat_robot_from_board,
                         physicsClientId=self.client_id,
                     )
 
@@ -681,17 +715,14 @@ class VirtualPhysicalWorld:
             c = int(p_info["col"])
             r = int(p_info["row"])
 
-            # Position on board grid:
-            # Row r along -X, Col c along +Y
-            x = x0 - r * row_spacing_m
-            y = y0 + c * col_spacing_m
+            # Position on board grid from authoritative BoardPlacementState
             # Spawn slightly above board surface for safe contact settling (1.0 mm clearance)
-            z = z0 + (height_m / 2.0) + 0.001
+            pos = self.board_placement_state.cell_to_robot_xyz(r, c, z_rel_m=(height_m / 2.0) + 0.001)
 
             body_id = p.createMultiBody(
                 baseMass=mass_kg,
                 baseCollisionShapeIndex=col_shape,
-                basePosition=[x, y, z],
+                basePosition=pos.tolist(),
                 baseOrientation=[0.0, 0.0, 0.0, 1.0],  # Upright cylinder
                 physicsClientId=self.client_id,
             )
@@ -715,9 +746,10 @@ class VirtualPhysicalWorld:
                 radius_m=radius_m,
                 height_m=height_m,
                 mass_kg=mass_kg,
-                grid_origin_robot=grid_origin,
+                grid_origin_robot=tuple(self.board_placement_state.grid_origin_robot_m),
                 col_spacing_m=col_spacing_m,
                 row_spacing_m=row_spacing_m,
+                board_placement_state=self.board_placement_state,
             )
             self.pieces[piece_id] = piece_body
 
@@ -728,15 +760,7 @@ class VirtualPhysicalWorld:
             if self.gripper.attached_piece is not None:
                 self.release_attached_piece()
 
-            shift_m = self.current_forward_shift_m
-            nom_origin = self.board_cfg.get("grid_origin_in_robot_base_m", [-0.180, -0.160, 0.0105])
-            x0 = nom_origin[0] - shift_m
-            y0 = nom_origin[1]
-            z0 = self.board_surface_z
-
             height_m = self.geom.piece_height_mm / 1000.0
-            col_spacing_m = self.geom.grid_cell_width_mm / 1000.0
-            row_spacing_m = self.geom.grid_cell_length_mm / 1000.0
 
             for p_info in self.layout_cfg.get("pieces", []):
                 pid = p_info["id"]
@@ -745,13 +769,11 @@ class VirtualPhysicalWorld:
                     continue
                 c = int(p_info["col"])
                 r = int(p_info["row"])
-                x = x0 - r * row_spacing_m
-                y = y0 + c * col_spacing_m
-                z = z0 + (height_m / 2.0) + 0.001
+                pos = self.board_placement_state.cell_to_robot_xyz(r, c, z_rel_m=(height_m / 2.0) + 0.001)
 
                 p.resetBasePositionAndOrientation(
                     p_body.body_id,
-                    [x, y, z],
+                    pos.tolist(),
                     [0.0, 0.0, 0.0, 1.0],
                     physicsClientId=self.client_id,
                 )
@@ -763,7 +785,8 @@ class VirtualPhysicalWorld:
                 )
                 p_body.physical_state = PiecePhysicalState.SETTLING
                 p_body._consecutive_settled_steps = 0
-                p_body.grid_origin_robot = (x0, y0, z0)
+                p_body.board_placement_state = self.board_placement_state
+                p_body.grid_origin_robot = tuple(self.board_placement_state.grid_origin_robot_m)
 
     def step(self, num_steps: int = 1) -> None:
         """Step the simulation by fixed deterministic timesteps."""
@@ -791,13 +814,10 @@ class VirtualPhysicalWorld:
                 v_lin = float(np.linalg.norm(lin_vel))
                 v_ang = float(np.linalg.norm(ang_vel))
 
-                # Check out of bounds: fallen below board or thrown far away
+                # Check out of bounds: fallen below board or thrown outside board physical boundary
                 is_oob = (
                     pos[2] < self.z_min_oob
-                    or pos[0] < self.board_x_min - self.xy_margin_oob
-                    or pos[0] > self.board_x_max + self.xy_margin_oob
-                    or pos[1] < self.board_y_min - self.xy_margin_oob
-                    or pos[1] > self.board_y_max + self.xy_margin_oob
+                    or not self.board_placement_state.is_in_bounds_robot(pos, xy_margin_m=self.xy_margin_oob)
                 )
 
                 if is_oob:

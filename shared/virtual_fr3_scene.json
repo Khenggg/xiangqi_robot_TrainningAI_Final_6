@@ -19,16 +19,17 @@
     "determinant": 1.0
   },
   "virtual_board_placement": {
-    "grid_origin_in_robot_base_m": [-0.18, -0.16, 0.0105],
+    "grid_origin_in_robot_base_m": [-0.20, 0.18, 0.0105],
     "board_center_in_robot_base_m": [-0.36, 0.0, 0.0105],
-    "grid_origin_in_3d_world_m": [0.16, 0.0105, 0.18],
+    "grid_origin_in_3d_world_m": [-0.18, 0.0105, 0.20],
     "board_center_in_3d_world_m": [0.0, 0.0105, 0.36],
     "board_surface_height_m": 0.0105,
-    "row_axis_in_robot_base": "-X",
-    "column_axis_in_robot_base": "+Y",
+    "board_yaw_deg": 90.0,
+    "row_axis_in_robot_base": "-Y",
+    "column_axis_in_robot_base": "-X",
     "up_axis_in_robot_base": "+Z",
-    "row_axis_in_3d_world": "+Z",
-    "column_axis_in_3d_world": "-X",
+    "row_axis_in_3d_world": "+X",
+    "column_axis_in_3d_world": "+Z",
     "up_axis_in_3d_world": "+Y",
     "target_tool_orientation_matrix": [
       [0.0, 1.0, 0.0],

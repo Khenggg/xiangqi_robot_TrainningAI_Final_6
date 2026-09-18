@@ -88,29 +88,25 @@ export function getActiveGeometry() {
   return _activeGeometry;
 }
 
-export function computeBoardOrigin(geometry = null) {
+export function boardPointToXYZ(col, row, geometry = null) {
   const geo = geometry || getActiveGeometry();
   const placement = getScenePlacement();
-  // Under canonical rotation R, X_world = -Y_robot.
-  // Col 0 (Y_robot = -0.16m) maps to X_world = +0.16m (boardCenterX + playableWidthM / 2.0).
-  // Row 0 (X_robot = -0.18m) maps to Z_world = +0.18m (boardCenterZ - playableDepthM / 2.0).
+  const colM = geo.cellM || 0.040;
+  const rowM = geo.rowSpacingM || 0.040;
+  // Under canonical 90 deg orientation:
+  // Column axis (span -160mm to +160mm) -> +Z_world (-X_robot)
+  // Row axis (span -180mm to +180mm)    -> +X_world (-Y_robot)
+  const u = (Number(col) - 4.0) * colM;
+  const v = (Number(row) - 4.5) * rowM;
   return new THREE.Vector3(
-    placement.boardCenterX + geo.playableWidthM / 2.0,
+    placement.boardCenterX + v,
     placement.boardSurfaceY,
-    placement.boardCenterZ - geo.playableDepthM / 2.0
+    placement.boardCenterZ + u
   );
 }
 
-export function boardPointToXYZ(col, row, geometry = null) {
-  const geo = geometry || getActiveGeometry();
-  const origin = computeBoardOrigin(geo);
-  // col increases (+Y in robot base) -> X_world decreases (-X direction)
-  // row increases (-X in robot base) -> Z_world increases (+Z direction)
-  return new THREE.Vector3(
-    origin.x - col * geo.cellM,
-    origin.y,
-    origin.z + row * geo.rowSpacingM
-  );
+export function computeBoardOrigin(geometry = null) {
+  return boardPointToXYZ(0, 0, geometry);
 }
 
 // ---------------------------------------------------------------------------
@@ -119,8 +115,10 @@ export function boardPointToXYZ(col, row, geometry = null) {
 function createBoardTexture(geometry = null) {
   const geo = geometry || getActiveGeometry();
   const canvas = document.createElement("canvas");
-  canvas.width = 1024;
-  canvas.height = Math.round(1024 * (geo.outerLengthMm / geo.outerWidthMm)); // 1144 px
+  // Canvas width maps along world X (row axis, 410 mm)
+  // Canvas height maps along world Z (col axis, 367 mm)
+  canvas.width = Math.round(1024 * (geo.outerLengthMm / geo.outerWidthMm)); // 1144 px
+  canvas.height = 1024;
   const ctx = canvas.getContext("2d");
 
   // Nền gỗ sáng
@@ -130,61 +128,59 @@ function createBoardTexture(geometry = null) {
   ctx.strokeStyle = "#1a1a1a";
   ctx.lineWidth = 5;
 
-  // Lề ngang & dọc theo tỷ lệ hình học chuẩn (23.5mm ngang, 25.0mm dọc)
-  const paddingX = Math.round(canvas.width * (geo.marginHorizontalMm / geo.outerWidthMm));
-  const paddingY = Math.round(canvas.height * (geo.marginVerticalMm / geo.outerLengthMm));
+  // Lề dọc (dọc theo hàng, canvas width) & lề ngang (ngang theo cột, canvas height)
+  const paddingX = Math.round(canvas.width * (geo.marginVerticalMm / geo.outerLengthMm));
+  const paddingY = Math.round(canvas.height * (geo.marginHorizontalMm / geo.outerWidthMm));
 
-  // Chia 8 cột và 9 hàng bằng nhau (bước lưới 40mm x 40mm)
-  const stepX = (canvas.width - paddingX * 2) / (geo.columns - 1);
-  const stepY = (canvas.height - paddingY * 2) / (geo.rows - 1);
+  // Chia 9 khoảng hàng (10 hàng) và 8 khoảng cột (9 cột)
+  const stepX = (canvas.width - paddingX * 2) / (geo.rows - 1);
+  const stepY = (canvas.height - paddingY * 2) / (geo.columns - 1);
 
-  // Column 0 maps to X_world = +0.16m (right side of canvas, u ~ 1)
-  // Column 8 maps to X_world = -0.16m (left side of canvas, u ~ 0)
-  const getX = (col) => (canvas.width - paddingX) - col * stepX;
-  const getY = (row) => paddingY + row * stepY;
+  const getX = (row) => paddingX + row * stepX;
+  const getY = (col) => paddingY + col * stepY;
 
-  // 1. Vẽ 10 đường ngang (row 0 = Black side, row 9 = Red side)
+  // 1. Vẽ 10 đường hàng (nối col 0 đến col 8 ở mỗi row r)
   for (let r = 0; r < 10; r++) {
     ctx.beginPath();
-    ctx.moveTo(getX(0), getY(r));
-    ctx.lineTo(getX(8), getY(r));
+    ctx.moveTo(getX(r), getY(0));
+    ctx.lineTo(getX(r), getY(8));
     ctx.stroke();
   }
 
-  // 2. Vẽ 9 đường dọc (2 đường biên kéo dài, các đường bên trong ngắt ở Sông row 4 -> row 5)
+  // 2. Vẽ 9 đường cột (2 đường biên kéo dài, các đường bên trong ngắt ở Sông row 4 -> row 5)
   for (let c = 0; c < 9; c++) {
     if (c === 0 || c === 8) {
       ctx.beginPath();
-      ctx.moveTo(getX(c), getY(0));
-      ctx.lineTo(getX(c), getY(9));
+      ctx.moveTo(getX(0), getY(c));
+      ctx.lineTo(getX(9), getY(c));
       ctx.stroke();
     } else {
       ctx.beginPath();
-      ctx.moveTo(getX(c), getY(0));
-      ctx.lineTo(getX(c), getY(4));
+      ctx.moveTo(getX(0), getY(c));
+      ctx.lineTo(getX(4), getY(c));
       ctx.stroke();
 
       ctx.beginPath();
-      ctx.moveTo(getX(c), getY(5));
-      ctx.lineTo(getX(c), getY(9));
+      ctx.moveTo(getX(5), getY(c));
+      ctx.lineTo(getX(9), getY(c));
       ctx.stroke();
     }
   }
 
   // 3. Đường chéo Cung Tướng Phe Đen (Hàng 0 đến 2, Cột 3 đến 5)
   ctx.beginPath();
-  ctx.moveTo(getX(3), getY(0));
-  ctx.lineTo(getX(5), getY(2));
-  ctx.moveTo(getX(5), getY(0));
-  ctx.lineTo(getX(3), getY(2));
+  ctx.moveTo(getX(0), getY(3));
+  ctx.lineTo(getX(2), getY(5));
+  ctx.moveTo(getX(0), getY(5));
+  ctx.lineTo(getX(2), getY(3));
   ctx.stroke();
 
   // 4. Đường chéo Cung Tướng Phe Đỏ (Hàng 7 đến 9, Cột 3 đến 5)
   ctx.beginPath();
-  ctx.moveTo(getX(3), getY(7));
-  ctx.lineTo(getX(5), getY(9));
-  ctx.moveTo(getX(5), getY(7));
-  ctx.lineTo(getX(3), getY(9));
+  ctx.moveTo(getX(7), getY(3));
+  ctx.lineTo(getX(9), getY(5));
+  ctx.moveTo(getX(7), getY(5));
+  ctx.lineTo(getX(9), getY(3));
   ctx.stroke();
 
   // Viền ngoài đôi bao quanh bàn cờ
@@ -206,14 +202,13 @@ function createBoardTexture(geometry = null) {
 
   const playableW = geo.playableWidthMm || 320;
   const playableL = geo.playableLengthMm || 360;
-  const pxPerMmX = (canvas.width - paddingX * 2) / playableW;
-  const pxPerMmY = (canvas.height - paddingY * 2) / playableL;
+  const pxPerMmX = (canvas.width - paddingX * 2) / playableL;
+  const pxPerMmY = (canvas.height - paddingY * 2) / playableW;
 
-  // Thước ngang (biên trên & biên dưới): col 0 (x max) -> col 8 (x min)
-  for (let mm = 0; mm <= playableW; mm += 1) {
-    const x = (canvas.width - paddingX) - mm * pxPerMmX;
+  // Thước ngang dọc theo row (0 đến 360mm): biên trên & biên dưới canvas
+  for (let mm = 0; mm <= playableL; mm += 1) {
+    const x = paddingX + mm * pxPerMmX;
     if (mm % 40 === 0) {
-      // Vạch cột chính (40mm)
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(x, paddingY - 12);
@@ -222,11 +217,9 @@ function createBoardTexture(geometry = null) {
       ctx.lineTo(x, canvas.height - paddingY + 26);
       ctx.stroke();
 
-      // Số đo mm
       ctx.fillText(`${mm}mm`, x, paddingY - 34);
       ctx.fillText(`${mm}mm`, x, canvas.height - paddingY + 34);
     } else if (mm % 10 === 0) {
-      // Vạch 10mm
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(x, paddingY - 12);
@@ -235,7 +228,6 @@ function createBoardTexture(geometry = null) {
       ctx.lineTo(x, canvas.height - paddingY + 21);
       ctx.stroke();
     } else if (mm % 2 === 0) {
-      // Vạch 2mm
       ctx.lineWidth = 0.8;
       ctx.beginPath();
       ctx.moveTo(x, paddingY - 12);
@@ -246,11 +238,10 @@ function createBoardTexture(geometry = null) {
     }
   }
 
-  // Thước dọc (biên trái & biên phải): row 0 -> row 9
-  for (let mm = 0; mm <= playableL; mm += 1) {
+  // Thước dọc dọc theo col (0 đến 320mm): biên trái & biên phải canvas
+  for (let mm = 0; mm <= playableW; mm += 1) {
     const y = paddingY + mm * pxPerMmY;
     if (mm % 40 === 0) {
-      // Vạch hàng chính (40mm)
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(paddingX - 12, y);
@@ -259,28 +250,25 @@ function createBoardTexture(geometry = null) {
       ctx.lineTo(canvas.width - paddingX + 26, y);
       ctx.stroke();
 
-      // Số đo mm bên trái & phải
       ctx.textAlign = "right";
       ctx.fillText(`${mm}`, paddingX - 30, y);
       ctx.textAlign = "left";
       ctx.fillText(`${mm}`, canvas.width - paddingX + 30, y);
     } else if (mm % 10 === 0) {
-      // Vạch 10mm
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(paddingX - 12, y);
-      ctx.lineTo(paddingX - 21, y);
+      ctx.lineTo(paddingX - 21);
       ctx.moveTo(canvas.width - paddingX + 12, y);
-      ctx.lineTo(canvas.width - paddingX + 21, y);
+      ctx.lineTo(canvas.width - paddingX + 21);
       ctx.stroke();
     } else if (mm % 2 === 0) {
-      // Vạch 2mm
       ctx.lineWidth = 0.8;
       ctx.beginPath();
       ctx.moveTo(paddingX - 12, y);
-      ctx.lineTo(paddingX - 17, y);
+      ctx.lineTo(paddingX - 17);
       ctx.moveTo(canvas.width - paddingX + 12, y);
-      ctx.lineTo(canvas.width - paddingX + 17, y);
+      ctx.lineTo(canvas.width - paddingX + 17);
       ctx.stroke();
     }
   }
@@ -300,9 +288,10 @@ export function buildBoardGrid(geometry = null) {
   group.name = "boardVisualRoot";
   group.userData = { isBoardVisualRoot: true, legacyName: "xiangqi-board" };
 
-  const boardWidth = geo.boardWidthM;
-  const boardDepth = geo.boardDepthM;
-  // Canonical board thickness derived from physical_geometry.json (0.0105m)
+  // Under 90 deg orientation:
+  // Length (410 mm) is along X_world; Width (367 mm) is along Z_world
+  const meshWidth = geo.boardDepthM || 0.410;  // Length along X_world
+  const meshDepth = geo.boardWidthM || 0.367;  // Width along Z_world
   const boardThickness = geo.boardThicknessM || 0.0105;
 
   const boardMaterial = new THREE.MeshLambertMaterial({
@@ -313,11 +302,16 @@ export function buildBoardGrid(geometry = null) {
     color: 0x5c3317,
   });
 
-  const center = boardPointToXYZ(4, 4.5, geo);
+  const placement = getScenePlacement();
+  const center = new THREE.Vector3(
+    placement.boardCenterX,
+    placement.boardSurfaceY,
+    placement.boardCenterZ
+  );
 
   // 1. Khung viền ngoài (tọa độ local tương đối với tâm group)
   const outerFrame = new THREE.Mesh(
-    new THREE.BoxGeometry(boardWidth + 0.02, boardThickness - 0.001, boardDepth + 0.02),
+    new THREE.BoxGeometry(meshWidth + 0.02, boardThickness - 0.001, meshDepth + 0.02),
     frameMaterial
   );
   outerFrame.position.set(0, -boardThickness / 2 - 0.0005, 0);
@@ -325,7 +319,7 @@ export function buildBoardGrid(geometry = null) {
 
   // 2. Mặt bàn cờ chính (tọa độ local tương đối với tâm group)
   const boardTop = new THREE.Mesh(
-    new THREE.BoxGeometry(boardWidth, boardThickness, boardDepth),
+    new THREE.BoxGeometry(meshWidth, boardThickness, meshDepth),
     boardMaterial
   );
   boardTop.position.set(0, -boardThickness / 2, 0);

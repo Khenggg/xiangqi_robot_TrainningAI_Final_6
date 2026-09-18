@@ -83,14 +83,14 @@ assert.ok(
   Array.isArray(gridOriginRobot) && gridOriginRobot.length === 3 && gridOriginRobot.every(Number.isFinite),
   "grid_origin_in_robot_base_m must be array of 3 finite numbers"
 );
-assert.deepEqual(gridOriginRobot, [-0.18, -0.16, 0.0105]);
+assert.deepEqual(gridOriginRobot, [-0.2, 0.18, 0.0105]);
 
 const gridOriginWorld = sceneData?.virtual_board_placement?.grid_origin_in_3d_world_m;
 assert.ok(
   Array.isArray(gridOriginWorld) && gridOriginWorld.length === 3 && gridOriginWorld.every(Number.isFinite),
   "grid_origin_in_3d_world_m must be array of 3 finite numbers"
 );
-assert.deepEqual(gridOriginWorld, [0.16, 0.0105, 0.18]);
+assert.deepEqual(gridOriginWorld, [-0.18, 0.0105, 0.2]);
 
 // Verify mathematical transformation identity: R * p_robot_origin + t == p_world_origin
 const trans = sceneData?.robot_base_to_3d_world?.translation_m || [0.0, 0.0, 0.0];
@@ -119,28 +119,28 @@ const rowSpacingM = physData.board.row_spacing / 1000.0;   // 0.04m
 const playableWidthM = (physData.board.columns - 1) * colSpacingM; // 0.32m
 const playableDepthM = (physData.board.rows - 1) * rowSpacingM;   // 0.36m
 
-// Viewer formula from board.mjs:
-// origin = Vector3(boardCenterX + playableWidthM / 2.0, boardSurfaceY, boardCenterZ - playableDepthM / 2.0)
-// point = Vector3(origin.x - col * cellM, origin.y, origin.z + row * rowSpacingM)
+// Viewer formula from board.mjs under 90 deg orientation:
+// Column axis (span -160mm to +160mm) -> +Z_world (-X_robot)
+// Row axis (span -180mm to +180mm)    -> +X_world (-Y_robot)
 function viewerPointToXYZ(col, row) {
-  const originX = boardCenterWorld[0] + playableWidthM / 2.0; // +0.16m
-  const originY = boardCenterWorld[1];                         // 0.05m
-  const originZ = boardCenterWorld[2] - playableDepthM / 2.0; // +0.18m
+  const u = (col - 4.0) * colSpacingM;
+  const v = (row - 4.5) * rowSpacingM;
   return [
-    originX - col * colSpacingM,
-    originY,
-    originZ + row * rowSpacingM,
+    boardCenterWorld[0] + v,
+    boardCenterWorld[1],
+    boardCenterWorld[2] + u,
   ];
 }
 
-// Robot base formula:
-// x0 = -0.18 (Row 0), row increases along -X -> x = x0 - row * 0.04
-// y0 = -0.16 (Col 0), col increases along +Y -> y = y0 + col * 0.04
-// z0 = 0.05
+// Robot base formula under 90 deg orientation:
+// col 0..8 along -X: u = (col - 4.0) * 0.04 -> x = boardCenterRobot[0] - u
+// row 0..9 along -Y: v = (row - 4.5) * 0.04 -> y = -v
 function robotBasePointToXYZ(col, row) {
+  const u = (col - 4.0) * colSpacingM;
+  const v = (row - 4.5) * rowSpacingM;
   return [
-    gridOriginRobot[0] - row * rowSpacingM,
-    gridOriginRobot[1] + col * colSpacingM,
+    -0.360 - u,
+    -v,
     gridOriginRobot[2],
   ];
 }

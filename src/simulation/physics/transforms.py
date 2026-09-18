@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
-from typing import Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Sequence, Tuple, Union
 import numpy as np
 
 
@@ -222,47 +222,59 @@ def tilt_angle_deg(q_robot: Sequence[float]) -> float:
 
 def continuous_board_coord(
     p_robot: Sequence[float],
-    grid_origin_robot: Sequence[float],
+    grid_origin_robot: Optional[Sequence[float]] = None,
     col_spacing_m: float = 0.040,
     row_spacing_m: float = 0.040,
+    board_placement_state: Optional[Any] = None,
+    board_yaw_deg: float = 90.0,
 ) -> Tuple[float, float]:
     """
-    Derive continuous floating-point (col, row) on the board from a robot_base point.
-    In robot_base:
-        x0 is row 0, row increases along -X -> row = (x0 - x) / row_spacing
-        y0 is col 0, col increases along +Y -> col = (y - y0) / col_spacing
+    Derive continuous floating-point (col, row) on the board from a robot_base point
+    using authoritative inverse board transform.
     """
-    x0, y0, _ = grid_origin_robot
-    x, y, _ = p_robot
-    col_float = (float(y) - float(y0)) / float(col_spacing_m)
-    row_float = (float(x0) - float(x)) / float(row_spacing_m)
-    return col_float, row_float
+    if board_placement_state is not None:
+        state = board_placement_state
+    else:
+        from src.simulation.placement import BoardPlacementState
+        state = BoardPlacementState.compute(0.0, board_yaw_deg=board_yaw_deg)
+        if grid_origin_robot is not None and len(grid_origin_robot) >= 3:
+            nom_x = state.grid_origin_robot_m[0]
+            d_m = -(float(grid_origin_robot[0]) - nom_x)
+            if abs(d_m) > 1e-4:
+                state = BoardPlacementState.compute(forward_shift_mm=d_m * 1000.0, board_yaw_deg=board_yaw_deg)
+
+    p_local = state.robot_to_board_local(p_robot)
+    c_float, r_float = state.board_local_to_cell(p_local[0], p_local[1])
+    return float(c_float), float(r_float)
 
 
 def nearest_intersection_metrics(
     col_float: float,
     row_float: float,
     p_robot: Sequence[float],
-    grid_origin_robot: Sequence[float],
+    grid_origin_robot: Optional[Sequence[float]] = None,
     col_spacing_m: float = 0.040,
     row_spacing_m: float = 0.040,
     max_cols: int = 9,
     max_rows: int = 10,
+    board_placement_state: Optional[Any] = None,
+    board_yaw_deg: float = 90.0,
 ) -> Tuple[int, int, float]:
     """
-    Calculate nearest intersection (nearest_col, nearest_row) and distance in meters.
-    Clamps nearest index to [0, max-1] only for nearest target calculation.
+    Calculate nearest intersection (nearest_col, nearest_row) and distance in meters
+    using authoritative inverse board transform.
     """
-    nearest_c = max(0, min(max_cols - 1, int(round(col_float))))
-    nearest_r = max(0, min(max_rows - 1, int(round(row_float))))
+    if board_placement_state is not None:
+        state = board_placement_state
+    else:
+        from src.simulation.placement import BoardPlacementState
+        state = BoardPlacementState.compute(0.0, board_yaw_deg=board_yaw_deg)
+        if grid_origin_robot is not None and len(grid_origin_robot) >= 3:
+            nom_x = state.grid_origin_robot_m[0]
+            d_m = -(float(grid_origin_robot[0]) - nom_x)
+            if abs(d_m) > 1e-4:
+                state = BoardPlacementState.compute(forward_shift_mm=d_m * 1000.0, board_yaw_deg=board_yaw_deg)
 
-    x0, y0, z0 = grid_origin_robot
-    target_x = x0 - nearest_r * row_spacing_m
-    target_y = y0 + nearest_c * col_spacing_m
+    nearest_c, nearest_r, dist_m = state.robot_xyz_to_nearest_cell(p_robot)
+    return int(nearest_c), int(nearest_r), float(dist_m)
 
-    # Horizontal distance in board XY plane
-    dx = float(p_robot[0]) - target_x
-    dy = float(p_robot[1]) - target_y
-    dist_m = math.hypot(dx, dy)
-
-    return nearest_c, nearest_r, dist_m

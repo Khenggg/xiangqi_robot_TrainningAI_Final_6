@@ -2,7 +2,7 @@
 Xiangqi piece rigid body wrapper for PyBullet simulation.
 """
 
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 import numpy as np
 import pybullet as p
 
@@ -34,6 +34,7 @@ class XiangqiPieceBody:
         grid_origin_robot: Sequence[float],
         col_spacing_m: float = 0.040,
         row_spacing_m: float = 0.040,
+        board_placement_state: Optional[Any] = None,
     ):
         self.piece_id = str(piece_id)
         self.side = str(side)
@@ -46,6 +47,7 @@ class XiangqiPieceBody:
         self.grid_origin_robot = tuple(float(v) for v in grid_origin_robot)
         self.col_spacing_m = float(col_spacing_m)
         self.row_spacing_m = float(row_spacing_m)
+        self.board_placement_state = board_placement_state
 
         self.physical_state = PiecePhysicalState.SETTLING
         self.attached_to_gripper = False
@@ -79,9 +81,10 @@ class XiangqiPieceBody:
         pos, _ = self.get_pose_robot_base()
         return continuous_board_coord(
             pos,
-            self.grid_origin_robot,
-            self.col_spacing_m,
-            self.row_spacing_m,
+            grid_origin_robot=self.grid_origin_robot,
+            col_spacing_m=self.col_spacing_m,
+            row_spacing_m=self.row_spacing_m,
+            board_placement_state=self.board_placement_state,
         )
 
     def get_nearest_intersection(self) -> Tuple[int, int, float]:
@@ -92,9 +95,10 @@ class XiangqiPieceBody:
             c_float,
             r_float,
             pos,
-            self.grid_origin_robot,
-            self.col_spacing_m,
-            self.row_spacing_m,
+            grid_origin_robot=self.grid_origin_robot,
+            col_spacing_m=self.col_spacing_m,
+            row_spacing_m=self.row_spacing_m,
+            board_placement_state=self.board_placement_state,
         )
 
     @property

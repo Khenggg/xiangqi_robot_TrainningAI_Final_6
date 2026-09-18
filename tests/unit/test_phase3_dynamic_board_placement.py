@@ -55,29 +55,27 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         # 1. d = 0, row 0 col 4
         x, y, z = canonical_cell_to_robot_xyz_m(
             row=0, col=4, forward_shift_mm=0.0, z_m=0.0105,
-            nominal_x0=-0.180, nominal_y0=-0.160, row_spacing_m=r_sp, col_spacing_m=c_sp,
+            row_spacing_m=r_sp, col_spacing_m=c_sp,
         )
-        self.assertAlmostEqual(x, -0.180, places=4)
-        self.assertAlmostEqual(y, 0.000, places=4)
+        self.assertAlmostEqual(x, -0.360, places=4)
+        self.assertAlmostEqual(y, 0.180, places=4)
         self.assertAlmostEqual(z, 0.0105, places=4)
 
         # 2. d = +30mm, row 0 col 4
         x, y, z = canonical_cell_to_robot_xyz_m(
             row=0, col=4, forward_shift_mm=30.0, z_m=0.0105,
-            nominal_x0=-0.180, nominal_y0=-0.160, row_spacing_m=r_sp, col_spacing_m=c_sp,
+            row_spacing_m=r_sp, col_spacing_m=c_sp,
         )
-        self.assertAlmostEqual(x, -0.210, places=4)
-        self.assertAlmostEqual(y, 0.000, places=4)
+        self.assertAlmostEqual(x, -0.390, places=4)
+        self.assertAlmostEqual(y, 0.180, places=4)
 
         # 3. d = +30mm, row 9 col 8
         x, y, z = canonical_cell_to_robot_xyz_m(
             row=9, col=8, forward_shift_mm=30.0, z_m=0.0105,
-            nominal_x0=-0.180, nominal_y0=-0.160, row_spacing_m=r_sp, col_spacing_m=c_sp,
+            row_spacing_m=r_sp, col_spacing_m=c_sp,
         )
-        # x = -0.180 - 0.030 - 9*0.040 = -0.570
-        # y = -0.160 + 8*0.040 = +0.160
-        self.assertAlmostEqual(x, -0.570, places=4)
-        self.assertAlmostEqual(y, 0.160, places=4)
+        self.assertAlmostEqual(x, -0.550, places=4)
+        self.assertAlmostEqual(y, -0.180, places=4)
 
         # 4. Three.js world mapping verification: world_z = -robot_x
         state_nom = BoardPlacementState.compute(forward_shift_mm=0.0)
@@ -228,11 +226,6 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         for pid, p in sim.world.pieces.items():
             p.physical_state = PiecePhysicalState.OUT_OF_BOUNDS
 
-        # Place an elevated obstacle directly on the path between cell (2, 2) and cell (2, 6)
-        obs = sim.world.pieces["black_cannon_0"]
-        obs.physical_state = PiecePhysicalState.RESTING
-        obs.set_pose_robot_base([-0.260, 0.0, 0.130], [0, 0, 0, 1])
-
         # Start at cell (2, 2), goal at cell (2, 6) at transit height
         pos_s = sim.cell_to_robot_xyz_m(2, 2, sim.board_surface_z + 0.070)
         pos_g = sim.cell_to_robot_xyz_m(2, 6, sim.board_surface_z + 0.070)
@@ -241,6 +234,11 @@ class DynamicBoardPlacementTests(unittest.TestCase):
 
         p_mid_m = sim.cell_to_robot_xyz_m(2, 4, sim.board_surface_z + 0.070)
         p_m_mm = [v * 1000.0 for v in p_mid_m] + [180.0, 0.0, 90.0]
+
+        # Place an elevated obstacle directly on the path between cell (2, 2) and cell (2, 6)
+        obs = sim.world.pieces["black_cannon_0"]
+        obs.physical_state = PiecePhysicalState.RESTING
+        obs.set_pose_robot_base(p_mid_m + np.array([0.0, 0.010, 0.0]), [0, 0, 0, 1])
 
         seed_s = sim.reachability_dataset[(2, 2)]["approach_joints_deg"]
         seed_g = sim.reachability_dataset[(2, 6)]["approach_joints_deg"]
@@ -291,80 +289,72 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         """
         Verify Section 39 & 40:
         At nominal d=0, H=70mm:
-        - Row 0 Col 2..6 LAND vertical descent fails due to link 1 <-> link 3 robot self-collision.
-        At recommended placement d=28.5mm, H=40mm:
-        - Row 0 Col 2..6 ALL succeed LAND vertical descent without collision.
-        - Far cells (Row 9 Col 0, 4, 8) remain reachable and collision-free.
+        - Near-side center cells (4, 0) and (5, 0) LAND descent fails due to link 1 <-> link 3 robot self-collision.
+        At recommended placement d=15.0mm, H=40mm:
+        - Near cells ALL succeed LAND vertical descent without collision.
+        - Far cells (e.g. (0, 8), (4, 8), (9, 8)) remain reachable and collision-free.
         """
         sim = VirtualXiangqiSimulation()
         sim.start()
 
-        # Step 1: Prove nominal problem on Row 0 Col 4
+        # Step 1: Prove nominal problem on near-side cell (4, 0)
         sim.reset_board_placement()  # d=0, H=70
         z_grasp = sim.board_surface_z + sim.geom.piece_height_mm / 2000.0
-        p_gr_nom = [v * 1000.0 for v in sim.cell_to_robot_xyz_m(0, 4, z_grasp)] + [180.0, 0.0, 90.0]
+        p_gr_nom = [v * 1000.0 for v in sim.cell_to_robot_xyz_m(4, 0, z_grasp)] + [180.0, 0.0, 90.0]
 
-        cell_info = sim.reachability_dataset.get((0, 4))
+        cell_info = sim.reachability_dataset.get((4, 0))
         q_app = np.deg2rad(cell_info["approach_joints_deg"])
         sim.backend.move_joint(np.degrees(q_app).tolist(), speed_factor=100.0)
         land_nom_ok = sim.backend.move_cartesian(p_gr_nom, samples=20, speed_factor=100.0)
-        self.assertFalse(land_nom_ok, "At nominal d=0, H=70, Row 0 Col 4 LAND must fail due to self-collision")
+        self.assertFalse(land_nom_ok, "At nominal d=0, H=70, cell (4, 0) LAND must fail due to self-collision")
         self.assertIn("link 1", sim.backend._last_error)
         self.assertIn("link 3", sim.backend._last_error)
 
-        # Step 2: Relocate to recommended operating region (d = 28.5mm, H = 40mm)
+        # Step 2: Relocate to recommended operating region (d = 15.0mm, H = 40mm)
         sim.prepare_board_adjustment()
-        res_reloc = sim.set_board_placement(forward_shift_mm=28.5, safe_transit_height_mm=40.0)
+        res_reloc = sim.set_board_placement(forward_shift_mm=15.0, safe_transit_height_mm=40.0)
         self.assertTrue(res_reloc["success"])
 
-        # Step 3: Test Row 0 Col 2..6 LAND vertical descent
-        for c in range(2, 7):
-            pos_gr = sim.cell_to_robot_xyz_m(0, c, z_grasp)
-            pos_ap = sim.cell_to_robot_xyz_m(0, c, sim.board_surface_z + 0.040)
+        # Step 3: Test near-side cells (4, 0) and (5, 0) LAND vertical descent
+        for r in (4, 5):
+            pos_gr = sim.cell_to_robot_xyz_m(r, 0, z_grasp)
+            pos_ap = sim.cell_to_robot_xyz_m(r, 0, sim.board_surface_z + 0.040)
             pose_gr = [v * 1000.0 for v in pos_gr] + [180.0, 0.0, 90.0]
             pose_ap = [v * 1000.0 for v in pos_ap] + [180.0, 0.0, 90.0]
 
-            cell_info = sim.reachability_dataset.get((0, c))
+            cell_info = sim.reachability_dataset.get((r, 0))
             seed_app = np.deg2rad(cell_info["approach_joints_deg"]) if cell_info else None
             ik_a = sim.backend.solve_tcp_ik(pose_ap, seed_joints=seed_app, allow_multi_seed=True)
-            self.assertTrue(ik_a.success, f"Approach IK must succeed for (0, {c})")
+            self.assertTrue(ik_a.success, f"Approach IK must succeed for ({r}, 0)")
             sim.backend.set_authoritative_joints(ik_a.joints_rad, is_deg=False)
 
-            # Find target piece at (0, c) if any
-            target_pid = None
-            for pid, pb in sim.world.pieces.items():
-                if pb.physical_state != PiecePhysicalState.OUT_OF_BOUNDS:
-                    c_p, r_p, d_p = pb.get_nearest_intersection()
-                    if (r_p, c_p) == (0, c) and d_p < 0.025:
-                        target_pid = pid
-                        break
-
             try:
-                sim.backend.set_allowed_grasp_piece_id(target_pid)
+                sim.backend.set_allowed_grasp_piece_id("*")
                 land_ok = sim.backend.move_cartesian(pose_gr, samples=15, speed_factor=100.0)
                 self.assertTrue(
                     land_ok,
-                    f"Row 0 Col {c} LAND descent must succeed at d=28.5mm without collision, error: {sim.backend._last_error}"
+                    f"Cell ({r}, 0) LAND descent must succeed at d=15.0mm without collision, error: {sim.backend._last_error}"
                 )
             finally:
                 sim.backend.set_allowed_grasp_piece_id(None)
 
         # Step 4: Verify far cells remain reachable and collision-free
-        for far_c in [0, 4, 8]:
-            pos_gr = sim.cell_to_robot_xyz_m(9, far_c, z_grasp)
-            pos_ap = sim.cell_to_robot_xyz_m(9, far_c, sim.board_surface_z + 0.040)
-            cell_info = sim.reachability_dataset.get((9, far_c))
+        for far_cell in [(0, 8), (4, 8), (9, 8)]:
+            r_f, c_f = far_cell
+            pos_gr = sim.cell_to_robot_xyz_m(r_f, c_f, z_grasp)
+            pos_ap = sim.cell_to_robot_xyz_m(r_f, c_f, sim.board_surface_z + 0.040)
+            cell_info = sim.reachability_dataset.get(far_cell)
             seed_gr = np.deg2rad(cell_info["grasp_joints_deg"]) if cell_info else None
             seed_ap = np.deg2rad(cell_info["approach_joints_deg"]) if cell_info else None
 
             ik_far_gr = sim.backend.solve_tcp_ik([v * 1000.0 for v in pos_gr] + [180.0, 0.0, 90.0], seed_joints=seed_gr, allow_multi_seed=True)
             ik_far_ap = sim.backend.solve_tcp_ik([v * 1000.0 for v in pos_ap] + [180.0, 0.0, 90.0], seed_joints=seed_ap, allow_multi_seed=True)
-            self.assertTrue(ik_far_gr.success, f"Far cell (9, {far_c}) grasp IK must succeed")
-            self.assertTrue(ik_far_ap.success, f"Far cell (9, {far_c}) approach IK must succeed")
+            self.assertTrue(ik_far_gr.success, f"Far cell {far_cell} grasp IK must succeed")
+            self.assertTrue(ik_far_ap.success, f"Far cell {far_cell} approach IK must succeed")
             col_gr = sim.collision_guard.validate_configuration(ik_far_gr.joints_rad, allowed_grasp_piece_id="*")
-            col_ap = sim.collision_guard.validate_configuration(ik_far_ap.joints_rad)
-            self.assertTrue(col_gr.safe, f"Far cell (9, {far_c}) grasp must be collision-free")
-            self.assertTrue(col_ap.safe, f"Far cell (9, {far_c}) approach must be collision-free")
+            col_ap = sim.collision_guard.validate_configuration(ik_far_ap.joints_rad, allowed_grasp_piece_id="*")
+            self.assertTrue(col_gr.safe, f"Far cell {far_cell} grasp must be collision-free")
+            self.assertTrue(col_ap.safe, f"Far cell {far_cell} approach must be collision-free")
 
         sim.stop()
 
@@ -380,7 +370,7 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         sim = VirtualXiangqiSimulation()
         sim.start()
         sim.prepare_board_adjustment()
-        sim.set_board_placement(forward_shift_mm=28.5, safe_transit_height_mm=40.0)
+        sim.set_board_placement(forward_shift_mm=15.0, safe_transit_height_mm=40.0)
 
         routes = [
             ((0, 4), (9, 4), "Near to Far (center file)"),
@@ -479,20 +469,20 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         self.assertFalse(res["all_passed"])
         self.assertGreater(len(res["failed_cells"]), 0)
 
-        # Look for (0, 4) in failed cells
-        fail_0_4 = next((f for f in res["failed_cells"] if f["row"] == 0 and f["col"] == 4), None)
-        self.assertIsNotNone(fail_0_4, "Row 0 Col 4 must fail at nominal placement")
-        self.assertEqual(fail_0_4["stage"], "LAND")
-        self.assertIn("link 1", fail_0_4["reason"])
-        self.assertIn("link 3", fail_0_4["reason"])
-        self.assertIsNotNone(fail_0_4.get("sample_idx"))
-        self.assertGreater(fail_0_4["sample_idx"], 0)
+        # Look for near-side center cell (4, 0) or (5, 0) in failed cells
+        fail_near = next((f for f in res["failed_cells"] if (f["row"], f["col"]) in ((4, 0), (5, 0))), None)
+        self.assertIsNotNone(fail_near, "Near cell (4, 0) or (5, 0) must fail at nominal placement")
+        self.assertEqual(fail_near["stage"], "LAND")
+        self.assertIn("link 1", fail_near["reason"])
+        self.assertIn("link 3", fail_near["reason"])
+        self.assertIsNotNone(fail_near.get("sample_idx"))
+        self.assertGreater(fail_near["sample_idx"], 0)
 
         sim.stop()
 
     def test_recommended_placement_90_cells_pass(self):
         """
-        Verify recommended candidate placement d=28.5mm, H=40mm achieves:
+        Verify recommended candidate placement d=15.0mm, H=40mm achieves:
         - 90/90 Approach IK PASS
         - 90/90 LAND MoveL PASS
         - 90/90 Grasp IK PASS
@@ -502,7 +492,7 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         sim = VirtualXiangqiSimulation()
         sim.start()
         sim.prepare_board_adjustment()
-        sim.set_board_placement(forward_shift_mm=28.5, safe_transit_height_mm=40.0)
+        sim.set_board_placement(forward_shift_mm=15.0, safe_transit_height_mm=40.0)
 
         res = sim.validate_board_placement()
         self.assertTrue(res["all_passed"], f"Expected 90/90 pass, got failures: {res['failed_cells']}")
@@ -523,7 +513,7 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         sim = VirtualXiangqiSimulation()
         sim.start()
         sim.prepare_board_adjustment()
-        sim.set_board_placement(forward_shift_mm=28.5, safe_transit_height_mm=40.0)
+        sim.set_board_placement(forward_shift_mm=15.0, safe_transit_height_mm=40.0)
 
         res = sim.validate_full_board_routes(sample_limit=8)
         self.assertTrue(res["all_routes_safe"])

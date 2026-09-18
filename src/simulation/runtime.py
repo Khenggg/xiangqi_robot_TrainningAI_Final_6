@@ -282,13 +282,8 @@ class VirtualXiangqiSimulation:
 
     def find_nearest_cell(self, pos_robot_m: Sequence[float]) -> Tuple[int, int]:
         """Map a 3D position in robot_base to nearest board grid (row, col)."""
-        px, py = float(pos_robot_m[0]), float(pos_robot_m[1])
-        x0, y0 = float(self.placement_state.grid_origin_robot_m[0]), float(self.placement_state.grid_origin_robot_m[1])
-        col_sp = self.geom.board.column_spacing / 1000.0
-        row_sp = self.geom.board.row_spacing / 1000.0
-        row = int(round((x0 - px) / row_sp))
-        col = int(round((py - y0) / col_sp))
-        return max(0, min(9, row)), max(0, min(8, col))
+        c, r, _ = self.placement_state.robot_xyz_to_nearest_cell(pos_robot_m)
+        return r, c
 
     def _sync_gripper_to_tcp(self, snapshot: RobotStateSnapshot):
         """Authoritative synchronization of physical gripper proxies to backend TCP."""
@@ -396,13 +391,10 @@ class VirtualXiangqiSimulation:
 
     def cell_to_robot_xyz(self, col: int, row: int, z_height_m: Optional[float] = None) -> Tuple[float, float, float]:
         """Convert board cell (col, row) to robot_base (x, y, z) in meters."""
-        x0, y0, _ = self.grid_origin_robot
-        col_sp = self.geom.board.column_spacing / 1000.0
-        row_sp = self.geom.board.row_spacing / 1000.0
-        x = x0 - row * row_sp
-        y = y0 + col * col_sp
-        z = self.board_surface_z if z_height_m is None else float(z_height_m)
-        return x, y, z
+        effective_z = self.board_surface_z if z_height_m is None else float(z_height_m)
+        z_rel = effective_z - self.placement_state.board_surface_z_robot_m
+        p = self.placement_state.cell_to_robot_xyz(row=row, col=col, z_rel_m=z_rel)
+        return float(p[0]), float(p[1]), float(p[2])
 
     def pick_piece(
         self,
@@ -586,7 +578,7 @@ class VirtualXiangqiSimulation:
 
                         # 6. Verify payload clearance away from board
                         self.backend.set_trajectory_stage("PAYLOAD_CLEAR")
-                        self.world.step_until_settled(max_steps=20)
+                        self.world.step_until_settled(max_steps=60)
                         payload_rep = self.evaluate_payload_clearance(expected_piece_id=piece_id)
                         if not payload_rep.payload_clear:
                             self.backend.set_trajectory_stage("FAILED")
@@ -1139,23 +1131,10 @@ class VirtualXiangqiSimulation:
 
     def cell_to_robot_xyz_m(self, row: int, col: int, z_m: Optional[float] = None) -> List[float]:
         """Convert board cell (row, col) and altitude z_m to robot base XYZ coordinates."""
-        d = self.placement_state.forward_shift_mm
         effective_z = self.board_surface_z if z_m is None else float(z_m)
-        r_sp = self.geom.grid_cell_length_mm / 1000.0
-        c_sp = self.geom.grid_cell_width_mm / 1000.0
-        nom_x0 = self.placement_state.grid_origin_robot_m[0] + (d / 1000.0)
-        nom_y0 = self.placement_state.grid_origin_robot_m[1]
-        x, y, z = canonical_cell_to_robot_xyz_m(
-            row=row,
-            col=col,
-            forward_shift_mm=d,
-            z_m=effective_z,
-            nominal_x0=nom_x0,
-            nominal_y0=nom_y0,
-            row_spacing_m=r_sp,
-            col_spacing_m=c_sp,
-        )
-        return [round(x, 5), round(y, 5), round(z, 5)]
+        z_rel = effective_z - self.placement_state.board_surface_z_robot_m
+        p = self.placement_state.cell_to_robot_xyz(row=row, col=col, z_rel_m=z_rel)
+        return [round(float(p[0]), 5), round(float(p[1]), 5), round(float(p[2]), 5)]
 
     def set_board_placement(
         self,
@@ -1186,27 +1165,28 @@ class VirtualXiangqiSimulation:
                         err = f"Cannot change board placement during active trajectory ({snap.trajectory_stage})"
                         return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ACTIVE_TRAJECTORY", "error": err}
 
-                    if self.world.get_attached_piece() is not None or self.backend.get_attached_piece_id() is not None:
-                        err = "Cannot change board placement while a piece is attached to gripper"
-                        return {
-                            "success": False,
-                            "status": "BOARD_RELOCATION_REJECTED_WORLD_NOT_SETTLED",
-                            "error": err,
-                            "transient_pieces": [{"id": self.world.get_attached_piece().piece_id if self.world.get_attached_piece() else "attached", "state": "ATTACHED_TO_GRIPPER"}],
-                        }
+                    if not internal_reset:
+                        if self.world.get_attached_piece() is not None or self.backend.get_attached_piece_id() is not None:
+                            err = "Cannot change board placement while a piece is attached to gripper"
+                            return {
+                                "success": False,
+                                "status": "BOARD_RELOCATION_REJECTED_WORLD_NOT_SETTLED",
+                                "error": err,
+                                "transient_pieces": [{"id": self.world.get_attached_piece().piece_id if self.world.get_attached_piece() else "attached", "state": "ATTACHED_TO_GRIPPER"}],
+                            }
 
-                    transient = [
-                        p_body for p_body in self.world.pieces.values()
-                        if p_body.physical_state in (PiecePhysicalState.ATTACHED_TO_GRIPPER, PiecePhysicalState.FALLING, PiecePhysicalState.SETTLING)
-                    ]
-                    if transient:
-                        err = "Cannot change board placement while world is not settled (pieces falling/settling/attached)"
-                        return {
-                            "success": False,
-                            "status": "BOARD_RELOCATION_REJECTED_WORLD_NOT_SETTLED",
-                            "error": err,
-                            "transient_pieces": [{"id": p.piece_id, "state": p.physical_state.value} for p in transient],
-                        }
+                        transient = [
+                            p_body for p_body in self.world.pieces.values()
+                            if p_body.physical_state in (PiecePhysicalState.ATTACHED_TO_GRIPPER, PiecePhysicalState.FALLING, PiecePhysicalState.SETTLING)
+                        ]
+                        if transient:
+                            err = "Cannot change board placement while world is not settled (pieces falling/settling/attached)"
+                            return {
+                                "success": False,
+                                "status": "BOARD_RELOCATION_REJECTED_WORLD_NOT_SETTLED",
+                                "error": err,
+                                "transient_pieces": [{"id": p.piece_id, "state": p.physical_state.value} for p in transient],
+                            }
 
                     cur_fwd = self.placement_state.forward_shift_mm if forward_shift_mm is None else float(forward_shift_mm)
                     cur_h = self.placement_state.safe_transit_height_mm if safe_transit_height_mm is None else float(safe_transit_height_mm)
@@ -1247,6 +1227,7 @@ class VirtualXiangqiSimulation:
                         forward_shift_mm=cur_fwd,
                         safe_transit_height_mm=cur_h,
                         board_height_offset_mm=cur_z_off,
+                        board_yaw_deg=self.placement_state.board_yaw_deg,
                         placement_version=new_version,
                     )
 
@@ -1258,7 +1239,7 @@ class VirtualXiangqiSimulation:
 
                     self.placement_state = new_state
                     self.grid_origin_robot = list(new_state.grid_origin_robot_m)
-                    self.board_surface_z = new_state.grid_origin_robot_m[2]
+                    self.board_surface_z = new_state.board_surface_z_robot_m
                     self.backend.set_placement_version(new_version)
                     self._board_adjustment_ready = False
 
@@ -1364,6 +1345,10 @@ class VirtualXiangqiSimulation:
                 self.backend.set_gripper(False)
                 self.backend.reset_to_home()
                 self.clear_error()
+
+                # Ensure any pieces are settled before resetting placement
+                if hasattr(self.world, "step_until_settled"):
+                    self.world.step_until_settled(max_steps=30)
 
                 # Reset board placement (internally relocates PyBullet board & updates placement_state)
                 self.reset_board_placement()
@@ -2256,11 +2241,14 @@ class VirtualXiangqiSimulation:
                     res = {
                         "type": "placement_validation_result",
                         "validation_scope": "local_cell_trajectories",
-                        "status": "LOCAL_CELL_TRAJECTORIES_PASS" if all_passed else "FAIL",
+                        "validation_label": "LOCAL_CELL_FEASIBILITY",
+                        "status": "LOCAL_CELL_FEASIBLE" if all_passed else "FAIL",
+                        "local_cell_feasible": all_passed,
                         "placement_version": v_start,
                         "forward_shift_mm": d,
                         "safe_transit_height_mm": H,
                         "board_height_offset_mm": z_off,
+                        "board_yaw_deg": self.placement_state.board_yaw_deg,
                         "grasp_ik_count": grasp_ik_ok,
                         "approach_ik_count": app_ik_ok,
                         "grasp_collision_free_count": grasp_col_free,
@@ -2389,11 +2377,9 @@ class VirtualXiangqiSimulation:
                         # Resolve explicit piece ID for candidate cell
                         target_piece_id = self._get_piece_at_cell(r, c)
 
-                        ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
                         ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
 
                         lift_plan = None
-                        land_plan = None
                         if ik_gr.success:
                             lift_plan = self.backend.plan_cartesian(
                                 start_q=ik_gr.joints_rad,
@@ -2402,22 +2388,12 @@ class VirtualXiangqiSimulation:
                                 allowed_grasp_piece_id=target_piece_id,
                                 check_collision=True,
                             )
-                        if ik_ap.success:
-                            land_plan = self.backend.plan_cartesian(
-                                start_q=ik_ap.joints_rad,
-                                target_pose_mm_deg=pose_gr_mm,
-                                samples=15,
-                                allowed_grasp_piece_id=target_piece_id,
-                                check_collision=True,
-                            )
 
                         cell_plans[(r, c)] = {
-                            "ik_ap": ik_ap,
                             "ik_gr": ik_gr,
                             "pose_ap_mm": pose_ap_mm,
                             "pose_gr_mm": pose_gr_mm,
                             "lift_plan": lift_plan,
-                            "land_plan": land_plan,
                         }
 
                     total_routes = len(routes_to_test)
@@ -2436,7 +2412,7 @@ class VirtualXiangqiSimulation:
                         src_cp = cell_plans[src]
                         dst_cp = cell_plans[dst]
 
-                        # Stage 1: LIFT
+                        # Stage 1: LIFT (from src grasp to src approach)
                         if not (src_cp["lift_plan"] and src_cp["lift_plan"].success):
                             failed_routes += 1
                             if worst_route is None:
@@ -2447,7 +2423,7 @@ class VirtualXiangqiSimulation:
 
                         q_after_lift = src_cp["lift_plan"].final_q
 
-                        # Stage 2: TRANSIT (MoveL at transit height) - carried piece is from src
+                        # Stage 2: TRANSIT (MoveL at transit height to dst approach)
                         src_piece_id = self._get_piece_at_cell(src[0], src[1])
                         transit_plan = self.backend.plan_cartesian(
                             start_q=q_after_lift,
@@ -2464,24 +2440,96 @@ class VirtualXiangqiSimulation:
                                 col_pair = transit_plan.colliding_links_or_bodies
                             continue
 
-                        # Stage 3: LAND
-                        if not (dst_cp["land_plan"] and dst_cp["land_plan"].success):
+                        q_after_transit = transit_plan.final_q
+
+                        # Stage 3: LAND (MoveL descending to dst grasp, starting strictly from transit_plan.final_q!)
+                        land_plan = self.backend.plan_cartesian(
+                            start_q=q_after_transit,
+                            target_pose_mm_deg=dst_cp["pose_gr_mm"],
+                            samples=15,
+                            allowed_grasp_piece_id=src_piece_id,
+                            check_collision=True,
+                        )
+                        if not land_plan.success:
                             failed_routes += 1
                             if worst_route is None:
                                 worst_route = {"src": list(src), "dst": list(dst), "stage": "LAND"}
                                 first_col_stage = "LAND"
-                                col_pair = dst_cp["land_plan"].colliding_links_or_bodies if dst_cp["land_plan"] else "Approach IK failed"
+                                col_pair = land_plan.colliding_links_or_bodies
+                            continue
+
+                        q_after_land = land_plan.final_q
+
+                        # Stage 4: POST_RELEASE_LIFT (MoveL ascending back to dst approach)
+                        post_lift_plan = self.backend.plan_cartesian(
+                            start_q=q_after_land,
+                            target_pose_mm_deg=dst_cp["pose_ap_mm"],
+                            samples=15,
+                            allowed_grasp_piece_id=src_piece_id,
+                            check_collision=True,
+                        )
+                        if not post_lift_plan.success:
+                            failed_routes += 1
+                            if worst_route is None:
+                                worst_route = {"src": list(src), "dst": list(dst), "stage": "POST_RELEASE_LIFT"}
+                                first_col_stage = "POST_RELEASE_LIFT"
+                                col_pair = post_lift_plan.colliding_links_or_bodies
+                            continue
+
+                        q_after_post_lift = post_lift_plan.final_q
+
+                        # Stage 5: CLEAR_BOARD (Elevate above safe plane)
+                        safe_plane_z = self.board_surface_z + (self.placement_state.safe_transit_height_mm / 1000.0)
+                        clear_z_mm = (safe_plane_z + 0.030) * 1000.0
+                        clear_tcp_pose = list(dst_cp["pose_ap_mm"])
+                        if clear_tcp_pose[2] < clear_z_mm:
+                            clear_tcp_pose[2] = clear_z_mm
+                            clear_plan = self.backend.plan_cartesian(
+                                start_q=q_after_post_lift,
+                                target_pose_mm_deg=clear_tcp_pose,
+                                samples=10,
+                                allowed_grasp_piece_id=None,
+                                check_collision=True,
+                            )
+                            q_after_clear = clear_plan.final_q if (clear_plan and clear_plan.success) else q_after_post_lift
+                        else:
+                            q_after_clear = q_after_post_lift
+
+                        # Stage 6: SERVICE_RETREAT (Interpolation towards SERVICE_SAFE_JOINTS_DEG)
+                        target_service_q = np.deg2rad(self.backend.SERVICE_SAFE_JOINTS_DEG)
+                        retreat_collision = False
+                        retreat_col_body = None
+                        for s_step in range(1, 11):
+                            interp_q = q_after_clear + (target_service_q - q_after_clear) * (s_step / 10.0)
+                            col_check = self.collision_guard.validate_configuration(interp_q, restore_state=True)
+                            if not col_check.safe:
+                                retreat_collision = True
+                                retreat_col_body = col_check.failure_reason
+                                break
+
+                        if retreat_collision:
+                            failed_routes += 1
+                            if worst_route is None:
+                                worst_route = {"src": list(src), "dst": list(dst), "stage": "SERVICE_RETREAT"}
+                                first_col_stage = "SERVICE_RETREAT"
+                                col_pair = retreat_col_body
                             continue
 
                         passed_routes += 1
                         if transit_plan.min_joint_margin_deg is not None:
                             min_margin_deg = min(min_margin_deg, transit_plan.min_joint_margin_deg)
+                        if land_plan.min_joint_margin_deg is not None:
+                            min_margin_deg = min(min_margin_deg, land_plan.min_joint_margin_deg)
                         if transit_plan.worst_condition_number is not None:
                             worst_cond = max(worst_cond, transit_plan.worst_condition_number)
+                        if land_plan.worst_condition_number is not None:
+                            worst_cond = max(worst_cond, land_plan.worst_condition_number)
 
                     all_routes_safe = (passed_routes == total_routes and total_routes > 0)
                     res = {
                         "type": "full_route_validation_result",
+                        "validation_scope": "full_board_routes",
+                        "validation_label": "FULL_CHAINED_ROUTE_VALIDATION",
                         "total_routes": total_routes,
                         "passed_routes": passed_routes,
                         "failed_routes": failed_routes,
