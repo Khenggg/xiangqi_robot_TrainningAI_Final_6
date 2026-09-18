@@ -183,6 +183,29 @@
 
 ---
 
+## B13 — Phase 3 90° Board Migration Corrective: Browser Viewer Boot Recovery & Coordinate Contract Audit
+* **Status:** FIXED
+* **Severity:** BLOCKER
+* **Affected Files:** `robot-3d-viewer/board.mjs`, `robot-3d-viewer/main.mjs`, `robot-3d-viewer/ruler.mjs`, `tests/unit/test_viewer_canvas_api.mjs`, `tests/unit/test_viewer_coordinate_contract.mjs`, `tests/unit/test_viewer_browser_smoke.mjs`
+* **Evidence:**
+  1. Fatal boot defect in `createBoardTexture()`: 4 calls to `ctx.lineTo(x)` were missing the `y` parameter in `board.mjs`, causing an unhandled `TypeError` during startup and aborting `initApp()` before WebGL/Three.js rendering or model loading started.
+  2. Stale 0° orientation geometry remained in `robot-3d-viewer/main.mjs`: `goToCell(row, col)` computed `robX = -0.180 - d/1000 - row*0.04`, `robY = -0.160 + col*0.04`; `computeGeometricPrecheck()` hardcoded $X_{\text{far}} = 540.0 + d$, $Y_{\text{far}} = 160.0$; and `updateGeometricPrecheckUI()` reported 0° extrema (180, 540, 155, 565 mm).
+  3. Non-standardized `boardPointToXYZ(col, row)` parameter ordering inverted arguments vs backend `BoardCell(row, col)`, risking column/row transposition.
+  4. Stale 0° markers in `robot-3d-viewer/ruler.mjs`: `specialZMarkers` listed H0: 180mm, H9: 540mm; and board edges hit proxies used length along Z and width along X.
+* **Fix Summary:**
+  1. Fixed `createBoardTexture()` Canvas API path calls by supplying required `y` arguments to `ctx.lineTo(...)`. Verified across all 45 Canvas path operations in `test_viewer_canvas_api.mjs`.
+  2. Standardized `boardPointToXYZ(row, col)` signature and object overload `boardPointToXYZ({ row, col })`, deriving coordinates strictly from canonical 90° orientation math ($u = (col - 4) \times 0.040$, $v = (row - 4.5) \times 0.040$, $X_{\text{world}} = v$, $Z_{\text{world}} = 0.360 + d/1000 + u$).
+  3. Updated piece construction (`buildPieces`) and piece relocation (`movePieceTo`) to consume standardized `(row, col)` coordinates.
+  4. Refactored `goToCell()` and `applyAuthoritativeBoardPlacement()` in `main.mjs` with canonical 90° formulas ($robX = -0.360 - d/1000 - u$, $robY = -v$, $robZ = 0.0105 + z_{\text{off}}/1000$), standardized label formatting `(Hàng row, Cột col)`, and atomic `updateGeometricPrecheckUI()` dispatch.
+  5. Refactored `computeGeometricPrecheck()` with 90° extrema ($X_{\text{far}} = 520.0 + d$, $Y_{\text{far}} = 180.0$) and updated precheck readouts (Col 0: 200 mm, Col 8: 520 mm, Near edge: 176.5 mm, Center: 360 mm, Far edge: 543.5 mm).
+  6. Updated `ruler.mjs` special markers (Cột 0: 200mm, Tâm: 360mm, Cột 8: 520mm) and 4-edge hit proxies (Near: 176.5mm, Far: 543.5mm along Z; Left: -205mm, Right: +205mm along X).
+  7. Created `test_viewer_coordinate_contract.mjs` verifying 90-cell parity, 32-piece placement, asymmetric cell (2, 7), and dynamic shift invariance.
+  8. Created automated headless Chrome CDP smoke test `test_viewer_browser_smoke.mjs` verifying V90-01 through V90-05.
+* **Regression Test:** `tests/unit/test_viewer_canvas_api.mjs`, `tests/unit/test_viewer_coordinate_contract.mjs`, `tests/unit/test_viewer_browser_smoke.mjs`
+* **Last Verified Functional HEAD:** 1196f90d1f4b8cf65f02bc0f7e4dfbf6b3fcb590
+
+---
+
 ## I01 — Deprecated `WebSocketServerProtocol` Import in Telemetry Publisher
 * **Status:** OPEN (Benign warning)
 * **Severity:** LOW

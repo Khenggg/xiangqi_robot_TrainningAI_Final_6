@@ -6,15 +6,16 @@
 
 ## METADATA
 * **CURRENT_BRANCH:** `feature/virtual-robot-3d-simulator`
-* **STARTING_REMOTE_HEAD:** `f0d28e49404a7d5e32a0b197e207a0d27d5c38cd`
-* **LAST_REVIEWED_HEAD:** `b0027e744ccacc3e4dd21f6150271c0fc6f7c2cf`
-* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `b0027e744ccacc3e4dd21f6150271c0fc6f7c2cf`
+* **STARTING_REMOTE_HEAD:** `6a477d77a65969f6342075adac0f190318585318`
+* **LAST_REVIEWED_HEAD:** `1196f90d1f4b8cf65f02bc0f7e4dfbf6b3fcb590`
+* **LAST_REVIEWED_FUNCTIONAL_HEAD:** `1196f90d1f4b8cf65f02bc0f7e4dfbf6b3fcb590`
 * **PASS_A_RUNTIME_AUTHORITY:** `PASS`
 * **PASS_A1_REENTRANT_LOCK:** `PASS`
 * **PASS_A2_NO_SILENT_QUEUE:** `PASS`
 * **PASS_B_SERVICE_SAFE:** `PASS`
 * **PASS_C_POST_OP_RETREAT:** `PASS`
 * **CORRECTIVE_GEOMETRY_G90:** `PASS`
+* **CORRECTIVE_VIEWER_BOOT_AND_COORDINATES:** `PASS`
 * **SELECTED_PLACEMENT_CANDIDATE:** `d = 15.0 mm, H = 40.0 mm, Z = 0.0 mm`
 * **PHASE:** `PHASE_3_SIMULATION_VIRTUAL_TWIN`
 * **PHASE_STATUS:** `PARTIAL`
@@ -69,6 +70,14 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
     - Regenerated `shared/cell_reachability_dataset.json` with 90/90 cells solved and 0 collisions.
     - Updated physics transform engine, piece poses, world relocation, runtime cell mapping, viewer mesh, canvas texture, and dimension tape.
     - Implemented dedicated G90-01 through G90-25 test suite in `tests/unit/test_phase3_board_orientation_90.py`. (Verified by `test_phase3_board_orientation_90.py` 25/25 PASSED, `test_phase3_dynamic_board_placement.py` 13/13 PASSED).
+15. **[B13] Phase 3 90° Board Migration Corrective: Browser Viewer Boot Recovery & Coordinate Contract Audit:**
+    - Resolved fatal boot defect in `createBoardTexture()` where missing `y` coordinates in 4 `ctx.lineTo(x)` calls caused an unhandled `TypeError` during startup, aborting `initApp()` and leaving a blank canvas.
+    - Unified coordinate contract `BoardCell(row, col)` with `row` $\in [0, 9]$ and `col` $\in [0, 8]$ across all frontend modules, standardizing `boardPointToXYZ(row, col)` and supporting object overloads `{ row, col }`.
+    - Removed stale 0° geometry formulas from `goToCell()` and telemetry handlers in `robot-3d-viewer/main.mjs`, replacing them with canonical 90° formulas ($robX = -0.360 - d/1000 - u$, $robY = -v$, $robZ = 0.0105 + z_{\text{off}}/1000$).
+    - Updated `computeGeometricPrecheck()` with canonical 90° extrema ($X_{\text{far}} = 520.0 + d\text{ mm}$, $Y_{\text{far}} = 180.0\text{ mm}$) and synchronized precheck UI readouts with dynamic board placement.
+    - Updated `robot-3d-viewer/ruler.mjs` special Z markers (Cột 0: 200mm, Tâm: 360mm, Cột 8: 520mm) and 4-edge hit proxies (Near: 176.5mm, Far: 543.5mm along Z; Left: -205mm, Right: +205mm along X).
+    - Verified complete 90-cell parity and 32-piece layout placement in `tests/unit/test_viewer_coordinate_contract.mjs`.
+    - Verified live browser boot and WebGL render pipeline via automated headless Chrome CDP test in `tests/unit/test_viewer_browser_smoke.mjs`.
 
 ---
 
@@ -93,11 +102,14 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
   * `tests/unit/test_phase3_final_closure.py`: 11 passed
   * `tests/unit/test_phase3_isolation_and_fail_fast.py`: 12 passed
   * `tests/unit/test_phase3_dynamic_board_placement.py`: 13 passed
-* **Node.js Viewer Tests:** 4/4 suites PASSED (100% pass rate)
+* **Node.js Viewer Tests:** 7/7 suites PASSED (100% pass rate)
   * `test_viewer_single_motion_authority.mjs`: PASSED
+  * `test_viewer_profile_binding.mjs`: PASSED
   * `test_viewer_coordinate_ruler.mjs`: PASSED
   * `test_viewer_gripper_and_telemetry.mjs`: PASSED
-  * `test_viewer_profile_binding.mjs`: PASSED
+  * `test_viewer_canvas_api.mjs`: PASSED
+  * `test_viewer_coordinate_contract.mjs`: PASSED
+  * `test_viewer_browser_smoke.mjs`: PASSED
 
 ---
 
