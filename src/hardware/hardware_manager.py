@@ -230,6 +230,8 @@ class HardwareManager:
             try: self.cap.release()
             except: pass
         if self.robot and self.robot.connected and not self.dry_run:
+            try: self.robot._set_gripper_safe_idle()
+            except Exception as e: print(f"[CLEANUP] ⚠️ Không thể tắt gripper Tool DO: {e}")
             try: self.robot.robot.RobotEnable(0)
             except: pass
 

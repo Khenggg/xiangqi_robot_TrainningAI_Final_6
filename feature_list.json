@@ -1,0 +1,29 @@
+[
+  {
+    "id": "two-output-gripper-actuation",
+    "title": "Safe two-output gripper actuation",
+    "user_visible_behavior": "",
+    "verification_command": "",
+    "status": "passing",
+    "evidence": "Mocked gripper tests verify DO0-open/DO1-close pulse order and all-low reset.",
+    "notes": ""
+  },
+  {
+    "id": "two-output-gripper-tests",
+    "title": "Gripper interlock and timing tests",
+    "user_visible_behavior": "",
+    "verification_command": "",
+    "status": "passing",
+    "evidence": "6 gripper unit tests passed; Python compilation passed.",
+    "notes": ""
+  },
+  {
+    "id": "two-output-gripper-commissioning",
+    "title": "Guarded gripper wiring diagnostic",
+    "user_visible_behavior": "",
+    "verification_command": "",
+    "status": "not_started",
+    "evidence": "",
+    "notes": ""
+  }
+]
