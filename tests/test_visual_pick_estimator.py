@@ -46,6 +46,13 @@ class VisualPickEstimatorTests(unittest.TestCase):
         ]
         self.assertIsNone(self.estimator.estimate_pick_target(detections, 2.0, 2.0))
 
+    def test_aggregate_targets_uses_median_and_requires_stable_samples(self):
+        first = self.estimator.estimate_pick_target([(0, 0.9, (1.9, 1.0, 2.1, 2.0))], 2.0, 1.85)
+        second = self.estimator.estimate_pick_target([(0, 0.8, (2.0, 1.0, 2.2, 2.0))], 2.1, 1.85)
+        self.assertIsNone(self.estimator.aggregate_targets([first], min_samples=2))
+        target = self.estimator.aggregate_targets([first, second], min_samples=2)
+        self.assertIsNotNone(target)
+
     def test_returns_target_when_foot_is_within_safe_offset(self):
         detections = [(5, 0.70, (2.00, 1.00, 2.20, 2.00))]
         target = self.estimator.estimate_pick_target(detections, expected_col=2.1, expected_row=1.85)
