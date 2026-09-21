@@ -1,6 +1,7 @@
 # =============================================================================
 # === FILE: auto_calibrate.py ===
-# === Tự Động Hiệu Chỉnh Camera Perspective cho Bàn Cờ Tướng (YOLO-Pose) ===
+# === Tự Động Hiệu Chỉnh Camera Perspective cho Bàn Cờ Tướng ===
+# === Sử dụng RTMPose ONNX (pose_4_v6.onnx) thay cho YOLO-Pose cũ ===
 # === Có cơ chế Geometric Sanity Check & Fallback an toàn về Click tay ===
 # =============================================================================
 import os
@@ -14,29 +15,33 @@ import config
 
 
 class AutoCalibrator:
-    """Tự động hiệu chỉnh ma trận phối cảnh camera (Auto-Calibration) bằng YOLO-Pose."""
+    """Tự động hiệu chỉnh ma trận phối cảnh camera (Auto-Calibration) bằng RTMPose ONNX.
+    
+    Sử dụng CChessRecognizer.detect_board_corners() để phát hiện 4 góc bàn cờ,
+    thay thế YOLO-Pose (board_pose.pt) cũ bằng model RTMPose (pose_4_v6.onnx).
+    
+    Keypoint mapping:
+        CChess A0 (idx 0) → P0 (Đen Trái,  col=0, row=0)
+        CChess A8 (idx 1) → P1 (Đen Phải,  col=8, row=0)
+        CChess J8 (idx 3) → P2 (Đỏ Phải,   col=8, row=9)
+        CChess J0 (idx 2) → P3 (Đỏ Trái,   col=0, row=9)
+    """
 
-    def __init__(self, pose_model_path=None, min_kpt_conf=0.65):
+    def __init__(self, cchess_recognizer=None, pose_model_path=None, min_kpt_conf=0.65):
         """
         Args:
-            pose_model_path: Đường dẫn tới file weights YOLO-Pose (vd: models/board_pose.pt)
+            cchess_recognizer: Instance CChessRecognizer đã khởi tạo (ưu tiên sử dụng)
+            pose_model_path: (Legacy/unused) Giữ lại cho tương thích API cũ, không còn dùng YOLO-Pose
             min_kpt_conf: Ngưỡng confidence tối thiểu cho mỗi keypoint
         """
-        self.model = None
+        self.recognizer = cchess_recognizer
         self.min_kpt_conf = min_kpt_conf
         self.pose_model_path = pose_model_path
 
-        if pose_model_path and os.path.exists(str(pose_model_path)):
-            try:
-                from ultralytics import YOLO
-                self.model = YOLO(str(pose_model_path))
-                print(f"[AUTO CALIBRATE] ✅ Đã tải mô hình Pose: {pose_model_path}")
-            except Exception as e:
-                print(f"[AUTO CALIBRATE] ⚠️ Không thể tải mô hình Pose ({pose_model_path}): {e}")
-                self.model = None
+        if self.recognizer is not None:
+            print("[AUTO CALIBRATE] Da tai mo hinh RTMPose ONNX (pose_4_v6.onnx)")
         else:
-            if pose_model_path:
-                print(f"[AUTO CALIBRATE] ℹ️ File model chưa tồn tại: {pose_model_path}")
+            print("[AUTO CALIBRATE] Chua co CChessRecognizer - se fallback sang click tay")
 
     def sanity_check_geometry(self, kpts, img_w, img_h):
         """Kiểm tra tính hợp lệ hình học của 4 góc bàn cờ (P0, P1, P2, P3).
@@ -87,72 +92,78 @@ class AutoCalibrator:
         return True, "Hợp lệ"
 
     def predict_corners(self, frame):
-        """Dự đoán 4 góc bàn cờ từ frame ảnh đã warm-up.
+        """Dự đoán 4 góc bàn cờ từ frame ảnh bằng RTMPose ONNX.
+        
+        CChessRecognizer trả về 4 keypoints theo thứ tự: A0, A8, J0, J8
+        Ta chuyển đổi sang thứ tự P0, P1, P2, P3 để tương thích hệ thống cũ:
+            P0 = A0 (Đen Trái)  = CChess idx 0
+            P1 = A8 (Đen Phải)  = CChess idx 1
+            P2 = J8 (Đỏ Phải)   = CChess idx 3
+            P3 = J0 (Đỏ Trái)   = CChess idx 2
         
         Returns:
             (kpts, mean_conf) nếu hợp lệ, hoặc (None, 0.0) nếu không đạt.
         """
-        if self.model is None or frame is None:
+        if self.recognizer is None or frame is None:
             return None, 0.0
 
         h, w = frame.shape[:2]
         try:
-            # Thêm border padding 60px để xử lý trường hợp bàn cờ bị chụp/crop sát mép ảnh (tránh mất receptive field của CNN)
-            pad = 60
-            padded_frame = cv2.copyMakeBorder(frame, pad, pad, pad, pad, cv2.BORDER_REFLECT)
-            
-            results = self.model.predict(padded_frame, conf=0.25, verbose=False)
-            if not results or len(results) == 0 or results[0].keypoints is None:
-                return None, 0.0
+            # RTMPose inference qua CChessRecognizer
+            cchess_kpts, cchess_scores = self.recognizer.detect_board_corners(frame)
+            # cchess_kpts shape (4, 2): [A0, A8, J0, J8]
+            # cchess_scores shape (4,)
 
-            kpts_obj = results[0].keypoints
-            if len(kpts_obj) == 0:
-                return None, 0.0
+            # Chuyển đổi thứ tự CChess → P-order cho calibration
+            # CChess: [0]=A0, [1]=A8, [2]=J0, [3]=J8
+            # P-order: P0=A0, P1=A8, P2=J8, P3=J0
+            reorder = [0, 1, 3, 2]
+            kpts_xy = cchess_kpts[reorder].astype(np.float32)
+            kpts_conf = cchess_scores[reorder]
 
-            kpts_padded = kpts_obj[0].xy[0].cpu().numpy()  # (4, 2)
-            kpts_conf = (
-                kpts_obj[0].conf[0].cpu().numpy()
-                if kpts_obj[0].conf is not None
-                else np.array([1.0, 1.0, 1.0, 1.0])
-            )
-            
-            # Trừ lại padding để đưa về hệ tọa độ của frame gốc
-            kpts_xy = kpts_padded - np.array([pad, pad], dtype=np.float32)
-
-            # Cải tiến: Dùng Adaptive Confidence (Trung bình >= 0.65 VÀ điểm thấp nhất >= 0.40)
+            # Adaptive Confidence check for RTMPose SimCC
+            # SimCC scores = max(softmax_x) * max(softmax_y), typically 0.15-0.35 for good predictions
+            # Much lower than YOLO confidence (0.65+) because it's a product of two softmax values
             mean_conf = float(np.mean(kpts_conf))
             min_conf = float(np.min(kpts_conf))
-            if mean_conf < 0.65 or min_conf < 0.40:
-                print(f"[AUTO CALIBRATE] ⚠️ Confidence keypoint thấp: mean={mean_conf:.2f}, min={min_conf:.2f} (yêu cầu mean>=0.65, min>=0.40)")
+            if mean_conf < 0.15 or min_conf < 0.08:
+                print(f"[AUTO CALIBRATE] Confidence keypoint thap: mean={mean_conf:.4f}, min={min_conf:.4f} (yeu cau mean>=0.15, min>=0.08)")
                 return None, 0.0
 
             # Geometric Sanity Check
             is_valid, reason = self.sanity_check_geometry(kpts_xy, w, h)
             if not is_valid:
-                print(f"[AUTO CALIBRATE] ⚠️ Sanity Check thất bại: {reason}")
+                print(f"[AUTO CALIBRATE] Sanity Check that bai: {reason}")
                 return None, 0.0
 
-            return kpts_xy.astype(np.float32), mean_conf
+            return kpts_xy, mean_conf
 
         except Exception as e:
-            print(f"[AUTO CALIBRATE] ❌ Lỗi inference: {e}")
+            print(f"[AUTO CALIBRATE] Loi inference RTMPose: {e}")
             return None, 0.0
 
 
-def run_calibration_flow(cap, perspective_path, pose_model_path=None, preview_sec=2.0):
+def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_model_path=None, preview_sec=2.0):
     """Quy trình hiệu chỉnh Camera tích hợp:
     
     1. Warm-up camera một lần duy nhất (tránh race condition).
-    2. Thử Auto-Calibration bằng YOLO-Pose nếu có model.
+    2. Thử Auto-Calibration bằng RTMPose ONNX (pose_4_v6.onnx) nếu có CChessRecognizer.
     3. Nếu Auto thành công: tính M, lưu .npy, hiển thị overlay lưới xác nhận rồi vào game.
     4. Nếu Auto thất bại hoặc chưa có model: Tự động fallback sang Click tay 4 góc (manual).
+    
+    Args:
+        cap: cv2.VideoCapture object đã mở
+        perspective_path: đường dẫn lưu file .npy
+        cchess_recognizer: Instance CChessRecognizer (ưu tiên sử dụng thay cho YOLO-Pose)
+        pose_model_path: (Legacy/unused) Giữ lại cho tương thích API cũ
+        preview_sec: Thời gian hiển thị preview (giây)
     """
     if getattr(config, "DRY_RUN", False):
-        print("[CALIBRATE] DRY_RUN: bỏ qua calibration.")
+        print("[CALIBRATE] DRY_RUN: bo qua calibration.")
         return None
 
     # --- BƯỚC 1: WARM UP CAMERA (Đồng nhất, không race condition) ---
-    print("\n[CALIBRATE] ⏳ Đang ổn định Camera USB...")
+    print("\n[CALIBRATE] Dang on dinh Camera USB...")
     for _ in range(40):
         ret, _ = cap.read()
         if not ret:
@@ -162,13 +173,13 @@ def run_calibration_flow(cap, perspective_path, pose_model_path=None, preview_se
 
     ret, warm_frame = cap.read()
     if not ret or warm_frame is None:
-        print("[CALIBRATE] ❌ Không lấy được frame sau warm-up!")
+        print("[CALIBRATE] Khong lay duoc frame sau warm-up!")
         return None
 
     # --- BƯỚC 2: THỬ AUTO-CALIBRATION (Multi-frame Sampling) ---
-    if pose_model_path and os.path.exists(str(pose_model_path)):
-        print("[CALIBRATE] 🤖 Đang chạy AI Auto-Calibration phát hiện 4 góc (Multi-frame Sampling)...")
-        calibrator = AutoCalibrator(pose_model_path=pose_model_path)
+    if cchess_recognizer is not None:
+        print("[CALIBRATE] Dang chay AI Auto-Calibration (RTMPose ONNX) phat hien 4 goc...")
+        calibrator = AutoCalibrator(cchess_recognizer=cchess_recognizer)
 
         best_corners = None
         best_score = 0.0
@@ -186,9 +197,9 @@ def run_calibration_flow(cap, perspective_path, pose_model_path=None, preview_se
             time.sleep(0.06)
 
         if best_corners is not None:
-            print(f"[CALIBRATE] 🎯 AI phát hiện 4 góc bàn cờ thành công! (Confidence trung bình: {best_score:.2%})")
-            for i, name in enumerate(["Đen Trái", "Đen Phải", "Đỏ Phải", "Đỏ Trái"]):
-                print(f"   👉 P{i} ({name}): ({best_corners[i][0]:.1f}, {best_corners[i][1]:.1f})")
+            print(f"[CALIBRATE] AI phat hien 4 goc ban co thanh cong! (Confidence: {best_score:.2%})")
+            for i, name in enumerate(["Den Trai", "Den Phai", "Do Phai", "Do Trai"]):
+                print(f"   P{i} ({name}): ({best_corners[i][0]:.1f}, {best_corners[i][1]:.1f})")
 
             # Tính ma trận phối cảnh M: pixel -> grid
             src = best_corners.astype(np.float32)
@@ -201,7 +212,7 @@ def run_calibration_flow(cap, perspective_path, pose_model_path=None, preview_se
 
             M = cv2.getPerspectiveTransform(src, dst)
             np.save(str(perspective_path), M)
-            print(f"[CALIBRATE] ✅ ĐÃ LƯU MA TRẬN AUTO-CALIBRATION: {perspective_path}")
+            print(f"[CALIBRATE] DA LUU MA TRAN AUTO-CALIBRATION: {perspective_path}")
 
             # Hiển thị Preview xác nhận trực quan (Grid Overlay)
             try:
@@ -235,14 +246,14 @@ def run_calibration_flow(cap, perspective_path, pose_model_path=None, preview_se
                 cv2.waitKey(int(preview_sec * 1000))
                 cv2.destroyWindow(win_name)
             except Exception as e:
-                print(f"[CALIBRATE] ⚠️ Preview error: {e}")
+                print(f"[CALIBRATE] Preview error: {e}")
 
             return M
 
-        print("[CALIBRATE] ⚠️ Auto-Calibration không đạt độ tin cậy. Đang chuyển sang Manual Fallback...")
+        print("[CALIBRATE] Auto-Calibration khong dat do tin cay. Chuyen sang Manual Fallback...")
 
     # --- BƯỚC 3: FALLBACK CLICK TAY NẾU CHƯA CÓ MODEL HOẶC AUTO THẤT BẠI ---
-    print("[CALIBRATE] 🖱️ Mở giao diện Click 4 góc thủ công...")
+    print("[CALIBRATE] Mo giao dien Click 4 goc thu cong...")
     return calibrate_perspective_camera(cap, str(perspective_path))
 
 
@@ -276,13 +287,13 @@ def check_drift(frame, current_M, calibrator, threshold_px=8.0):
         max_error = float(np.max(errors))
 
         if max_error > threshold_px:
-            print(f"[DRIFT WATCHDOG] ⚠️ Phát hiện bàn cờ bị lệch {max_error:.1f}px > ngưỡng {threshold_px}px!")
+            print(f"[DRIFT WATCHDOG] Phat hien ban co bi lech {max_error:.1f}px > nguong {threshold_px}px!")
             dst = np.array([[0, 0], [8, 0], [8, 9], [0, 9]], dtype=np.float32)
             new_M = cv2.getPerspectiveTransform(new_corners.astype(np.float32), dst)
             return True, new_M, max_error
 
         return False, current_M, max_error
     except Exception as e:
-        print(f"[DRIFT WATCHDOG] ⚠️ Lỗi kiểm tra drift: {e}")
+        print(f"[DRIFT WATCHDOG] Loi kiem tra drift: {e}")
         return False, current_M, 0.0
 

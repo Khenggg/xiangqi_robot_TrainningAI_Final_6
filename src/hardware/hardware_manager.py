@@ -183,12 +183,11 @@ class HardwareManager:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-        # Calibrate Vision
+        # Calibrate Vision (RTMPose ONNX thay cho YOLO-Pose cũ)
         print("\n" + "=" * 60)
-        print("  📐  CAMERA CALIBRATION — BẮT BUỘC KHI KHỞI ĐỘNG")
+        print("  CAMERA CALIBRATION - BAT BUOC KHI KHOI DONG")
         print("=" * 60)
-        pose_model_path = Path(self.project_dir) / "models" / "board_pose.pt"
-        run_calibration_flow(self.cap, str(self.perspective_path), pose_model_path=pose_model_path)
+        run_calibration_flow(self.cap, str(self.perspective_path), cchess_recognizer=self.cchess_recognizer)
         
         if not os.path.exists(str(self.perspective_path)):
             print("❌ Chưa có perspective.npy! Không thể detect nước đi.")
