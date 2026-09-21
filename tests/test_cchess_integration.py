@@ -135,6 +135,29 @@ def test_snapshot_detector_recovery():
     assert recovered_moves[0] == ((4, 6), (4, 5), "r_P")
     print("  --> SnapshotDetector CChess recovery fallback verified!")
 
+def test_snapshot_detector_direct_cchess_move():
+    print("[TEST] 5. Checking direct CChess move detection via detect_move()...")
+    perspective_path = PROJECT_ROOT / "perspective.npy"
+    detector = SnapshotDetector(perspective_path, {})
+
+    board = xiangqi.get_board()
+    # Move: Red cannon at (1, 7) moves to (4, 7)
+    rec_board = [row[:] for row in board]
+    rec_board[7][1] = "."
+    rec_board[7][4] = "r_C"
+
+    cchess_result = {
+        "success": True,
+        "board": rec_board
+    }
+
+    # Calling detect_move directly with cchess_result (even without T1 baseline!)
+    src, dst, piece = detector.detect_move(None, [], board, cchess_result=cchess_result)
+    assert src == (1, 7), f"Expected src (1, 7), got {src}"
+    assert dst == (4, 7), f"Expected dst (4, 7), got {dst}"
+    assert piece == "r_C", f"Expected piece r_C, got {piece}"
+    print("  --> Direct CChess move detection verified successfully!")
+
 def main():
     print("=" * 60)
     print("[TEST] RUNNING CCHESS RECOGNITION INTEGRATION TESTS")
