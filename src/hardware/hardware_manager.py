@@ -197,12 +197,17 @@ class HardwareManager:
             print("❌ Chưa có perspective.npy! Không thể detect nước đi.")
             sys.exit()
 
-        # Start Monitor
-        if self.model is not None:
-            self.cam_monitor = CameraMonitor(self.cap, self.model, self.perspective_path)
+        # Start Monitor (Ưu tiên CChessRecognizer ONNX)
+        if self.model is not None or self.cchess_recognizer is not None:
+            self.cam_monitor = CameraMonitor(
+                self.cap,
+                model=self.model,
+                perspective_path=self.perspective_path,
+                cchess_recognizer=self.cchess_recognizer,
+            )
             self.cam_monitor.start()
             self.yolo_detector = YoloSnapshotDetector(self.perspective_path, self.class_id_to_name)
-            print("[INIT] ✅ YoloSnapshotDetector initialized.")
+            print("[INIT] SnapshotDetector & CameraMonitor initialized (CChess ONNX enabled).")
             if getattr(self.config, "VISUAL_PICK_ENABLED", False):
                 try:
                     self.pick_estimator = VisualPickEstimator(
@@ -340,12 +345,13 @@ class HardwareManager:
 
     def recognize_board_state(self, frame=None):
         """Nhận diện toàn bộ bàn cờ (10x9) bằng CChessRecognizer ONNX models.
+        Ưu tiên dùng ma trận phối cảnh đã cân chỉnh để nắn bàn cờ chuẩn xác và ổn định nhất.
         
         Args:
             frame: OpenCV BGR frame. Nếu None, sẽ lấy từ CameraMonitor.
             
         Returns:
-            dict kết quả từ CChessRecognizer.full_recognize() hoặc None nếu không khả dụng.
+            dict kết quả nhận diện bàn cờ hoặc None nếu không khả dụng.
         """
         if self.cchess_recognizer is None:
             return None
@@ -356,4 +362,28 @@ class HardwareManager:
         if frame is None:
             return None
 
+        # 1. Ưu tiên nắn bằng 4 góc đã hiệu chỉnh (calibrated perspective)
+        if os.path.exists(str(self.perspective_path)):
+            try:
+                M = np.load(str(self.perspective_path))
+                inv_M = np.linalg.inv(M)
+                grid_kpts = np.array([
+                    [[0.0, 0.0]], [[8.0, 0.0]], [[0.0, 9.0]], [[8.0, 9.0]]
+                ], dtype=np.float32)
+                kpts_px = cv2.perspectiveTransform(grid_kpts, inv_M).reshape(4, 2)
+                warped, _ = self.cchess_recognizer.extract_rectified_board(frame, kpts_px)
+                board_proj, board_short, confs = self.cchess_recognizer.recognize_layout(warped)
+                return {
+                    "success": True,
+                    "board": board_proj,
+                    "board_short": board_short,
+                    "confidence": confs,
+                    "keypoints": kpts_px,
+                    "warped_image": warped,
+                    "error": None,
+                }
+            except Exception as e:
+                print(f"[RECOGNIZE] Fallback to full_recognize: {e}")
+
+        # 2. Fallback sang phát hiện lại 4 góc nếu chưa có perspective.npy
         return self.cchess_recognizer.full_recognize(frame)

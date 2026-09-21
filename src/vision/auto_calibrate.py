@@ -65,29 +65,15 @@ class AutoCalibrator:
         if not cv2.isContourConvex(pts_contour):
             return False, "4 điểm không tạo thành tứ giác lồi hợp lệ"
 
-        # 4. Kiểm tra thứ tự và chiều quay (Clockwise: P0 -> P1 -> P2 -> P3)
-        # Vector P0 -> P1 (đường đỉnh, phía Đen)
-        v_top = kpts[1] - kpts[0]
-        # Vector P3 -> P2 (đường đáy, phía Đỏ)
-        v_bottom = kpts[2] - kpts[3]
+        # 4. Kiểm tra chiều quay và diện tích tứ giác (Oriented Area: Clockwise P0 -> P1 -> P2 -> P3)
+        oriented_area = cv2.contourArea(pts_contour, oriented=True)
+        if oriented_area <= 0:
+            return False, f"Thứ tự các góc không đúng chiều kim đồng hồ (oriented_area={oriented_area:.1f})"
 
-        # Kiểm tra hướng ngang theo tỷ lệ ảnh (P1 phải nằm bên phải P0, P2 phải bên phải P3 ít nhất 5% chiều rộng ảnh)
-        min_horizontal_span = img_w * 0.05
-        if v_top[0] <= min_horizontal_span or v_bottom[0] <= min_horizontal_span:
-            return False, f"Hướng ngang bàn cờ bị đảo lộn (trái/phải): dx_top={v_top[0]:.1f}, dx_bot={v_bottom[0]:.1f}"
-
-        # Kiểm tra hướng dọc theo tỷ lệ ảnh (P3, P2 phải nằm phía dưới P0, P1 ít nhất 5% chiều cao ảnh)
-        min_vertical_span = img_h * 0.05
-        if kpts[3][1] <= kpts[0][1] + min_vertical_span or kpts[2][1] <= kpts[1][1] + min_vertical_span:
-            return False, "Hướng dọc bàn cờ bị đảo lộn (trên/dưới)"
-
-        # 5. Kiểm tra kích thước bàn cờ tối thiểu (tránh bốc nhầm vật thể quá nhỏ)
-        w_top = np.linalg.norm(v_top)
-        w_bot = np.linalg.norm(v_bottom)
-        h_left = np.linalg.norm(kpts[3] - kpts[0])
-        h_right = np.linalg.norm(kpts[2] - kpts[1])
-        if min(w_top, w_bot, h_left, h_right) < min(img_w, img_h) * 0.15:
-            return False, "Kích thước bàn cờ dự đoán quá nhỏ so với khung hình"
+        # 5. Kiểm tra diện tích bàn cờ tối thiểu (ít nhất 8% diện tích khung hình)
+        total_frame_area = float(img_w * img_h)
+        if abs(oriented_area) < 0.08 * total_frame_area:
+            return False, f"Diện tích bàn cờ quá nhỏ ({abs(oriented_area):.0f} < {0.08*total_frame_area:.0f} px)"
 
         return True, "Hợp lệ"
 
@@ -122,12 +108,11 @@ class AutoCalibrator:
             kpts_conf = cchess_scores[reorder]
 
             # Adaptive Confidence check for RTMPose SimCC
-            # SimCC scores = max(softmax_x) * max(softmax_y), typically 0.15-0.35 for good predictions
-            # Much lower than YOLO confidence (0.65+) because it's a product of two softmax values
+            # SimCC scores = max(softmax_x) * max(softmax_y), typically 0.08-0.35 for good predictions
             mean_conf = float(np.mean(kpts_conf))
             min_conf = float(np.min(kpts_conf))
-            if mean_conf < 0.15 or min_conf < 0.08:
-                print(f"[AUTO CALIBRATE] Confidence keypoint thap: mean={mean_conf:.4f}, min={min_conf:.4f} (yeu cau mean>=0.15, min>=0.08)")
+            if mean_conf < 0.08 or min_conf < 0.05:
+                print(f"[AUTO CALIBRATE] Confidence keypoint thap: mean={mean_conf:.4f}, min={min_conf:.4f} (yeu cau mean>=0.08, min>=0.05)")
                 return None, 0.0
 
             # Geometric Sanity Check

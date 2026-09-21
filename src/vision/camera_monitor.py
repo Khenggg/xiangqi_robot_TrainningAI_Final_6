@@ -11,31 +11,49 @@ import threading
 import os
 
 # Màu hiển thị
-_PIECE_COLOR = (0, 255, 0)     # BGR - xanh lá cho tất cả quân detect được
-_GRID_COLOR = (0, 255, 255)    # BGR - vàng cho lưới perspective
+_PIECE_COLOR = (0, 255, 0)     # BGR - xanh lá (fallback YOLO)
+_GRID_COLOR = (0, 215, 255)    # BGR - vàng kim cho lưới perspective
+
+# Bảng nhãn hiển thị quân cờ tiếng Việt + màu sắc (text_color, bg_color)
+_PIECE_BADGES = {
+    "r_K": ("Tg", (0, 0, 220), (255, 255, 255)),   # Tướng Đỏ
+    "r_A": ("Si", (0, 0, 220), (255, 255, 255)),   # Sĩ Đỏ
+    "r_E": ("Tu", (0, 0, 220), (255, 255, 255)),   # Tượng Đỏ
+    "r_N": ("Ma", (0, 0, 220), (255, 255, 255)),   # Mã Đỏ
+    "r_R": ("Xe", (0, 0, 220), (255, 255, 255)),   # Xe Đỏ
+    "r_C": ("Ph", (0, 0, 220), (255, 255, 255)),   # Pháo Đỏ
+    "r_P": ("Tot", (0, 0, 220), (255, 255, 255)),  # Tốt Đỏ
+    "b_K": ("Tg", (25, 25, 25), (235, 235, 235)),  # Tướng Đen
+    "b_A": ("Si", (25, 25, 25), (235, 235, 235)),  # Sĩ Đen
+    "b_E": ("Tu", (25, 25, 25), (235, 235, 235)),  # Tượng Đen
+    "b_N": ("Ma", (25, 25, 25), (235, 235, 235)),  # Mã Đen
+    "b_R": ("Xe", (25, 25, 25), (235, 235, 235)),  # Xe Đen
+    "b_C": ("Ph", (25, 25, 25), (235, 235, 235)),  # Pháo Đen
+    "b_P": ("Tot", (25, 25, 25), (235, 235, 235)), # Tốt Đen
+}
 
 
 class CameraMonitor:
-    """Hiển thị camera feed liên tục với YOLO detections + perspective grid.
+    """Hiển thị camera feed liên tục với CChess ONNX layout classification + perspective grid.
     
     Đây là SINGLE OWNER duy nhất truy cập camera (cv2.VideoCapture).
     Các module khác (SnapshotDetector) nhận frame + detections từ đây.
     """
 
-    def __init__(self, cap, model, perspective_path, window_name="Camera Monitor", conf=0.25):
+    def __init__(self, cap, model=None, perspective_path=None, window_name="Camera Monitor", conf=0.25, cchess_recognizer=None):
         """
         Args:
             cap: cv2.VideoCapture đã mở
-            model: YOLO model đã load
+            model: (Optional) YOLO model
             perspective_path: đường dẫn file perspective.npy
             window_name: tên cửa sổ OpenCV
-            conf: ngưỡng confidence phát hiện quân cờ (default: 0.35)
-                  Giữ thấp để không bỏ sót quân — false positives ngoài bàn cờ
-                  đã được chặn bởi ROI polygon filter (_filter_by_board).
+            conf: ngưỡng confidence phát hiện quân cờ
+            cchess_recognizer: (Optional) CChessRecognizer ONNX instance
         """
         self.cap = cap
         self.model = model
-        self.perspective_path = str(perspective_path)
+        self.cchess_recognizer = cchess_recognizer
+        self.perspective_path = str(perspective_path) if perspective_path else None
         self.window_name = window_name
         self.conf = conf
 
@@ -43,9 +61,10 @@ class CameraMonitor:
         self._inv_M = None  # inverse (grid → camera pixel, để vẽ lưới)
         self._last_frame = None
         self._last_detections = []  # format: (cls_id, conf, (x1, y1, x2, y2))
+        self._last_cchess_result = None  # Dict: {"success": True, "board": ..., "confidence": ...}
         self._stop_event = threading.Event()  # Thread-safe shutdown signal
         self._thread = None                 # Capture thread (30-60 FPS mượt mà)
-        self._detect_thread = None          # YOLO detect thread (Async background)
+        self._detect_thread = None          # Detect thread (Async background)
         self._lock = threading.Lock()       # Bảo vệ _last_frame/_last_detections
         self._cam_lock = threading.Lock()   # Bảo vệ truy cập camera (cap.read/grab)
         self._board_polygon = None  # Cache polygon bàn cờ trong pixel space (4 điểm)
@@ -56,7 +75,10 @@ class CameraMonitor:
             self.device = 0 if torch.cuda.is_available() else 'cpu'
         except Exception:
             self.device = 'cpu'
-        print(f"[CAM MONITOR] 🚀 Using device: {self.device} for YOLO")
+        if self.cchess_recognizer is not None:
+            print("[CAM MONITOR] CChessRecognizer layout enabled for live monitoring.")
+        if self.model is not None:
+            print(f"[CAM MONITOR] Using device: {self.device} for YOLO fallback")
         self._load_perspective()
 
     # -------------------------------------------------------------------------
@@ -184,10 +206,10 @@ class CameraMonitor:
         print("[CAM MONITOR] 🛑 Camera capture thread exited cleanly.")
 
     def _detect_loop(self):
-        """Luồng 2: Chạy nền độc lập (Async) nhận diện YOLO định kỳ ở imgsz=640.
-        Cập nhật bounding box đè lên video mà không bao giờ làm đứng hình camera."""
+        """Luồng 2: Chạy nền độc lập (Async) nhận diện cờ định kỳ.
+        Ưu tiên CChessRecognizer ONNX (layout_nano_v3.onnx), fallback về YOLO nếu không có CChess."""
         while not self._stop_event.is_set():
-            if self.model is None:
+            if self.cchess_recognizer is None and self.model is None:
                 time.sleep(0.2)
                 continue
 
@@ -201,47 +223,71 @@ class CameraMonitor:
                 continue
 
             detections = []
-            try:
-                frame_rgb = cv2.cvtColor(frame_to_detect, cv2.COLOR_BGR2RGB)
-                results = self.model.predict(
-                    frame_rgb, conf=self.conf, iou=0.35,
-                    imgsz=640, device=self.device, verbose=False
-                )
-                for box in results[0].boxes:
-                    cls_id = int(box.cls[0])
-                    conf = float(box.conf[0])
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    detections.append((cls_id, conf, (x1, y1, x2, y2)))
-            except Exception:
-                pass
+            # 1. ƯU TIÊN: Chạy CChessRecognizer layout classification
+            if self.cchess_recognizer is not None and self._inv_M is not None:
+                try:
+                    grid_kpts = np.array([
+                        [[0.0, 0.0]], [[8.0, 0.0]], [[0.0, 9.0]], [[8.0, 9.0]]
+                    ], dtype=np.float32)
+                    kpts_px = cv2.perspectiveTransform(grid_kpts, self._inv_M).reshape(4, 2)
+                    warped, _ = self.cchess_recognizer.extract_rectified_board(frame_to_detect, kpts_px)
+                    board_proj, board_short, confs = self.cchess_recognizer.recognize_layout(warped)
 
+                    # Tạo danh sách detections tương thích ngược từ các ô có quân
+                    for r in range(10):
+                        for c in range(9):
+                            p = board_proj[r][c]
+                            if p not in (".", "x"):
+                                pt = cv2.perspectiveTransform(
+                                    np.array([[[float(c), float(r)]]], dtype=np.float32), self._inv_M
+                                )[0][0]
+                                cx, cy = int(pt[0]), int(pt[1])
+                                rad = 18
+                                conf_val = float(confs[r][c])
+                                detections.append((0, conf_val, (cx - rad, cy - rad, cx + rad, cy + rad)))
 
-            # Layer 0: Lọc những detection nằm ngoài vùng bàn cờ (pixel space)
-            detections = self._filter_by_board(detections)
+                    with self._lock:
+                        self._last_cchess_result = {
+                            "success": True,
+                            "board": board_proj,
+                            "board_short": board_short,
+                            "confidence": confs,
+                            "keypoints": kpts_px,
+                            "warped_image": warped,
+                        }
+                        self._last_detections = detections
+                except Exception as e:
+                    pass
 
-            with self._lock:
-                self._last_detections = detections
-            # Nghỉ ngắn giữa các lần quét để không quá tải tài nguyên
-            self._stop_event.wait(timeout=0.05)
+            # 2. FALLBACK: Chạy YOLO nếu không có CChess
+            elif self.model is not None:
+                try:
+                    frame_rgb = cv2.cvtColor(frame_to_detect, cv2.COLOR_BGR2RGB)
+                    results = self.model.predict(
+                        frame_rgb, conf=self.conf, iou=0.35,
+                        imgsz=640, device=self.device, verbose=False
+                    )
+                    for box in results[0].boxes:
+                        cls_id = int(box.cls[0])
+                        conf = float(box.conf[0])
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
+                        detections.append((cls_id, conf, (x1, y1, x2, y2)))
+                    detections = self._filter_by_board(detections)
+                    with self._lock:
+                        self._last_detections = detections
+                except Exception:
+                    pass
 
-        print("[CAM MONITOR] 🛑 Detection background thread exited cleanly.")
+            # Nghỉ ngắn giữa các lần quét (khoảng ~150-250ms)
+            self._stop_event.wait(timeout=0.2)
+
+        print("[CAM MONITOR] Detection background thread exited cleanly.")
 
     def _draw_overlay(self, frame, detections):
-        """Vẽ bounding box + lưới perspective lên frame."""
+        """Vẽ hiển thị bàn cờ: Lưới phối cảnh + Quân cờ CChess (hoặc bounding box YOLO)."""
         display = frame.copy()
 
-        # --- Vẽ bounding box YOLO ---
-        for (cls_id, conf, (x1, y1, x2, y2)) in detections:
-            cv2.rectangle(display, (x1, y1), (x2, y2), _PIECE_COLOR, 2)
-
-            # Nhãn: confidence %
-            text = f"piece {conf:.0%}"
-            (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-            cv2.rectangle(display, (x1, y1 - th - 6), (x1 + tw + 4, y1), _PIECE_COLOR, -1)
-            cv2.putText(display, text, (x1 + 2, y1 - 4),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1)
-
-        # --- Vẽ lưới perspective ---
+        # --- 1. Vẽ lưới perspective ---
         if self._inv_M is not None:
             try:
                 # 10 hàng ngang
@@ -260,72 +306,139 @@ class CameraMonitor:
                         np.array([[[c, 9]]], dtype=np.float32), self._inv_M)[0][0]
                     cv2.line(display, (int(p1[0]), int(p1[1])),
                              (int(p2[0]), int(p2[1])), _GRID_COLOR, 1)
-            except:
+            except Exception:
                 pass
 
-        # --- Info text ---
-        n_pieces = len(detections)
-        dev_tag = "GPU" if self.device != "cpu" else "CPU"
-        info = f"[{dev_tag}] Detected: {n_pieces} pieces | SPACE=confirm move"
-        cv2.putText(display, info, (10, 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        # --- 2. Vẽ quân cờ CChess ONNX (ƯU TIÊN) ---
+        has_cchess = False
+        with self._lock:
+            cchess_res = self._last_cchess_result.copy() if self._last_cchess_result else None
+
+        if cchess_res and cchess_res.get("success") and self._inv_M is not None:
+            has_cchess = True
+            board_proj = cchess_res["board"]
+            for r in range(10):
+                for c in range(9):
+                    p = board_proj[r][c]
+                    if p in _PIECE_BADGES:
+                        badge_txt, text_col, bg_col = _PIECE_BADGES[p]
+                        pt = cv2.perspectiveTransform(
+                            np.array([[[float(c), float(r)]]], dtype=np.float32), self._inv_M
+                        )[0][0]
+                        cx, cy = int(round(pt[0])), int(round(pt[1]))
+                        # Vẽ vòng tròn quân cờ nền sáng, viền đậm
+                        cv2.circle(display, (cx, cy), 16, bg_col, -1)
+                        cv2.circle(display, (cx, cy), 16, text_col, 2)
+                        # Vẽ tên quân cờ căn giữa
+                        (tw, th), _ = cv2.getTextSize(badge_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+                        cv2.putText(display, badge_txt, (cx - tw // 2, cy + th // 2),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, text_col, 1, cv2.LINE_AA)
+
+            n_red = sum(1 for row in board_proj for p in row if p.startswith("r_"))
+            n_black = sum(1 for row in board_proj for p in row if p.startswith("b_"))
+            total = n_red + n_black
+            info = f"[CChess ONNX] Do: {n_red} | Den: {n_black} (Tong: {total}) | SPACE=xac nhan nuoc di"
+            # Banner nền tối ở trên cùng
+            cv2.rectangle(display, (0, 0), (620, 32), (0, 0, 0), -1)
+            cv2.putText(display, info, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 255, 0), 2)
+
+        # --- 3. Fallback YOLO nếu chưa có CChess ---
+        if not has_cchess and detections:
+            for (cls_id, conf, (x1, y1, x2, y2)) in detections:
+                cv2.rectangle(display, (x1, y1), (x2, y2), _PIECE_COLOR, 2)
+                text = f"piece {conf:.0%}"
+                (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+                cv2.rectangle(display, (x1, y1 - th - 6), (x1 + tw + 4, y1), _PIECE_COLOR, -1)
+                cv2.putText(display, text, (x1 + 2, y1 - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1)
+
+            n_pieces = len(detections)
+            dev_tag = "GPU" if self.device != "cpu" else "CPU"
+            info = f"[{dev_tag}] Detected: {n_pieces} pieces | SPACE=confirm move"
+            cv2.putText(display, info, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
         return display
 
     def get_fresh_snapshot(self):
-        """Chụp 1 snapshot MỚI: flush buffer + read + YOLO.
-        
-        Dùng khi SnapshotDetector cần ảnh chính xác tại thời điểm hiện tại
-        (ví dụ: khi người chơi bấm SPACE).
-        
-        ⚠️ Hàm này BLOCK thread gọi nó (~200-500ms) vì phải chạy YOLO.
+        """Chụp 1 snapshot MỚI: flush buffer + read.
+        Cập nhật đồng thời CChess layout recognition và detections.
         
         Returns:
-            (frame, detections) hoặc (None, []) nếu lỗi
-            detections format: [(cls_id, conf, (x1, y1, x2, y2)), ...]
+            (frame, detections) — giữ nguyên signature để tương thích các module gọi
         """
         if self.cap is None or not self.cap.isOpened():
             return None, []
 
-        # Dùng _cam_lock để không race với background thread
         with self._cam_lock:
-            # Flush buffer camera để lấy frame mới nhất
             for _ in range(5):
                 self.cap.grab()
-
             ret, frame = self.cap.read()
 
-        if not ret:
-            print("[CAM MONITOR] ❌ Camera read failed in get_fresh_snapshot!")
+        if not ret or frame is None:
+            print("[CAM MONITOR] Camera read failed in get_fresh_snapshot!")
             return None, []
 
-        # Chạy YOLO (bên ngoài cam_lock vì không cần camera nữa)
         detections = []
-        if self.model is not None:
+        # Chạy CChess nếu có
+        if self.cchess_recognizer is not None and self._inv_M is not None:
+            try:
+                grid_kpts = np.array([
+                    [[0.0, 0.0]], [[8.0, 0.0]], [[0.0, 9.0]], [[8.0, 9.0]]
+                ], dtype=np.float32)
+                kpts_px = cv2.perspectiveTransform(grid_kpts, self._inv_M).reshape(4, 2)
+                warped, _ = self.cchess_recognizer.extract_rectified_board(frame, kpts_px)
+                board_proj, board_short, confs = self.cchess_recognizer.recognize_layout(warped)
+
+                for r in range(10):
+                    for c in range(9):
+                        p = board_proj[r][c]
+                        if p not in (".", "x"):
+                            pt = cv2.perspectiveTransform(
+                                np.array([[[float(c), float(r)]]], dtype=np.float32), self._inv_M
+                            )[0][0]
+                            cx, cy = int(pt[0]), int(pt[1])
+                            rad = 18
+                            detections.append((0, float(confs[r][c]), (cx - rad, cy - rad, cx + rad, cy + rad)))
+
+                with self._lock:
+                    self._last_cchess_result = {
+                        "success": True,
+                        "board": board_proj,
+                        "board_short": board_short,
+                        "confidence": confs,
+                        "keypoints": kpts_px,
+                        "warped_image": warped,
+                    }
+            except Exception as e:
+                print(f"[CAM MONITOR] CChess error in fresh snapshot: {e}")
+
+        # Fallback YOLO
+        elif self.model is not None:
             try:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = self.model.predict(
                     frame_rgb, conf=self.conf, iou=0.35,
                     imgsz=640, device=self.device, verbose=False
-
                 )
                 for box in results[0].boxes:
                     cls_id = int(box.cls[0])
                     conf = float(box.conf[0])
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
                     detections.append((cls_id, conf, (x1, y1, x2, y2)))
+                detections = self._filter_by_board(detections)
             except Exception as e:
-                print(f"[CAM MONITOR] ⚠️ YOLO error in snapshot: {e}")
+                print(f"[CAM MONITOR] YOLO error in snapshot: {e}")
 
-        # Layer 0: Lọc những detection nằm ngoài vùng bàn cờ (pixel space)
-        detections = self._filter_by_board(detections)
-
-        # Cập nhật cache luôn
         with self._lock:
             self._last_frame = frame.copy()
             self._last_detections = detections
 
         return frame, detections
+
+    def get_latest_cchess_result(self):
+        """Lấy kết quả nhận diện CChess layout mới nhất."""
+        with self._lock:
+            return self._last_cchess_result.copy() if self._last_cchess_result is not None else None
 
 
     def start(self):
