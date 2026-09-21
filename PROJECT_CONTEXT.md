@@ -18,7 +18,7 @@
   - Giao tiếp mạng: `requests` (giao tiếp REST API).
 * **Phần cứng tích hợp:**
   - Tay máy công nghiệp: **Fairino FR5 (6 bậc tự do / 6-DOF)** kết nối qua giao thức mạng Ethernet Socket RPC (`192.168.58.2`).
-  - Đầu gắp (Gripper): Van hút/kẹp khí nén điều khiển qua cổng Digital Output của robot (`Tool DO0`).
+  - Đầu gắp (Gripper): Motor hai chiều điều khiển qua Tool DO1 (mở) và Tool DO0 (đóng), dùng xung thời gian ngắn.
   - Camera: USB Webcam (độ phân giải 1280x720) nhìn từ trên xuống góc xiên.
 
 ---
