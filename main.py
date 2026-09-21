@@ -121,6 +121,15 @@ try:
             key = hw.cam_monitor.update_display()
             if key == ord("q"): running = False
 
+        # Only inspect for a move after the hand detector observes a complete
+        # hand-in/hand-out interaction. SPACE remains the safe manual fallback.
+        if (state.turn == "r" and not state.game_over
+                and hw.hand_interaction_finished()):
+            input_mgr.try_auto_confirm_move(
+                retries=config.AUTO_MOVE_CONFIRM_RETRIES,
+                retry_seconds=config.AUTO_MOVE_CONFIRM_RETRY_SECONDS,
+            )
+
         # 2d. Xử lý AI Turn (Non-blocking)
         if state.turn == "b" and not state.game_over:
             

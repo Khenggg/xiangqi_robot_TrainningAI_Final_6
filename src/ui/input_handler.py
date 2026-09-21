@@ -66,13 +66,13 @@ class InputHandler:
         elif key == pygame.K_SPACE:
             self._handle_space_key()
 
-    def _handle_space_key(self):
+    def _handle_space_key(self, auto_retry=False):
         print("\n[SPACE] 🎯 Người chơi bấm SPACE — đang chụp T2 snapshot...")
         self.state.set_status("📸  Đang phân tích YOLO...", color=(0, 100, 180), duration=3.0)
         
         if not self.hw.yolo_detector or not self.hw.cam_monitor:
             self.state.set_status("❌  Hệ thống nhận diện chưa khởi tạo!", color=(180, 0, 0))
-            return
+            return False
             
         frame, detections = self.hw.cam_monitor.get_fresh_snapshot()
         
@@ -83,7 +83,7 @@ class InputHandler:
                 self.state.set_status("📸 Đã làm mới Trạng thái bàn cờ hiện tại", color=(0, 100, 180), duration=5.0)
             else:
                 self.state.set_status("❌ Không chụp được baseline!", color=(180, 0, 0))
-            return
+            return False
 
         # SAVE ROLLBACK STATE TRƯỚC KHI DETECT (để có thể rollback khi lỗi)
         occ = [row[:] for row in self.hw.yolo_detector._baseline_occ]
@@ -114,18 +114,43 @@ class InputHandler:
         # Verify result
         if src is None:
             print("[SPACE] ❌ YOLO KHÔNG thấy nước đi hợp lệ!")
-            self.state.set_status("❌  Không thấy nước đi! Di quân trên màn hình.", color=(180, 0, 0), duration=5.0)
-            self.state.manual_override_active = True
-            self.hw.clear_yolo_baseline()
-            return
+            if not auto_retry:
+                self.state.set_status("❌  Không thấy nước đi! Di quân trên màn hình.", color=(180, 0, 0), duration=5.0)
+                self.state.manual_override_active = True
+                self.hw.clear_yolo_baseline()
+            return False
             
         if not xiangqi.is_valid_move(src, dst, self.state.board, "r"):
             print(f"[SPACE] ❌ YOLO báo nước đi không hợp lệ: {src}->{dst}")
-            self.state.set_status("⚠️  Lỗi nhận diện / Đi sai luật! Dùng chuột kéo thả.", color=(180, 100, 0), duration=60.0)
-            self.state.set_invalid_flash(dst[0], dst[1])
-            self.state.manual_override_active = True
-            self.hw.clear_yolo_baseline()
-            return
+            if not auto_retry:
+                self.state.set_status("⚠️  Lỗi nhận diện / Đi sai luật! Dùng chuột kéo thả.", color=(180, 100, 0), duration=60.0)
+                self.state.set_invalid_flash(dst[0], dst[1])
+                self.state.manual_override_active = True
+                self.hw.clear_yolo_baseline()
+            return False
 
         # Commit move (state đã được save ở trên rồi)
         self.state.process_human_move(src, dst, piece)
+        return True
+
+    def try_auto_confirm_move(self, retries=10, retry_seconds=0.2):
+        """Reuse the existing rule-validated snapshot flow after hand exit."""
+        import time
+        if self.state.turn != "r" or self.state.game_over:
+            return False
+        if not self.hw.yolo_detector or not self.hw.yolo_detector.has_baseline():
+            self.hw.reset_hand_interaction_monitor()
+            self.state.set_status("⚠️ Chưa có baseline. Hãy nhấn SPACE để xác minh.", color=(180, 100, 0), duration=12.0)
+            return False
+        self.state.set_status("✋ Hand left board — verifying move...", color=(0, 100, 180), duration=3.0)
+        for attempt in range(1, int(retries) + 1):
+            if self._handle_space_key(auto_retry=True):
+                self.hw.reset_hand_interaction_monitor()
+                return True
+            if attempt < retries:
+                time.sleep(float(retry_seconds))
+        self.state.manual_override_active = False
+        self.hw.reset_hand_interaction_monitor()
+        self.state.set_status("⚠️ Không xác minh được nước đi. Hãy nhấn SPACE.", color=(180, 100, 0), duration=12.0)
+        print("[AUTO CONFIRM] Failed after retry limit; waiting for SPACE fallback.")
+        return False

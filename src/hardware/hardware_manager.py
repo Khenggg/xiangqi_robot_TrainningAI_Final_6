@@ -15,6 +15,7 @@ from src.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetecto
 from src.vision.visual_pick_estimator import VisualPickEstimator
 from src.vision.calibrate_camera import calibrate_perspective_camera
 from src.vision.auto_calibrate import run_calibration_flow
+from src.vision.turn_completion_monitor import TurnCompletionMonitor
 
 try:
     from ultralytics import YOLO
@@ -38,6 +39,9 @@ class HardwareManager:
         self.yolo_detector = None
         self.cchess_recognizer = None
         self.pick_estimator = None
+        self.hand_model = None
+        self.turn_completion_monitor = None
+        self._last_hand_check = 0.0
         self.perspective_path = Path(project_dir) / "perspective.npy"
         
         self.class_id_to_name = {
@@ -211,6 +215,21 @@ class HardwareManager:
                 except Exception as e:
                     print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
 
+        if getattr(self.config, "AUTO_MOVE_CONFIRM_ENABLED", False) and YOLO is not None:
+            hand_path = Path(self.project_dir) / self.config.HAND_MODEL_PATH
+            try:
+                if hand_path.exists():
+                    self.hand_model = YOLO(str(hand_path))
+                    self.turn_completion_monitor = TurnCompletionMonitor(
+                        self.config.HAND_ABSENCE_SECONDS,
+                        self.config.HAND_MIN_PRESENT_SECONDS,
+                    )
+                    print("[INIT] ✅ Hand-aware automatic move confirmation enabled.")
+                else:
+                    print(f"[INIT] ⚠️ Hand model not found: {hand_path}")
+            except Exception as e:
+                print(f"[INIT] ⚠️ Hand-aware confirmation disabled: {e}")
+
     def cleanup(self):
         print("[CLEANUP] Đang dọn dẹp hardware...")
         if self.cam_monitor:
@@ -249,30 +268,57 @@ class HardwareManager:
             print("[VISUAL PICK] Fallback: cam_monitor chưa được khởi tạo.")
             return targets
 
-        # 1. Bọc an toàn khi lấy snapshot từ camera
-        try:
-            if not hasattr(self.cam_monitor, "get_fresh_snapshot"):
-                print("[VISUAL PICK] ⚠️ cam_monitor thiếu method 'get_fresh_snapshot'. Dùng fallback tâm ô.")
-                return targets
-
-            _frame, detections = self.cam_monitor.get_fresh_snapshot()
-            if _frame is None:
-                print("[VISUAL PICK] ⚠️ Không lấy được frame mới từ camera. Dùng fallback tâm ô.")
-                return targets
-        except Exception as e:
-            print(f"[VISUAL PICK] ⚠️ Ngoại lệ khi snapshot camera: {e}. Dùng fallback tâm ô.")
-            return targets
-
-        # 2. Bọc an toàn khi ước lượng từng ô cờ
-        for name, cell in expected_cells.items():
+        samples = {name: [] for name in expected_cells}
+        for _ in range(max(1, int(getattr(self.config, "VISUAL_PICK_SAMPLE_COUNT", 3)))):
             try:
-                col, row = cell
-                targets[name] = self.pick_estimator.estimate_pick_target(detections, col, row)
+                frame, detections = self.cam_monitor.get_fresh_snapshot()
+                if frame is None:
+                    continue
+                for name, (col, row) in expected_cells.items():
+                    samples[name].append(self.pick_estimator.estimate_pick_target(detections, col, row))
             except Exception as e:
-                print(f"[VISUAL PICK] ⚠️ Lỗi ước lượng cho {name} tại {cell!r}: {e}. Fallback ô này.")
-                targets[name] = None
+                print(f"[VISUAL PICK] ⚠️ Snapshot error: {e}")
+        min_samples = getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2)
+        for name, values in samples.items():
+            targets[name] = self.pick_estimator.aggregate_targets(values, min_samples)
+            if targets[name] is None:
+                print(f"[VISUAL PICK] Fallback {name}: insufficient stable samples.")
 
         return targets
+
+    def hand_interaction_finished(self):
+        """Return True once after a hand has entered then cleared the board ROI."""
+        if self.hand_model is None or self.turn_completion_monitor is None or self.cam_monitor is None:
+            return False
+        now = time.monotonic()
+        if now - self._last_hand_check < 0.10:
+            return False
+        self._last_hand_check = now
+        frame, _ = self.cam_monitor.get_latest_frame_and_detections()
+        if frame is None:
+            return False
+        hand_on_board = False
+        try:
+            result = self.hand_model(frame, conf=self.config.HAND_CONFIDENCE, verbose=False)[0]
+            boxes = getattr(result, "boxes", None)
+            if boxes is not None and len(boxes) > 0:
+                polygon = self.cam_monitor._compute_board_polygon()
+                if polygon is None:
+                    print("[HAND] Board ROI unavailable; keeping SPACE fallback.")
+                    return False
+                for box in boxes.xyxy.cpu().tolist():
+                    cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+                    if cv2.pointPolygonTest(polygon, (cx, cy), False) >= 0:
+                        hand_on_board = True
+                        break
+        except Exception as e:
+            print(f"[HAND] ⚠️ Detection error: {e}")
+            return False
+        return self.turn_completion_monitor.observe(hand_on_board, now)
+
+    def reset_hand_interaction_monitor(self):
+        if self.turn_completion_monitor is not None:
+            self.turn_completion_monitor.reset()
 
     def capture_baseline_if_needed(self, force_delay=0.0):
         if self.cam_monitor and self.yolo_detector:

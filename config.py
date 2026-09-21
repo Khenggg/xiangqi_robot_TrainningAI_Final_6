@@ -83,6 +83,19 @@ VISUAL_PICK_ENABLED = True
 VISUAL_PICK_MIN_CONFIDENCE = 0.45
 VISUAL_PICK_MAX_OFFSET_CELLS = 0.25
 VISUAL_PICK_FOOT_RATIO = 0.85
+VISUAL_PICK_SAMPLE_COUNT = 3
+VISUAL_PICK_MIN_STABLE_SAMPLES = 2
+
+# --- HAND-AWARE AUTO MOVE CONFIRMATION ---
+# The hand model only gates when to inspect the board.  SnapshotDetector and
+# Xiangqi validation still decide whether a move is accepted.
+AUTO_MOVE_CONFIRM_ENABLED = True
+HAND_MODEL_PATH = "models/hand_best_egohands.pt"
+HAND_CONFIDENCE = 0.45
+HAND_ABSENCE_SECONDS = 0.8
+HAND_MIN_PRESENT_SECONDS = 0.25
+AUTO_MOVE_CONFIRM_RETRIES = 10
+AUTO_MOVE_CONFIRM_RETRY_SECONDS = 0.20
 
 # --- THÔNG SỐ AI ---
 AI_THINK_TIME = 10  # Time per move in seconds — AI gets 10s after subtracting TIME_BUFFER (0.5)
