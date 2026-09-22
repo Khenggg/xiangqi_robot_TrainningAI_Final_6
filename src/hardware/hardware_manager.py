@@ -19,6 +19,7 @@ from src.vision.camera_monitor import CameraMonitor
 from src.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetector
 from src.vision.visual_pick_estimator import VisualPickEstimator
 from src.vision.calibrate_camera import calibrate_perspective_camera
+from src.vision.turn_completion_monitor import TurnCompletionMonitor
 
 try:
     from ultralytics import YOLO
@@ -45,6 +46,9 @@ class HardwareManager:
         self.cam_monitor = None
         self.yolo_detector = None
         self.pick_estimator = None
+        self.hand_model = None
+        self.turn_completion_monitor = None
+        self._last_hand_check = 0.0
         self.perspective_path = Path(project_dir) / "perspective.npy"
         
         self.class_id_to_name = {
@@ -251,6 +255,54 @@ class HardwareManager:
                     print("[INIT] ✅ VisualPickEstimator initialized.")
                 except Exception as e:
                     print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
+
+        if getattr(self.config, "AUTO_MOVE_CONFIRM_ENABLED", False) and YOLO is not None:
+            hand_path = Path(self.project_dir) / getattr(self.config, "HAND_MODEL_PATH", "models/hand_best_egohands.pt")
+            try:
+                if hand_path.exists():
+                    self.hand_model = YOLO(str(hand_path))
+                    self.turn_completion_monitor = TurnCompletionMonitor(
+                        getattr(self.config, "HAND_ABSENCE_SECONDS", 0.8),
+                        getattr(self.config, "HAND_MIN_PRESENT_SECONDS", 0.25),
+                    )
+                    print("[INIT] ✅ Hand-aware automatic move confirmation enabled.")
+                else:
+                    print(f"[INIT] ⚠️ Hand model not found: {hand_path}")
+            except Exception as e:
+                print(f"[INIT] ⚠️ Hand-aware confirmation disabled: {e}")
+
+    def hand_interaction_finished(self) -> bool:
+        """Return True once after a hand has entered then cleared the board ROI."""
+        if self.hand_model is None or self.turn_completion_monitor is None or self.cam_monitor is None:
+            return False
+        now = time.monotonic()
+        if now - self._last_hand_check < 0.10:
+            return False
+        self._last_hand_check = now
+        frame, _ = self.cam_monitor.get_latest_frame_and_detections()
+        if frame is None:
+            return False
+        hand_on_board = False
+        try:
+            result = self.hand_model(frame, conf=getattr(self.config, "HAND_CONFIDENCE", 0.45), verbose=False)[0]
+            boxes = getattr(result, "boxes", None)
+            if boxes is not None and len(boxes) > 0:
+                polygon = self.cam_monitor._compute_board_polygon()
+                if polygon is None:
+                    return False
+                for box in boxes.xyxy.cpu().tolist():
+                    cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+                    if cv2.pointPolygonTest(polygon, (cx, cy), False) >= 0:
+                        hand_on_board = True
+                        break
+        except Exception as e:
+            print(f"[HAND] ⚠️ Detection error: {e}")
+            return False
+        return self.turn_completion_monitor.observe(hand_on_board, now)
+
+    def reset_hand_interaction_monitor(self):
+        if self.turn_completion_monitor is not None:
+            self.turn_completion_monitor.reset()
 
     @property
     def is_robot_ready(self) -> bool:

@@ -83,6 +83,17 @@ VISUAL_PICK_MIN_CONFIDENCE = 0.45
 VISUAL_PICK_MAX_OFFSET_CELLS = 0.25
 VISUAL_PICK_FOOT_RATIO = 0.85
 
+# --- HAND-AWARE AUTO MOVE CONFIRMATION ---
+# Hand detection gates when to inspect the board automatically after player leaves.
+# Mặc định False: Phím SPACE giữ quyền kiểm soát xác nhận chính thức an toàn.
+AUTO_MOVE_CONFIRM_ENABLED = False
+HAND_MODEL_PATH = "models/hand_best_egohands.pt"
+HAND_CONFIDENCE = 0.45
+HAND_ABSENCE_SECONDS = 0.8
+HAND_MIN_PRESENT_SECONDS = 0.25
+AUTO_MOVE_CONFIRM_RETRIES = 10
+AUTO_MOVE_CONFIRM_RETRY_SECONDS = 0.20
+
 # --- THÔNG SỐ AI ---
 AI_THINK_TIME = 10  # Time per move in seconds — AI gets 10s after subtracting TIME_BUFFER (0.5)
 AI_DEPTH = 30          # Độ sâu mặc định (sẽ bị ghi đè bởi logic tự động)

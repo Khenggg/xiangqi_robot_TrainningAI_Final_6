@@ -121,6 +121,15 @@ try:
             key = hw.cam_monitor.update_display()
             if key == ord("q"): running = False
 
+        # Optional Hand-Aware Auto Confirmation (when enabled in config)
+        if (state.turn == "r" and not state.game_over
+                and getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False)
+                and hw.hand_interaction_finished()):
+            input_mgr.try_auto_confirm_move(
+                retries=getattr(config, "AUTO_MOVE_CONFIRM_RETRIES", 10),
+                retry_seconds=getattr(config, "AUTO_MOVE_CONFIRM_RETRY_SECONDS", 0.2),
+            )
+
         # 2d. Xử lý AI Turn (Non-blocking)
         if state.turn == "b" and not state.game_over:
             
