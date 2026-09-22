@@ -54,6 +54,27 @@ class FR5Robot:
         # Kích thước ô cờ (mm), mặc định theo config, tự động cập nhật khi load teaching points
         self.auto_cell_sizes = {"x": config.CELL_SIZE_X, "y": config.CELL_SIZE_Y}
 
+        # Read-only snapshot for the optional debug dashboard.  It is updated
+        # immediately before every robot movement command is sent.
+        self._planned_command_lock = threading.Lock()
+        self._planned_command = None
+
+    def _set_planned_command(self, command, pose, label):
+        """Publish the next physical command without changing robot behavior."""
+        with self._planned_command_lock:
+            self._planned_command = {
+                "command": command,
+                "pose": [float(value) for value in pose[:6]],
+                "label": label,
+            }
+
+    def get_planned_command(self):
+        """Return a safe copy for UI readers running in another thread."""
+        with self._planned_command_lock:
+            if self._planned_command is None:
+                return None
+            return dict(self._planned_command, pose=list(self._planned_command["pose"]))
+
     # -------------------------------------------------------------------------
     # SET MA TRẬN TỪ NGOÀI
     # -------------------------------------------------------------------------
@@ -321,9 +342,11 @@ class FR5Robot:
     # DI CHUYỂN ROBOT
     # -------------------------------------------------------------------------
 
-    def move_safe_pose(self, pose, speed=None, col=None, row=None):
+    def move_safe_pose(self, pose, speed=None, col=None, row=None, label=None):
         """Di chuyển an toàn đến pose. Luôn dùng MoveCart để đảm bảo đường thẳng."""
         vel = speed or self.default_vel
+        location = f"grid ({col}, {row})" if col is not None and row is not None else "waypoint"
+        self._set_planned_command("MoveCart", pose, label or f"Approach {location}")
         if self.dry:
             print(f"[ROBOT] DRY MoveCart → {[round(v,1) for v in pose]} vel={vel}")
             time.sleep(0.2)
@@ -339,9 +362,10 @@ class FR5Robot:
             raise Exception(f"Robot MoveCart error code: {err}")
         return err
 
-    def movej_joint(self, joint_pos, desc_pos, speed=None):
+    def movej_joint(self, joint_pos, desc_pos, speed=None, label=None):
         """Di chuyển trực tiếp bằng góc joint (MoveJ) nếu đã biết."""
         vel = speed or self.default_vel
+        self._set_planned_command("MoveJ", desc_pos, label or "Joint waypoint")
         if self.dry:
             print(f"[ROBOT] DRY MoveJ_Joint → vel={vel}")
             time.sleep(0.2)
@@ -356,9 +380,10 @@ class FR5Robot:
             raise Exception(f"Robot movej_joint error code: {err}")
         return err
 
-    def movel_pose(self, pose, speed=None):
+    def movel_pose(self, pose, speed=None, label=None):
         """Di chuyển thẳng đứng (MoveCart) đến pose."""
         vel = speed or self.default_vel
+        self._set_planned_command("MoveCart", pose, label or "Vertical movement")
         if self.dry:
             print(f"[ROBOT] DRY MoveL → {[round(v,1) for v in pose]} vel={vel}")
             time.sleep(0.2)
@@ -382,14 +407,14 @@ class FR5Robot:
         print("[ROBOT] Về vị trí IDLE...")
         pose = [config.IDLE_X, config.IDLE_Y, config.IDLE_Z] + list(config.ROTATION)
         try:
-            self.move_safe_pose(pose)
+            self.move_safe_pose(pose, label="IDLE")
         except Exception as e:
             print(f"[ROBOT] ⚠️ Lỗi khi về IDLE trực tiếp: {e}. Thử nâng Z lên cao...")
             # Nâng Z an toàn trước khi di chuyển
             try:
                 high_z_pose = [config.IDLE_X, config.IDLE_Y, config.IDLE_Z + 100.0] + list(config.ROTATION)
-                self.move_safe_pose(high_z_pose)
-                self.move_safe_pose(pose)
+                self.move_safe_pose(high_z_pose, label="IDLE high-clearance waypoint")
+                self.move_safe_pose(pose, label="IDLE")
             except Exception as e2:
                 print(f"[ROBOT] ❌ Lỗi cả khi qua điểm trung gian Z cao: {e2}")
 
@@ -416,14 +441,14 @@ class FR5Robot:
                 joints = list(data[6:12])
                 print(f"[ROBOT] Đọc được joints HOMECHESS: {joints}")
                 try:
-                    self.movej_joint(joints, pose)
+                    self.movej_joint(joints, pose, label="HOMECHESS")
                     print("[ROBOT] ✅ Đã về HOMECHESS (bằng Joint).")
                     return
                 except Exception as je:
                     print(f"[ROBOT] ⚠️ Lỗi MoveJ bằng khớp: {je}. Tiếp tục thử MoveJ Pose...")
                     
             # Fallback to MoveJ with pose
-            self.move_safe_pose(pose)
+            self.move_safe_pose(pose, label="HOMECHESS")
             print("[ROBOT] ✅ Đã về HOMECHESS (bằng Pose).")
             
         except Exception as e:
@@ -525,10 +550,11 @@ class FR5Robot:
         print(f"[ROBOT] 🤏 Gắp tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
         self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
-        self.move_safe_pose(pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
-        self.movel_pose(pose_pick)                # Hạ xuống
+        self.move_safe_pose(pose_safe, col=col, row=row,
+                            label=f"Approach pick grid ({col}, {row})")
+        self.movel_pose(pose_pick, label=f"Descend to pick grid ({col}, {row})")
         self.gripper_ctrl(config.GRIPPER_ACTION_CLOSE)
-        self.movel_pose(pose_safe)                # Nhấc lên
+        self.movel_pose(pose_safe, label=f"Lift from pick grid ({col}, {row})")
         print(f"[ROBOT] ✅ Gắp xong ({col},{row})")
 
     def place_at(self, col, row):
@@ -538,10 +564,11 @@ class FR5Robot:
         pose_place = self.board_to_pose(col, row, config.PLACE_Z, rotation=place_rotation)
         print(f"[ROBOT] 📍 Đặt tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
-        self.move_safe_pose(pose_safe, col=col, row=row)  # Đến vị trí an toàn
-        self.movel_pose(pose_place)               # Hạ xuống
+        self.move_safe_pose(pose_safe, col=col, row=row,
+                            label=f"Approach place grid ({col}, {row})")
+        self.movel_pose(pose_place, label=f"Descend to place grid ({col}, {row})")
         self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
-        self.movel_pose(pose_safe)                # Nhấc lên
+        self.movel_pose(pose_safe, label=f"Lift from place grid ({col}, {row})")
         print(f"[ROBOT] ✅ Đặt xong ({col},{row})")
     
     def move_to_extra_safe(self, col, row, visual_target=None):
@@ -554,7 +581,8 @@ class FR5Robot:
         else:
             pose_safe = self.board_to_pose(col, row, config.SAFE_Z, rotation=pick_rotation)
         print(f"[ROBOT] ⬆️ Nâng lên độ cao an toàn tại ({col},{row}) Z={config.SAFE_Z}")
-        self.move_safe_pose(pose_safe, col=col, row=row)
+        self.move_safe_pose(pose_safe, col=col, row=row,
+                            label=f"Extra-safe lift at grid ({col}, {row})")
 
     def place_in_capture_bin(self, current_z=None):
         """Thả quân bị ăn vào bãi thải sử dụng teaching point R_Trash.
@@ -581,19 +609,19 @@ class FR5Robot:
             trash_pose = self.teaching_points["R_Trash"]["pose"]
             
             # Di chuyển đến R_Trash bằng MoveJ (an toàn hơn)
-            err = self.movej_joint(trash_joints, trash_pose)
+            err = self.movej_joint(trash_joints, trash_pose, label="Capture bin (R_Trash)")
             if err not in (0, 112):
                 print(f"[ROBOT] ⚠️ Không thể đến R_Trash, dùng tọa độ config backup")
                 # Fallback: dùng tọa độ từ config
                 safe_z = current_z if current_z is not None else config.SAFE_Z
                 pose_safe = [config.CAPTURE_BIN_X, config.CAPTURE_BIN_Y, safe_z] + list(config.ROTATION)
-                self.move_safe_pose(pose_safe)
+                self.move_safe_pose(pose_safe, label="Capture bin fallback")
         else:
             print(f"[ROBOT] ⚠️ Không tìm thấy R_Trash, dùng tọa độ config")
             # Fallback: dùng tọa độ từ config
             safe_z = current_z if current_z is not None else config.SAFE_Z
             pose_safe = [config.CAPTURE_BIN_X, config.CAPTURE_BIN_Y, safe_z] + list(config.ROTATION)
-            self.move_safe_pose(pose_safe)
+            self.move_safe_pose(pose_safe, label="Capture bin fallback")
         
         # Bước 3: Thả quân
         self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)

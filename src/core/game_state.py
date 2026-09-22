@@ -114,6 +114,11 @@ class GameState:
     def handle_game_over(self, the_winner):
         self.winner = the_winner
         self.game_over = True
+        # Do not leave a move/vision notification competing with the winner
+        # banner.  New-game setup will reset these fields as usual.
+        self.status_message = ""
+        self.status_expiry = 0.0
+        self.ai_thinking = False
 
     def save_rollback_state(self, baseline_occ=None, baseline_time=None):
         self._pre_space_state = {

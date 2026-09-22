@@ -71,6 +71,7 @@ PLACE_TOOL_ROTATION = list(ROTATION)
 # Kết nối Robot
 ROBOT_IP = "192.168.58.2"
 DRY_RUN = False # Đổi thành True nếu muốn test code mà không cần bật Robot
+DEBUG_DASHBOARD = False  # True: open the optional read-only debug window
 
 # Camera index (0 = built-in webcam, 1 = USB cam, 2 = DroidCam, etc.)
 # main.py will auto-try configured index first, then others if it fails.

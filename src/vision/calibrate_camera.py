@@ -72,7 +72,7 @@ def calibrate_perspective_camera(cap, save_path):
     print("   3️⃣  Góc Xe Đỏ (Phải)")
     print("   4️⃣  Góc Xe Đỏ (Trái)")
     print("---------------------------------------------")
-    print("⌨️  Phím tắt: 'R'=Làm lại | 'S'=Lưu file | 'Q'=Thoát")
+    print("⌨️  Phím tắt: 'R'=Xóa điểm | 'S'=Lưu file | 'Q'=Thoát")
 
     import os
     M = None
@@ -129,7 +129,7 @@ def calibrate_perspective_camera(cap, save_path):
                     cv2.line(display, (int(p1[0]), int(p1[1])),
                              (int(p2[0]), int(p2[1])), (0, 255, 255), 1)
 
-                prompt_text = "OK? Bam 'S' de Luu / Dung lai"
+                prompt_text = "S: Luu | R: Xoa diem | Q: Huy"
                 cv2.putText(display, prompt_text, (20, 45),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             except:
@@ -151,6 +151,6 @@ def calibrate_perspective_camera(cap, save_path):
             break
 
     cal_stop[0] = True
-    cal_thread.join(timeout=1.0)
+    cal_thread.join()
     cv2.destroyWindow(window)
     return M
