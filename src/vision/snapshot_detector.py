@@ -78,6 +78,8 @@ class SnapshotDetector:
 
     def detect_move(self, frame, detections, board, cchess_result=None):
         """Chụp T2 và so sánh với T1 để phát hiện nước đi của quân ĐỎ.
+        ƯU TIÊN HÀNG ĐẦU: Nhận diện trực tiếp qua CChess ONNX layout (layout_nano_v3.onnx).
+        FALLBACK: So sánh occupancy grid của YOLO nếu không có CChess.
         
         Args:
             frame:          OpenCV frame (BGR) từ CameraMonitor
@@ -89,12 +91,22 @@ class SnapshotDetector:
             (src, dst, piece_name) nếu phát hiện nước đi hợp lệ
             (None, None, None) nếu không phát hiện được
         """
+        # === 1. ƯU TIÊN HÀNG ĐẦU: CCHESS ONNX DIRECT MOVE DETECTION ===
+        if cchess_result and cchess_result.get("success"):
+            rec_board = cchess_result.get("board", [])
+            if rec_board:
+                s, d, p = self._detect_move_from_cchess(board, rec_board)
+                if s is not None and d is not None:
+                    print(f"[SNAPSHOT] CChess ONNX Direct Move: {p} {s}->{d}")
+                    return s, d, p
+
+        # === 2. FALLBACK: YOLO OCCUPANCY GRID COMPARISON ===
         if self._baseline_occ is None:
-            print("[SNAPSHOT] ⚠️ Chưa có T1 baseline! Gọi capture_baseline() trước.")
+            print("[SNAPSHOT] Chua co T1 baseline! Goi capture_baseline() truoc.")
             return None, None, None
 
         if frame is None:
-            print("[SNAPSHOT] ❌ Không có frame cho T2!")
+            print("[SNAPSHOT] Khong co frame cho T2!")
             return None, None, None
 
         # Build T2 occupancy
@@ -102,10 +114,62 @@ class SnapshotDetector:
 
         # Debug
         n_occupied = sum(1 for r in t2_occ for cell in r if cell)
-        print(f"[SNAPSHOT] 📸 T2 captured: {n_occupied} quân detected")
+        print(f"[SNAPSHOT] T2 captured (YOLO): {n_occupied} quan detected")
 
-        # So sánh T1 vs T2 (dùng occupancy + memory board + CChess ONNX hỗ trợ)
+        # So sánh T1 vs T2
         return self._compare_snapshots(self._baseline_occ, t2_occ, board, frame, cchess_result=cchess_result)
+
+    def _detect_move_from_cchess(self, current_board, rec_board):
+        """Phát hiện nước đi trực tiếp từ CChess ONNX layout classification."""
+        try:
+            from src.core import xiangqi
+        except ImportError:
+            return None, None, None
+
+        # 1. Tìm các ô quân Đỏ bị thay đổi (rời đi)
+        src_candidates = []
+        for r in range(self.num_rows):
+            for c in range(self.num_cols):
+                p = current_board[r][c]
+                rec_p = rec_board[r][c]
+                if p.startswith("r") and rec_p != p:
+                    src_candidates.append(((c, r), p))
+
+        # 2. Tìm các ô đích có thể xuất hiện quân đỏ
+        dst_candidates = []
+        for r in range(self.num_rows):
+            for c in range(self.num_cols):
+                rec_p = rec_board[r][c]
+                orig_p = current_board[r][c]
+                if rec_p.startswith("r") and orig_p != rec_p:
+                    dst_candidates.append(((c, r), rec_p))
+
+        # 3. Thử từng cặp (src, dst) theo luật cờ tướng
+        valid_moves = []
+        for (sc, sr), p_src in src_candidates:
+            for (dc, dr), p_dst in dst_candidates:
+                if (sc, sr) == (dc, dr):
+                    continue
+                if xiangqi.is_valid_move((sc, sr), (dc, dr), current_board, "r"):
+                    is_exact_piece = (p_src == p_dst)
+                    valid_moves.append(((sc, sr), (dc, dr), p_src, is_exact_piece))
+
+        # Ưu tiên nước đi khớp đúng loại quân (vừa hợp luật vừa đúng loại quân nhận diện)
+        exact_moves = [m for m in valid_moves if m[3]]
+        if len(exact_moves) == 1:
+            s, d, p, _ = exact_moves[0]
+            return s, d, p
+        elif len(valid_moves) == 1:
+            s, d, p, _ = valid_moves[0]
+            return s, d, p
+        elif len(exact_moves) > 1:
+            s, d, p, _ = exact_moves[0]
+            return s, d, p
+        elif len(valid_moves) > 1:
+            s, d, p, _ = valid_moves[0]
+            return s, d, p
+
+        return None, None, None
 
     def has_baseline(self):
         """Kiểm tra đã có T1 baseline chưa."""
