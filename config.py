@@ -33,8 +33,8 @@ CAPTURE_BIN_Z = 291.68  # [QUAN TRỌNG] Độ cao khi thả quân vào thùng
 
 # Độ cao an toàn (mm)
 SAFE_Z  = 210.0    # Độ cao an toàn khi di chuyển giữa các ô (tăng lên để tránh hất quân)
-PICK_Z  = 175.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
-PLACE_Z = 175.0   # Hạ xuống đặt
+PICK_Z  = 178.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
+PLACE_Z = 178.0   # Hạ xuống đặt
 
 # Cấu hình kẹp: motor 2 chiều dùng Tool DO trên đầu robot.
 # Verified wiring: DO1 chạy hướng MỞ, DO0 chạy hướng ĐÓNG. Không bao giờ bật cả hai cùng lúc.
@@ -48,11 +48,11 @@ GRIPPER_ACTIVE_STATUS = 1
 # Motor không có công tắc hành trình: chỉ cấp điện theo xung ngắn rồi tắt cả hai DO.
 # Tinh chỉnh hai PULSE riêng sau khi thử với tay robot đứng yên và không có quân cờ.
 GRIPPER_DIRECTION_DEADTIME_SEC = 0.10
-GRIPPER_OPEN_PULSE_SEC = 0.20
-GRIPPER_CLOSE_PULSE_SEC = 0.20
+GRIPPER_OPEN_PULSE_SEC = 0.3
+GRIPPER_CLOSE_PULSE_SEC = 0.3
 GRIPPER_OPEN_SETTLE_SEC = 0.25
 GRIPPER_CLOSE_SETTLE_SEC = 0.25
-MOVE_SPEED = 50
+MOVE_SPEED = 60 #Percentage based
 
 # Góc xoay của đầu Robot (Rx, Ry, Rz)
 ROTATION = [-176.418, -1.049, -40.623] 
