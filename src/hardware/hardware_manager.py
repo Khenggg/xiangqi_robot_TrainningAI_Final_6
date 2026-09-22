@@ -10,8 +10,13 @@ from pathlib import Path
 from src.hardware.robot_VIP import FR5Robot
 from src.hardware.backends import RobotBackend, PhysicalFR3Backend, VirtualFR3Backend
 from src.hardware.gripper import TwoOutputGripperDriver
-from src.domain.board_pose_provider import BoardPoseProvider, FixedBoardPoseProvider
-from src.motion.coordinator import MotionCoordinator
+from src.domain.board_pose_provider import (
+    BoardPoseProvider,
+    FixedBoardPoseProvider,
+    PhysicalTeachingPointBoardPoseProvider,
+    BoardCalibrationResult,
+)
+from src.motion.coordinator import MotionCoordinator, MotionProfile
 from src.ai.moonfish_engine import MoonfishEngine
 from src.ai.cloud_engine import CloudEngine
 from src.ai.ai_controller import AIController
@@ -74,7 +79,28 @@ class HardwareManager:
             except Exception as e:
                 print(f"⚠️ [MAIN] Virtual FR3 init error: {e}")
                 self.backend = None
+
+            # Setup Board Pose Provider & Motion Coordinator for Virtual Backend
+            forward_shift_mm = getattr(self.config, "FORWARD_SHIFT_MM", 0.0)
+            self.board_pose_provider = FixedBoardPoseProvider.from_forward_shift(
+                forward_shift_mm=forward_shift_mm
+            )
+            motion_profile = MotionProfile(
+                pick_tcp_height_above_board_mm=getattr(self.config, "PICK_TCP_HEIGHT_MM", 4.715),
+                place_tcp_height_above_board_mm=getattr(self.config, "PLACE_TCP_HEIGHT_MM", 4.715),
+                safe_clearance_above_board_mm=getattr(self.config, "SAFE_CLEARANCE_Z_MM", 40.0),
+                provenance="SIMULATION_GEOMETRIC_DEFAULT",
+            )
+            if self.backend is not None:
+                self.motion_coordinator = MotionCoordinator(
+                    backend=self.backend,
+                    board_pose_provider=self.board_pose_provider,
+                    motion_profile=motion_profile,
+                    tool_rotation_deg=getattr(self.config, "PICK_TOOL_ROTATION", [-179.164, -3.047, -26.304]),
+                )
+                print("[MAIN] 🧭 MotionCoordinator initialized (Virtual Mode).")
         else:
+            print("[MAIN] 🦾 Initializing Physical FR3 Backend...")
             try:
                 self.gripper_driver = TwoOutputGripperDriver(
                     dry_run=self.dry_run,
@@ -96,65 +122,95 @@ class HardwareManager:
                 print(f"⚠️ [MAIN] Physical FR3 Backend init error: {e}")
                 self.backend = None
 
-        # Setup Board Pose Provider & Motion Coordinator
-        self.board_pose_provider = FixedBoardPoseProvider.from_forward_shift(forward_shift_mm=0.0)
-        if self.backend is not None:
-            self.motion_coordinator = MotionCoordinator(
-                backend=self.backend,
-                board_pose_provider=self.board_pose_provider,
-                tool_rotation_deg=getattr(self.config, "PICK_TOOL_ROTATION", [-179.164, -3.047, -26.304]),
-                safe_clearance_z_mm=getattr(self.config, "SAFE_CLEARANCE_Z_MM", 40.0),
-                pick_depth_offset_mm=getattr(self.config, "PICK_DEPTH_OFFSET_MM", 0.0),
-            )
-            print("[MAIN] 🧭 MotionCoordinator initialized.")
+            # Legacy fallback connection for existing code/tests
+            if not self.dry_run:
+                try:
+                    self.robot.connect()
+                    print("[MAIN] ✅ Robot kết nối thành công.")
+                except Exception as e:
+                    print(f"⚠️ [MAIN] Robot connection error: {e}")
+                    print("   → Tiếp tục chạy KHÔNG có robot (camera + calibrate vẫn hoạt động)")
+                    self.robot.connected = False
 
-        # Legacy fallback connection for existing code/tests
-        if not self.dry_run:
-            try:
-                self.robot.connect()
-                print("[MAIN] ✅ Robot kết nối thành công.")
-            except Exception as e:
-                print(f"⚠️ [MAIN] Robot connection error: {e}")
-                print("   → Tiếp tục chạy KHÔNG có robot (camera + calibrate vẫn hoạt động)")
+                if self.robot.connected:
+                    try:
+                        self.robot.go_to_home_chess()
+                    except Exception as e:
+                        print(f"⚠️ [MAIN] go_to_home_chess lỗi: {e} → bỏ qua, robot vẫn CONNECTED")
+            else:
+                print("[MAIN] DRY_RUN: Skipping physical robot connection.")
                 self.robot.connected = False
 
-            if self.robot.connected:
-                try:
-                    self.robot.go_to_home_chess()
-                except Exception as e:
-                    print(f"⚠️ [MAIN] go_to_home_chess lỗi: {e} → bỏ qua, robot vẫn CONNECTED")
-        else:
-            print("[MAIN] DRY_RUN: Skipping physical robot connection.")
-            self.robot.connected = False
-
-        self._calibrate_robot()
+            # Physical board calibration from R1-R4 teaching points
+            self._calibrate_robot()
 
     def _calibrate_robot(self):
-        print("\n--- ROBOT CALIBRATION (R1 ORIGIN) ---")
-        if not self.robot.connected:
-            print("  ℹ️ Robot chưa kết nối — sử dụng tọa độ gốc mặc định từ config.")
+        print("\n--- ROBOT CALIBRATION (R1-R4 TEACHING POINTS) ---")
+        backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
+        if backend_type == "VIRTUAL":
+            return
+
+        if self.backend is None:
+            print("  ⚠️ Backend không khả dụng — không thể calibrate physical board pose.")
+            self.board_pose_provider = None
+            self.motion_coordinator = None
             return
 
         try:
-            if self.dry_run:
-                self.config.BOARD_ORIGIN_X = 200.0
-                self.config.BOARD_ORIGIN_Y = -100.0
-                print(f"  ✅ DRY RUN: Gán gốc giả định X={self.config.BOARD_ORIGIN_X:.3f}, Y={self.config.BOARD_ORIGIN_Y:.3f}")
-            else:
-                print("Reading coordinates from robot for R1...")
-                err, data = self.robot.robot.GetRobotTeachingPoint("R1")
-                if err != 0:
-                    raise Exception(f"Error getting teaching point R1 (err={err})")
-                self.config.BOARD_ORIGIN_X = float(str(data[0]).strip())
-                self.config.BOARD_ORIGIN_Y = float(str(data[1]).strip())
-                print(f"  ✅ Đã lấy gốc R1 thực tế: X={self.config.BOARD_ORIGIN_X:.3f}, Y={self.config.BOARD_ORIGIN_Y:.3f}")
+            provider = PhysicalTeachingPointBoardPoseProvider.from_controller(self.backend)
+            res = provider.calibration_result
 
-            print("=== ROBOT CALIBRATION OK ===")
+            if not res.success:
+                print(f"\n{'='*60}")
+                print(f"❌ [CRITICAL] Physical board calibration THẤT BẠI: {res.error_message}")
+                print(f"   RMS error: {res.rms_error_mm:.3f} mm, Max error: {res.max_error_mm:.3f} mm")
+                print("   Robot motion đã bị VÔ HIỆU HÓA. Không fallback sang simulation.")
+                print(f"{'='*60}\n")
+                self.board_pose_provider = None
+                self.motion_coordinator = None
+                return
+
+            self.board_pose_provider = provider
+            print(f"  ✅ Calibrated physical board pose thành công:")
+            print(f"     Width: {res.measured_width_mm:.2f} mm (expected 320 mm)")
+            print(f"     Length: {res.measured_length_mm:.2f} mm (expected 360 mm)")
+            print(f"     Residuals (mm): R1={res.residuals_mm.get('R1', 0.0):.2f}, "
+                  f"R2={res.residuals_mm.get('R2', 0.0):.2f}, "
+                  f"R3={res.residuals_mm.get('R3', 0.0):.2f}, "
+                  f"R4={res.residuals_mm.get('R4', 0.0):.2f}")
+            print(f"     RMS Error: {res.rms_error_mm:.3f} mm, Max Error: {res.max_error_mm:.3f} mm")
+
+            # Setup MotionProfile with explicit provenance
+            motion_profile = MotionProfile(
+                pick_tcp_height_above_board_mm=getattr(self.config, "PICK_TCP_HEIGHT_MM", 4.715),
+                place_tcp_height_above_board_mm=getattr(self.config, "PLACE_TCP_HEIGHT_MM", 4.715),
+                safe_clearance_above_board_mm=getattr(self.config, "SAFE_CLEARANCE_Z_MM", 40.0),
+                provenance=getattr(self.config, "PICK_HEIGHT_PROVENANCE", "PROVISIONAL_SIMULATION"),
+            )
+
+            self.motion_coordinator = MotionCoordinator(
+                backend=self.backend,
+                board_pose_provider=self.board_pose_provider,
+                motion_profile=motion_profile,
+                tool_rotation_deg=getattr(self.config, "PICK_TOOL_ROTATION", [-179.164, -3.047, -26.304]),
+            )
+            print("[MAIN] 🧭 MotionCoordinator initialized with Calibrated Physical Board Pose.")
+
+            # Deprecated: Keep legacy config variables populated for non-migrated code
+            # Note: The new motion path (MotionCoordinator) does NOT depend on these.
+            state = self.board_pose_provider.get_board_placement_state()
+            p_r1 = state.cell_to_robot_xyz(0, 0, height_above_board_mm=0.0)
+            self.config.BOARD_ORIGIN_X = float(p_r1[0]) * 1000.0
+            self.config.BOARD_ORIGIN_Y = float(p_r1[1]) * 1000.0
+            print(f"  [LEGACY] Synced deprecated config.BOARD_ORIGIN_X={self.config.BOARD_ORIGIN_X:.3f}, Y={self.config.BOARD_ORIGIN_Y:.3f}")
+
         except Exception as e:
             print(f"\n{'='*60}")
-            print(f"❌ [CRITICAL] Robot calibration (R1) THẤT BẠI: {e}")
-            self.robot.connected = False
-            print("   Robot đã bị vô hiệu hóa. Game tiếp tục ở chế độ KHÔNG CÓ ROBOT.")
+            print(f"❌ [CRITICAL] Lỗi trong quá trình calibrate physical board: {e}")
+            print("   Robot motion đã bị VÔ HIỆU HÓA. Không fallback sang simulation.")
+            print(f"{'='*60}\n")
+            self.board_pose_provider = None
+            self.motion_coordinator = None
 
     def _init_ai(self):
         engine_type = getattr(self.config, "ENGINE_TYPE", "LOCAL")
@@ -307,7 +363,11 @@ class HardwareManager:
     @property
     def is_robot_ready(self) -> bool:
         """Returns True if authoritative backend or legacy robot is ready for motion."""
+        backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
         if self.backend is not None:
+            # Physical mode strictly requires successful board calibration
+            if backend_type == "PHYSICAL" and self.board_pose_provider is None:
+                return False
             return self.backend.get_state_snapshot().connected
         return bool(self.robot and self.robot.connected)
 
@@ -325,6 +385,11 @@ class HardwareManager:
         Execute pick-and-place move through the authoritative MotionCoordinator.
         Falls back to legacy FR5Robot if coordinator is unavailable.
         """
+        backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
+        if backend_type == "PHYSICAL" and self.board_pose_provider is None:
+            print("[ROBOT] ❌ Physical motion is DISABLED because board calibration failed or is unavailable.")
+            return False
+
         if self.motion_coordinator is not None and self.is_robot_ready:
             capture_pose = [
                 getattr(self.config, "CAPTURE_BIN_X", -226.123),
@@ -342,7 +407,7 @@ class HardwareManager:
                 moving_visual_target=moving_visual_target,
                 captured_visual_target=captured_visual_target,
             )
-        elif self.robot and self.robot.connected:
+        elif self.robot and self.robot.connected and backend_type != "PHYSICAL":
             return self.robot.move_piece(
                 s_col, s_row, d_col, d_row, is_capture,
                 moving_visual_target=moving_visual_target,

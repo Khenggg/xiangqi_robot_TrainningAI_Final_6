@@ -92,3 +92,7 @@ class RobotBackend(ABC):
     def stop(self) -> bool:
         """Emergency stop / halt current motion."""
         pass
+
+    def get_teaching_point(self, name: str) -> Tuple[int, List[float]]:
+        """Optional query for controller teaching points. Returns (err_code, data)."""
+        return -1, []
