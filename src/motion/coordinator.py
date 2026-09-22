@@ -5,6 +5,7 @@ Decouples high-level motion planning and multi-stage pick/place sequences
 from backend hardware execution (VirtualFR3Backend vs PhysicalFR3Backend).
 """
 
+from dataclasses import dataclass
 from typing import Any, Optional, Sequence, Tuple
 import logging
 import time
@@ -16,10 +17,28 @@ from src.hardware.backends.base import RobotBackend
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class MotionProfile:
+    """
+    Authoritative motion parameters relative to board surface with provenance tracking.
+    
+    Attributes:
+        pick_tcp_height_above_board_mm: Gripper TCP height above board surface during grasp.
+            Canonical default = piece_height / 2 = 9.43 / 2 = 4.715 mm (center of piece).
+        place_tcp_height_above_board_mm: Gripper TCP height above board surface during release.
+        safe_clearance_above_board_mm: Safe transit / approach clearance above board surface (e.g. 40.0 mm).
+        provenance: Semantic origin tag ('SIMULATION_GEOMETRIC_DEFAULT', 'PROVISIONAL_SIMULATION', 'MEASURED_APPROXIMATE').
+    """
+    pick_tcp_height_above_board_mm: float = 4.715
+    place_tcp_height_above_board_mm: float = 4.715
+    safe_clearance_above_board_mm: float = 40.0
+    provenance: str = "SIMULATION_GEOMETRIC_DEFAULT"
+
+
 class MotionCoordinator:
     """
     Coordinates multi-phase pick, place, and capture sequences using an authoritative
-    BoardPoseProvider and an abstract RobotBackend.
+    BoardPoseProvider, MotionProfile, and an abstract RobotBackend.
     """
 
     def __init__(
@@ -27,14 +46,36 @@ class MotionCoordinator:
         backend: RobotBackend,
         board_pose_provider: Optional[BoardPoseProvider] = None,
         tool_rotation_deg: Sequence[float] = (180.0, 0.0, 90.0),
-        safe_clearance_z_mm: float = 40.0,
-        pick_depth_offset_mm: float = 0.0,
+        motion_profile: Optional[MotionProfile] = None,
+        safe_clearance_z_mm: Optional[float] = None,
+        pick_depth_offset_mm: Optional[float] = None,
     ):
         self.backend = backend
         self.board_pose_provider = board_pose_provider or FixedBoardPoseProvider()
         self.tool_rotation_deg = list(tool_rotation_deg)
-        self.safe_clearance_z_mm = float(safe_clearance_z_mm)
-        self.pick_depth_offset_mm = float(pick_depth_offset_mm)
+
+        if motion_profile is not None:
+            self.motion_profile = motion_profile
+        else:
+            pick_h = float(pick_depth_offset_mm) if pick_depth_offset_mm is not None else 4.715
+            clearance_h = float(safe_clearance_z_mm) if safe_clearance_z_mm is not None else 40.0
+            prov = "CUSTOM_OVERRIDE" if pick_depth_offset_mm is not None else "SIMULATION_GEOMETRIC_DEFAULT"
+            self.motion_profile = MotionProfile(
+                pick_tcp_height_above_board_mm=pick_h,
+                place_tcp_height_above_board_mm=pick_h,
+                safe_clearance_above_board_mm=clearance_h,
+                provenance=prov,
+            )
+
+    @property
+    def safe_clearance_z_mm(self) -> float:
+        """Deprecated alias for motion_profile.safe_clearance_above_board_mm."""
+        return self.motion_profile.safe_clearance_above_board_mm
+
+    @property
+    def pick_depth_offset_mm(self) -> float:
+        """Deprecated alias for motion_profile.pick_tcp_height_above_board_mm."""
+        return self.motion_profile.pick_tcp_height_above_board_mm
 
     @property
     def board_placement(self) -> BoardPlacementState:
@@ -67,8 +108,8 @@ class MotionCoordinator:
         target_row = getattr(visual_target, "row", row) if visual_target is not None else row
         target_col = getattr(visual_target, "col", col) if visual_target is not None else col
 
-        clearance_m = self.safe_clearance_z_mm / 1000.0
-        pick_z_m = self.pick_depth_offset_mm / 1000.0
+        clearance_m = self.motion_profile.safe_clearance_above_board_mm / 1000.0
+        pick_z_m = self.motion_profile.pick_tcp_height_above_board_mm / 1000.0
 
         approach_pose = self._get_cartesian_pose_mm_deg(target_row, target_col, z_rel_m=clearance_m)
         pick_pose = self._get_cartesian_pose_mm_deg(target_row, target_col, z_rel_m=pick_z_m)
@@ -105,8 +146,8 @@ class MotionCoordinator:
         3. Open gripper
         4. Lift back to approach pose
         """
-        clearance_m = self.safe_clearance_z_mm / 1000.0
-        place_z_m = self.pick_depth_offset_mm / 1000.0
+        clearance_m = self.motion_profile.safe_clearance_above_board_mm / 1000.0
+        place_z_m = self.motion_profile.place_tcp_height_above_board_mm / 1000.0
 
         approach_pose = self._get_cartesian_pose_mm_deg(row, col, z_rel_m=clearance_m)
         place_pose = self._get_cartesian_pose_mm_deg(row, col, z_rel_m=place_z_m)
@@ -138,7 +179,7 @@ class MotionCoordinator:
         """
         pose = list(pose_mm_deg)
         approach_pose = pose.copy()
-        approach_pose[2] += self.safe_clearance_z_mm
+        approach_pose[2] += self.motion_profile.safe_clearance_above_board_mm
 
         logger.info(f"[MotionCoordinator] Place at custom pose -> {pose[:3]}")
 
