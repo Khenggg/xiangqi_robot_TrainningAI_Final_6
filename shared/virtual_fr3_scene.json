@@ -42,11 +42,15 @@
     "joints_deg": [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
   },
   "tool_transform": {
-    "status": "USER_MEASURED_CAD_REPORTED",
+    "status": "MEASURED_APPROXIMATE",
     "type": "tcp_relative_to_flange",
-    "flange_to_tcp_xyz_m": [0.0, 0.0, 0.218],
+    "canonical_profile_ref": "shared/robot_profiles/fr3.json",
+    "flange_to_tcp_xyz_m": [0.0, 0.0, 0.150],
     "flange_to_tcp_rpy_deg": [0.0, 0.0, 0.0],
-    "description": "Measured distance from FR3 J6 flange to fingertips on physical robot with custom adapter plate (218mm). Raw CAD STEP model measures 147.5mm along tool axis.",
+    "flange_to_tcp_distance_m": 0.150,
+    "description": "Measured distance from FR3 J6 flange to actual grasp center of Xiangqi piece (~150mm, direct mount without extender plate). Source: MEASURED_APPROXIMATE. Raw CAD STEP model axial length is 147.5mm [CAD_DERIVED]. Legacy 218mm is OBSOLETE / UNVERIFIED.",
+    "cad_derived_length_m": 0.1475,
+    "obsolete_legacy_length_m": 0.218,
     "visual_asset_status": "VISUAL_CALIBRATION_PROVISIONAL",
     "visual_asset_notes": "Finger meshes visual scale (0.0008) and origin approximation for 3D viewer rendering."
   }

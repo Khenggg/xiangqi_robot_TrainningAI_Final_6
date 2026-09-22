@@ -4,7 +4,7 @@ Regenerate shared/cell_reachability_dataset.json for all 90 Xiangqi board cells
 under the authoritative 90° orientation.
 
 Ensures:
-- Single tool frame contract (flange_to_tcp = 218 mm along +Z)
+- Single tool frame contract (flange_to_tcp = 150 mm [MEASURED_APPROXIMATE] along +Z)
 - Authoritative BoardPose (+col -> -X_robot, +row -> -Y_robot, +Z_board -> +Z_robot)
 - Canonical heights: grasp clearance = 4.715 mm (piece center), approach = H mm
 - 100% collision-free validity via FR3CollisionGuard in PyBullet
@@ -22,7 +22,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.domain.geometry import get_physical_geometry
+from src.domain.geometry import get_physical_geometry, get_canonical_tool_geometry
 from src.simulation.placement import BoardPlacementState
 from src.simulation.kinematics.fr3 import FR3Kinematics
 from src.simulation.kinematics.urdf_chain import Pose3D, rpy_to_matrix
@@ -32,17 +32,20 @@ from src.simulation.virtual_fr3_backend import VirtualFR3Backend
 
 
 def generate_dataset(
-    forward_shift_mm: float = 15.0,
+    forward_shift_mm: float = 25.0,
     safe_transit_height_mm: float = 40.0,
     board_height_offset_mm: float = 0.0,
     board_yaw_deg: float = 90.0,
     output_path: Path = _PROJECT_ROOT / "shared" / "cell_reachability_dataset.json",
 ):
     world = VirtualPhysicalWorld()
+    world.relocate_board(forward_shift_m=forward_shift_mm / 1000.0, height_offset_m=board_height_offset_mm / 1000.0)
     guard = FR3CollisionGuard(world)
     backend = VirtualFR3Backend()
+    backend.set_collision_guard(guard)
     kin = backend.kinematics
     geom = get_physical_geometry()
+    tool_geom = get_canonical_tool_geometry()
 
     state = BoardPlacementState.compute(
         forward_shift_mm=forward_shift_mm,
@@ -55,7 +58,7 @@ def generate_dataset(
     piece_h = geom.piece_height_mm / 1000.0
     z_grasp_rel = piece_h / 2.0  # 0.004715 m
     z_app_rel = safe_transit_height_mm / 1000.0  # 0.040 m
-    tool_offset_z = 0.218
+    tool_offset_z = tool_geom.flange_to_tcp_distance_m  # Canonical 0.150 m [MEASURED_APPROXIMATE]
 
     target_tool_rpy = [180.0, 0.0, 90.0]
 
@@ -65,6 +68,13 @@ def generate_dataset(
         np.array([-1.57, -1.2, 1.8, -2.1, -1.571, -1.57]),
         np.array([-2.3, -1.0, 1.8, -2.2, -1.571, -2.3]),
         np.array([0.8, -1.0, 1.8, -2.2, -1.571, 0.8]),
+        np.array([-0.8, -1.2, 1.5, -1.8, -1.571, -0.8]),
+        np.array([-1.8, -1.2, 1.5, -1.8, -1.571, -1.8]),
+        np.array([-0.5, -1.2, 1.8, -2.0, -1.571, -0.5]),
+        np.array([-1.0, -1.2, 2.0, -2.2, -1.571, -1.0]),
+        np.array([0.5, -1.2, 1.8, -2.0, -1.571, 0.5]),
+        np.array([1.0, -1.2, 2.0, -2.2, -1.571, 1.0]),
+        np.array([0.0, -1.0, 2.0, -2.2, -1.571, 0.0]),
     ]
 
     # Order cells from center outward for smooth neighbor propagation
@@ -73,6 +83,7 @@ def generate_dataset(
 
     solved_gr = {}
     solved_ap = {}
+    target_service_q = np.deg2rad(backend.SERVICE_SAFE_JOINTS_DEG)
 
     for r, c in cells_order:
         p_gr = state.cell_to_robot_xyz(r, c, z_grasp_rel)
@@ -82,42 +93,50 @@ def generate_dataset(
 
         cand_seeds = []
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            if (r + dr, c + dc) in solved_gr:
-                cand_seeds.append(solved_gr[(r + dr, c + dc)])
+            if (r + dr, c + dc) in solved_ap:
+                cand_seeds.append(solved_ap[(r + dr, c + dc)])
         cand_seeds.extend(base_seeds)
 
-        # 1. Approach IK
-        res_ap = backend.solve_tcp_ik(pose_ap_mm, seed_joints=cand_seeds[0] if cand_seeds else None, allow_multi_seed=True)
-        if not res_ap.success:
-            for s in cand_seeds:
-                res_ap = backend.solve_tcp_ik(pose_ap_mm, seed_joints=s, allow_multi_seed=False)
-                if res_ap.success:
+        res_ap = None
+        plan_land = None
+        plan_lift = None
+
+        for s in cand_seeds:
+            cand_res = backend.solve_tcp_ik(pose_ap_mm, seed_joints=s, allow_multi_seed=False)
+            if not cand_res.success:
+                continue
+            # Must maintain canonical downward wrist branch (J5 ~ -90 deg)
+            if abs(cand_res.joints_rad[4] - (-1.570796)) > 0.3:
+                continue
+            if not guard.validate_configuration(cand_res.joints_rad).safe:
+                continue
+            land_test = backend.plan_cartesian(cand_res.joints_rad, pose_gr_mm, samples=20, allowed_grasp_piece_id="*")
+            if not land_test.success:
+                continue
+            if not guard.validate_configuration(land_test.final_q, allowed_grasp_piece_id="*").safe:
+                continue
+            lift_test = backend.plan_cartesian(land_test.final_q, pose_ap_mm, samples=20, allowed_grasp_piece_id="*")
+            if not lift_test.success:
+                continue
+
+            # Ensure retreat to SERVICE_SAFE is safe
+            safe_retreat = True
+            for s_step in range(1, 11):
+                interp_q = cand_res.joints_rad + (target_service_q - cand_res.joints_rad) * (s_step / 10.0)
+                if not guard.validate_configuration(interp_q).safe:
+                    safe_retreat = False
                     break
-        assert res_ap.success, f"Approach IK failed at ({r}, {c})"
-        col_ap = guard.validate_configuration(res_ap.joints_rad)
-        assert col_ap.safe, f"Approach collision at ({r}, {c}): {col_ap.failure_reason}"
+            if not safe_retreat:
+                continue
+
+            res_ap = cand_res
+            plan_land = land_test
+            plan_lift = lift_test
+            break
+
+        assert res_ap is not None, f"Approach/Grasp IK failed or collided at ({r}, {c})"
         solved_ap[(r, c)] = res_ap.joints_rad
-
-        # 2. Grasp IK
-        res_gr = backend.solve_tcp_ik(pose_gr_mm, seed_joints=res_ap.joints_rad, allow_multi_seed=False)
-        if not res_gr.success:
-            for s in cand_seeds:
-                res_gr = backend.solve_tcp_ik(pose_gr_mm, seed_joints=s, allow_multi_seed=False)
-                if res_gr.success:
-                    break
-        assert res_gr.success, f"Grasp IK failed at ({r}, {c})"
-        col_gr = guard.validate_configuration(res_gr.joints_rad, allowed_grasp_piece_id="*")
-        assert col_gr.safe, f"Grasp collision at ({r}, {c}): {col_gr.failure_reason}"
-        solved_gr[(r, c)] = res_gr.joints_rad
-
-        # 3. LAND MoveL (Approach -> Grasp)
-        plan_land = backend.plan_cartesian(res_ap.joints_rad, pose_gr_mm, samples=20, allowed_grasp_piece_id="*")
-        assert plan_land.success, f"LAND MoveL failed at ({r}, {c}): {plan_land.failure_reason}"
-
-        # 4. LIFT MoveL (Grasp -> Approach)
-        start_lift = plan_land.final_q if plan_land.final_q is not None else res_gr.joints_rad
-        plan_lift = backend.plan_cartesian(start_lift, pose_ap_mm, samples=20, allowed_grasp_piece_id="*")
-        assert plan_lift.success, f"LIFT MoveL failed at ({r}, {c}): {plan_lift.failure_reason}"
+        solved_gr[(r, c)] = plan_land.final_q
 
     # Reorder sequentially by row, col for canonical dataset indexing
     cell_records = []
@@ -182,7 +201,7 @@ def generate_dataset(
 
 def main():
     parser = argparse.ArgumentParser(description="Generate 90-cell reachability dataset for 90° board orientation.")
-    parser.add_argument("--shift-mm", type=float, default=15.0, help="Forward shift along -X in mm (default 15.0)")
+    parser.add_argument("--shift-mm", type=float, default=25.0, help="Forward shift along -X in mm (default 25.0)")
     parser.add_argument("--safe-transit-h-mm", type=float, default=40.0, help="Safe transit height H in mm (default 40.0)")
     parser.add_argument("--board-height-offset-mm", type=float, default=0.0, help="Z offset in mm (default 0.0)")
     parser.add_argument("--board-yaw-deg", type=float, default=90.0, help="Board yaw in degrees (default 90.0)")

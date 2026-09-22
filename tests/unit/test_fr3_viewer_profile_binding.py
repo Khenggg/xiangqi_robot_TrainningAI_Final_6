@@ -77,12 +77,12 @@ class ViewerProfileBindingTests(unittest.TestCase):
         grid_robot = placement.get("grid_origin_in_robot_base_m")
         self.assertIsInstance(grid_robot, list)
         self.assertEqual(len(grid_robot), 3)
-        self.assertEqual(grid_robot, [-0.18, -0.16, 0.0105])
+        self.assertEqual(grid_robot, [-0.20, 0.18, 0.0105])
 
         grid_world = placement.get("grid_origin_in_3d_world_m")
         self.assertIsInstance(grid_world, list)
         self.assertEqual(len(grid_world), 3)
-        self.assertEqual(grid_world, [0.16, 0.0105, 0.18])
+        self.assertEqual(grid_world, [-0.18, 0.0105, 0.20])
 
         # Mathematical transformation consistency: R * p_robot_origin + t == p_world_origin
         import numpy as np
@@ -100,7 +100,7 @@ class ViewerProfileBindingTests(unittest.TestCase):
     def test_four_corners_and_all_cells_robot_to_world_parity(self):
         """Verify mathematical parity between robot base and 3D viewer board points.
 
-        For all 4 corners and all 90 cells:
+        For all 4 corners and all 90 cells under 90° orientation:
         R @ p_robot(col, row) + t == p_viewer(col, row)
         Error must be strictly < 1e-6 m (zero column mirroring).
         """
@@ -120,31 +120,27 @@ class ViewerProfileBindingTests(unittest.TestCase):
 
         placement = scene_data["virtual_board_placement"]
         grid_robot = np.array(placement["grid_origin_in_robot_base_m"], dtype=float)
-        center_world = np.array(placement["board_center_in_3d_world_m"], dtype=float)
+        grid_world = np.array(placement["grid_origin_in_3d_world_m"], dtype=float)
 
         col_spacing_m = phys_data["board"]["column_spacing"] / 1000.0  # 0.04m
         row_spacing_m = phys_data["board"]["row_spacing"] / 1000.0     # 0.04m
         cols = phys_data["board"]["columns"]                          # 9
         rows = phys_data["board"]["rows"]                             # 10
 
-        playable_width_m = (cols - 1) * col_spacing_m                 # 0.32m
-        playable_depth_m = (rows - 1) * row_spacing_m                 # 0.36m
-
+        # In 90° orientation:
+        # Col axis is -X_robot (+Z_world), Row axis is -Y_robot (+X_world)
         def robot_point(c: int, r: int) -> np.ndarray:
             return np.array([
-                grid_robot[0] - r * row_spacing_m,
-                grid_robot[1] + c * col_spacing_m,
+                grid_robot[0] - c * col_spacing_m,
+                grid_robot[1] - r * row_spacing_m,
                 grid_robot[2],
             ], dtype=float)
 
         def viewer_point(c: int, r: int) -> np.ndarray:
-            origin_x = center_world[0] + playable_width_m / 2.0
-            origin_y = center_world[1]
-            origin_z = center_world[2] - playable_depth_m / 2.0
             return np.array([
-                origin_x - c * col_spacing_m,
-                origin_y,
-                origin_z + r * row_spacing_m,
+                grid_world[0] + r * row_spacing_m,
+                grid_world[1],
+                grid_world[2] + c * col_spacing_m,
             ], dtype=float)
 
         corners = [

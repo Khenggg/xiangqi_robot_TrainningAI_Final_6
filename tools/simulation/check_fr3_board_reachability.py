@@ -70,11 +70,10 @@ def evaluate_board_reachability(
     cell_results = []
 
     for r in range(num_rows):
-        # Row 0 is at x0, Row (num_rows-1) along -X in robot base
-        x = x0 - r * row_spacing
+        # In 90° orientation: Col axis is along -X, Row axis is along -Y
+        y = y0 - r * row_spacing
         for c in range(num_cols):
-            # Col 0 is at y0, Col (num_cols-1) along +Y in robot base
-            y = y0 + c * col_spacing
+            x = x0 - c * col_spacing
 
             T_target = np.eye(4, dtype=float)
             T_target[:3, :3] = R_target

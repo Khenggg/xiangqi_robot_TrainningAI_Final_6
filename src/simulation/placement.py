@@ -25,7 +25,7 @@ import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
-from src.domain.geometry import get_physical_geometry
+from src.domain.geometry import get_physical_geometry, get_canonical_tool_geometry
 from src.simulation.kinematics.fr3 import FR3Kinematics, IKResult
 
 
@@ -51,11 +51,14 @@ class BoardPlacementAnalyzer:
     def __init__(
         self,
         kinematics: Optional[FR3Kinematics] = None,
-        tool_flange_to_tcp_m: Sequence[float] = (0.0, 0.0, 0.218),
+        tool_flange_to_tcp_m: Optional[Sequence[float]] = None,
         board_surface_nominal_m: float = 0.0105,
     ):
         self.kinematics = kinematics or FR3Kinematics()
         self.geom = get_physical_geometry()
+        canonical_tool = get_canonical_tool_geometry()
+        if tool_flange_to_tcp_m is None:
+            tool_flange_to_tcp_m = canonical_tool.canonical_tcp_offset_m
         self.tool_length_m = float(tool_flange_to_tcp_m[2])
         self.tool_length_mm = self.tool_length_m * 1000.0
         self.board_surface_nominal_m = float(board_surface_nominal_m)

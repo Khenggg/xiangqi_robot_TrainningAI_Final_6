@@ -6,10 +6,51 @@ Does NOT import `config.py` to prevent circular dependencies.
 """
 
 from dataclasses import dataclass
+from enum import Enum
 import json
 import math
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
+
+
+class ProvenanceStatus(str, Enum):
+    """
+    Source provenance status for physical and geometric constants.
+    Guarantees no unverified or provisional values are silently treated as ground truth.
+    """
+    MEASURED = "MEASURED"                          # Ground truth directly measured with certified physical tool
+    MEASURED_APPROXIMATE = "MEASURED_APPROXIMATE"  # Hand-measured on physical hardware (e.g. caliper / tape ~150mm)
+    CAD_DERIVED = "CAD_DERIVED"                    # Extracted directly from CAD STEP / URDF model
+    PROVISIONAL_SIMULATION = "PROVISIONAL_SIMULATION"  # Simulation-only tuning candidate pending physical validation
+    LEGACY_UNVERIFIED = "LEGACY_UNVERIFIED"        # Historical / obsolete value (e.g. 218mm with unverified adapter)
+
+
+@dataclass(frozen=True)
+class ProvenanceRecord:
+    """Rigorous audit record for a physical or kinematic parameter."""
+    parameter: str
+    value: Any
+    unit: str
+    status: ProvenanceStatus
+    description: str
+    notes: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ToolGeometry:
+    """Canonical single-source-of-truth tool definition for FAIRINO FR3 gripper."""
+    canonical_tcp_offset_m: Tuple[float, float, float]  # [0.0, 0.0, 0.150]
+    flange_to_tcp_distance_m: float                     # 0.150
+    flange_to_tcp_distance_mm: float                    # 150.0
+    cad_length_mm: float                                # 147.5
+    legacy_unverified_length_mm: float                  # 218.0
+    status: ProvenanceStatus                            # ProvenanceStatus.MEASURED_APPROXIMATE
+    cad_status: ProvenanceStatus = ProvenanceStatus.CAD_DERIVED
+    legacy_status: ProvenanceStatus = ProvenanceStatus.LEGACY_UNVERIFIED
+    mount_type: str = "DIRECT_J6_FLANGE"
+    has_adapter_plate: bool = False
+    source_file: str = "shared/robot_profiles/fr3.json"
+
 
 
 
@@ -368,4 +409,201 @@ def metric_to_grid(
     """Module-level helper to convert metric (u_mm, v_mm) to grid (col, row)."""
     g = geom or get_physical_geometry()
     return g.metric_to_grid(u_mm, v_mm, strict=strict)
+
+
+_CACHED_TOOL_GEOMETRY: Optional[ToolGeometry] = None
+
+
+def get_default_robot_profile_path() -> Path:
+    """Resolve default path to shared/robot_profiles/fr3.json relative to repository root."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    return repo_root / "shared" / "robot_profiles" / "fr3.json"
+
+
+def load_canonical_tool_geometry(profile_path: Optional[Path] = None) -> ToolGeometry:
+    """
+    Load canonical tool geometry from shared/robot_profiles/fr3.json.
+    Falls back to shared/virtual_fr3_scene.json or measured defaults.
+    """
+    path = Path(profile_path) if profile_path else get_default_robot_profile_path()
+    if path.is_file():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            tool_data = data.get("tool", {})
+            can_tcp = tool_data.get("canonical_tcp", {})
+            cad_data = tool_data.get("cad_geometry", {})
+            legacy_data = tool_data.get("legacy_geometry", {})
+
+            tcp_xyz = tuple(float(x) for x in can_tcp.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.150]))
+            dist_m = float(can_tcp.get("flange_to_tcp_distance_m", tcp_xyz[2]))
+            dist_mm = float(can_tcp.get("length_mm", dist_m * 1000.0))
+            cad_mm = float(cad_data.get("length_mm", 147.5))
+            legacy_mm = float(legacy_data.get("length_mm", 218.0))
+            status = ProvenanceStatus(can_tcp.get("provenance", "MEASURED_APPROXIMATE"))
+
+            return ToolGeometry(
+                canonical_tcp_offset_m=(tcp_xyz[0], tcp_xyz[1], tcp_xyz[2]),
+                flange_to_tcp_distance_m=dist_m,
+                flange_to_tcp_distance_mm=dist_mm,
+                cad_length_mm=cad_mm,
+                legacy_unverified_length_mm=legacy_mm,
+                status=status,
+                cad_status=ProvenanceStatus.CAD_DERIVED,
+                legacy_status=ProvenanceStatus.LEGACY_UNVERIFIED,
+                mount_type=str(tool_data.get("mount_type", "DIRECT_J6_FLANGE")),
+                has_adapter_plate=bool(tool_data.get("has_adapter_plate", False)),
+                source_file=str(path),
+            )
+        except Exception:
+            pass
+
+    # Fallback to defaults
+    return ToolGeometry(
+        canonical_tcp_offset_m=(0.0, 0.0, 0.150),
+        flange_to_tcp_distance_m=0.150,
+        flange_to_tcp_distance_mm=150.0,
+        cad_length_mm=147.5,
+        legacy_unverified_length_mm=218.0,
+        status=ProvenanceStatus.MEASURED_APPROXIMATE,
+        cad_status=ProvenanceStatus.CAD_DERIVED,
+        legacy_status=ProvenanceStatus.LEGACY_UNVERIFIED,
+        mount_type="DIRECT_J6_FLANGE",
+        has_adapter_plate=False,
+        source_file="defaults",
+    )
+
+
+def get_canonical_tool_geometry(reload: bool = False) -> ToolGeometry:
+    """Return cached singleton ToolGeometry instance."""
+    global _CACHED_TOOL_GEOMETRY
+    if _CACHED_TOOL_GEOMETRY is None or reload:
+        _CACHED_TOOL_GEOMETRY = load_canonical_tool_geometry()
+    return _CACHED_TOOL_GEOMETRY
+
+
+def get_physical_constants_provenance() -> Dict[str, ProvenanceRecord]:
+    """
+    Return comprehensive provenance registry for all physical-critical constants.
+    Ensures PROVISIONAL and LEGACY_UNVERIFIED constants are explicitly audited.
+    """
+    geom = get_physical_geometry()
+    tool = get_canonical_tool_geometry()
+
+    return {
+        "tool_length": ProvenanceRecord(
+            parameter="tool_length",
+            value=tool.flange_to_tcp_distance_mm,
+            unit="mm",
+            status=ProvenanceStatus.MEASURED_APPROXIMATE,
+            description="FR3 J6 flange plane to actual grasp center of Xiangqi piece (direct mount)",
+            notes="Approx. 150mm measured on physical FR3 hardware. Does not include obsolete adapter plate.",
+        ),
+        "cad_tool_length": ProvenanceRecord(
+            parameter="cad_tool_length",
+            value=tool.cad_length_mm,
+            unit="mm",
+            status=ProvenanceStatus.CAD_DERIVED,
+            description="Axial distance from flange mount to fingertip from CAD STEP model",
+            notes="Extracted from Assieme_pinza_dita_parallele.stp (147.5mm).",
+        ),
+        "legacy_tool_length": ProvenanceRecord(
+            parameter="legacy_tool_length",
+            value=tool.legacy_unverified_length_mm,
+            unit="mm",
+            status=ProvenanceStatus.LEGACY_UNVERIFIED,
+            description="Obsolete Virtual Twin flange-to-TCP length with custom adapter plate",
+            notes="OBSOLETE / UNVERIFIED. 218mm replaced by 150mm on direct flange mount.",
+        ),
+        "board_outer_width": ProvenanceRecord(
+            parameter="board_outer_width",
+            value=geom.outer_width_mm,
+            unit="mm",
+            status=ProvenanceStatus.MEASURED,
+            description="Full outer wooden frame width across columns (367.0mm)",
+        ),
+        "board_outer_length": ProvenanceRecord(
+            parameter="board_outer_length",
+            value=geom.outer_length_mm,
+            unit="mm",
+            status=ProvenanceStatus.MEASURED,
+            description="Full outer wooden frame length across rows (410.0mm)",
+        ),
+        "board_thickness": ProvenanceRecord(
+            parameter="board_thickness",
+            value=geom.thickness_mm,
+            unit="mm",
+            status=ProvenanceStatus.MEASURED,
+            description="Board substrate height above table surface (10.5mm)",
+        ),
+        "grid_column_spacing": ProvenanceRecord(
+            parameter="grid_column_spacing",
+            value=geom.grid_cell_width_mm,
+            unit="mm",
+            status=ProvenanceStatus.MEASURED,
+            description="Center-to-center spacing between board columns (40.0mm)",
+        ),
+        "grid_row_spacing": ProvenanceRecord(
+            parameter="grid_row_spacing",
+            value=geom.grid_cell_length_mm,
+            unit="mm",
+            status=ProvenanceStatus.MEASURED,
+            description="Center-to-center spacing between board rows (40.0mm)",
+        ),
+        "piece_diameter": ProvenanceRecord(
+            parameter="piece_diameter",
+            value=geom.piece_diameter_mm,
+            unit="mm",
+            status=ProvenanceStatus.MEASURED,
+            description="Diameter of standard Xiangqi piece (22.5mm)",
+        ),
+        "piece_height": ProvenanceRecord(
+            parameter="piece_height",
+            value=geom.piece_height_mm,
+            unit="mm",
+            status=ProvenanceStatus.MEASURED,
+            description="Height of standard Xiangqi piece (9.43mm)",
+        ),
+        "board_pose_nominal": ProvenanceRecord(
+            parameter="board_pose_nominal",
+            value={"forward_shift_mm": 15.0, "board_yaw_deg": 90.0, "z_offset_mm": 0.0},
+            unit="mm/deg",
+            status=ProvenanceStatus.PROVISIONAL_SIMULATION,
+            description="Nominal simulation board placement relative to robot base",
+            notes="Pending in-situ camera calibration on physical workstation.",
+        ),
+        "tool_orientation": ProvenanceRecord(
+            parameter="tool_orientation",
+            value=[180.0, 0.0, 90.0],
+            unit="deg",
+            status=ProvenanceStatus.PROVISIONAL_SIMULATION,
+            description="Target tool downward perpendicular orientation Euler angles (RPY)",
+            notes="Points tool approach vector (+Z_tool) along -Z_robot.",
+        ),
+        "SAFE_Z": ProvenanceRecord(
+            parameter="SAFE_Z",
+            value=40.0,
+            unit="mm",
+            status=ProvenanceStatus.PROVISIONAL_SIMULATION,
+            description="Safe transit flight height clearance above board surface (H = 40.0mm)",
+            notes="Ensures collision-free transit across all board pieces.",
+        ),
+        "PICK_Z": ProvenanceRecord(
+            parameter="PICK_Z",
+            value=round(geom.thickness_mm + geom.piece_height_mm / 2.0, 3),
+            unit="mm",
+            status=ProvenanceStatus.MEASURED_APPROXIMATE,
+            description="Nominal TCP z-height at piece grasp center (15.215mm from table, 4.715mm from board surface)",
+            notes="Piece center = board_thickness (10.5mm) + piece_height / 2 (4.715mm).",
+        ),
+        "PLACE_Z": ProvenanceRecord(
+            parameter="PLACE_Z",
+            value=round(geom.thickness_mm + geom.piece_height_mm / 2.0, 3),
+            unit="mm",
+            status=ProvenanceStatus.MEASURED_APPROXIMATE,
+            description="Nominal TCP z-height at piece release center (15.215mm from table, 4.715mm from board surface)",
+            notes="Piece center = board_thickness (10.5mm) + piece_height / 2 (4.715mm).",
+        ),
+    }
+
 

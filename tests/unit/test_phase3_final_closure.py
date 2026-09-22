@@ -1,7 +1,7 @@
 """
 Comprehensive unit tests for Phase 3 Final Closure:
-1. Single Tool Frame Contract (TCP at fingertips, 0.218m rigid offset, 0 grasp offset).
-2. Authoritative Motion & Rigid TCP Invariant (||p_tcp - p_flange|| == 0.218m).
+1. Single Tool Frame Contract (TCP at grasp center, 0.150m rigid offset [MEASURED_APPROXIMATE], 0 grasp offset).
+2. Authoritative Motion & Rigid TCP Invariant (||p_tcp - p_flange|| == 0.150m).
 3. Collision Guard Negative Tests (penetration rejection, state preservation).
 4. Cartesian 3-Stage Trajectory (Lift XY drift <= 1.0mm, Transit Z deviation <= 1.0mm, Land XY drift <= 1.0mm, tilt <= 0.5 deg).
 5. All 90 cells in cell_reachability_dataset.json kinematically valid and collision-free.
@@ -56,7 +56,7 @@ class Phase3FinalClosureTests(unittest.TestCase):
         self.assertEqual(gripper_cfg["tcp_to_grasp_center_m"], [0.0, 0.0, 0.0])
 
     def test_tool_frame_rigid_invariant(self):
-        """Verify ||p_tcp - p_flange|| == 0.218m across diverse joint configurations."""
+        """Verify ||p_tcp - p_flange|| == 0.150m (canonical measured tool) across diverse joint configurations."""
         backend = VirtualFR3Backend()
         test_configs = [
             [0.0, -45.0, 90.0, -45.0, -90.0, 0.0],
@@ -64,6 +64,9 @@ class Phase3FinalClosureTests(unittest.TestCase):
             [-30.0, -80.0, 130.0, -90.0, -90.0, -30.0],
             [45.0, -30.0, 60.0, -120.0, -90.0, 45.0],
         ]
+
+        expected_dist = backend.flange_to_tcp_distance_m
+        self.assertAlmostEqual(expected_dist, 0.150, places=4)
 
         for q_deg in test_configs:
             q_rad = np.radians(q_deg)
@@ -76,9 +79,9 @@ class Phase3FinalClosureTests(unittest.TestCase):
 
             self.assertAlmostEqual(
                 dist,
-                0.218,
+                0.150,
                 places=4,
-                msg=f"Flange-to-TCP distance must be 0.218m at q={q_deg}, got {dist:.6f}m",
+                msg=f"Flange-to-TCP distance must be 0.150m at q={q_deg}, got {dist:.6f}m",
             )
 
     def test_downward_tool_orientation_contract(self):
@@ -181,7 +184,7 @@ class Phase3FinalClosureTests(unittest.TestCase):
 
         board_z = sim.board_surface_z
         z_grasp = board_z + sim.geom.piece_height_mm / 2000.0  # 0.015215 m
-        z_transit = board_z + 0.070                            # 0.0805 m
+        z_transit = board_z + (sim.placement_state.safe_transit_height_mm / 1000.0)
         p_src_grasp = np.array(sim.cell_to_robot_xyz_m(src_cell[0], src_cell[1], z_grasp))
         p_dst_grasp = np.array(sim.cell_to_robot_xyz_m(dst_cell[0], dst_cell[1], z_grasp))
 

@@ -20,6 +20,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+from src.domain.geometry import get_canonical_tool_geometry
 from src.hardware.backends.base import RobotBackend, RobotStateSnapshot
 from src.simulation.kinematics.fr3 import FR3Kinematics, IKResult, IKStatus
 from src.simulation.kinematics.urdf_chain import Pose3D, matrix_to_rpy, rpy_to_matrix
@@ -115,8 +116,9 @@ class VirtualFR3Backend(RobotBackend):
                 self._listeners.remove(callback)
 
     def _load_tool_transform(self) -> None:
-        """Load fixed tool transform from canonical scene configuration."""
-        tool_xyz = [0.0, 0.0, 0.218]
+        """Load fixed tool transform from canonical tool geometry and scene configuration."""
+        canonical_tool = get_canonical_tool_geometry()
+        tool_xyz = list(canonical_tool.canonical_tcp_offset_m)
         tool_rpy = [0.0, 0.0, 0.0]
         if self.scene_config_path.is_file():
             try:

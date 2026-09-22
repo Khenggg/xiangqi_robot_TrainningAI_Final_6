@@ -831,7 +831,7 @@ function syncAllJointSliders() {
 // ---------------------------------------------------------------------------
 export function computeGeometricPrecheck(d_mm, H_mm, z_board_mm = 10.5, yaw_deg = 90.0) {
   const R = 650.0;
-  const L_tool = 218.0;
+  const L_tool = 150.0; // Canonical measured flange-to-TCP [MEASURED_APPROXIMATE] (CAD: 147.5mm, Legacy 218mm OBSOLETE)
   const piece_h = 9.43;
   const z_tcp_grasp = z_board_mm + piece_h / 2.0;
   const z_flange_grasp = z_tcp_grasp + L_tool;

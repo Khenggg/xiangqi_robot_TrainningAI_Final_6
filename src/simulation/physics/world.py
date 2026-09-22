@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pybullet as p
 
-from src.domain.geometry import get_physical_geometry
+from src.domain.geometry import get_physical_geometry, get_canonical_tool_geometry
 from src.simulation.placement import BoardPlacementState
 from src.simulation.physics.gripper import VirtualGripper
 from src.simulation.physics.piece import XiangqiPieceBody
@@ -190,8 +190,14 @@ class VirtualPhysicalWorld:
             self.gripper = VirtualGripper(profile_path=self.gripper_profile_path)
             self._spawn_gripper_proxies()
 
+            # Resolve canonical tool offset
+            tool_cfg = self.scene_cfg.get("tool_transform", {})
+            can_tcp = list(get_canonical_tool_geometry().canonical_tcp_offset_m)
+            self._tool_offset = np.array(tool_cfg.get("flange_to_tcp_xyz_m", can_tcp), dtype=float)
+
             # Full articulated FR3 robot for collision queries
             self.robot_body_id = -1
+            self._synced_robot_joints: Optional[List[float]] = None
             self._spawn_robot()
         except Exception:
             if self.client_id >= 0:
@@ -243,9 +249,7 @@ class VirtualPhysicalWorld:
             flange_quat = np.array(link_state[5], dtype=float)
 
             R_flange = quat_to_rot_matrix(flange_quat)
-            tool_cfg = self.scene_cfg.get("tool_transform", {})
-            tool_offset = np.array(tool_cfg.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.218]), dtype=float)
-            p_tcp = flange_pos + R_flange @ tool_offset
+            p_tcp = flange_pos + R_flange @ self._tool_offset
             self.gripper.set_collision_proxy_pose(p_tcp, flange_quat)
 
     def sync_robot_runtime_configuration(self, joints_rad: Sequence[float]) -> None:
@@ -256,6 +260,7 @@ class VirtualPhysicalWorld:
         if self.robot_body_id < 0 or self.client_id < 0:
             return
         with self._physics_lock:
+            self._synced_robot_joints = [float(joints_rad[j]) for j in range(min(6, len(joints_rad)))]
             for j_idx in range(min(6, len(joints_rad))):
                 target_pos = float(joints_rad[j_idx])
                 p.resetJointState(self.robot_body_id, j_idx, target_pos, targetVelocity=0.0, physicsClientId=self.client_id)
@@ -274,9 +279,7 @@ class VirtualPhysicalWorld:
             flange_quat = np.array(link_state[5], dtype=float)
 
             R_flange = quat_to_rot_matrix(flange_quat)
-            tool_cfg = self.scene_cfg.get("tool_transform", {})
-            tool_offset = np.array(tool_cfg.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.218]), dtype=float)
-            p_tcp = flange_pos + R_flange @ tool_offset
+            p_tcp = flange_pos + R_flange @ self._tool_offset
             self.gripper.set_tcp_pose(p_tcp, flange_quat)
 
     def sync_robot_configuration(self, joints_rad: Sequence[float]) -> None:
@@ -793,6 +796,11 @@ class VirtualPhysicalWorld:
         for _ in range(num_steps):
             p.stepSimulation(physicsClientId=self.client_id)
             self.sim_time += self.timestep_s
+
+            # Re-apply authoritative robot configuration to prevent gravity drift
+            if self.robot_body_id >= 0 and self._synced_robot_joints is not None:
+                for j_idx, target_pos in enumerate(self._synced_robot_joints):
+                    p.resetJointState(self.robot_body_id, j_idx, target_pos, targetVelocity=0.0, physicsClientId=self.client_id)
 
             # Update attached piece kinematic slaving
             if self.gripper.attached_piece is not None:

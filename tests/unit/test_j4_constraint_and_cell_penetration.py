@@ -15,6 +15,7 @@ from pathlib import Path
 import unittest
 import numpy as np
 
+from src.domain.board_pose import BoardPlacementState
 from src.domain.geometry import get_physical_geometry
 from src.simulation.kinematics.fr3 import FR3Kinematics
 
@@ -39,9 +40,9 @@ class J4ConstraintAndPenetrationTests(unittest.TestCase):
         cls.num_rows = cls.geom.board.rows
         cls.num_cols = cls.geom.board.columns
 
-        # Authoritative CAD parallel gripper length from J6 flange to finger tips (218mm)
+        # Canonical measured parallel gripper length from J6 flange to grasp center (150mm [MEASURED_APPROXIMATE])
         tool_cfg = cls.scene.get("tool_transform", {})
-        cls.L_gripper = float(tool_cfg.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.218])[2])
+        cls.L_gripper = float(tool_cfg.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.150])[2])
         # Desired finger tip height: 1.5mm above board surface to cleanly grasp pieces without touching board
         cls.z_tips = cls.z0 + 0.0015
         cls.z_flange = cls.z_tips + cls.L_gripper
@@ -52,14 +53,14 @@ class J4ConstraintAndPenetrationTests(unittest.TestCase):
         reachable = 0
         min_clearances = []
         tilts = []
+        placement = BoardPlacementState.compute(forward_shift_mm=25.0, board_yaw_deg=90.0)
 
         for r in range(self.num_rows):
-            x = self.x0 - r * self.row_spacing
             for c in range(self.num_cols):
-                y = self.y0 + c * self.col_spacing
+                target_xyz = placement.cell_to_robot_xyz(r, c, z_rel_m=0.0)
                 T_target = np.eye(4)
                 T_target[:3, :3] = self.R_target
-                T_target[:3, 3] = [x, y, self.z_flange]
+                T_target[:3, 3] = [target_xyz[0], target_xyz[1], self.z_flange]
 
                 res = self.kin.inverse_kinematics(T_target, seed_joints=q_seed, max_iterations=80)
                 if not res.success:
@@ -103,7 +104,7 @@ class J4ConstraintAndPenetrationTests(unittest.TestCase):
         L5_expected = 0.102   # Wrist2 to Flange (102mm)
 
         for cell in dataset["cells"]:
-            q = np.radians(cell["joints_deg"])
+            q = np.radians(cell.get("joints_deg") or cell.get("grasp_joints_deg"))
             chain = self.kin.chain.forward_kinematics_chain(q)
 
             p0, p1, p2, p3, p4, p5 = [frame[:3, 3] for frame in chain[:6]]

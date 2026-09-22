@@ -165,5 +165,34 @@
       "velocity_rad_s": 3.2,
       "effort_nm": 28.0
     }
-  ]
+  ],
+  "tool": {
+    "name": "FAIRINO_FR3_PARALLEL_GRIPPER",
+    "mount_type": "DIRECT_J6_FLANGE",
+    "has_adapter_plate": false,
+    "canonical_tcp": {
+      "description": "J6 flange plane to actual grasp center of Xiangqi piece",
+      "flange_to_tcp_xyz_m": [0.0, 0.0, 0.150],
+      "flange_to_tcp_rpy_deg": [0.0, 0.0, 0.0],
+      "flange_to_tcp_distance_m": 0.150,
+      "length_mm": 150.0,
+      "provenance": "MEASURED_APPROXIMATE",
+      "notes": "Direct J6 mount to piece grasp center. Physical measurement ~150mm on actual FAIRINO FR3 hardware."
+    },
+    "cad_geometry": {
+      "description": "Raw CAD STEP model axial length from flange to fingertip",
+      "length_mm": 147.5,
+      "length_m": 0.1475,
+      "provenance": "CAD_DERIVED",
+      "notes": "CAD STEP model Assieme_pinza_dita_parallele.stp axial length is 147.5mm."
+    },
+    "legacy_geometry": {
+      "description": "Legacy Virtual Twin flange-to-TCP with custom adapter plate",
+      "length_mm": 218.0,
+      "length_m": 0.218,
+      "provenance": "LEGACY_UNVERIFIED",
+      "status": "OBSOLETE / UNVERIFIED",
+      "notes": "Obsolete value representing legacy custom extender plate. Not present on current hardware."
+    }
+  }
 }

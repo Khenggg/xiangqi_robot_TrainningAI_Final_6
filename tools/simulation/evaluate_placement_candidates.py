@@ -85,6 +85,12 @@ def solve_candidate(backend, guard, d_mm, H_mm, z_off_mm=0.0):
         np.array([-1.57, -1.2, 1.8, -2.1, -1.571, -1.57]),
         np.array([-2.3, -1.0, 1.8, -2.2, -1.571, -2.3]),
         np.array([0.8, -1.0, 1.8, -2.2, -1.571, 0.8]),
+        np.array([-0.5, -0.6, 1.1, 0.4, 1.571, 2.5]),
+        np.array([-1.0, -0.6, 1.1, 0.4, 1.571, 2.1]),
+        np.array([-1.5, -0.6, 1.1, 0.4, 1.571, 1.6]),
+        np.array([0.0, -0.6, 1.1, 0.4, 1.571, 3.14]),
+        np.array([-0.8, -1.2, 1.5, -1.8, -1.571, -0.8]),
+        np.array([-1.8, -1.2, 1.5, -1.8, -1.571, -1.8]),
     ]
 
     land_passed = 0
@@ -99,41 +105,43 @@ def solve_candidate(backend, guard, d_mm, H_mm, z_off_mm=0.0):
 
         cand_seeds = []
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            if (r + dr, c + dc) in solved_gr:
-                cand_seeds.append(solved_gr[(r + dr, c + dc)])
+            if (r + dr, c + dc) in solved_ap:
+                cand_seeds.append(solved_ap[(r + dr, c + dc)])
         cand_seeds.extend(base_seeds)
 
-        # Approach IK
-        res_ap = backend.solve_tcp_ik(pose_ap_mm, seed_joints=cand_seeds[0] if cand_seeds else None, allow_multi_seed=True)
-        if not res_ap.success:
-            for s in cand_seeds:
-                res_ap = backend.solve_tcp_ik(pose_ap_mm, seed_joints=s, allow_multi_seed=False)
-                if res_ap.success:
+        # Approach IK with collision validation
+        res_ap = None
+        for s in cand_seeds:
+            cand_res = backend.solve_tcp_ik(pose_ap_mm, seed_joints=s, allow_multi_seed=False)
+            if cand_res.success:
+                col_test = guard.validate_configuration(cand_res.joints_rad)
+                if col_test.safe:
+                    res_ap = cand_res
                     break
-        if not res_ap.success:
-            failed_cells.append((r, c, "Approach IK failed"))
-            continue
 
-        col_ap = guard.validate_configuration(res_ap.joints_rad)
-        if not col_ap.safe:
-            failed_cells.append((r, c, f"Approach collision: {col_ap.failure_reason}"))
+        if res_ap is None:
+            failed_cells.append((r, c, "Approach IK failed or collision"))
             continue
         solved_ap[(r, c)] = res_ap.joints_rad
 
-        # Grasp IK
-        res_gr = backend.solve_tcp_ik(pose_gr_mm, seed_joints=res_ap.joints_rad, allow_multi_seed=False)
-        if not res_gr.success:
-            for s in cand_seeds:
-                res_gr = backend.solve_tcp_ik(pose_gr_mm, seed_joints=s, allow_multi_seed=False)
-                if res_gr.success:
-                    break
-        if not res_gr.success:
-            failed_cells.append((r, c, "Grasp IK failed"))
-            continue
+        # Grasp IK with collision validation
+        res_gr = None
+        cand_gr_seeds = [res_ap.joints_rad]
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            if (r + dr, c + dc) in solved_gr:
+                cand_gr_seeds.append(solved_gr[(r + dr, c + dc)])
+        cand_gr_seeds.extend(base_seeds)
 
-        col_gr = guard.validate_configuration(res_gr.joints_rad, allowed_grasp_piece_id="*")
-        if not col_gr.safe:
-            failed_cells.append((r, c, f"Grasp collision: {col_gr.failure_reason}"))
+        for s in cand_gr_seeds:
+            cand_res = backend.solve_tcp_ik(pose_gr_mm, seed_joints=s, allow_multi_seed=False)
+            if cand_res.success:
+                col_test = guard.validate_configuration(cand_res.joints_rad, allowed_grasp_piece_id="*")
+                if col_test.safe:
+                    res_gr = cand_res
+                    break
+
+        if res_gr is None:
+            failed_cells.append((r, c, "Grasp IK failed or collision"))
             continue
         solved_gr[(r, c)] = res_gr.joints_rad
 
@@ -226,12 +234,12 @@ def main():
     backend = VirtualFR3Backend()
 
     candidates = [
-        (0.0, 30.0), (0.0, 40.0), (0.0, 50.0),
-        (5.0, 30.0), (5.0, 40.0), (5.0, 50.0),
-        (10.0, 30.0), (10.0, 35.0), (10.0, 40.0), (10.0, 45.0),
+        (10.0, 35.0), (10.0, 40.0),
         (15.0, 30.0), (15.0, 35.0), (15.0, 40.0), (15.0, 45.0),
         (20.0, 30.0), (20.0, 35.0), (20.0, 40.0), (20.0, 45.0),
-        (25.0, 35.0), (25.0, 40.0),
+        (25.0, 30.0), (25.0, 35.0), (25.0, 40.0), (25.0, 45.0),
+        (30.0, 30.0), (30.0, 35.0), (30.0, 40.0), (30.0, 45.0),
+        (35.0, 35.0), (35.0, 40.0),
     ]
 
     header = f"{'d(mm)':>6} {'H(mm)':>6} {'Z(mm)':>6} {'Local(90)':>10} {'Chained':>9} {'ReachMarg':>10} {'MinCol(mm)':>11} {'MinJt(deg)':>11} {'WorstCond':>10}"

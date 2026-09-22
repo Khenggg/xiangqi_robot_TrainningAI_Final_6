@@ -349,13 +349,13 @@ class Phase3FinalG90CorrectiveTests(unittest.TestCase):
         self.assertIn(farthest, [(0, 8), (9, 8)])
 
     def test_g90f_05_max_flange_approach_distance_audit(self):
-        """G90F-05: The audited value 625.1 mm is strictly Max flange approach distance, NOT TCP distance."""
+        """G90F-05: The audited value 599.0 mm is strictly Max flange approach distance under 150mm tool, NOT TCP distance."""
         analysis = self.analyzer.compute_geometric_precheck(
             forward_shift_mm=15.0,
             safe_transit_height_mm=40.0,
             board_yaw_deg=90.0,
         )
-        self.assertAlmostEqual(analysis["far_approach_distance_mm"], 625.1, delta=1.0)
+        self.assertAlmostEqual(analysis["far_approach_distance_mm"], 599.0, delta=1.0)
         self.assertAlmostEqual(analysis["approach_reach_margin_mm"], 650.0 - analysis["far_approach_distance_mm"], delta=0.1)
 
     def test_g90f_06_physical_board_corner_distances(self):

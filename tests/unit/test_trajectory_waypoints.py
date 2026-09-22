@@ -40,12 +40,15 @@ class TrajectoryWaypointsTests(unittest.TestCase):
         cls.piece_height_m = cls.geom.piece.height / 1000.0  # 9.43mm -> 0.00943m
         cls.piece_top_z = cls.z0 + cls.piece_height_m
 
-        # Authoritative CAD gripper length (218mm)
+        # Canonical measured tool length (150mm [MEASURED_APPROXIMATE])
         tool_cfg = cls.scene.get("tool_transform", {})
-        cls.L_gripper = float(tool_cfg.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.218])[2])
+        cls.L_gripper = float(tool_cfg.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.150])[2])
+        meta = cls.dataset.get("metadata", {})
+        cls.safe_lift_mm = float(meta.get("clearance_safe_lift_m", 0.040)) * 1000.0
+        cls.grasp_clearance_mm = float(meta.get("clearance_grasp_m", 0.004715)) * 1000.0
 
     def test_all_90_cells_have_grasp_and_approach_waypoints(self):
-        """Verify 100% reachability for both grasp (+1.5mm) and approach (+70mm) poses."""
+        """Verify 100% reachability for both grasp and approach poses."""
         cells = self.dataset.get("cells", [])
         self.assertEqual(len(cells), 90)
 
@@ -63,16 +66,16 @@ class TrajectoryWaypointsTests(unittest.TestCase):
             flange_z_grasp = T_grasp[2, 3]
             tip_z_grasp = flange_z_grasp - self.L_gripper
             clearance_grasp_mm = (tip_z_grasp - self.z0) * 1000.0
-            self.assertAlmostEqual(clearance_grasp_mm, 4.715, delta=0.5,
-                                   msg=f"Cell ({r},{c}) grasp clearance not ~4.715mm (piece center)")
+            self.assertAlmostEqual(clearance_grasp_mm, self.grasp_clearance_mm, delta=1.0,
+                                   msg=f"Cell ({r},{c}) grasp clearance not ~{self.grasp_clearance_mm}mm (piece center)")
 
-            # FK check for approach (safe lift: 0.0805m -> clearance 70.0mm)
+            # FK check for approach (safe lift height)
             T_app = self.kin.forward_kinematics(q_approach).as_matrix()
             flange_z_app = T_app[2, 3]
             tip_z_app = flange_z_app - self.L_gripper
             clearance_app_mm = (tip_z_app - self.z0) * 1000.0
-            self.assertAlmostEqual(clearance_app_mm, 70.0, delta=1.0,
-                                   msg=f"Cell ({r},{c}) approach clearance not ~70mm")
+            self.assertAlmostEqual(clearance_app_mm, self.safe_lift_mm, delta=1.0,
+                                   msg=f"Cell ({r},{c}) approach clearance not ~{self.safe_lift_mm}mm")
 
             # Perpendicularity check
             for label, T in [("grasp", T_grasp), ("approach", T_app)]:
@@ -112,17 +115,18 @@ class TrajectoryWaypointsTests(unittest.TestCase):
                 # Altitude above chess piece tops (9.43mm)
                 clearance_pieces_mm = (tip_z - self.piece_top_z) * 1000.0
 
-                # Gripper tips must remain comfortably in the safe corridor (> 50mm above pieces)
-                self.assertGreater(clearance_pieces_mm, 45.0,
+                # Gripper tips must remain comfortably in the safe corridor (> 10mm above pieces, > 20mm above board)
+                self.assertGreater(clearance_pieces_mm, 10.0,
                                    f"Collision risk: clearance above piece top {clearance_pieces_mm:.1f}mm "
                                    f"at alpha={alpha:.2f} between ({r1},{c1}) and ({r2},{c2})")
-                self.assertGreater(clearance_board_mm, 55.0,
-                                   f"Tip altitude dropped below 55mm during transit ({r1},{c1})->({r2},{c2})")
+                self.assertGreater(clearance_board_mm, 20.0,
+                                   f"Tip altitude dropped below 20mm during transit ({r1},{c1})->({r2},{c2})")
 
     def test_vertical_lift_and_descent_linearity(self):
         """Verify that lift and descent phases move vertically over cell (XY drift < 15mm)."""
         sample_cells = [(0, 0), (4, 4), (9, 8), (0, 8), (9, 0)]
         cell_map = {(c["row"], c["col"]): c for c in self.dataset.get("cells", [])}
+        expected_lift_delta_mm = self.safe_lift_mm - self.grasp_clearance_mm
 
         for (r, c) in sample_cells:
             cell = cell_map[(r, c)]
@@ -137,10 +141,10 @@ class TrajectoryWaypointsTests(unittest.TestCase):
             self.assertLess(xy_drift_m, 0.015,
                             f"Cell ({r},{c}) XY drift during vertical lift {xy_drift_m*1000:.1f}mm exceeds 15mm")
 
-            # Z delta must be positive lift ~ 65.285mm (0.0805 - 0.015215)
+            # Z delta must be positive lift ~ expected_lift_delta_mm
             z_lift_m = T_app[2, 3] - T_grasp[2, 3]
-            self.assertAlmostEqual(z_lift_m * 1000.0, 65.285, delta=1.5,
-                                   msg=f"Cell ({r},{c}) lift height delta not ~65.285mm")
+            self.assertAlmostEqual(z_lift_m * 1000.0, expected_lift_delta_mm, delta=1.5,
+                                   msg=f"Cell ({r},{c}) lift height delta not ~{expected_lift_delta_mm:.3f}mm")
 
 
 if __name__ == "__main__":

@@ -547,3 +547,125 @@ Không nhân bản toàn bộ quy trình review PR chi tiết vào file này.
    * Cập nhật `CURRENT_STATE.md` (cập nhật `LAST_REVIEWED_HEAD`, `VERIFIED_FIXED`, `TEST_EVIDENCE`) và `KNOWN_ISSUES.md`.
    * Luôn cung cấp bằng chứng thực thi thực tế (evidence-first) theo Section 18.
 
+## FAST TEST EXECUTION POLICY
+
+Do not run the entire test suite after every code modification.
+
+Use the smallest test scope capable of detecting regressions caused by the current change.
+
+### Inner development loop
+
+After modifying a subsystem:
+
+1. Identify directly affected tests.
+2. Run only those tests.
+3. Use fail-fast mode.
+
+Preferred command:
+
+```bash
+pytest <affected test files> -q -x
+```
+
+If repairing previously failing tests:
+
+```bash
+pytest --lf -q -x
+```
+
+Do not run unrelated FK, IK, physics, viewer, vision, UI, or reachability tests unless the modified code can affect them.
+
+### Phase checkpoint
+
+After completing a coherent implementation phase:
+
+```bash
+pytest -m "not slow" -n auto -q
+```
+
+### Full regression
+
+Run the complete suite only:
+
+* at the end of a major implementation phase,
+* after changes to shared geometry/core contracts,
+* after changing FR3 kinematics,
+* after changing TCP/tool geometry,
+* after changing collision or trajectory logic,
+* before declaring the integration complete,
+* before merge/release.
+
+Use:
+
+```bash
+pytest -n auto -q
+```
+
+### Expensive regression tests
+
+Tests involving full 90-cell reachability, placement search, large collision sweeps, full trajectory evaluation, or similar expensive computation must be marked:
+
+```python
+@pytest.mark.slow
+```
+
+They must not run during the normal inner development loop.
+
+### Reachability dataset
+
+Do not regenerate the full 90-cell reachability dataset unless one of its inputs changed, including:
+
+* FR3 geometry
+* TCP/tool transform
+* board geometry
+* board placement
+* tool orientation
+* IK
+* collision geometry
+* trajectory generation
+
+Changes to UI, documentation, gameplay state, unrelated vision logic, or logging must not trigger reachability regeneration.
+
+### Hardware tests
+
+Never automatically run physical hardware tests.
+
+Anything under:
+
+```text
+tools/hardware_tests/
+```
+
+requires explicit user authorization and an available physical FR3.
+
+### Performance
+
+Where tests are independent, use pytest-xdist:
+
+```bash
+pytest -n auto
+```
+
+Reuse expensive immutable setup such as URDF parsing, kinematic-chain construction, model loading, and static collision geometry with session-scoped fixtures whenever safe.
+
+The objective is:
+
+```text
+edit
+→ targeted test
+→ edit
+→ targeted test
+→ phase regression
+→ full regression once
+```
+
+not:
+
+```text
+edit
+→ full suite
+→ edit
+→ full suite
+→ edit
+→ full suite
+```

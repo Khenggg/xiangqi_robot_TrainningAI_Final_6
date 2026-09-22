@@ -164,10 +164,12 @@ class VirtualXiangqiSimulation:
         repo_root = Path(__file__).resolve().parent.parent.parent
         reach_path = repo_root / "shared" / "cell_reachability_dataset.json"
         self.reachability_dataset = {}
+        dataset_meta = {}
         if reach_path.is_file():
             try:
                 with open(reach_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                    dataset_meta = data.get("metadata", {})
                     self.reachability_dataset = {
                         (c["row"], c["col"]): c for c in data.get("cells", [])
                     }
@@ -2529,12 +2531,22 @@ class VirtualXiangqiSimulation:
                         target_service_q = np.deg2rad(self.backend.SERVICE_SAFE_JOINTS_DEG)
                         retreat_collision = False
                         retreat_col_body = None
-                        for s_step in range(1, 11):
-                            interp_q = q_after_clear + (target_service_q - q_after_clear) * (s_step / 10.0)
-                            col_check = self.collision_guard.validate_configuration(interp_q, restore_state=True)
-                            if not col_check.safe:
-                                retreat_collision = True
-                                retreat_col_body = col_check.failure_reason
+                        if q_after_clear[4] > 0.0:
+                            q_mid1 = np.array([q_after_clear[0], math.radians(-60.0), math.radians(30.0), 0.0, math.radians(90.0), 0.0], dtype=float)
+                            q_mid2 = np.array([q_after_clear[0], math.radians(-60.0), math.radians(30.0), 0.0, math.radians(-90.0), 0.0], dtype=float)
+                            segments = [(q_after_clear, q_mid1), (q_mid1, q_mid2), (q_mid2, target_service_q)]
+                        else:
+                            segments = [(q_after_clear, target_service_q)]
+
+                        for q_a, q_b in segments:
+                            for s_step in range(1, 11):
+                                interp_q = q_a + (q_b - q_a) * (s_step / 10.0)
+                                col_check = self.collision_guard.validate_configuration(interp_q, restore_state=True)
+                                if not col_check.safe:
+                                    retreat_collision = True
+                                    retreat_col_body = col_check.failure_reason
+                                    break
+                            if retreat_collision:
                                 break
 
                         if retreat_collision:

@@ -58,8 +58,8 @@ const sceneData = JSON.parse(fs.readFileSync(sceneJsonPath, "utf-8"));
 
 assert.equal(
   sceneData?.tool_transform?.status,
-  "USER_MEASURED_CAD_REPORTED",
-  "tool_transform.status must be USER_MEASURED_CAD_REPORTED"
+  "MEASURED_APPROXIMATE",
+  "tool_transform.status must be MEASURED_APPROXIMATE"
 );
 assert.equal(
   sceneData?.tool_transform?.visual_asset_status,
@@ -68,8 +68,8 @@ assert.equal(
 );
 assert.deepEqual(
   sceneData?.tool_transform?.flange_to_tcp_xyz_m,
-  [0.0, 0.0, 0.218],
-  "flange_to_tcp_xyz_m must be [0, 0, 0.218]"
+  [0.0, 0.0, 0.150],
+  "flange_to_tcp_xyz_m must be [0, 0, 0.150]"
 );
 
 console.log("  [PASS] shared/virtual_fr3_scene.json has honest tool and visual asset classification.");
@@ -79,8 +79,8 @@ const indexPath = path.resolve(repoRoot, "robot-3d-viewer", "index.html");
 const indexContent = fs.readFileSync(indexPath, "utf-8");
 
 assert.ok(
-  indexContent.includes("USER_MEASURED_CAD_REPORTED"),
-  "index.html must display USER_MEASURED_CAD_REPORTED"
+  indexContent.includes("MEASURED_APPROXIMATE"),
+  "index.html must display MEASURED_APPROXIMATE"
 );
 assert.ok(
   indexContent.includes("VISUAL_CALIBRATION_PROVISIONAL"),
