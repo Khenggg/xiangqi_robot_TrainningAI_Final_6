@@ -44,6 +44,7 @@ class HardwareManager:
         self.gripper_driver = None
         self.board_pose_provider = None
         self.motion_coordinator = None
+        self.physical_motion_authorized = False
         self.engine = None
         self.ai_ctrl = None
         self.cap = None
@@ -122,36 +123,33 @@ class HardwareManager:
                 print(f"⚠️ [MAIN] Physical FR3 Backend init error: {e}")
                 self.backend = None
 
-            # Legacy fallback connection for existing code/tests
+            # Legacy fallback connection for existing code/tests (WITHOUT ANY MOTION)
             if not self.dry_run:
                 try:
                     self.robot.connect()
-                    print("[MAIN] ✅ Robot kết nối thành công.")
+                    print("[MAIN] ✅ Robot kết nối thành công (NO MOTION until board calibrated).")
                 except Exception as e:
                     print(f"⚠️ [MAIN] Robot connection error: {e}")
                     print("   → Tiếp tục chạy KHÔNG có robot (camera + calibrate vẫn hoạt động)")
                     self.robot.connected = False
-
-                if self.robot.connected:
-                    try:
-                        self.robot.go_to_home_chess()
-                    except Exception as e:
-                        print(f"⚠️ [MAIN] go_to_home_chess lỗi: {e} → bỏ qua, robot vẫn CONNECTED")
             else:
                 print("[MAIN] DRY_RUN: Skipping physical robot connection.")
                 self.robot.connected = False
 
             # Physical board calibration from R1-R4 teaching points
+            # TUYỆT ĐỐI KHÔNG GỌI MOTION (go_to_home_chess, MoveJ, MoveL, MoveCart) TRƯỚC KHI CALIBRATE
             self._calibrate_robot()
 
     def _calibrate_robot(self):
         print("\n--- ROBOT CALIBRATION (R1-R4 TEACHING POINTS) ---")
         backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
         if backend_type == "VIRTUAL":
+            self.physical_motion_authorized = True
             return
 
         if self.backend is None:
             print("  ⚠️ Backend không khả dụng — không thể calibrate physical board pose.")
+            self.physical_motion_authorized = False
             self.board_pose_provider = None
             self.motion_coordinator = None
             return
@@ -166,27 +164,30 @@ class HardwareManager:
                 print(f"   RMS error: {res.rms_error_mm:.3f} mm, Max error: {res.max_error_mm:.3f} mm")
                 print("   Robot motion đã bị VÔ HIỆU HÓA. Không fallback sang simulation.")
                 print(f"{'='*60}\n")
+                self.physical_motion_authorized = False
                 self.board_pose_provider = None
                 self.motion_coordinator = None
                 return
 
             self.board_pose_provider = provider
+            self.physical_motion_authorized = True
             print(f"  ✅ Calibrated physical board pose thành công:")
-            print(f"     Width: {res.measured_width_mm:.2f} mm (expected 320 mm)")
-            print(f"     Length: {res.measured_length_mm:.2f} mm (expected 360 mm)")
-            print(f"     Residuals (mm): R1={res.residuals_mm.get('R1', 0.0):.2f}, "
-                  f"R2={res.residuals_mm.get('R2', 0.0):.2f}, "
-                  f"R3={res.residuals_mm.get('R3', 0.0):.2f}, "
-                  f"R4={res.residuals_mm.get('R4', 0.0):.2f}")
-            print(f"     RMS Error: {res.rms_error_mm:.3f} mm, Max Error: {res.max_error_mm:.3f} mm")
+            if res.calibration_log:
+                print(f"{res.calibration_log}")
+            if res.warnings:
+                for w in res.warnings:
+                    print(f"  ⚠️ [CALIBRATION WARNING] {w}")
 
             # Setup MotionProfile with explicit provenance
+            prov = getattr(self.config, "PICK_HEIGHT_PROVENANCE", "PROVISIONAL_SIMULATION")
             motion_profile = MotionProfile(
                 pick_tcp_height_above_board_mm=getattr(self.config, "PICK_TCP_HEIGHT_MM", 4.715),
                 place_tcp_height_above_board_mm=getattr(self.config, "PLACE_TCP_HEIGHT_MM", 4.715),
                 safe_clearance_above_board_mm=getattr(self.config, "SAFE_CLEARANCE_Z_MM", 40.0),
-                provenance=getattr(self.config, "PICK_HEIGHT_PROVENANCE", "PROVISIONAL_SIMULATION"),
+                provenance=prov,
             )
+            if not motion_profile.is_physical_validated:
+                print(f"  ⚠️ [MAIN WARNING] Physical grasp height is {prov}, not measured physical truth.")
 
             self.motion_coordinator = MotionCoordinator(
                 backend=self.backend,
@@ -209,6 +210,7 @@ class HardwareManager:
             print(f"❌ [CRITICAL] Lỗi trong quá trình calibrate physical board: {e}")
             print("   Robot motion đã bị VÔ HIỆU HÓA. Không fallback sang simulation.")
             print(f"{'='*60}\n")
+            self.physical_motion_authorized = False
             self.board_pose_provider = None
             self.motion_coordinator = None
 
@@ -362,14 +364,27 @@ class HardwareManager:
 
     @property
     def is_robot_ready(self) -> bool:
-        """Returns True if authoritative backend or legacy robot is ready for motion."""
+        """
+        Returns True if authoritative backend or legacy robot is ready for motion.
+        For Physical mode, strictly requires:
+          1. backend connected
+          2. board provider calibrated
+          3. motion coordinator available
+          4. physical motion authorized
+        """
         backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
-        if self.backend is not None:
-            # Physical mode strictly requires successful board calibration
-            if backend_type == "PHYSICAL" and self.board_pose_provider is None:
-                return False
-            return self.backend.get_state_snapshot().connected
-        return bool(self.robot and self.robot.connected)
+        if backend_type == "PHYSICAL":
+            return bool(
+                self.backend is not None
+                and self.backend.get_state_snapshot().connected
+                and self.board_pose_provider is not None
+                and getattr(self.board_pose_provider, "is_calibrated", False)
+                and self.motion_coordinator is not None
+                and self.physical_motion_authorized
+            )
+        elif self.backend is not None:
+            return bool(self.backend.get_state_snapshot().connected and self.motion_coordinator is not None)
+        return bool(self.robot and self.robot.connected and self.physical_motion_authorized)
 
     def move_piece(
         self,
@@ -383,11 +398,11 @@ class HardwareManager:
     ) -> bool:
         """
         Execute pick-and-place move through the authoritative MotionCoordinator.
-        Falls back to legacy FR5Robot if coordinator is unavailable.
+        Falls back to legacy FR5Robot if coordinator is unavailable (virtual/legacy only).
         """
         backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
-        if backend_type == "PHYSICAL" and self.board_pose_provider is None:
-            print("[ROBOT] ❌ Physical motion is DISABLED because board calibration failed or is unavailable.")
+        if backend_type == "PHYSICAL" and not self.is_robot_ready:
+            print("[ROBOT] ❌ Physical motion is DISABLED because robot is not ready or board calibration failed.")
             return False
 
         if self.motion_coordinator is not None and self.is_robot_ready:

@@ -52,14 +52,15 @@ class PhysicalFR3Backend(RobotBackend):
         # Internal state cache (for dry-run and between read cycles)
         self._current_joints_deg: List[float] = [0.0, -45.0, 90.0, -135.0, -90.0, 0.0]
         self._current_tcp_pose_mm_deg: List[float] = [-360.0, 0.0, 200.0, 180.0, 0.0, 90.0]
-        self._current_flange_pose_mm_deg: List[float] = [-360.0, 0.0, 418.0, 180.0, 0.0, 90.0]
+        # Canonical tool length is 150.0 mm (no legacy 218 mm residual). Flange Z = TCP Z + 150.0 = 350.0 mm
+        self._current_flange_pose_mm_deg: List[float] = [-360.0, 0.0, 350.0, 180.0, 0.0, 90.0]
 
-        # Teaching points for dry-run / simulation testing
+        # Standard FAIRINO SDK teaching point format (20 elements, tool 0, user 0)
         self._dry_run_teaching_points: dict = {
-            "R1": [-200.0, 180.0, 50.0, 180.0, 0.0, 0.0],
-            "R2": [-520.0, 180.0, 50.0, 180.0, 0.0, 0.0],
-            "R3": [-520.0, -180.0, 50.0, 180.0, 0.0, 0.0],
-            "R4": [-200.0, -180.0, 50.0, 180.0, 0.0, 0.0],
+            "R1": [40.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 50, 50, 0, 0, 0, 0],
+            "R2": [-280.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 50, 50, 0, 0, 0, 0],
+            "R3": [-280.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 50, 50, 0, 0, 0, 0],
+            "R4": [40.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 50, 50, 0, 0, 0, 0],
         }
 
     def connect(self) -> bool:

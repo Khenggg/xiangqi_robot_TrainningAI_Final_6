@@ -28,11 +28,17 @@ class MotionProfile:
         place_tcp_height_above_board_mm: Gripper TCP height above board surface during release.
         safe_clearance_above_board_mm: Safe transit / approach clearance above board surface (e.g. 40.0 mm).
         provenance: Semantic origin tag ('SIMULATION_GEOMETRIC_DEFAULT', 'PROVISIONAL_SIMULATION', 'MEASURED_APPROXIMATE').
+        is_physical_validated: True if grasp parameters have been physically calibrated and verified.
     """
     pick_tcp_height_above_board_mm: float = 4.715
     place_tcp_height_above_board_mm: float = 4.715
     safe_clearance_above_board_mm: float = 40.0
     provenance: str = "SIMULATION_GEOMETRIC_DEFAULT"
+    is_physical_validated: bool = False
+
+    def __post_init__(self):
+        if self.provenance in ("MEASURED", "PHYSICAL_CALIBRATED"):
+            object.__setattr__(self, "is_physical_validated", True)
 
 
 class MotionCoordinator:
@@ -51,6 +57,25 @@ class MotionCoordinator:
         pick_depth_offset_mm: Optional[float] = None,
     ):
         self.backend = backend
+
+        # Blocker: Prohibit silent default board pose for PhysicalFR3Backend
+        backend_cls_name = getattr(backend, "__class__", type(backend)).__name__
+        is_physical = backend_cls_name == "PhysicalFR3Backend"
+        if not is_physical:
+            try:
+                from src.hardware.backends.physical_fr3 import PhysicalFR3Backend
+                if isinstance(backend, PhysicalFR3Backend):
+                    is_physical = True
+            except ImportError:
+                pass
+
+        if is_physical and board_pose_provider is None:
+            raise ValueError(
+                "MotionCoordinator requires an explicit calibrated BoardPoseProvider when using "
+                "PhysicalFR3Backend. Falling back to FixedBoardPoseProvider is strictly forbidden "
+                "for physical robot safety."
+            )
+
         self.board_pose_provider = board_pose_provider or FixedBoardPoseProvider()
         self.tool_rotation_deg = list(tool_rotation_deg)
 
@@ -65,6 +90,13 @@ class MotionCoordinator:
                 place_tcp_height_above_board_mm=pick_h,
                 safe_clearance_above_board_mm=clearance_h,
                 provenance=prov,
+            )
+
+        if is_physical and not self.motion_profile.is_physical_validated:
+            logger.warning(
+                f"[MotionCoordinator] WARNING: Physical grasp height provenance is "
+                f"'{self.motion_profile.provenance}', NOT measured physical truth. "
+                "Physical validation is required before autonomous production runs."
             )
 
     @property
