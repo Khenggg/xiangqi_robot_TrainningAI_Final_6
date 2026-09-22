@@ -170,7 +170,7 @@ try:
 
                         robot_success = True
                         if not config.DRY_RUN:
-                            if hw.robot.connected:
+                            if hw.is_robot_ready:
                                 print(f"[AI] Robot executing move: {s}->{d}")
                                 try:
                                     pick_targets = {"moving": None, "captured": None}
@@ -180,7 +180,7 @@ try:
                                             expected_cells["captured"] = d
                                         # Snapshot happens before the robot enters the board.
                                         pick_targets = hw.get_visual_pick_targets(expected_cells)
-                                    hw.robot.move_piece(
+                                    robot_success = hw.move_piece(
                                         s[0], s[1], d[0], d[1], is_cap,
                                         moving_visual_target=pick_targets.get("moving"),
                                         captured_visual_target=pick_targets.get("captured"),
@@ -214,7 +214,7 @@ try:
                                 state.handle_game_over('b')
                                 state.api_client.end_match(winner="BLACK", reason="CHECKMATE")
                             else:
-                                if hw.robot.connected:
+                                if hw.is_robot_ready:
                                     hw.capture_baseline_if_needed(force_delay=1.0)
                                     state.set_status("Your turn!", color=(0, 100, 180), duration=5.0)
                                 else:

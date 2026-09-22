@@ -4,9 +4,14 @@ import sys
 import numpy as np
 import cv2
 import threading
+from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
 from src.hardware.robot_VIP import FR5Robot
+from src.hardware.backends import RobotBackend, PhysicalFR3Backend, VirtualFR3Backend
+from src.hardware.gripper import TwoOutputGripperDriver
+from src.domain.board_pose_provider import BoardPoseProvider, FixedBoardPoseProvider
+from src.motion.coordinator import MotionCoordinator
 from src.ai.moonfish_engine import MoonfishEngine
 from src.ai.cloud_engine import CloudEngine
 from src.ai.ai_controller import AIController
@@ -29,6 +34,10 @@ class HardwareManager:
         
         # Hardware instances
         self.robot = FR5Robot()
+        self.backend = None
+        self.gripper_driver = None
+        self.board_pose_provider = None
+        self.motion_coordinator = None
         self.engine = None
         self.ai_ctrl = None
         self.cap = None
@@ -51,6 +60,51 @@ class HardwareManager:
         return self
 
     def _init_robot(self):
+        backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
+        if backend_type == "VIRTUAL":
+            print("[MAIN] 🎮 Initializing Virtual FR3 Backend (Simulation)...")
+            try:
+                self.backend = VirtualFR3Backend()
+                self.backend.connect()
+                print("[MAIN] ✅ Virtual FR3 Backend connected.")
+            except Exception as e:
+                print(f"⚠️ [MAIN] Virtual FR3 init error: {e}")
+                self.backend = None
+        else:
+            try:
+                self.gripper_driver = TwoOutputGripperDriver(
+                    dry_run=self.dry_run,
+                    open_do_id=getattr(self.config, "TOOL_DO_OPEN", 1),
+                    close_do_id=getattr(self.config, "TOOL_DO_CLOSE", 0),
+                    open_pulse_sec=getattr(self.config, "TOOL_DO_OPEN_PULSE_SEC", 0.30),
+                    close_pulse_sec=getattr(self.config, "TOOL_DO_CLOSE_PULSE_SEC", 0.30),
+                    deadtime_sec=getattr(self.config, "TOOL_DO_DEADTIME_SEC", 0.10),
+                )
+                self.backend = PhysicalFR3Backend(
+                    ip=getattr(self.config, "ROBOT_IP", "192.168.58.2"),
+                    dry_run=self.dry_run,
+                    gripper_driver=self.gripper_driver,
+                )
+                self.backend.connect()
+                if not self.dry_run:
+                    print("[MAIN] ✅ Physical FR3 Backend connected.")
+            except Exception as e:
+                print(f"⚠️ [MAIN] Physical FR3 Backend init error: {e}")
+                self.backend = None
+
+        # Setup Board Pose Provider & Motion Coordinator
+        self.board_pose_provider = FixedBoardPoseProvider.from_forward_shift(forward_shift_mm=0.0)
+        if self.backend is not None:
+            self.motion_coordinator = MotionCoordinator(
+                backend=self.backend,
+                board_pose_provider=self.board_pose_provider,
+                tool_rotation_deg=getattr(self.config, "PICK_TOOL_ROTATION", [-179.164, -3.047, -26.304]),
+                safe_clearance_z_mm=getattr(self.config, "SAFE_CLEARANCE_Z_MM", 40.0),
+                pick_depth_offset_mm=getattr(self.config, "PICK_DEPTH_OFFSET_MM", 0.0),
+            )
+            print("[MAIN] 🧭 MotionCoordinator initialized.")
+
+        # Legacy fallback connection for existing code/tests
         if not self.dry_run:
             try:
                 self.robot.connect()
@@ -198,8 +252,59 @@ class HardwareManager:
                 except Exception as e:
                     print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
 
+    @property
+    def is_robot_ready(self) -> bool:
+        """Returns True if authoritative backend or legacy robot is ready for motion."""
+        if self.backend is not None:
+            return self.backend.get_state_snapshot().connected
+        return bool(self.robot and self.robot.connected)
+
+    def move_piece(
+        self,
+        s_col: int,
+        s_row: int,
+        d_col: int,
+        d_row: int,
+        is_capture: bool,
+        moving_visual_target: Optional[object] = None,
+        captured_visual_target: Optional[object] = None,
+    ) -> bool:
+        """
+        Execute pick-and-place move through the authoritative MotionCoordinator.
+        Falls back to legacy FR5Robot if coordinator is unavailable.
+        """
+        if self.motion_coordinator is not None and self.is_robot_ready:
+            capture_pose = [
+                getattr(self.config, "CAPTURE_BIN_X", -226.123),
+                getattr(self.config, "CAPTURE_BIN_Y", 225.024),
+                getattr(self.config, "CAPTURE_BIN_Z", 291.68),
+            ] + list(getattr(self.config, "ROTATION", [-179.164, -3.047, -26.304]))
+
+            return self.motion_coordinator.execute_move(
+                src_row=float(s_row),
+                src_col=float(s_col),
+                dst_row=float(d_row),
+                dst_col=float(d_col),
+                is_capture=is_capture,
+                capture_bin_pose_mm=capture_pose,
+                moving_visual_target=moving_visual_target,
+                captured_visual_target=captured_visual_target,
+            )
+        elif self.robot and self.robot.connected:
+            return self.robot.move_piece(
+                s_col, s_row, d_col, d_row, is_capture,
+                moving_visual_target=moving_visual_target,
+                captured_visual_target=captured_visual_target,
+            )
+        else:
+            print("[ROBOT] Robot not connected / ready for move.")
+            return False
+
     def cleanup(self):
         print("[CLEANUP] Đang dọn dẹp hardware...")
+        if self.backend is not None:
+            try: self.backend.disconnect()
+            except: pass
         if self.cam_monitor:
             try: self.cam_monitor.stop()
             except: pass
