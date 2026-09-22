@@ -131,7 +131,7 @@ try:
             )
 
         # 2d. Xử lý AI Turn (Non-blocking)
-        if state.turn == "b" and not state.game_over:
+        if state.turn == "b" and not state.game_over and not state.physical_sync_fault:
             
             # --- Khởi động Thread suy nghĩ ---
             if not state.ai_thinking and state.ai_thread is None:
@@ -171,11 +171,14 @@ try:
                     if best:
                         try: s, d = best
                         except: s, d = best[0], best[1]
-                        state.move_history.append({"turn": "b", "src": s, "dst": d})
-                        
                         cap_p = state.board[d[1]][d[0]]
                         is_cap = cap_p != "."
-                        if is_cap: state.r_captured.append(cap_p)
+                        expected_after, _ = xiangqi.make_temp_move(state.board, best)
+                        state.set_pending_ai_move(best, expected_after, cap_p)
+                        expected_after_capture = None
+                        if is_cap:
+                            expected_after_capture = [row[:] for row in state.board]
+                            expected_after_capture[d[1]][d[0]] = "."
 
                         robot_success = True
                         if not config.DRY_RUN:
@@ -183,26 +186,57 @@ try:
                                 print(f"[AI] Robot executing move: {s}->{d}")
                                 try:
                                     pick_targets = {"moving": None, "captured": None}
-                                    if getattr(config, "VISUAL_PICK_ENABLED", False):
-                                        expected_cells = {"moving": s}
-                                        if is_cap:
-                                            expected_cells["captured"] = d
-                                        # Snapshot happens before the robot enters the board.
+                                    # Verify only the piece that will be picked first.
+                                    # The moving piece is re-identified after a capture.
+                                    expected_cells = {"captured": d} if is_cap else {"moving": s}
+                                    if getattr(config, "VISUAL_BOARD_SYNC_REQUIRED", True):
+                                        # The source is picked at its observed physical offset;
+                                        # place_at still uses the calibrated logical destination.
+                                        pick_targets, board_verified = hw.get_verified_visual_pick_targets(
+                                            state.board, expected_cells
+                                        )
+                                        if not board_verified:
+                                            robot_success = False
+                                            state.physical_sync_fault = True
+                                            state.set_status(
+                                                "⚠️ Bàn thật không khớp FEN — robot chưa gắp quân.",
+                                                color=(180, 100, 0), duration=20.0,
+                                            )
+                                    elif getattr(config, "VISUAL_PICK_ENABLED", False):
                                         pick_targets = hw.get_visual_pick_targets(expected_cells)
-                                    hw.robot.move_piece(
-                                        s[0], s[1], d[0], d[1], is_cap,
-                                        moving_visual_target=pick_targets.get("moving"),
-                                        captured_visual_target=pick_targets.get("captured"),
-                                    )
+                                    if robot_success:
+                                        def refresh_moving_target():
+                                            if not is_cap:
+                                                return pick_targets.get("moving")
+                                            refreshed, verified = hw.get_verified_visual_pick_targets(
+                                                expected_after_capture, {"moving": s}
+                                            )
+                                            return refreshed.get("moving") if verified else None
+
+                                        hw.robot.move_piece(
+                                            s[0], s[1], d[0], d[1], is_cap,
+                                            moving_visual_target=pick_targets.get("moving"),
+                                            captured_visual_target=pick_targets.get("captured"),
+                                            refresh_moving_visual_target=refresh_moving_target,
+                                        )
                                 except Exception as e:
                                     error_str = str(e)
                                     print(f"⚠️ Robot error: {error_str}")
                                     if "112" in error_str or "MoveCart" in error_str:
-                                        print("✅ Light error — counting as successful.")
+                                        print("[ROBOT] Recoverable motion error; camera verification is required before FEN commit.")
                                     else:
                                         print("❌ [CRITICAL] Robot critical error, stopping game.")
                                         robot_success = False
+                                        state.physical_sync_fault = True
                                         time.sleep(2)
+                                if robot_success and getattr(config, "VISUAL_BOARD_SYNC_REQUIRED", True):
+                                    if not hw.verify_physical_board(expected_after):
+                                        robot_success = False
+                                        state.physical_sync_fault = True
+                                        state.set_status(
+                                            "❌ Không xác minh được quân robot đã thả — đã dừng để tránh đi lặp.",
+                                            color=(180, 0, 0), duration=20.0,
+                                        )
                             else:
                                 print(f"\n{'='*50}")
                                 print(f"🤖 AI đi: {state.board[s[1]][s[0]]} ({s[0]},{s[1]}) → ({d[0]},{d[1]}) {'ĂN' if is_cap else ''}")
@@ -210,10 +244,7 @@ try:
                                 print(f"{'='*50}\n")
 
                         if robot_success:
-                            state.board, _ = xiangqi.make_temp_move(state.board, best)
-                            state.last_move = best
-                            state.turn = 'r'
-                            state.update_fen_from_board()
+                            state.commit_pending_ai_move()
                             print(f"[FEN] {state.current_fen}")
                             
                             # [API] Gửi cập nhật nước đi của AI lên Server

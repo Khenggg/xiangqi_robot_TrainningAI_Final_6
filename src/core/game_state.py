@@ -40,6 +40,11 @@ class GameState:
         # Rollback State
         self._pre_space_state: Optional[Dict[str, Any]] = None
         self.manual_override_active: bool = False
+        # A failed post-move camera check means the physical board may have
+        # changed while FEN was intentionally left untouched.  Do not retry the
+        # same robot command until an operator resolves the discrepancy.
+        self.physical_sync_fault: bool = False
+        self.pending_ai_move: Optional[Dict[str, Any]] = None
 
     def update_fen_from_board(self):
         """Cập nhật current_fen từ board array hiện tại."""
@@ -91,6 +96,8 @@ class GameState:
         self.ai_thinking = False
         self.ai_think_start = 0.0
         self.manual_override_active = False
+        self.physical_sync_fault = False
+        self.pending_ai_move = None
 
         print("[GAME] 🔄 New game started!")
         print(f"[FEN] {self.current_fen}")
@@ -158,6 +165,36 @@ class GameState:
         print(f"[ROLLBACK] ✅ Done. FEN: {self.current_fen}")
         
         self.manual_override_active = False
+
+    def set_pending_ai_move(self, move, expected_board, captured_piece):
+        """Remember the only state transition a fault-recovery may commit."""
+        self.pending_ai_move = {
+            "move": move,
+            "expected_board": [row[:] for row in expected_board],
+            "captured_piece": captured_piece,
+        }
+
+    def clear_pending_ai_move(self):
+        self.pending_ai_move = None
+        self.physical_sync_fault = False
+
+    def commit_pending_ai_move(self):
+        """Atomically commit a camera-verified physical AI move to the FEN board."""
+        if self.pending_ai_move is None:
+            return False
+        pending = self.pending_ai_move
+        src, dst = pending["move"]
+        captured_piece = pending["captured_piece"]
+        self.move_history.append({"turn": "b", "src": src, "dst": dst})
+        if captured_piece != ".":
+            self.r_captured.append(captured_piece)
+        self.board = [row[:] for row in pending["expected_board"]]
+        self.last_move = pending["move"]
+        self.turn = "r"
+        self.update_fen_from_board()
+        self.pending_ai_move = None
+        self.physical_sync_fault = False
+        return True
 
     def process_human_move(self, src, dst, p_name):
         print(f"[HUMAN] ✅ Moved: {p_name} {src}->{dst}")

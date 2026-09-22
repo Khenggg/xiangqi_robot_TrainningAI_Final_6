@@ -609,7 +609,8 @@ class FR5Robot:
     # -------------------------------------------------------------------------
 
     def move_piece(self, s_col, s_row, d_col, d_row, is_capture,
-                   moving_visual_target=None, captured_visual_target=None):
+                   moving_visual_target=None, captured_visual_target=None,
+                   refresh_moving_visual_target=None):
         """Quy trình di chuyển hoàn chỉnh, bao gồm xử lý ăn quân.
         
         Args:
@@ -618,6 +619,8 @@ class FR5Robot:
             is_capture:   True nếu ăn quân đối phương
             moving_visual_target: GridTarget camera cho quân đang di chuyển, hoặc None
             captured_visual_target: GridTarget camera cho quân bị ăn, hoặc None
+            refresh_moving_visual_target: callback chụp lại bàn thật ngay trước
+                khi gắp quân di chuyển. Trả về GridTarget hoặc None để hủy an toàn.
         """
         print(f"[ROBOT] ♟️ Di chuyển: ({s_col},{s_row}) → ({d_col},{d_row})"
               + (" [ĂN QUÂN]" if is_capture else ""))
@@ -645,6 +648,13 @@ class FR5Robot:
             
             # Bay thẳng đến bãi thải ở độ cao SAFE_Z (giữ nguyên Z)
             self.place_in_capture_bin(current_z=config.SAFE_Z)
+
+        # A capture changes the physical board.  Do not reuse a target measured
+        # before that operation for the next pick; ask vision for a fresh pose.
+        if refresh_moving_visual_target is not None:
+            moving_visual_target = refresh_moving_visual_target()
+            if moving_visual_target is None:
+                raise RuntimeError("Fresh physical pose for moving piece was not verified")
 
         # 2. Gắp quân mình ở nguồn
         print(f"[ROBOT] 🤏 Gắp quân mình tại nguồn ({s_col},{s_row})")

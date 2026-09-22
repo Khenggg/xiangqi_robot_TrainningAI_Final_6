@@ -13,6 +13,7 @@ from src.ai.ai_controller import AIController
 from src.vision.camera_monitor import CameraMonitor
 from src.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetector
 from src.vision.visual_pick_estimator import VisualPickEstimator
+from src.vision.board_reconciler import BoardReconciler
 from src.vision.calibrate_camera import calibrate_perspective_camera
 from src.vision.auto_calibrate import run_calibration_flow
 from src.vision.turn_completion_monitor import TurnCompletionMonitor
@@ -39,6 +40,7 @@ class HardwareManager:
         self.yolo_detector = None
         self.cchess_recognizer = None
         self.pick_estimator = None
+        self.board_reconciler = None
         self.hand_model = None
         self.turn_completion_monitor = None
         self._last_hand_check = 0.0
@@ -208,7 +210,8 @@ class HardwareManager:
             self.cam_monitor.start()
             self.yolo_detector = YoloSnapshotDetector(self.perspective_path, self.class_id_to_name)
             print("[INIT] SnapshotDetector & CameraMonitor initialized (CChess ONNX enabled).")
-            if getattr(self.config, "VISUAL_PICK_ENABLED", False):
+            if (getattr(self.config, "VISUAL_PICK_ENABLED", False)
+                    or getattr(self.config, "VISUAL_BOARD_SYNC_REQUIRED", True)):
                 try:
                     self.pick_estimator = VisualPickEstimator(
                         self.perspective_path,
@@ -216,7 +219,8 @@ class HardwareManager:
                         max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
                         foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
                     )
-                    print("[INIT] ✅ VisualPickEstimator initialized.")
+                    self.board_reconciler = BoardReconciler(self.pick_estimator)
+                    print("[INIT] ✅ Visual pick / board reconciliation initialized.")
                 except Exception as e:
                     print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
 
@@ -290,6 +294,95 @@ class HardwareManager:
                 print(f"[VISUAL PICK] Fallback {name}: insufficient stable samples.")
 
         return targets
+
+    def get_verified_visual_pick_targets(self, expected_board, expected_cells):
+        """Verify the real board and return stable, camera-corrected pick points.
+
+        The robot must only pick a source/capture piece after CChess confirms
+        its identity against the FEN board.  Placement intentionally remains at
+        the calibrated logical destination, which is handled by ``place_at``.
+        """
+        targets = {name: None for name in expected_cells}
+        if not self.board_reconciler or not self.cam_monitor:
+            print("[BOARD SYNC] CChess/visual reconciliation is unavailable.")
+            return targets, False
+
+        samples = {name: [] for name in expected_cells}
+        valid_reports = 0
+        sample_count = max(1, int(getattr(self.config, "VISUAL_PICK_SAMPLE_COUNT", 3)))
+        for _ in range(sample_count):
+            try:
+                frame, detections = self.cam_monitor.get_fresh_snapshot()
+                if frame is None:
+                    continue
+                report = self.board_reconciler.reconcile(
+                    expected_board,
+                    expected_cells,
+                    self.recognize_board_state(frame),
+                    detections,
+                )
+                if not report.available:
+                    print(f"[BOARD SYNC] Recognition unavailable: {report.error}")
+                    continue
+                if not report.board_matches:
+                    if report.mismatches:
+                        print(f"[BOARD SYNC] FEN mismatch at {list(report.mismatches)}; robot motion blocked.")
+                    else:
+                        print(f"[BOARD SYNC] Unknown CChess cells at {list(report.unknown_cells)}; robot motion blocked.")
+                    continue
+                if not report.picks_verified:
+                    failures = {name: obs.reason for name, obs in report.picks.items() if not obs.verified}
+                    print(f"[BOARD SYNC] Pick verification failed: {failures}")
+                    continue
+                valid_reports += 1
+                for name, observation in report.picks.items():
+                    samples[name].append(observation.target)
+            except Exception as e:
+                print(f"[BOARD SYNC] Snapshot error: {e}")
+
+        minimum = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
+        for name, values in samples.items():
+            targets[name] = self.pick_estimator.aggregate_targets(values, minimum)
+
+        verified = valid_reports >= minimum and all(target is not None for target in targets.values())
+        if verified:
+            print(f"[BOARD SYNC] ✅ {valid_reports}/{sample_count} snapshots match FEN; using physical pick offsets.")
+        else:
+            print("[BOARD SYNC] Robot motion blocked: board/pick state was not stable enough.")
+        return targets, verified
+
+    def verify_physical_board(self, expected_board):
+        """Confirm the board after the robot has placed a piece before FEN commit."""
+        if not self.board_reconciler or not self.cam_monitor:
+            print("[BOARD SYNC] Post-move verification unavailable.")
+            return False
+
+        sample_count = max(1, int(getattr(self.config, "VISUAL_PICK_SAMPLE_COUNT", 3)))
+        minimum = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
+        matches = 0
+        for _ in range(sample_count):
+            try:
+                frame, detections = self.cam_monitor.get_fresh_snapshot()
+                if frame is None:
+                    continue
+                report = self.board_reconciler.reconcile(
+                    expected_board, {}, self.recognize_board_state(frame), detections
+                )
+                if report.board_matches:
+                    matches += 1
+                elif report.available:
+                    print(f"[BOARD SYNC] Post-move mismatch at {list(report.mismatches)}.")
+                else:
+                    print(f"[BOARD SYNC] Post-move recognition unavailable: {report.error}")
+            except Exception as e:
+                print(f"[BOARD SYNC] Post-move snapshot error: {e}")
+
+        verified = matches >= minimum
+        print(
+            f"[BOARD SYNC] {'✅' if verified else '❌'} Post-move FEN verification: "
+            f"{matches}/{sample_count} matching snapshots."
+        )
+        return verified
 
     def hand_interaction_finished(self):
         """Return True once after a hand has entered then cleared the board ROI."""

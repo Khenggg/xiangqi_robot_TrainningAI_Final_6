@@ -54,10 +54,14 @@ class InputHandler:
                         self.state.selected_pos = None
 
     def handle_keyboard(self, key):
+        import pygame  # type: ignore
+        if key == pygame.K_v and self.state.physical_sync_fault:
+            self._reconcile_physical_sync_fault()
+            return
+
         if self.state.allow_mouse_move or self.state.game_over or self.state.turn != "r":
             return
 
-        import pygame  # type: ignore
         # Z KEY: Rollback
         if key == pygame.K_z:
             self.state.handle_rollback(self.hw)
@@ -65,6 +69,34 @@ class InputHandler:
         # SPACE KEY: Trigger YOLO Detection
         elif key == pygame.K_SPACE:
             self._handle_space_key()
+
+    def _reconcile_physical_sync_fault(self):
+        """Supervised recovery for a stopped physical-board synchronization."""
+        pending = self.state.pending_ai_move
+        if not pending or not self.hw.verify_physical_board:
+            self.state.set_status("❌ Không có trạng thái đối soát để khôi phục.", color=(180, 0, 0), duration=8.0)
+            return
+
+        self.state.set_status("📸 Đang đối soát lại bàn thật...", color=(0, 100, 180), duration=5.0)
+        # No robot command is issued here.  Matching the old board means the
+        # arm did not complete the move; matching expected_board means it did.
+        if self.hw.verify_physical_board(self.state.board):
+            self.state.clear_pending_ai_move()
+            self.state.set_status("↩️ Bàn thật vẫn ở FEN cũ — có thể thử lại nước AI.", color=(0, 100, 180), duration=10.0)
+            return
+
+        if self.hw.verify_physical_board(pending["expected_board"]):
+            if self.state.commit_pending_ai_move():
+                self.state.api_client.send_move_update_board(self.state.current_fen)
+                if xiangqi.get_king_pos("r", self.state.board) is None:
+                    self.state.handle_game_over("b")
+                    self.state.api_client.end_match(winner="BLACK", reason="CHECKMATE")
+                else:
+                    self.hw.capture_baseline_if_needed(force_delay=1.0)
+                    self.state.set_status("✅ Đã xác nhận bàn thật — đến lượt bạn.", color=(0, 100, 180), duration=8.0)
+            return
+
+        self.state.set_status("❌ Bàn thật không khớp trước/sau nước đi. Chỉnh tay rồi nhấn V.", color=(180, 0, 0), duration=15.0)
 
     def _handle_space_key(self, auto_retry=False):
         print("\n[SPACE] 🎯 Người chơi bấm SPACE — đang chụp T2 snapshot...")

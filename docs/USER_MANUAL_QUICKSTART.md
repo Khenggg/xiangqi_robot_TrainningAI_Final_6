@@ -135,6 +135,7 @@ Sau khi bấm **`S`**, hai cửa sổ sẽ hiển thị song song:
 | **`R`** | CALIBRATE | Xóa 4 điểm click cũ để chọn lại từ đầu. |
 | **`SPACE`** | Game (Pygame) | Xác nhận hoàn thành nước đi / Yêu cầu AI chụp ảnh nhận diện. |
 | **`Z`** | Game (Pygame) | **Rollback (Đi lại):** Khôi phục trạng thái bàn cờ về trước nước đi vừa bấm SPACE. |
+| **`V`** | Game (Pygame) | Khi robot bị dừng vì lỗi đồng bộ, đối soát lại bàn thật. Nếu khớp FEN trước nước đi thì cho phép thử lại; nếu khớp trạng thái sau nước đi thì xác nhận nước đang chờ mà không gửi robot đi lần nữa. |
 | **Chuột trái**| Game (Pygame) | Chọn và di chuyển quân cờ thủ công khi camera nhận diện sai (Manual Override). |
 | **`Q`** | Camera / CALIBRATE | Thoát chương trình an toàn, tự động ngắt kết nối robot và camera. |
 

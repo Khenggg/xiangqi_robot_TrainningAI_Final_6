@@ -389,17 +389,6 @@ class CameraMonitor:
                 warped, _ = self.cchess_recognizer.extract_rectified_board(frame, kpts_px)
                 board_proj, board_short, confs = self.cchess_recognizer.recognize_layout(warped)
 
-                for r in range(10):
-                    for c in range(9):
-                        p = board_proj[r][c]
-                        if p not in (".", "x"):
-                            pt = cv2.perspectiveTransform(
-                                np.array([[[float(c), float(r)]]], dtype=np.float32), self._inv_M
-                            )[0][0]
-                            cx, cy = int(pt[0]), int(pt[1])
-                            rad = 18
-                            detections.append((0, float(confs[r][c]), (cx - rad, cy - rad, cx + rad, cy + rad)))
-
                 with self._lock:
                     self._last_cchess_result = {
                         "success": True,
@@ -412,8 +401,10 @@ class CameraMonitor:
             except Exception as e:
                 print(f"[CAM MONITOR] CChess error in fresh snapshot: {e}")
 
-        # Fallback YOLO
-        elif self.model is not None:
+        # YOLO supplies the *measured* pixel box for gripper correction.  It
+        # must run alongside CChess: CChess identifies pieces by cell but its
+        # cell centres are theoretical, not physical piece positions.
+        if self.model is not None:
             try:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = self.model.predict(
