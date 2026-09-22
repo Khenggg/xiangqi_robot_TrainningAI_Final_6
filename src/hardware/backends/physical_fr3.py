@@ -22,6 +22,17 @@ except ImportError:
     robot_sdk_core = None
 
 
+def is_motion_success_code(code: int) -> bool:
+    """
+    Check if FAIRINO SDK return code indicates successful motion.
+    
+    FAIRINO SDK specification: 0 = Success, non-zero = Error code.
+    Code 112 was historically treated as an ignorable singularity/out-of-reach warning,
+    which is unsafe for closed-loop physical execution. Only code 0 is authoritative success.
+    """
+    return code == 0
+
+
 class PhysicalFR3Backend(RobotBackend):
     """
     Physical execution backend for the FAIRINO FR3 collaborative industrial arm.
@@ -52,8 +63,10 @@ class PhysicalFR3Backend(RobotBackend):
         # Internal state cache (for dry-run and between read cycles)
         self._current_joints_deg: List[float] = [0.0, -45.0, 90.0, -135.0, -90.0, 0.0]
         self._current_tcp_pose_mm_deg: List[float] = [-360.0, 0.0, 200.0, 180.0, 0.0, 90.0]
-        # Canonical tool length is 150.0 mm (no legacy 218 mm residual). Flange Z = TCP Z + 150.0 = 350.0 mm
+        # Canonical tool length is 150.0 mm (no legacy 218 mm residual).
+        # TCP Z = 200.0 mm -> Flange Z = TCP Z + 150.0 = 350.0 mm for initial mock.
         self._current_flange_pose_mm_deg: List[float] = [-360.0, 0.0, 350.0, 180.0, 0.0, 90.0]
+        self._flange_authoritative: bool = False
 
         # Standard FAIRINO SDK teaching point format (20 elements, tool 0, user 0)
         self._dry_run_teaching_points: dict = {
@@ -63,12 +76,48 @@ class PhysicalFR3Backend(RobotBackend):
             "R4": [40.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 50, 50, 0, 0, 0, 0],
         }
 
+    def set_tool_do(self, do_id: int, status: int) -> int:
+        """
+        Send Tool Digital Output command to FAIRINO controller.
+
+        Args:
+            do_id: Output index on tool flange (0 or 1).
+            status: 0 (LOW / de-energized) or 1 (HIGH / energized).
+
+        Returns:
+            0 on success, non-zero error code on failure.
+        """
+        status_int = 1 if status else 0
+        if self.dry_run or self._rpc is None:
+            logger.debug(f"[PhysicalFR3Backend] DRY SetToolDO({do_id}, {status_int})")
+            return 0
+
+        try:
+            if hasattr(self._rpc, "SetToolDO"):
+                err = self._rpc.SetToolDO(int(do_id), status_int, block=0)
+                if err != 0:
+                    logger.error(f"[PhysicalFR3Backend] SetToolDO({do_id}, {status_int}) failed with code {err}")
+                return err
+            else:
+                logger.error("[PhysicalFR3Backend] RPC handle has no SetToolDO method")
+                return -1
+        except Exception as exc:
+            self._last_error = str(exc)
+            logger.error(f"[PhysicalFR3Backend] SetToolDO({do_id}, {status_int}) exception: {exc}")
+            raise
+
     def connect(self) -> bool:
         """Connect to the physical robot controller or initialize dry-run mock."""
         if self.dry_run:
             logger.info("[PhysicalFR3Backend] DRY_RUN mode enabled — skipping physical connection.")
             self._connected = True
             self._motion_state = "IDLE"
+            if self.gripper_driver is None:
+                from src.hardware.gripper.two_output import TwoOutputGripperDriver
+                self.gripper_driver = TwoOutputGripperDriver(
+                    set_do_fn=self.set_tool_do,
+                    dry_run=True,
+                )
             return True
 
         if robot_sdk_core is None:
@@ -104,6 +153,20 @@ class PhysicalFR3Backend(RobotBackend):
             self._last_error = None
             logger.info(f"[PhysicalFR3Backend] Successfully connected to FR3 at {self.ip}")
             self._sync_hardware_state()
+
+            # Ensure gripper driver is bound to Tool DO and in safe idle (both outputs LOW)
+            if self.gripper_driver is None:
+                from src.hardware.gripper.two_output import TwoOutputGripperDriver
+                self.gripper_driver = TwoOutputGripperDriver(
+                    set_do_fn=self.set_tool_do,
+                    dry_run=self.dry_run,
+                )
+            if hasattr(self.gripper_driver, "safe_idle"):
+                try:
+                    self.gripper_driver.safe_idle()
+                except Exception as exc:
+                    logger.warning(f"[PhysicalFR3Backend] Initial safe_idle warning: {exc}")
+
             return True
 
         except Exception as exc:
@@ -117,6 +180,11 @@ class PhysicalFR3Backend(RobotBackend):
         """Disconnect and release the RPC handle."""
         self._connected = False
         self._motion_state = "DISCONNECTED"
+        if self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
+            try:
+                self.gripper_driver.safe_idle()
+            except Exception:
+                pass
         if self._rpc is not None:
             try:
                 # Close connection if SDK supports it
@@ -132,7 +200,7 @@ class PhysicalFR3Backend(RobotBackend):
         return self._connected
 
     def _sync_hardware_state(self) -> None:
-        """Query actual hardware joint positions and TCP pose."""
+        """Query actual hardware joint positions, TCP pose, and flange pose."""
         if not self._connected or self.dry_run or self._rpc is None:
             return
 
@@ -148,6 +216,13 @@ class PhysicalFR3Backend(RobotBackend):
                 err, pose = self._rpc.GetActualTCPPose(flag=1)
                 if err == 0 and len(pose) >= 6:
                     self._current_tcp_pose_mm_deg = [float(v) for v in pose[:6]]
+
+            # Query actual Tool Flange Pose from controller if supported
+            if hasattr(self._rpc, "GetActualToolFlangePose"):
+                err, fpose = self._rpc.GetActualToolFlangePose(flag=1)
+                if err == 0 and len(fpose) >= 6:
+                    self._current_flange_pose_mm_deg = [float(v) for v in fpose[:6]]
+                    self._flange_authoritative = True
         except Exception as exc:
             logger.debug(f"[PhysicalFR3Backend] Hardware state sync failed: {exc}")
 
@@ -206,8 +281,8 @@ class PhysicalFR3Backend(RobotBackend):
                 offset_flag=0,
                 offset_pos=[0.0] * 6,
             )
-            # Codes 0 or 112 (complete/ok) are success
-            if err not in (0, 112):
+            # Strict motion success check: only code 0 is authoritative success
+            if not is_motion_success_code(err):
                 raise RuntimeError(f"MoveJ failed with return code {err}")
             self._current_joints_deg = target_q
             self._motion_state = "IDLE"
@@ -255,7 +330,8 @@ class PhysicalFR3Backend(RobotBackend):
                 blendT=-1.0,
                 config=-1,
             )
-            if err not in (0, 112):
+            # Strict motion success check: only code 0 is authoritative success
+            if not is_motion_success_code(err):
                 raise RuntimeError(f"MoveCart failed with return code {err}")
             self._current_tcp_pose_mm_deg = target_pose
             self._motion_state = "IDLE"
@@ -267,38 +343,45 @@ class PhysicalFR3Backend(RobotBackend):
             return False
 
     def set_gripper(self, closed: bool) -> bool:
-        """Command gripper open/close."""
+        """
+        Command gripper open/close.
+        Exclusively delegates to the authoritative TwoOutputGripperDriver to enforce
+        mutual exclusion, deadtime, calibrated pulse duration, and safe idle.
+        Raw uncontrolled SetToolDO fallback is strictly forbidden.
+        """
         self._gripper_closed = bool(closed)
-        if self.gripper_driver is not None:
+        if self.gripper_driver is None:
+            from src.hardware.gripper.two_output import TwoOutputGripperDriver
+            self.gripper_driver = TwoOutputGripperDriver(
+                set_do_fn=self.set_tool_do,
+                dry_run=self.dry_run,
+            )
+
+        try:
             if closed:
                 return bool(self.gripper_driver.close())
             else:
                 return bool(self.gripper_driver.open())
-
-        # Fallback if no separate gripper driver injected
-        if self.dry_run or self._rpc is None:
-            logger.info(f"[PhysicalFR3Backend] DRY Gripper -> {'CLOSE' if closed else 'OPEN'}")
-            return True
-
-        try:
-            # Verified wiring default: DO0=close, DO1=open
-            if closed:
-                self._rpc.SetToolDO(0, 1, block=0)
-                time.sleep(0.3)
-                self._rpc.SetToolDO(0, 0, block=0)
-            else:
-                self._rpc.SetToolDO(1, 1, block=0)
-                time.sleep(0.3)
-                self._rpc.SetToolDO(1, 0, block=0)
-            return True
         except Exception as exc:
             self._last_error = str(exc)
             logger.error(f"[PhysicalFR3Backend] set_gripper error: {exc}")
+            # Ensure outputs return to safe idle after failure
+            try:
+                if hasattr(self.gripper_driver, "safe_idle"):
+                    self.gripper_driver.safe_idle()
+            except Exception:
+                pass
             return False
 
     def stop(self) -> bool:
-        """Emergency stop / halt current motion immediately."""
+        """Emergency stop / halt current motion immediately and safe-idle gripper."""
         self._motion_state = "IDLE"
+        if self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
+            try:
+                self.gripper_driver.safe_idle()
+            except Exception:
+                pass
+
         if self.dry_run or self._rpc is None:
             logger.info("[PhysicalFR3Backend] DRY StopMotion called.")
             return True

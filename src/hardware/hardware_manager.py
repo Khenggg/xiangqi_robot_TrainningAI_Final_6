@@ -114,7 +114,12 @@ class HardwareManager:
         else:
             print("[MAIN] 🦾 Initializing Physical FR3 Backend...")
             try:
+                self.backend = PhysicalFR3Backend(
+                    ip=getattr(self.config, "ROBOT_IP", "192.168.58.2"),
+                    dry_run=self.dry_run,
+                )
                 self.gripper_driver = TwoOutputGripperDriver(
+                    set_do_fn=self.backend.set_tool_do,
                     dry_run=self.dry_run,
                     open_do_id=getattr(self.config, "TOOL_DO_OPEN", 1),
                     close_do_id=getattr(self.config, "TOOL_DO_CLOSE", 0),
@@ -122,11 +127,7 @@ class HardwareManager:
                     close_pulse_sec=getattr(self.config, "TOOL_DO_CLOSE_PULSE_SEC", 0.30),
                     deadtime_sec=getattr(self.config, "TOOL_DO_DEADTIME_SEC", 0.10),
                 )
-                self.backend = PhysicalFR3Backend(
-                    ip=getattr(self.config, "ROBOT_IP", "192.168.58.2"),
-                    dry_run=self.dry_run,
-                    gripper_driver=self.gripper_driver,
-                )
+                self.backend.gripper_driver = self.gripper_driver
                 self.backend.connect()
                 if not self.dry_run:
                     print("[MAIN] ✅ Physical FR3 Backend connected.")
@@ -513,6 +514,9 @@ class HardwareManager:
 
     def cleanup(self):
         print("[CLEANUP] Đang dọn dẹp hardware...")
+        if self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
+            try: self.gripper_driver.safe_idle()
+            except: pass
         if self.backend is not None:
             try: self.backend.disconnect()
             except: pass

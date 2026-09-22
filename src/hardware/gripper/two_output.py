@@ -114,6 +114,11 @@ class TwoOutputGripperDriver(GripperDriver):
         if errors:
             raise GripperSafetyError("Could not set both gripper outputs to safe idle (LOW)") from errors[0]
 
+    def safe_idle(self) -> None:
+        """Public method to force both gripper outputs to safe idle (LOW / 0)."""
+        with self._lock:
+            self._set_safe_idle()
+
     def open(self) -> bool:
         """Pulse the open motor direction, then return both outputs to safe idle."""
         self._validate_config()
