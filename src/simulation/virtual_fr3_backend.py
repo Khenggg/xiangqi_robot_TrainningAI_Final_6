@@ -238,13 +238,101 @@ class VirtualFR3Backend(RobotBackend):
         with self._state_lock:
             return self._connected
 
+    def solve_tcp_ik_candidates(
+        self,
+        tcp_pose_mm_deg: Sequence[float],
+        seed_joints: Optional[Sequence[float]] = None,
+        ref_joints: Optional[Sequence[float]] = None,
+        allow_alternate_yaw: bool = False,
+        allowed_grasp_piece_id: Optional[str] = None,
+    ) -> List[IKResult]:
+        """
+        Generate multiple valid, collision-checked IK candidates for target TCP pose,
+        ranked by continuity score against ref_joints (or current robot configuration).
+        """
+        q_ref = ref_joints if ref_joints is not None else np.radians(self._current_joints_deg)
+
+        poses_to_try = [list(tcp_pose_mm_deg)]
+        if allow_alternate_yaw:
+            alt_pose = list(tcp_pose_mm_deg)
+            alt_pose[5] = (alt_pose[5] + 180.0 + 180.0) % 360.0 - 180.0
+            poses_to_try.append(alt_pose)
+
+        all_candidates: List[IKResult] = []
+        seen: List[np.ndarray] = []
+
+        for p_target in poses_to_try:
+            p_m = np.array(p_target[:3], dtype=float) / 1000.0
+            R_tcp = rpy_to_matrix(np.radians(p_target[3:]))
+            T_tcp = np.eye(4, dtype=float)
+            T_tcp[:3, :3] = R_tcp
+            T_tcp[:3, 3] = p_m
+            T_flange = T_tcp @ self._T_tcp_flange
+            pose_flange = Pose3D.from_matrix(T_flange)
+
+            cands = self.kinematics.solve_ik_candidates(
+                pose_flange,
+                seed_joints=seed_joints,
+                ref_joints=q_ref,
+            )
+            for c in cands:
+                if any(np.allclose(c.joints_rad, s, atol=1e-2) for s in seen):
+                    continue
+                seen.append(c.joints_rad)
+
+                # Collision check if collision guard attached
+                if self.collision_guard is not None and getattr(self, "collision_guard_enabled", True):
+                    col = self.collision_guard.validate_configuration(
+                        c.joints_rad,
+                        allowed_grasp_piece_id=allowed_grasp_piece_id,
+                        restore_state=True,
+                    )
+                    if not col.safe:
+                        continue
+                all_candidates.append(c)
+
+        def score_fn(cand: IKResult) -> float:
+            disp = float(np.linalg.norm(cand.joints_rad - q_ref)) if q_ref is not None else 0.0
+            branch_diff = float(abs(cand.joints_rad[4] - q_ref[4])) if q_ref is not None else 0.0
+            margin_rad = min(
+                min(cand.joints_rad[k] - self.kinematics.lower_limits[k],
+                    self.kinematics.upper_limits[k] - cand.joints_rad[k])
+                for k in range(6)
+            )
+            margin_penalty = 0.1 / max(margin_rad, 0.01)
+            cond_penalty = (cand.condition_number or 10.0) / 200.0
+            return 2.0 * disp + 3.0 * branch_diff + margin_penalty + cond_penalty
+
+        all_candidates.sort(key=score_fn)
+        return all_candidates
+
     def solve_tcp_ik(
         self,
         tcp_pose_mm_deg: Sequence[float],
         seed_joints: Optional[Sequence[float]] = None,
         allow_multi_seed: bool = True,
+        ref_joints: Optional[Sequence[float]] = None,
+        allow_alternate_yaw: bool = False,
+        allowed_grasp_piece_id: Optional[str] = None,
     ) -> IKResult:
-        """Solve inverse kinematics for a target TCP pose (in mm and deg)."""
+        """
+        Solve inverse kinematics for a target TCP pose (in mm and deg).
+        Prioritizes continuity with ref_joints (or current robot posture).
+        """
+        q_ref = ref_joints if ref_joints is not None else np.radians(self._current_joints_deg)
+
+        if allow_multi_seed or allow_alternate_yaw:
+            cands = self.solve_tcp_ik_candidates(
+                tcp_pose_mm_deg,
+                seed_joints=seed_joints,
+                ref_joints=q_ref,
+                allow_alternate_yaw=allow_alternate_yaw,
+                allowed_grasp_piece_id=allowed_grasp_piece_id,
+            )
+            if cands:
+                return cands[0]
+
+        # Single seed fast path or fallback
         p_m = np.array(tcp_pose_mm_deg[:3], dtype=float) / 1000.0
         R_tcp = rpy_to_matrix(np.radians(tcp_pose_mm_deg[3:]))
         T_tcp = np.eye(4, dtype=float)
@@ -253,8 +341,12 @@ class VirtualFR3Backend(RobotBackend):
         T_flange = T_tcp @ self._T_tcp_flange
         pose_flange = Pose3D.from_matrix(T_flange)
         return self.kinematics.inverse_kinematics(
-            pose_flange, seed_joints=seed_joints, allow_multi_seed=allow_multi_seed
+            pose_flange,
+            seed_joints=seed_joints,
+            allow_multi_seed=allow_multi_seed,
+            ref_joints=q_ref,
         )
+
 
     def set_trajectory_stage(self, stage: Optional[str]) -> None:
         """Set current 3-stage trajectory phase (PREPOSITION, LIFT, TRANSIT, LAND, COMPLETE, FAILED, None)."""
@@ -479,7 +571,22 @@ class VirtualFR3Backend(RobotBackend):
         elevates the arm vertically into safe free space above obstacles, then re-adjusts
         to target joint configuration from the safe clearance altitude.
         """
-        # 1. Attempt direct joint motion
+        # 1. Attempt direct joint motion (or preemptive branch switch if already at SERVICE_SAFE)
+        curr_snap = self.get_state_snapshot()
+        branch_diff = abs(target_joints_deg[4] - curr_snap.joints_deg[4])
+        is_near_service_safe = (
+            abs(curr_snap.joints_deg[0] - self.SERVICE_SAFE_JOINTS_DEG[0]) < 15.0 and
+            abs(curr_snap.joints_deg[1] - self.SERVICE_SAFE_JOINTS_DEG[1]) < 15.0 and
+            abs(curr_snap.joints_deg[2] - self.SERVICE_SAFE_JOINTS_DEG[2]) < 15.0 and
+            abs(curr_snap.joints_deg[3] - self.SERVICE_SAFE_JOINTS_DEG[3]) < 15.0
+        )
+        if branch_diff > 90.0 and is_near_service_safe:
+            q_safe_flipped = list(self.SERVICE_SAFE_JOINTS_DEG)
+            q_safe_flipped[4] = target_joints_deg[4]
+            if self.move_joint(q_safe_flipped, speed_factor=speed_factor):
+                if self.move_joint(target_joints_deg, speed_factor=speed_factor):
+                    return True
+
         if self.move_joint(target_joints_deg, speed_factor=speed_factor):
             return True
 
@@ -490,7 +597,6 @@ class VirtualFR3Backend(RobotBackend):
         orig_stage = self._trajectory_stage
         self.set_trajectory_stage("RECOVERY_LIFT")
 
-        # Snapshot current safe position
         curr_snap = self.get_state_snapshot()
         curr_tcp = list(curr_snap.tcp_pose_mm_deg)
         curr_z_m = curr_tcp[2] / 1000.0
@@ -534,6 +640,18 @@ class VirtualFR3Backend(RobotBackend):
         # 2. Adjust pose to target from safe elevated clearance
         logger.info("[COLLISION RECOVERY] Arm successfully lifted. Adjusting pose to target from safe altitude...")
         target_ok = self.move_joint(target_joints_deg, speed_factor=speed_factor)
+
+        # Strategy C: If target move failed and requires branch switch, reconfigure at SERVICE_SAFE
+        if not target_ok and abs(target_joints_deg[4] - curr_snap.joints_deg[4]) > 90.0:
+            logger.info("[COLLISION RECOVERY] Elevated move rejected due to branch flip. Reconfiguring at SERVICE_SAFE...")
+            q_safe_curr = list(self.SERVICE_SAFE_JOINTS_DEG)
+            q_safe_curr[4] = curr_snap.joints_deg[4]
+            if self.move_joint(q_safe_curr, speed_factor=speed_factor):
+                q_safe_target = list(self.SERVICE_SAFE_JOINTS_DEG)
+                q_safe_target[4] = target_joints_deg[4]
+                if self.move_joint(q_safe_target, speed_factor=speed_factor):
+                    target_ok = self.move_joint(target_joints_deg, speed_factor=speed_factor)
+
         self.set_trajectory_stage(orig_stage or "IDLE")
 
         if target_ok:
@@ -620,11 +738,11 @@ class VirtualFR3Backend(RobotBackend):
             wp_flange = Pose3D.from_matrix(T_base_flange_i)
 
             ik_res = self.kinematics.inverse_kinematics(
-                wp_flange, seed_joints=seed, allow_multi_seed=False
+                wp_flange, seed_joints=seed, allow_multi_seed=False, ref_joints=seed
             )
             if not ik_res.success:
                 ik_res = self.kinematics.inverse_kinematics(
-                    wp_flange, seed_joints=seed, allow_multi_seed=True
+                    wp_flange, seed_joints=seed, allow_multi_seed=True, ref_joints=seed
                 )
 
             if not ik_res.success:

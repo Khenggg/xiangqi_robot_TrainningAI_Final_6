@@ -74,6 +74,8 @@ class VirtualXiangqiSimulation:
 
     DEFAULT_SERVICE_XY_MARGIN_M: float = 0.030
     DEFAULT_SERVICE_VERTICAL_CLEARANCE_M: float = 0.050
+    POST_LIFT_SETTLE_MAX_STEPS: int = 60
+    POST_RELEASE_SETTLE_MAX_STEPS: int = 60
 
     def __init__(
         self,
@@ -444,12 +446,22 @@ class VirtualXiangqiSimulation:
                     rx, ry, rz = self.target_tool_euler_deg
                     hover_pose = [px * 1000.0, py * 1000.0, (pz + eff_hover_h) * 1000.0, rx, ry, rz]
 
-                    # Use dataset approach joints STRICTLY as IK seed, never as direct motion target
+                    # Use current joint state as reference for IK continuity
+                    curr_snap = self.backend.get_state_snapshot()
+                    curr_q_rad = np.radians(curr_snap.joints_deg)
+
+                    # Use dataset approach joints as candidate seed if available
                     r, c = self.find_nearest_cell(pos_robot)
                     cell_info = self.reachability_dataset.get((r, c))
                     seed_joints = np.radians(cell_info["approach_joints_deg"]) if cell_info and "approach_joints_deg" in cell_info else None
 
-                    ik_hover = self.backend.solve_tcp_ik(hover_pose, seed_joints=seed_joints, allow_multi_seed=True)
+                    ik_hover = self.backend.solve_tcp_ik(
+                        hover_pose,
+                        seed_joints=seed_joints,
+                        allow_multi_seed=True,
+                        ref_joints=curr_q_rad,
+                        allow_alternate_yaw=True,
+                    )
                     if not ik_hover.success:
                         self.backend.set_trajectory_stage("FAILED")
                         return PickResult(
@@ -461,6 +473,15 @@ class VirtualXiangqiSimulation:
                             payload_clear=False,
                             requires_recovery=False,
                         )
+
+                    # Safe branch switching check:
+                    # If target hover pose requires a different wrist branch (|Delta J5| > 90 deg)
+                    # and arm is currently at low Z (near board), elevate to SERVICE_SAFE first.
+                    target_j5 = ik_hover.joints_deg[4]
+                    curr_j5 = curr_snap.joints_deg[4]
+                    curr_tcp_z = curr_snap.tcp_pose_mm_deg[2]
+                    if abs(target_j5 - curr_j5) > 90.0 and curr_tcp_z < 250.0:
+                        self.runtime_go_service_safe()
 
                     # 2. Preposition / Hover
                     self.backend.set_trajectory_stage("PREPOSITION")
@@ -2104,72 +2125,143 @@ class VirtualXiangqiSimulation:
                             # Resolve candidate target piece on cell if any (replaces wildcard '*')
                             target_piece_id = self._get_piece_at_cell(r, c)
 
-                            # 1. Approach endpoint IK
-                            ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
+                            # Multi-candidate Approach IK with trajectory validation
+                            cands_ap = self.backend.solve_tcp_ik_candidates(
+                                pose_ap_mm,
+                                seed_joints=seed_app,
+                                ref_joints=backend_q_orig,
+                                allow_alternate_yaw=True,
+                                allowed_grasp_piece_id=target_piece_id,
+                            )
+                            ik_ap = None
                             col_ap_safe = False
                             col_ap_reason = None
-                            if ik_ap.success:
-                                app_ik_ok += 1
-                                col_ap = self.collision_guard.validate_configuration(ik_ap.joints_rad, restore_state=True)
-                                if col_ap.safe:
-                                    app_col_free += 1
-                                    col_ap_safe = True
-                                else:
-                                    col_ap_reason = col_ap.failure_reason
-
-                            # 2. LAND MoveL trajectory (Approach -> Grasp)
                             land_safe = False
                             land_reason = None
                             land_plan = None
-                            if ik_ap.success and col_ap_safe:
-                                land_plan = self.backend.plan_cartesian(
-                                    start_q=ik_ap.joints_rad,
-                                    target_pose_mm_deg=pose_gr_mm,
-                                    samples=20,
-                                    allowed_grasp_piece_id=target_piece_id,
-                                    check_collision=True,
-                                )
-                                if land_plan.success:
-                                    land_traj_ok += 1
-                                    land_safe = True
-                                else:
-                                    land_reason = land_plan.failure_reason
-
-                            # 3. Grasp endpoint IK & collision
-                            ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
+                            ik_gr = None
                             col_gr_safe = False
                             col_gr_reason = None
-                            if ik_gr.success:
-                                grasp_ik_ok += 1
-                                col_gr = self.collision_guard.validate_configuration(
-                                    ik_gr.joints_rad, allowed_grasp_piece_id=target_piece_id, restore_state=True
-                                )
-                                if col_gr.safe:
-                                    grasp_col_free += 1
-                                    col_gr_safe = True
-                                else:
-                                    col_gr_reason = col_gr.failure_reason
-
-                            # 4. LIFT MoveL trajectory (Grasp -> Approach)
                             lift_safe = False
                             lift_reason = None
                             lift_plan = None
-                            start_q_lift = land_plan.final_q if (land_plan and land_plan.success and land_plan.final_q is not None) else (
-                                ik_gr.joints_rad if ik_gr.success else None
-                            )
-                            if start_q_lift is not None and col_gr_safe:
-                                lift_plan = self.backend.plan_cartesian(
-                                    start_q=start_q_lift,
-                                    target_pose_mm_deg=pose_ap_mm,
+
+                            for c_ap in cands_ap:
+                                col_ap = self.collision_guard.validate_configuration(c_ap.joints_rad, restore_state=True)
+                                if not col_ap.safe:
+                                    continue
+                                rpy_ap = self.backend._compute_tcp_pose_mm_deg(c_ap.joints_rad)[3:]
+                                pose_gr_i = [v * 1000.0 for v in pos_gr] + list(rpy_ap)
+                                pose_ap_i = [v * 1000.0 for v in pos_ap] + list(rpy_ap)
+
+                                lp = self.backend.plan_cartesian(
+                                    start_q=c_ap.joints_rad,
+                                    target_pose_mm_deg=pose_gr_i,
                                     samples=20,
                                     allowed_grasp_piece_id=target_piece_id,
                                     check_collision=True,
                                 )
-                                if lift_plan.success:
-                                    lift_traj_ok += 1
-                                    lift_safe = True
-                                else:
-                                    lift_reason = lift_plan.failure_reason
+                                if not lp.success:
+                                    continue
+
+                                ik_g = self.backend.solve_tcp_ik(
+                                    pose_gr_i,
+                                    seed_joints=lp.final_q,
+                                    ref_joints=c_ap.joints_rad,
+                                    allow_multi_seed=True,
+                                    allow_alternate_yaw=True,
+                                    allowed_grasp_piece_id=target_piece_id,
+                                )
+                                if not ik_g.success:
+                                    continue
+                                col_g = self.collision_guard.validate_configuration(
+                                    ik_g.joints_rad, allowed_grasp_piece_id=target_piece_id, restore_state=True
+                                )
+                                if not col_g.safe:
+                                    continue
+
+                                lftp = self.backend.plan_cartesian(
+                                    start_q=lp.final_q,
+                                    target_pose_mm_deg=pose_ap_i,
+                                    samples=20,
+                                    allowed_grasp_piece_id=target_piece_id,
+                                    check_collision=True,
+                                )
+                                if not lftp.success:
+                                    continue
+
+                                # All 4 stages successfully validated!
+                                ik_ap = c_ap
+                                col_ap_safe = True
+                                land_safe = True
+                                land_plan = lp
+                                ik_gr = ik_g
+                                col_gr_safe = True
+                                lift_safe = True
+                                lift_plan = lftp
+                                break
+
+                            if ik_ap is not None:
+                                app_ik_ok += 1
+                                app_col_free += 1
+                                land_traj_ok += 1
+                                grasp_ik_ok += 1
+                                grasp_col_free += 1
+                                lift_traj_ok += 1
+                            else:
+                                # Fallback to standard single IK to record diagnostic failure reasons
+                                ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
+                                if ik_ap.success:
+                                    app_ik_ok += 1
+                                    col_ap = self.collision_guard.validate_configuration(ik_ap.joints_rad, restore_state=True)
+                                    if col_ap.safe:
+                                        app_col_free += 1
+                                        col_ap_safe = True
+                                    else:
+                                        col_ap_reason = col_ap.failure_reason
+
+                                if ik_ap.success and col_ap_safe:
+                                    land_plan = self.backend.plan_cartesian(
+                                        start_q=ik_ap.joints_rad,
+                                        target_pose_mm_deg=pose_gr_mm,
+                                        samples=20,
+                                        allowed_grasp_piece_id=target_piece_id,
+                                        check_collision=True,
+                                    )
+                                    if land_plan.success:
+                                        land_traj_ok += 1
+                                        land_safe = True
+                                    else:
+                                        land_reason = land_plan.failure_reason
+
+                                ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
+                                if ik_gr.success:
+                                    grasp_ik_ok += 1
+                                    col_gr = self.collision_guard.validate_configuration(
+                                        ik_gr.joints_rad, allowed_grasp_piece_id=target_piece_id, restore_state=True
+                                    )
+                                    if col_gr.safe:
+                                        grasp_col_free += 1
+                                        col_gr_safe = True
+                                    else:
+                                        col_gr_reason = col_gr.failure_reason
+
+                                start_q_lift = land_plan.final_q if (land_plan and land_plan.success and land_plan.final_q is not None) else (
+                                    ik_gr.joints_rad if ik_gr.success else None
+                                )
+                                if start_q_lift is not None and col_gr_safe:
+                                    lift_plan = self.backend.plan_cartesian(
+                                        start_q=start_q_lift,
+                                        target_pose_mm_deg=pose_ap_mm,
+                                        samples=20,
+                                        allowed_grasp_piece_id=target_piece_id,
+                                        check_collision=True,
+                                    )
+                                    if lift_plan.success:
+                                        lift_traj_ok += 1
+                                        lift_safe = True
+                                    else:
+                                        lift_reason = lift_plan.failure_reason
 
                             cell_passed = (
                                 ik_ap.success and col_ap_safe and land_safe and
@@ -2397,6 +2489,7 @@ class VirtualXiangqiSimulation:
                         target_piece_id = self._get_piece_at_cell(r, c)
 
                         ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
+                        ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
 
                         lift_plan = None
                         if ik_gr.success:
@@ -2410,6 +2503,7 @@ class VirtualXiangqiSimulation:
 
                         cell_plans[(r, c)] = {
                             "ik_gr": ik_gr,
+                            "ik_ap": ik_ap,
                             "pose_ap_mm": pose_ap_mm,
                             "pose_gr_mm": pose_gr_mm,
                             "lift_plan": lift_plan,
@@ -2451,20 +2545,47 @@ class VirtualXiangqiSimulation:
                             allowed_grasp_piece_id=src_piece_id,
                             check_collision=True,
                         )
+                        choreo_used = False
                         if not transit_plan.success:
-                            failed_routes += 1
-                            if worst_route is None:
-                                worst_route = {"src": list(src), "dst": list(dst), "stage": "TRANSIT"}
-                                first_col_stage = "TRANSIT"
-                                col_pair = transit_plan.colliding_links_or_bodies
-                            continue
+                            # Direct Cartesian transit failed (e.g. branch flip |ΔJ5| > 90° or cross-board obstacle).
+                            # Check 3-segment safe branch switching choreography through SERVICE_SAFE:
+                            # Seg 1: q_after_lift -> SERVICE_SAFE (current branch)
+                            # Seg 2: SERVICE_SAFE current branch -> SERVICE_SAFE target branch
+                            # Seg 3: SERVICE_SAFE target branch -> dst approach
+                            q_dst_app = dst_cp["ik_ap"].joints_rad if (dst_cp.get("ik_ap") and dst_cp["ik_ap"].success) else None
+                            if q_dst_app is not None:
+                                q_safe_rad = np.radians(self.backend.SERVICE_SAFE_JOINTS_DEG)
+                                q_safe_src = np.copy(q_safe_rad)
+                                q_safe_src[4] = q_after_lift[4]
+                                q_safe_dst = np.copy(q_safe_rad)
+                                q_safe_dst[4] = q_dst_app[4]
 
-                        q_after_transit = transit_plan.final_q
+                                def _interp(qa, qb, n=10):
+                                    return [(1.0 - a) * qa + a * qb for a in np.linspace(0.0, 1.0, n)]
 
-                        # Stage 3: LAND (MoveL descending to dst grasp, starting strictly from transit_plan.final_q!)
+                                c1 = self.collision_guard.validate_trajectory(_interp(q_after_lift, q_safe_src), allowed_grasp_piece_id=src_piece_id)
+                                c2 = self.collision_guard.validate_trajectory(_interp(q_safe_src, q_safe_dst), allowed_grasp_piece_id=src_piece_id)
+                                c3 = self.collision_guard.validate_trajectory(_interp(q_safe_dst, q_dst_app), allowed_grasp_piece_id=src_piece_id)
+                                if c1.safe and c2.safe and c3.safe:
+                                    choreo_used = True
+                                    q_after_transit = q_dst_app
+                            if not choreo_used:
+                                failed_routes += 1
+                                if worst_route is None:
+                                    worst_route = {"src": list(src), "dst": list(dst), "stage": "TRANSIT"}
+                                    first_col_stage = "TRANSIT"
+                                    col_pair = transit_plan.colliding_links_or_bodies
+                                continue
+                        else:
+                            q_after_transit = transit_plan.final_q
+
+                        # Stage 3: LAND (MoveL descending to dst grasp, starting strictly from q_after_transit!)
+                        # Lock orientation to current wrist orientation to avoid 180° wrist flip during vertical descent
+                        curr_land_rpy = self.backend._compute_tcp_pose_mm_deg(q_after_transit)[3:]
+                        land_target_pose = list(dst_cp["pose_gr_mm"][:3]) + list(curr_land_rpy)
                         land_plan = self.backend.plan_cartesian(
                             start_q=q_after_transit,
-                            target_pose_mm_deg=dst_cp["pose_gr_mm"],
+                            target_pose_mm_deg=land_target_pose,
                             samples=15,
                             allowed_grasp_piece_id=src_piece_id,
                             check_collision=True,
@@ -2897,12 +3018,53 @@ class VirtualXiangqiSimulation:
             dst_grasp_pose_mm = to_mm_deg(dst_grasp_m)
             dst_app_pose_mm = to_mm_deg(dst_app_m)
 
-            self.backend.set_trajectory_stage("PREPOSITION")
+            # Multi-candidate selection ensuring entire 3-stage chain (src_land, transit, dst_land) is collision-safe
+            cands_src_app = self.backend.solve_tcp_ik_candidates(
+                src_app_pose_mm,
+                seed_joints=seed_src_app,
+                ref_joints=self.backend._current_joints_rad,
+                allow_alternate_yaw=True,
+            )
+            ik_src_app = None
+            for cand_src in cands_src_app:
+                rpy_c = self.backend._compute_tcp_pose_mm_deg(cand_src.joints_rad)[3:]
+                p_sl = self.backend.plan_cartesian(
+                    start_q=cand_src.joints_rad,
+                    target_pose_mm_deg=[src_grasp_m[0]*1000.0, src_grasp_m[1]*1000.0, src_grasp_m[2]*1000.0] + list(rpy_c),
+                    samples=samples_per_stage,
+                    check_collision=True,
+                )
+                if not p_sl.success:
+                    continue
+                p_tr = self.backend.plan_cartesian(
+                    start_q=cand_src.joints_rad,
+                    target_pose_mm_deg=[dst_app_m[0]*1000.0, dst_app_m[1]*1000.0, dst_app_m[2]*1000.0] + list(rpy_c),
+                    samples=samples_per_stage,
+                    check_collision=True,
+                )
+                if not p_tr.success:
+                    continue
+                rpy_tr = self.backend._compute_tcp_pose_mm_deg(p_tr.final_q)[3:]
+                p_dl = self.backend.plan_cartesian(
+                    start_q=p_tr.final_q,
+                    target_pose_mm_deg=[dst_grasp_m[0]*1000.0, dst_grasp_m[1]*1000.0, dst_grasp_m[2]*1000.0] + list(rpy_tr),
+                    samples=samples_per_stage,
+                    check_collision=True,
+                )
+                if p_dl.success:
+                    ik_src_app = cand_src
+                    break
 
-            ik_src_app = self.backend.solve_tcp_ik(src_app_pose_mm, seed_joints=seed_src_app, allow_multi_seed=True)
-            ik_src_gr = self.backend.solve_tcp_ik(src_grasp_pose_mm, seed_joints=seed_src_gr, allow_multi_seed=True)
-            ik_dst_app = self.backend.solve_tcp_ik(dst_app_pose_mm, seed_joints=seed_dst_app, allow_multi_seed=True)
-            ik_dst_gr = self.backend.solve_tcp_ik(dst_grasp_pose_mm, seed_joints=seed_dst_gr, allow_multi_seed=True)
+            if ik_src_app is None:
+                ik_src_app = self.backend.solve_tcp_ik(src_app_pose_mm, seed_joints=seed_src_app, allow_multi_seed=True, allow_alternate_yaw=True)
+
+            ik_src_rpy = self.backend._compute_tcp_pose_mm_deg(ik_src_app.joints_rad)[3:] if ik_src_app.success else tool_rpy
+            src_grasp_pose_mm = [src_grasp_m[0]*1000.0, src_grasp_m[1]*1000.0, src_grasp_m[2]*1000.0] + list(ik_src_rpy)
+            src_app_pose_mm = [src_app_m[0]*1000.0, src_app_m[1]*1000.0, src_app_m[2]*1000.0] + list(ik_src_rpy)
+
+            ik_src_gr = self.backend.solve_tcp_ik(src_grasp_pose_mm, seed_joints=seed_src_gr, ref_joints=ik_src_app.joints_rad, allow_multi_seed=True, allow_alternate_yaw=True)
+            ik_dst_app = self.backend.solve_tcp_ik(dst_app_pose_mm, seed_joints=seed_dst_app, ref_joints=ik_src_app.joints_rad, allow_multi_seed=True, allow_alternate_yaw=True)
+            ik_dst_gr = self.backend.solve_tcp_ik(dst_grasp_pose_mm, seed_joints=seed_dst_gr, ref_joints=ik_dst_app.joints_rad, allow_multi_seed=True, allow_alternate_yaw=True)
 
             if not ik_src_gr.success or not ik_src_app.success:
                 err_msg = f"Preposition rejected: Source cell {src_cell} is unreachable at current board placement"
@@ -3036,7 +3198,9 @@ class VirtualXiangqiSimulation:
 
                 # --- Stage 1: LIFT (vertical MoveL from grasp to safe transit height) ---
                 self.backend.set_trajectory_stage("LIFT")
-                ok1 = self.move_cartesian(to_mm_deg(src_app_m), speed_factor=speed_factor, samples=samples_per_stage)
+                curr_snap_lift1 = self.backend.get_state_snapshot()
+                src_app_pose_mm = [src_app_m[0]*1000.0, src_app_m[1]*1000.0, src_app_m[2]*1000.0] + list(curr_snap_lift1.tcp_pose_mm_deg[3:])
+                ok1 = self.move_cartesian(src_app_pose_mm, speed_factor=speed_factor, samples=samples_per_stage)
                 if not ok1:
                     err_msg = self.backend._last_error or "LIFT stage failed"
                     self.backend.set_trajectory_stage("FAILED")
@@ -3054,7 +3218,7 @@ class VirtualXiangqiSimulation:
                 # If piece was grasped, verify payload clearance
                 if should_grasp and piece_at_src:
                     self.backend.set_trajectory_stage("PAYLOAD_CLEAR")
-                    self.world.step_until_settled(max_steps=20)
+                    self.world.step_until_settled(max_steps=self.POST_LIFT_SETTLE_MAX_STEPS)
                     payload_rep = self.evaluate_payload_clearance(expected_piece_id=piece_at_src)
                     if not payload_rep.payload_clear:
                         err_msg = f"LIFT stage failed: Payload clearance predicate failed ({', '.join(payload_rep.reasons)})"
@@ -3072,7 +3236,18 @@ class VirtualXiangqiSimulation:
 
                 # --- Stage 2: TRANSIT (horizontal MoveL across safe transit plane) ---
                 self.backend.set_trajectory_stage("TRANSIT")
-                ok2 = self.move_cartesian(to_mm_deg(dst_app_m), speed_factor=speed_factor, samples=samples_per_stage)
+                curr_snap_transit = self.backend.get_state_snapshot()
+                dst_app_pose_mm = [dst_app_m[0]*1000.0, dst_app_m[1]*1000.0, dst_app_m[2]*1000.0] + list(curr_snap_transit.tcp_pose_mm_deg[3:])
+                ok2 = self.move_cartesian(dst_app_pose_mm, speed_factor=speed_factor, samples=samples_per_stage)
+                if not ok2:
+                    # If direct horizontal MoveL at transit height is obstructed or crosses an incompatible IK branch
+                    # (e.g. near-base J5=+90° to far-edge J5=-90°), safely reconfigure via elevated choreography (SERVICE_SAFE).
+                    target_dst_app_deg = np.degrees(ik_dst_app.joints_rad).tolist()
+                    ok2 = self.backend.move_joint_with_lift_recovery(
+                        target_dst_app_deg,
+                        speed_factor=speed_factor,
+                        safe_plane_z_m=z_transit,
+                    )
                 if not ok2:
                     err_msg = self.backend._last_error or "TRANSIT stage failed"
                     self.backend.set_trajectory_stage("FAILED")
@@ -3089,7 +3264,9 @@ class VirtualXiangqiSimulation:
 
                 # --- Stage 3: LAND (vertical MoveL from safe transit height down to grasp target) ---
                 self.backend.set_trajectory_stage("LAND")
-                ok3 = self.move_cartesian(to_mm_deg(dst_grasp_m), speed_factor=speed_factor, samples=samples_per_stage)
+                curr_snap_land = self.backend.get_state_snapshot()
+                dst_grasp_pose_mm = [dst_grasp_m[0]*1000.0, dst_grasp_m[1]*1000.0, dst_grasp_m[2]*1000.0] + list(curr_snap_land.tcp_pose_mm_deg[3:])
+                ok3 = self.move_cartesian(dst_grasp_pose_mm, speed_factor=speed_factor, samples=samples_per_stage)
                 if not ok3:
                     err_msg = self.backend._last_error or "LAND stage failed"
                     self.backend.set_trajectory_stage("FAILED")
@@ -3116,7 +3293,7 @@ class VirtualXiangqiSimulation:
                     piece_released = True
 
                     self.backend.set_trajectory_stage("SETTLE")
-                    self.world.step_until_settled(max_steps=40)
+                    self.world.step_until_settled(max_steps=self.POST_RELEASE_SETTLE_MAX_STEPS)
 
                     # Physical placement verification
                     p_obj = self.world.pieces.get(piece_at_src) if piece_at_src else None
@@ -3140,7 +3317,9 @@ class VirtualXiangqiSimulation:
                 # --- Stage 5: Mandatory Pass C Post-Operation Safe Retreat ---
                 # 5.1 POST_RELEASE_LIFT: Vertical lift back to safe transit height
                 self.backend.set_trajectory_stage("POST_RELEASE_LIFT")
-                ok_lift_retreat = self.move_cartesian(to_mm_deg(dst_app_m), speed_factor=speed_factor, samples=samples_per_stage)
+                curr_snap_lift2 = self.backend.get_state_snapshot()
+                dst_app_pose_mm_retreat = [dst_app_m[0]*1000.0, dst_app_m[1]*1000.0, dst_app_m[2]*1000.0] + list(curr_snap_lift2.tcp_pose_mm_deg[3:])
+                ok_lift_retreat = self.move_cartesian(dst_app_pose_mm_retreat, speed_factor=speed_factor, samples=samples_per_stage)
                 if not ok_lift_retreat:
                     self.backend.set_trajectory_stage("FAILED")
                     err_msg = self.backend._last_error or "Post-release lift failed"
@@ -3214,6 +3393,7 @@ class VirtualXiangqiSimulation:
                     }
 
                 # 5.4 Physical SERVICE_SAFE verification using Pass B predicate
+                self.world.step_until_settled(max_steps=self.POST_RELEASE_SETTLE_MAX_STEPS)
                 rep = self.evaluate_service_safety()
                 if not rep.service_safe:
                     self.backend.set_trajectory_stage("FAILED")

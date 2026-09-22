@@ -197,11 +197,16 @@ class FR3CollisionGuard:
                         ),
                     )
 
-        # 4. Check FR3 links <-> pieces
+        # 4. Check FR3 links <-> pieces (stationary board obstacles)
+        attached_p = self.world.get_attached_piece()
+        attached_id = attached_p.piece_id if attached_p is not None else None
         for pid, piece in self.world.pieces.items():
             if piece.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
                 continue
-            # Non-gripper robot links may NEVER collide with any piece (even target piece)
+            # Attached payload piece moves with gripper, not a stationary obstacle
+            if (pid == attached_id) or piece.attached_to_gripper:
+                continue
+            # Non-gripper robot links may NEVER collide with any board piece (even target piece)
             pts = p.getClosestPoints(robot_id, piece.body_id, distance=margin, physicsClientId=client)
             for pt in pts:
                 dist = float(pt[8])

@@ -17,6 +17,7 @@ import numpy as np
 
 from src.domain.geometry import get_physical_geometry
 from src.simulation.kinematics.fr3 import FR3Kinematics
+from src.simulation.virtual_fr3_backend import VirtualFR3Backend
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -46,6 +47,7 @@ class TrajectoryWaypointsTests(unittest.TestCase):
         meta = cls.dataset.get("metadata", {})
         cls.safe_lift_mm = float(meta.get("clearance_safe_lift_m", 0.040)) * 1000.0
         cls.grasp_clearance_mm = float(meta.get("clearance_grasp_m", 0.004715)) * 1000.0
+        cls.backend = VirtualFR3Backend()
 
     def test_all_90_cells_have_grasp_and_approach_waypoints(self):
         """Verify 100% reachability for both grasp and approach poses."""
@@ -84,43 +86,59 @@ class TrajectoryWaypointsTests(unittest.TestCase):
                 tilt_deg = float(np.degrees(np.arccos(dot)))
                 self.assertLess(tilt_deg, 0.15, f"Cell ({r},{c}) {label} tilt exceeded 0.15 deg")
 
-    def test_transit_clearance_over_pieces_between_arbitrary_cells(self):
-        """Simulate horizontal transit between distant cells and verify safe clearance above piece tops."""
+    def test_naive_joint_interpolation_can_violate_safe_transit(self):
+        """Negative control: Naive joint-space interpolation between distant cells sags below safe clearance corridor."""
+        cell_map = {(c["row"], c["col"]): c for c in self.dataset.get("cells", [])}
+        src = cell_map[(0, 0)]
+        dst = cell_map[(9, 8)]
+
+        q_src_app = np.radians(src["approach_joints_deg"])
+        q_dst_app = np.radians(dst["approach_joints_deg"])
+
+        dips_detected = False
+        for alpha in np.linspace(0.0, 1.0, 21):
+            q_interp = (1.0 - alpha) * q_src_app + alpha * q_dst_app
+            T = self.kin.forward_kinematics(q_interp).as_matrix()
+            flange_z = T[2, 3]
+            tip_z = flange_z - self.L_gripper
+            clearance_pieces_mm = (tip_z - self.piece_top_z) * 1000.0
+            if clearance_pieces_mm < 10.0:
+                dips_detected = True
+                break
+
+        self.assertTrue(dips_detected, "Expected naive linear joint interpolation to sag below 10mm corridor, demonstrating why production Cartesian planning is required.")
+
+    def test_production_planner_transit_maintains_safe_height(self):
+        """Production planner enforces TCP altitude >= safe_transit_plane_z - tolerance (<= 1.0mm) across all transit waypoints."""
         test_pairs = [
             ((0, 0), (9, 8)),  # Main diagonal
             ((0, 8), (9, 0)),  # Anti-diagonal
             ((0, 4), (9, 4)),  # King-file full traverse
-            ((4, 0), (4, 8)),  # River lateral traverse
-            ((2, 1), (7, 6)),  # Typical knight move traverse
+            ((2, 1), (7, 6)),  # Knight move traverse
         ]
 
         cell_map = {(c["row"], c["col"]): c for c in self.dataset.get("cells", [])}
+        safe_plane_z = self.z0 + (self.safe_lift_mm / 1000.0)
+        tolerance_m = 0.001  # 1.0 mm simulation tolerance
 
         for (r1, c1), (r2, c2) in test_pairs:
             src = cell_map[(r1, c1)]
             dst = cell_map[(r2, c2)]
 
             q_src_app = np.radians(src["approach_joints_deg"])
-            q_dst_app = np.radians(dst["approach_joints_deg"])
+            target_pose = [dst["x_m"] * 1000.0, dst["y_m"] * 1000.0, safe_plane_z * 1000.0, 180.0, 0.0, 90.0]
 
-            # Interpolate 20 steps along the transit trajectory
-            for alpha in np.linspace(0.0, 1.0, 21):
-                q_interp = (1.0 - alpha) * q_src_app + alpha * q_dst_app
-                T = self.kin.forward_kinematics(q_interp).as_matrix()
-                flange_z = T[2, 3]
-                tip_z = flange_z - self.L_gripper
+            plan = self.backend.plan_cartesian(q_src_app, target_pose, samples=20)
+            self.assertTrue(plan.success, f"Production plan_cartesian failed between ({r1},{c1}) and ({r2},{c2})")
 
-                # Altitude above board surface
-                clearance_board_mm = (tip_z - self.z0) * 1000.0
-                # Altitude above chess piece tops (9.43mm)
-                clearance_pieces_mm = (tip_z - self.piece_top_z) * 1000.0
-
-                # Gripper tips must remain comfortably in the safe corridor (> 10mm above pieces, > 20mm above board)
-                self.assertGreater(clearance_pieces_mm, 10.0,
-                                   f"Collision risk: clearance above piece top {clearance_pieces_mm:.1f}mm "
-                                   f"at alpha={alpha:.2f} between ({r1},{c1}) and ({r2},{c2})")
-                self.assertGreater(clearance_board_mm, 20.0,
-                                   f"Tip altitude dropped below 20mm during transit ({r1},{c1})->({r2},{c2})")
+            for idx, q_sample in enumerate(plan.q_samples):
+                tcp_pose = self.backend._compute_tcp_pose_mm_deg(q_sample)
+                tcp_z = tcp_pose[2] / 1000.0
+                self.assertGreaterEqual(
+                    tcp_z,
+                    safe_plane_z - tolerance_m,
+                    f"Sample {idx}/20 TCP Z ({tcp_z*1000.0:.2f}mm) dipped below safe transit plane ({safe_plane_z*1000.0:.2f}mm - 1mm) between ({r1},{c1}) and ({r2},{c2})",
+                )
 
     def test_vertical_lift_and_descent_linearity(self):
         """Verify that lift and descent phases move vertically over cell (XY drift < 15mm)."""

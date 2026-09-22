@@ -110,9 +110,13 @@ class FR3Kinematics:
 
         # Predefined reference seed configurations (radians)
         self.reference_seeds = [
-            np.array([0.0, -0.785, 1.571, -0.785, -1.571, 0.0], dtype=float),   # Standard elbow up
-            np.array([0.0, -1.2, 1.8, -2.1, -1.571, 0.0], dtype=float),          # Folded reach
-            np.array([0.0, -0.5, 1.2, -1.4, 1.571, 0.0], dtype=float),           # Downward wrist flip
+            np.array([0.0, -0.785, 1.571, -0.785, -1.571, 0.0], dtype=float),   # Standard elbow up (J5 ~ -90)
+            np.array([0.0, -1.2, 1.8, -2.1, -1.571, 0.0], dtype=float),          # Folded reach (J5 ~ -90)
+            np.array([0.0, -1.0, 2.0, -2.4, -1.571, 0.0], dtype=float),          # Deep reach (J5 ~ -90)
+            np.array([0.0, -1.4, 2.4, -2.6, -1.571, 0.0], dtype=float),          # Extended reach (J5 ~ -90)
+            np.array([0.0, -0.5, 1.2, -1.4, 1.571, 0.0], dtype=float),           # Downward wrist flip (J5 ~ +90)
+            np.array([0.0, -0.8, 1.5, 0.4, 1.571, 2.5], dtype=float),            # Near-board folded (J5 ~ +90)
+            np.array([0.0, -1.2, 1.8, 0.4, 1.571, 2.0], dtype=float),            # Near-board high (J5 ~ +90)
             np.zeros(6, dtype=float),                                             # Zero pose
         ]
 
@@ -256,94 +260,383 @@ class FR3Kinematics:
                 failure_reason=f"Target distance {dist_from_base*1000.0:.1f}mm exceeds max FR3 reach {self.MAX_REACH_RADIUS_M*1000.0:.1f}mm",
             )
 
-        # Assemble list of candidate seeds to attempt
-        seeds = []
-        if seed_joints is not None:
-            s_arr = np.asarray(seed_joints, dtype=float)
-            if len(s_arr) == 6 and np.all(np.isfinite(s_arr)):
-                seeds.append(s_arr)
+    def _solve_single_seed(
+        self,
+        p_target: np.ndarray,
+        R_target: np.ndarray,
+        seed: np.ndarray,
+        max_iterations: int = 150,
+        pos_tol_m: float = 0.001,
+        rot_tol_rad: float = 0.017453,
+        damping: float = 0.02,
+    ) -> Optional[Tuple[np.ndarray, float, float, int, float]]:
+        """
+        Run Damped Least Squares on a single seed.
+        Returns (q, pos_err_m, rot_err_rad, iterations, cond) if converged, else None.
+        """
+        q = np.clip(seed, self.lower_limits, self.upper_limits)
+        for it in range(1, max_iterations + 1):
+            chain_transforms = self.chain.forward_kinematics_chain(q)
+            p_cur = chain_transforms[-1][:3, 3]
+            R_cur = chain_transforms[-1][:3, :3]
 
-        if allow_multi_seed or not seeds:
-            # Base yaw seed aligned with target azimuth in XY
-            yaw_base = math.atan2(float(p_target[1]), float(p_target[0]))
-            for ref_s in self.reference_seeds:
-                s_cand = ref_s.copy()
-                s_cand[0] = yaw_base
-                # Also try reverse yaw for alternate arm pose
-                s_cand_rev = ref_s.copy()
-                s_cand_rev[0] = (yaw_base + math.pi) % (2.0 * math.pi) - math.pi
-                seeds.append(s_cand)
-                seeds.append(s_cand_rev)
+            e_p = p_target - p_cur
+            e_o = _rotation_error_vector(R_target, R_cur)
+            e = np.concatenate([e_p, e_o])
+
+            pos_err_m = float(np.linalg.norm(e_p))
+            rot_err_rad = float(np.linalg.norm(e_o))
+
+            if pos_err_m <= pos_tol_m and rot_err_rad <= rot_tol_rad:
+                J = self.chain.geometric_jacobian(q, chain_transforms)
+                cond = self.compute_condition_number(J)
+                return q, pos_err_m, rot_err_rad, it, cond
+
+            J = self.chain.geometric_jacobian(q, chain_transforms)
+            JTJ = J.T @ J
+            damped_matrix = JTJ + (damping ** 2) * np.eye(6, dtype=float)
+            try:
+                delta_q = np.linalg.solve(damped_matrix, J.T @ e)
+            except np.linalg.LinAlgError:
+                break
+
+            step_mag = float(np.linalg.norm(delta_q))
+            if step_mag > 0.15:
+                delta_q = delta_q * (0.15 / step_mag)
+
+            q = np.clip(q + delta_q, self.lower_limits, self.upper_limits)
+
+        return None
+
+    def solve_ik_candidates(
+        self,
+        target: Union[Pose3D, np.ndarray, Sequence[float]],
+        seed_joints: Optional[Sequence[float]] = None,
+        max_iterations: int = 150,
+        pos_tol_mm: float = 1.0,
+        rot_tol_deg: float = 1.0,
+        damping: float = 0.02,
+        ref_joints: Optional[Sequence[float]] = None,
+    ) -> List[IKResult]:
+        """
+        Generate multiple valid, converged IK candidates across candidate seeds.
+        Candidates are scored according to:
+        1. Minimum joint-space displacement from ref_joints (or seed_joints)
+        2. Same IK branch / wrist orientation (|Delta J5|)
+        3. Joint limit margin
+        4. Singularity / Jacobian condition number
+        """
+        try:
+            if isinstance(target, Pose3D):
+                target_pose = target
+            elif isinstance(target, np.ndarray) and target.shape == (4, 4):
+                target_pose = Pose3D.from_matrix(target)
+            elif isinstance(target, (list, tuple, np.ndarray)) and len(target) == 6:
+                vals = [float(v) for v in target]
+                if not all(math.isfinite(v) for v in vals):
+                    return []
+                xyz_m = [vals[0] / 1000.0, vals[1] / 1000.0, vals[2] / 1000.0]
+                rpy_rad = [math.radians(vals[3]), math.radians(vals[4]), math.radians(vals[5])]
+                target_pose = Pose3D.from_xyz_rpy(xyz_m, rpy_rad)
+            else:
+                return []
+        except Exception:
+            return []
+
+        p_target = target_pose.translation_m
+        R_target = target_pose.rotation_matrix
+        if not (np.all(np.isfinite(p_target)) and np.all(np.isfinite(R_target))):
+            return []
+
+        dist_from_base = float(np.linalg.norm(p_target))
+        if dist_from_base > self.MAX_REACH_RADIUS_M:
+            return []
 
         pos_tol_m = pos_tol_mm / 1000.0
         rot_tol_rad = math.radians(rot_tol_deg)
+
+        # Reference joints for continuity scoring
+        q_ref = None
+        if ref_joints is not None:
+            q_ref = np.asarray(ref_joints, dtype=float)
+        elif seed_joints is not None:
+            q_ref = np.asarray(seed_joints, dtype=float)
+
+        seeds = []
+        # Priority 1: ref_joints (continuity with current/previous posture)
+        if q_ref is not None and len(q_ref) == 6 and np.all(np.isfinite(q_ref)):
+            seeds.append(q_ref)
+
+        # Priority 2: seed_joints (warm-start seed if different from ref_joints)
+        if seed_joints is not None:
+            s_arr = np.asarray(seed_joints, dtype=float)
+            if len(s_arr) == 6 and np.all(np.isfinite(s_arr)):
+                if not any(np.allclose(s_arr, s, atol=1e-3) for s in seeds):
+                    seeds.append(s_arr)
+
+        # Fast continuation check: if primary reference seed converges locally,
+        # return immediately to preserve maximum trajectory evaluation speed
+        if seeds:
+            res_fast = self._solve_single_seed(
+                p_target, R_target, seeds[0],
+                max_iterations=max(min(max_iterations, 80), 30),
+                pos_tol_m=pos_tol_m,
+                rot_tol_rad=rot_tol_rad,
+                damping=damping,
+            )
+            if res_fast is not None:
+                q_sol, pos_err_m, rot_err_rad, iters, cond = res_fast
+                disp = float(np.linalg.norm(q_sol - seeds[0]))
+                branch_diff = float(abs(q_sol[4] - seeds[0][4]))
+                margin_rad = min(
+                    min(q_sol[k] - self.lower_limits[k], self.upper_limits[k] - q_sol[k])
+                    for k in range(6)
+                )
+                if disp < 0.25 and branch_diff < 0.25 and margin_rad > 0.05:
+                    return [
+                        IKResult(
+                            status=IKStatus.SUCCESS,
+                            success=True,
+                            joints_rad=q_sol,
+                            joints_deg=[round(math.degrees(float(val)), 3) for val in q_sol],
+                            position_error_mm=round(pos_err_m * 1000.0, 4),
+                            orientation_error_deg=round(math.degrees(rot_err_rad), 3),
+                            iterations=iters,
+                            condition_number=round(cond, 2),
+                            failure_reason=None,
+                        )
+                    ]
+
+        # Multi-seed search: assemble concise set of candidate postures
+        yaw_fr3 = math.atan2(-float(p_target[1]), -float(p_target[0]))
+        for ref_s in self.reference_seeds:
+            s_cand = ref_s.copy()
+            s_cand[0] = yaw_fr3
+            seeds.append(s_cand)
+            s_cand_rev = ref_s.copy()
+            s_cand_rev[0] = (yaw_fr3 + math.pi) % (2.0 * math.pi) - math.pi
+            seeds.append(s_cand_rev)
+
+        candidates: List[Tuple[float, IKResult]] = []
+        seen_solutions: List[np.ndarray] = []
+
+        max_it_search = min(max_iterations, 50)
+        for s in seeds:
+            res = self._solve_single_seed(
+                p_target, R_target, s,
+                max_iterations=max_it_search,
+                pos_tol_m=pos_tol_m,
+                rot_tol_rad=rot_tol_rad,
+                damping=damping,
+            )
+            if res is None:
+                continue
+
+            q_sol, pos_err_m, rot_err_rad, iters, cond = res
+
+            # Deduplicate
+            if any(np.allclose(q_sol, seen_q, atol=1e-2) for seen_q in seen_solutions):
+                continue
+            seen_solutions.append(q_sol)
+
+            # Joint limit margin
+            margin_rad = min(
+                min(q_sol[k] - self.lower_limits[k], self.upper_limits[k] - q_sol[k])
+                for k in range(6)
+            )
+
+            # Continuity score: lower is better
+            disp = float(np.linalg.norm(q_sol - q_ref)) if q_ref is not None else 0.0
+            branch_diff = float(abs(q_sol[4] - q_ref[4])) if q_ref is not None else 0.0
+            margin_penalty = 0.1 / max(margin_rad, 0.01)
+            cond_penalty = cond / 200.0
+
+            score = 2.0 * disp + 3.0 * branch_diff + margin_penalty + cond_penalty
+
+            ik_res = IKResult(
+                status=IKStatus.SUCCESS,
+                success=True,
+                joints_rad=q_sol,
+                joints_deg=[round(math.degrees(float(val)), 3) for val in q_sol],
+                position_error_mm=round(pos_err_m * 1000.0, 4),
+                orientation_error_deg=round(math.degrees(rot_err_rad), 3),
+                iterations=iters,
+                condition_number=round(cond, 2),
+                failure_reason=None,
+            )
+            candidates.append((score, ik_res))
+
+        candidates.sort(key=lambda item: item[0])
+
+        return [c[1] for c in candidates]
+
+    def inverse_kinematics(
+        self,
+        target: Union[Pose3D, np.ndarray, Sequence[float]],
+        seed_joints: Optional[Sequence[float]] = None,
+        max_iterations: int = 150,
+        pos_tol_mm: float = 1.0,
+        rot_tol_deg: float = 1.0,
+        damping: float = 0.02,
+        allow_multi_seed: bool = True,
+        ref_joints: Optional[Sequence[float]] = None,
+    ) -> IKResult:
+        """
+        Solve full 6-DOF Inverse Kinematics using Damped Least Squares (DLS).
+        When allow_multi_seed is True, evaluates multiple candidate seeds and
+        ranks results by continuity to ref_joints (or seed_joints).
+        """
+        # Parse target into Pose3D
+        try:
+            if isinstance(target, Pose3D):
+                target_pose = target
+            elif isinstance(target, np.ndarray) and target.shape == (4, 4):
+                target_pose = Pose3D.from_matrix(target)
+            elif isinstance(target, (list, tuple, np.ndarray)) and len(target) == 6:
+                vals = [float(v) for v in target]
+                if not all(math.isfinite(v) for v in vals):
+                    raise ValueError("Target contains non-finite values")
+                xyz_m = [vals[0] / 1000.0, vals[1] / 1000.0, vals[2] / 1000.0]
+                rpy_rad = [math.radians(vals[3]), math.radians(vals[4]), math.radians(vals[5])]
+                target_pose = Pose3D.from_xyz_rpy(xyz_m, rpy_rad)
+            else:
+                return IKResult(
+                    status=IKStatus.INVALID_TARGET,
+                    success=False,
+                    joints_rad=None,
+                    joints_deg=None,
+                    position_error_mm=float("inf"),
+                    orientation_error_deg=float("inf"),
+                    iterations=0,
+                    condition_number=float("inf"),
+                    failure_reason=f"Unsupported target format: {type(target)}",
+                )
+        except (ValueError, TypeError) as err:
+            return IKResult(
+                status=IKStatus.INVALID_TARGET,
+                success=False,
+                joints_rad=None,
+                joints_deg=None,
+                position_error_mm=float("inf"),
+                orientation_error_deg=float("inf"),
+                iterations=0,
+                condition_number=float("inf"),
+                failure_reason=f"Invalid target: {err}",
+            )
+
+        p_target = target_pose.translation_m
+        R_target = target_pose.rotation_matrix
+        if not (np.all(np.isfinite(p_target)) and np.all(np.isfinite(R_target))):
+            return IKResult(
+                status=IKStatus.INVALID_TARGET,
+                success=False,
+                joints_rad=None,
+                joints_deg=None,
+                position_error_mm=float("inf"),
+                orientation_error_deg=float("inf"),
+                iterations=0,
+                condition_number=float("inf"),
+                failure_reason="Target contains non-finite coordinates or rotation elements",
+            )
+
+        dist_from_base = float(np.linalg.norm(p_target))
+        if dist_from_base > self.MAX_REACH_RADIUS_M:
+            return IKResult(
+                status=IKStatus.UNREACHABLE,
+                success=False,
+                joints_rad=None,
+                joints_deg=None,
+                position_error_mm=(dist_from_base - self.MAX_REACH_RADIUS_M) * 1000.0,
+                orientation_error_deg=180.0,
+                iterations=0,
+                condition_number=float("inf"),
+                failure_reason=f"Target distance {dist_from_base*1000.0:.1f}mm exceeds max FR3 reach {self.MAX_REACH_RADIUS_M*1000.0:.1f}mm",
+            )
+
+        pos_tol_m = pos_tol_mm / 1000.0
+        rot_tol_rad = math.radians(rot_tol_deg)
+
+        # Fast path: single seed requested and valid
+        if not allow_multi_seed and seed_joints is not None:
+            s_arr = np.asarray(seed_joints, dtype=float)
+            if len(s_arr) == 6 and np.all(np.isfinite(s_arr)):
+                res = self._solve_single_seed(
+                    p_target, R_target, s_arr,
+                    max_iterations=max_iterations,
+                    pos_tol_m=pos_tol_m,
+                    rot_tol_rad=rot_tol_rad,
+                    damping=damping,
+                )
+                if res is not None:
+                    q_sol, pos_err_m, rot_err_rad, iters, cond = res
+                    return IKResult(
+                        status=IKStatus.SUCCESS,
+                        success=True,
+                        joints_rad=q_sol,
+                        joints_deg=[round(math.degrees(float(val)), 3) for val in q_sol],
+                        position_error_mm=round(pos_err_m * 1000.0, 4),
+                        orientation_error_deg=round(math.degrees(rot_err_rad), 3),
+                        iterations=iters,
+                        condition_number=round(cond, 2),
+                        failure_reason=None,
+                    )
+
+        # Multi-seed search with continuity ranking
+        candidates = self.solve_ik_candidates(
+            target_pose,
+            seed_joints=seed_joints,
+            max_iterations=max_iterations,
+            pos_tol_mm=pos_tol_mm,
+            rot_tol_deg=rot_tol_deg,
+            damping=damping,
+            ref_joints=ref_joints if ref_joints is not None else seed_joints,
+        )
+        if candidates:
+            return candidates[0]
+
+        # Fallback tracking for non-converged diagnostics
+        seeds = []
+        if seed_joints is not None:
+            seeds.append(np.asarray(seed_joints, dtype=float))
+        yaw_base = math.atan2(float(p_target[1]), float(p_target[0]))
+        for ref_s in self.reference_seeds:
+            s_cand = ref_s.copy()
+            s_cand[0] = yaw_base
+            seeds.append(s_cand)
 
         best_q = None
         best_pos_err = float("inf")
         best_rot_err = float("inf")
         best_cond = float("inf")
-        total_iters = 0
 
         for seed in seeds:
             q = np.clip(seed, self.lower_limits, self.upper_limits)
-            for it in range(max_iterations):
-                total_iters += 1
+            for it in range(min(max_iterations, 30)):
                 chain_transforms = self.chain.forward_kinematics_chain(q)
                 p_cur = chain_transforms[-1][:3, 3]
                 R_cur = chain_transforms[-1][:3, :3]
-
                 e_p = p_target - p_cur
                 e_o = _rotation_error_vector(R_target, R_cur)
-                e = np.concatenate([e_p, e_o])
-
                 pos_err_m = float(np.linalg.norm(e_p))
                 rot_err_rad = float(np.linalg.norm(e_o))
-
                 if pos_err_m < best_pos_err:
                     best_pos_err = pos_err_m
                     best_rot_err = rot_err_rad
                     best_q = q.copy()
-
-                # Check convergence
-                if pos_err_m <= pos_tol_m and rot_err_rad <= rot_tol_rad:
-                    J = self.chain.geometric_jacobian(q, chain_transforms)
-                    cond = self.compute_condition_number(J)
-                    joints_deg = [round(math.degrees(float(val)), 3) for val in q]
-                    return IKResult(
-                        status=IKStatus.SUCCESS,
-                        success=True,
-                        joints_rad=q,
-                        joints_deg=joints_deg,
-                        position_error_mm=round(pos_err_m * 1000.0, 4),
-                        orientation_error_deg=round(math.degrees(rot_err_rad), 3),
-                        iterations=total_iters,
-                        condition_number=round(cond, 2),
-                        failure_reason=None,
-                    )
-
                 J = self.chain.geometric_jacobian(q, chain_transforms)
                 best_cond = self.compute_condition_number(J)
-
-                # Damped Least Squares update: delta_q = (J^T J + lambda^2 I)^-1 J^T e
-                JTJ = J.T @ J
-                damped_matrix = JTJ + (damping ** 2) * np.eye(6, dtype=float)
+                damped_matrix = J.T @ J + (damping ** 2) * np.eye(6, dtype=float)
                 try:
-                    delta_q = np.linalg.solve(damped_matrix, J.T @ e)
+                    delta_q = np.linalg.solve(damped_matrix, J.T @ np.concatenate([e_p, e_o]))
                 except np.linalg.LinAlgError:
                     break
-
-                # Clamp max step size to prevent divergence
                 step_mag = float(np.linalg.norm(delta_q))
                 if step_mag > 0.15:
                     delta_q = delta_q * (0.15 / step_mag)
-
                 q = np.clip(q + delta_q, self.lower_limits, self.upper_limits)
 
-        # Solver did not converge to within specified tolerance
         best_pos_err_mm = round(best_pos_err * 1000.0, 3)
         best_rot_err_deg = round(math.degrees(best_rot_err), 3)
-
-        # Assess failure mode
         status = IKStatus.NON_CONVERGED
         if best_pos_err_mm > 50.0:
             status = IKStatus.UNREACHABLE
@@ -357,10 +650,11 @@ class FR3Kinematics:
             joints_deg=[round(math.degrees(float(val)), 3) for val in best_q] if best_q is not None else None,
             position_error_mm=best_pos_err_mm,
             orientation_error_deg=best_rot_err_deg,
-            iterations=total_iters,
+            iterations=len(seeds) * 30,
             condition_number=round(best_cond, 2),
             failure_reason=(
                 f"Solver terminated with position error {best_pos_err_mm:.2f}mm (tol {pos_tol_mm}mm) "
                 f"and orientation error {best_rot_err_deg:.2f}deg (tol {rot_tol_deg}deg)"
             ),
         )
+
