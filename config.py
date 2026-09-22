@@ -1,33 +1,29 @@
 # =============================================================================
 # === FILE: config.py (CẤU HÌNH TOÀN HỆ THỐNG) ===
 # =============================================================================
+import os as _os
 
-# --- THÔNG SỐ ROBOT BÀN CỜ (HARDCODED TOẠ ĐỘ TOÁN HỌC) ---
-# Tọa độ gốc (Điểm R1 - tương ứng Xe Đen Trái, ô col=0, row=0)
-# Tọa độ này sẽ được hệ thống Robot tự động ghi đè lúc khởi động bằng lệnh GetRobotTeachingPoint("R1")
-BOARD_ORIGIN_X = 200.0  
-BOARD_ORIGIN_Y = -100.0 
+# --- [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH] ---
+# Các biến dưới đây chỉ phục vụ tương thích ngược với robot_VIP.py cũ.
+# Luồng di chuyển mới (MotionCoordinator -> BoardPlacementState) hoàn toàn KHÔNG phụ thuộc vào chúng.
+BOARD_ORIGIN_X = 200.0   # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+BOARD_ORIGIN_Y = -100.0  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
 
-# Offset điều chỉnh (mm) - Dùng để tinh chỉnh vị trí gắp
-# Nếu robot gắp lệch, điều chỉnh các giá trị này:
-# - OFFSET_X: Dương = dịch xuống dưới (về phía row=9), Âm = dịch lên trên (về phía row=0)
-# - OFFSET_Y: Dương = dịch sang phải (về phía col=8), Âm = dịch sang trái (về phía col=0)
-OFFSET_X = 5.0   # Robot gắp lệch lên trên 5mm → cần dịch xuống 5mm
-OFFSET_Y = 0.0   # Không lệch ngang
+# Offset điều chỉnh (mm) - [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+OFFSET_X = 5.0   # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+OFFSET_Y = 0.0   # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
 
-# Chiều hướng di chuyển so với gốc R1 (1 hoặc -1)
-# LƯU Ý: Hệ tọa độ robot: X=dọc (row), Y=ngang (col)
-# 1: row tăng thì X tăng, col tăng thì Y tăng
-ROBOT_DIR_X = 1  
-ROBOT_DIR_Y = 1  
+# Chiều hướng di chuyển so với gốc R1 - [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+ROBOT_DIR_X = 1  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+ROBOT_DIR_Y = 1  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
 
 # Kích thước vật lý bàn cờ & quân cờ (nguồn chuẩn hóa từ shared/physical_geometry.json)
 from src.domain.geometry import get_physical_geometry as _get_physical_geometry
 _geo = _get_physical_geometry()
 
-CELL_SIZE_X = _geo.board.column_spacing   # Cạnh ô cờ 40.0mm (ngang)
-CELL_SIZE_Y = _geo.board.row_spacing      # Cạnh ô cờ 40.0mm (dọc)
-RIVER_GAP_Y = 0.00                        # Bù sông (mặc định 0mm khi dùng cạnh ô 40mm đều)
+CELL_SIZE_X = _geo.board.column_spacing   # [LEGACY ALIAS] Cạnh ô cờ 40.0mm (ngang)
+CELL_SIZE_Y = _geo.board.row_spacing      # [LEGACY ALIAS] Cạnh ô cờ 40.0mm (dọc)
+RIVER_GAP_Y = 0.00                        # [LEGACY ALIAS] Bù sông (0mm khi dùng cạnh ô 40mm đều)
 
 BOARD_WIDTH_MM = _geo.board.outer_width   # Chiều ngang bàn cờ: 367.0 mm
 BOARD_LENGTH_MM = _geo.board.outer_length # Chiều dài bàn cờ: 410.0 mm
@@ -38,33 +34,41 @@ PLAYABLE_LENGTH_MM = _geo.board.playable_grid_length_mm # Chiều dài vùng ch�
 BOARD_MARGIN_X_MM = _geo.board.margin_horizontal_mm     # Lề trái/phải: 23.5 mm
 BOARD_MARGIN_Y_MM = _geo.board.margin_vertical_mm       # Lề trên/dưới: 25.0 mm
 
-# Tọa độ bãi chứa quân bị ăn (X, Y, Z)
+# Tọa độ bãi chứa quân bị ăn (X, Y, Z) [LEGACY ISOLATED TARGET]
 CAPTURE_BIN_X = -226.123
 CAPTURE_BIN_Y = 225.024
 CAPTURE_BIN_Z = 291.68  # [QUAN TRỌNG] Độ cao khi thả quân vào thùng
 
-# Độ cao an toàn (mm)
-SAFE_Z  = 290.0    # Độ cao an toàn khi di chuyển giữa các ô (tăng lên để tránh hất quân)
-PICK_Z  = 190.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
-PLACE_Z = 195.0   # Hạ xuống đặt
+# Độ cao an toàn (mm) - [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+# Unified Motion Coordinator sử dụng độ cao tương đối so với mặt bàn (PICK_TCP_HEIGHT_MM, SAFE_CLEARANCE_Z_MM)
+SAFE_Z  = 290.0    # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+PICK_Z  = 190.0    # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+PLACE_Z = 195.0    # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+
+# --- UNIFIED PHYSICAL MOTION PROFILE (RELATIVE TO BOARD SURFACE) ---
+# Tọa độ gắp/thả và clearance được tính tương đối so với mặt phẳng bàn cờ (BoardPlacementState)
+PICK_TCP_HEIGHT_MM = 4.715      # piece_height / 2 (PROVISIONAL_SIMULATION)
+PLACE_TCP_HEIGHT_MM = 4.715
+SAFE_CLEARANCE_Z_MM = 40.0
+PICK_HEIGHT_PROVENANCE = "PROVISIONAL_SIMULATION"  # Đánh dấu nguồn gốc chưa qua kiểm chứng vật lý
 
 # Cấu hình Kẹp (Gripper) - Tùy chỉnh theo loại van của bạn
 GRIPPER_CLOSE = 1
 GRIPPER_OPEN = 0
 MOVE_SPEED = 50
 
-# Góc xoay của đầu Robot (Rx, Ry, Rz)
+# Cổng điều khiển Tool DO cho TwoOutputGripperDriver
+TOOL_DO_OPEN = 1
+TOOL_DO_CLOSE = 0
+TOOL_DO_OPEN_PULSE_SEC = 0.30
+TOOL_DO_CLOSE_PULSE_SEC = 0.30
+TOOL_DO_DEADTIME_SEC = 0.10
+
+# Góc xoay của đầu Robot (Rx, Ry, Rz) - Historical taught orientation
 ROTATION = [-179.164, -3.047, -26.304] 
 
 # --- PHYSICAL PICK / PLACE MOTION PROFILE ---
-# Các pose Cartesian FR5 gồm [X, Y, Z, Rx, Ry, Rz]. XY được nội suy từ R1-R4;
-# ba góc dưới đây là tư thế tool đã được dạy để ngàm kẹp hướng đúng xuống quân.
-#
-# Để đổi hướng ngàm thật: đưa robot đến một ô trống ở SAFE_Z bằng pendant,
-# xoay wrist/tool tới hướng kẹp đúng và chép Rx/Ry/Rz hiển thị vào PICK_TOOL_ROTATION.
-# Không sửa tool frame/TCP trong code. Khi chưa dạy lại, giữ nguyên ROTATION hiện tại.
 PICK_TOOL_ROTATION = list(ROTATION)
-# Thông thường đặt dùng cùng hướng với gắp; tách biến để có thể hiệu chỉnh sau này.
 PLACE_TOOL_ROTATION = list(ROTATION)
 
 # Kết nối Robot
@@ -75,7 +79,10 @@ DRY_RUN = False # Đổi thành True nếu muốn test code mà không cần b�
 # Chế độ hiệu chuẩn bàn cờ thực tế từ điểm dạy R1-R4:
 # "POINTER_CONTACT": Dạy bằng bút đo/pointer tiếp xúc trực tiếp mặt bàn tại R1-R4 (offset = [0, 0, 0]).
 # "KNOWN_OFFSET": Dạy bằng TCP có khoảng cách xác định tới mặt bàn. Yêu cầu khai báo OFFSET_MM, OFFSET_FRAME, PROVENANCE.
-BOARD_CALIBRATION_MODE = "POINTER_CONTACT"
+#
+# CHẾ ĐỘ MẶC ĐỊNH: None (FAIL-CLOSED)
+# Bắt buộc người vận hành phải cấu hình rõ ràng trước khi robot được phép chuyển động.
+BOARD_CALIBRATION_MODE = None  # None / "UNCONFIGURED" / "POINTER_CONTACT" / "KNOWN_OFFSET"
 BOARD_CALIBRATION_OFFSET_MM = [0.0, 0.0, 0.0]
 BOARD_CALIBRATION_OFFSET_FRAME = "ROBOT_BASE"  # "ROBOT_BASE" hoặc "TOOL"
 BOARD_CALIBRATION_PROVENANCE = "CALIBRATED_POINTER_CONTACT"
@@ -84,7 +91,6 @@ BOARD_CALIBRATION_PROVENANCE = "CALIBRATED_POINTER_CONTACT"
 # Bàn cờ Xiangqi thực tế yêu cầu mặt phẳng gần như nằm ngang.
 BOARD_MAX_TILT_WARNING_DEG = 2.5    # Cảnh báo khi độ nghiêng vượt quá 2.5°
 BOARD_MAX_TILT_HARD_FAIL_DEG = 5.0   # Từ chối hiệu chuẩn & khóa chuyển động khi độ nghiêng >= 5.0°
-
 
 # Camera index (0 = built-in webcam, 1 = USB cam, 2 = DroidCam, etc.)
 # main.py will auto-try configured index first, then others if it fails.
@@ -99,8 +105,6 @@ VISUAL_PICK_MAX_OFFSET_CELLS = 0.25
 VISUAL_PICK_FOOT_RATIO = 0.85
 
 # --- HAND-AWARE AUTO MOVE CONFIRMATION ---
-# Hand detection gates when to inspect the board automatically after player leaves.
-# Mặc định False: Phím SPACE giữ quyền kiểm soát xác nhận chính thức an toàn.
 AUTO_MOVE_CONFIRM_ENABLED = False
 HAND_MODEL_PATH = "models/hand_best_egohands.pt"
 HAND_CONFIDENCE = 0.45
@@ -114,29 +118,27 @@ AI_THINK_TIME = 10  # Time per move in seconds — AI gets 10s after subtracting
 AI_DEPTH = 30          # Độ sâu mặc định (sẽ bị ghi đè bởi logic tự động)
 
 # --- AI ENGINE CONFIGURATION ---
-ENGINE_TYPE = "HYBRID" # "HYPrefixBRID" (Ưu tiên Cloud), "CLOUD" (Chỉ Cloud), "LOCAL" (Chỉ Local)
+ENGINE_TYPE = "HYBRID" # "HYBRID" (Ưu tiên Cloud), "CLOUD" (Chỉ Cloud), "LOCAL" (Chỉ Local)
 CLOUD_API_URL = "https://tuongkydaisu.com/api/engine/bestmove"
 CLOUD_TIMEOUT_SEC = 5
 
 # --- SIMULATION API CONFIGURATION ---
 SIMULATION_API_URL = "https://tuongkydaisu.com"
-SIMULATION_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzaW11bGF0aW9uMDAxIiwicm9sZSI6IlNJTVVMQVRJT04iLCJ0b2tlbklkIjoiMTlkYjRjMDEtNjk4My00MTU5LTllNzYtODk0NDU5YjJhMjM5IiwiaWF0IjoxNzczMTI3MTE5LCJleHAiOjE4MDQ2NjMxMTl9.cHQEzHS-SqrZqUZ9FRcJgUE_BzyxZ60iiy7xYzZPQOo" # Liên hệ admin để lấy Token cấp cho app. Điền vào đây.
+# Secret token read securely from environment variable, avoiding hardcoded secrets in source control
+SIMULATION_TOKEN = _os.environ.get("SIMULATION_TOKEN", "")
 
 # --- MOONFISH ENGINE ---
-# Hướng dẫn cho người mới clone repo:
-# 1. Clone Moonfish engine: git clone https://github.com/walker8088/moonfish.git moonfish
-# 2. Moonfish không cần NNUE file, chạy trực tiếp bằng Python
-import os as _os
 _BASE_DIR      = _os.path.dirname(_os.path.abspath(__file__))
 _MOONFISH_DIR = _os.path.join(_BASE_DIR, 'moonfish')
 MOONFISH_EXE  = _os.path.join(_MOONFISH_DIR, 'moonfish_ucci.py')
 MOONFISH_NNUE = None  # Moonfish doesn't use NNUE
 MOONFISH_THINK_MS = 1000  # Thời gian suy nghĩ mỗi nước (milliseconds)
 
-# Tọa độ về nhà (Home) để né Camera
-IDLE_X = -72.027
-IDLE_Y = 200.248
-IDLE_Z = 278.586  
+# Tọa độ về nhà (Home) để né Camera - [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+IDLE_X = -72.027  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+IDLE_Y = 200.248  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+IDLE_Z = 278.586  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
 
 # --- OPTIONAL DEBUG DASHBOARD ---
 ENABLE_DEBUG_DASHBOARD = False
+
