@@ -211,7 +211,7 @@ Dự-án-gốc/
   [x] Pikafish config (PIKAFISH_EXE, PIKAFISH_NNUE, PIKAFISH_THINK_MS)
   [x] Tải Pikafish 2026-01-02
   [x] Rollback (phím Z)
-  [x] robot_VIP.py — Tool DO0
+  [x] robot_VIP.py — Tool DO0/DO1 pulse gripper control
   [x] Tách file logic khỏi main.py vào kiến trúc Modular src/
   [x] Fix robot.connected bị set False sai khi go_to_home_chess lỗi
   [x] Fix snapshot_detector: detect ăn quân khi YOLO thấy quân đỏ tại ô đích

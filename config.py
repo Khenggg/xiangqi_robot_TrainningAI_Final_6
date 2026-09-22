@@ -32,17 +32,30 @@ CAPTURE_BIN_Y = 225.024
 CAPTURE_BIN_Z = 291.68  # [QUAN TRỌNG] Độ cao khi thả quân vào thùng
 
 # Độ cao an toàn (mm)
-SAFE_Z  = 290.0    # Độ cao an toàn khi di chuyển giữa các ô (tăng lên để tránh hất quân)
-PICK_Z  = 190.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
-PLACE_Z = 195.0   # Hạ xuống đặt
+SAFE_Z  = 210.0    # Độ cao an toàn khi di chuyển giữa các ô (tăng lên để tránh hất quân)
+PICK_Z  = 178.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
+PLACE_Z = 178.0   # Hạ xuống đặt
 
-# Cấu hình Kẹp (Gripper) - Tùy chỉnh theo loại van của bạn
-GRIPPER_CLOSE = 1
-GRIPPER_OPEN = 0
+# Cấu hình kẹp: motor 2 chiều dùng Tool DO trên đầu robot.
+# Verified wiring: DO1 chạy hướng MỞ, DO0 chạy hướng ĐÓNG. Không bao giờ bật cả hai cùng lúc.
+GRIPPER_ACTION_OPEN = "open"
+GRIPPER_ACTION_CLOSE = "close"
+GRIPPER_OPEN_DO_ID = 1
+GRIPPER_CLOSE_DO_ID = 0
+GRIPPER_IDLE_STATUS = 0
+GRIPPER_ACTIVE_STATUS = 1
+
+# Motor không có công tắc hành trình: chỉ cấp điện theo xung ngắn rồi tắt cả hai DO.
+# Tinh chỉnh hai PULSE riêng sau khi thử với tay robot đứng yên và không có quân cờ.
+GRIPPER_DIRECTION_DEADTIME_SEC = 0.10
+GRIPPER_OPEN_PULSE_SEC = 0.3
+GRIPPER_CLOSE_PULSE_SEC = 0.3
+GRIPPER_OPEN_SETTLE_SEC = 0.25
+GRIPPER_CLOSE_SETTLE_SEC = 0.25
 MOVE_SPEED = 50
 
 # Góc xoay của đầu Robot (Rx, Ry, Rz)
-ROTATION = [-179.164, -3.047, -26.304] 
+ROTATION = [-176.418, -1.049, -40.623] 
 
 # --- PHYSICAL PICK / PLACE MOTION PROFILE ---
 # Các pose Cartesian FR5 gồm [X, Y, Z, Rx, Ry, Rz]. XY được nội suy từ R1-R4;
@@ -61,7 +74,7 @@ DRY_RUN = False # Đổi thành True nếu muốn test code mà không cần b�
 
 # Camera index (0 = built-in webcam, 1 = USB cam, 2 = DroidCam, etc.)
 # main.py will auto-try configured index first, then others if it fails.
-VIDEO_SOURCE = 2
+VIDEO_SOURCE = 1
 
 # --- VISUAL PICK CORRECTION ---
 # Chỉ bù vị trí gắp khi snapshot mới từ camera xác nhận quân nằm gần ô logic.
@@ -96,9 +109,12 @@ MOONFISH_NNUE = None  # Moonfish doesn't use NNUE
 MOONFISH_THINK_MS = 1000  # Thời gian suy nghĩ mỗi nước (milliseconds)
 
 # Tọa độ về nhà (Home) để né Camera
-IDLE_X = -72.027
-IDLE_Y = 200.248
-IDLE_Z = 278.586  
+# IDLE_X = -72.027
+# IDLE_Y = 200.248
+# IDLE_Z = 278.586  
 
+IDLE_X = -104.274
+IDLE_Y = 149.608
+IDLE_Z = 348.199
 # --- CCHESS RECOGNITION (ONNX) ---
 CCHESS_RECOGNITION_ENABLED = True  # Bật/tắt CChess ONNX recognition bổ sung

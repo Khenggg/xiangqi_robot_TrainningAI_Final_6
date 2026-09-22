@@ -1,12 +1,14 @@
 # ==================================
 # === FILE: VIP/robot_VIP.py ===
 # === Điều khiển cánh tay robot FR5 — phiên bản VIP ===
-# === Dựa trên robot.py gốc, dùng Controller DO2 (bộ điều khiển) ===
+# === Dựa trên robot.py gốc, dùng Tool DO0/DO1 cho kẹp hai chiều ===
 # ==================================
 import time
 import sys
 import os
 import json
+import threading
+import math
 import numpy as np
 import cv2
 
@@ -23,6 +25,10 @@ except ImportError:
     robot_sdk_core = None
 
 
+class GripperCommandError(RuntimeError):
+    """The gripper output state is unsafe or could not be commanded."""
+
+
 class FR5Robot:
     def __init__(self, ip=None):
         self.ip          = ip or config.ROBOT_IP
@@ -33,8 +39,10 @@ class FR5Robot:
         self.user_num    = 1
         self.default_vel = config.MOVE_SPEED
 
-        # ⚙️ Kẹp: dùng Tool DO0 (Đầu cánh tay - cáp M12)
-        self.gripper_do_id = 0
+        # Two-direction direct-drive gripper: Tool DO1=open, Tool DO0=close.
+        self.gripper_open_do_id = config.GRIPPER_OPEN_DO_ID
+        self.gripper_close_do_id = config.GRIPPER_CLOSE_DO_ID
+        self._gripper_lock = threading.RLock()
 
         # Ma trận hiệu chỉnh perspective (được set từ main_VIP.py)
         self.perspective_matrix = None
@@ -84,7 +92,12 @@ class FR5Robot:
             err = self.robot.Mode(0)
             if err != 0:
                 print(f"[ROBOT] ⚠️ Set Mode(0) thất bại, code={err}")
-            
+
+            self._validate_gripper_config()
+            self._set_gripper_safe_idle()
+            # Establish a known jaw state before HardwareManager moves to HOMECHESS.
+            self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
+
             # Load teaching points để tránh Singularity
             self._load_teaching_points()
 
@@ -418,33 +431,72 @@ class FR5Robot:
             self.go_to_idle_home()
 
     # -------------------------------------------------------------------------
-    # GRIPPER — Controller DO2
+    # GRIPPER — Tool DO1=open, Tool DO0=close
     # -------------------------------------------------------------------------
 
-    def gripper_ctrl(self, val):
-        """Điều khiển kẹp qua Controller DO2 (bộ điều khiển, không phải Tool DO).
-        
-        val = config.GRIPPER_CLOSE (1) → Đóng kẹp
-        val = config.GRIPPER_OPEN  (0) → Mở kẹp
-        """
-        if self.dry:
-            action = "ĐÓNG" if val == config.GRIPPER_CLOSE else "MỞ"
-            print(f"[ROBOT] DRY Gripper (SetDO ID={self.gripper_do_id}) → {action}")
-            time.sleep(0.3)
-            return 0
-
-        # NẾU CẮM CÁP M12 8-PIN VÀO ĐẦU CÁNH TAY (Tool DO):
-        # 1. Hãy dò tìm ID bằng file test_tool_do2.py trước (Thử ID=0, rồi ID=1)
-        # 2. Sau khi biết ID thực (VD: 1), sửa self.gripper_do_id = 1 ở đầu file.
-        # 3. Đổi hàm SetDO (dưới đây) thành SetToolDO:
-        err = self.robot.SetToolDO(
-            id=self.gripper_do_id,
-            status=val,
-            block=1
+    def _validate_gripper_config(self):
+        if self.gripper_open_do_id == self.gripper_close_do_id:
+            raise GripperCommandError("Open and close gripper Tool DO IDs must differ")
+        if {self.gripper_open_do_id, self.gripper_close_do_id} - {0, 1}:
+            raise GripperCommandError("Gripper Tool DO IDs must be 0 or 1")
+        timing_values = (
+            config.GRIPPER_DIRECTION_DEADTIME_SEC,
+            config.GRIPPER_OPEN_PULSE_SEC,
+            config.GRIPPER_CLOSE_PULSE_SEC,
+            config.GRIPPER_OPEN_SETTLE_SEC,
+            config.GRIPPER_CLOSE_SETTLE_SEC,
         )
+        if (any(not isinstance(value, (int, float)) for value in timing_values)
+                or any(not math.isfinite(value) or value < 0 for value in timing_values)):
+            raise GripperCommandError("Gripper timing values must be non-negative numbers")
+
+    def _set_tool_do(self, output_id, status):
+        if self.dry:
+            print(f"[ROBOT] DRY Tool DO{output_id}={'ON' if status else 'OFF'}")
+            return 0
+        err = self.robot.SetToolDO(id=output_id, status=status, block=0)
         if err != 0:
-            print(f"[ROBOT] ❌ Lỗi SetToolDO (gripper): {err}")
+            raise GripperCommandError(f"SetToolDO(DO{output_id}, {status}) failed: {err}")
         return err
+
+    def _set_gripper_safe_idle(self):
+        """Best-effort all-low state; raise if either DO cannot be reset."""
+        failures = []
+        for output_id in (self.gripper_open_do_id, self.gripper_close_do_id):
+            try:
+                self._set_tool_do(output_id, config.GRIPPER_IDLE_STATUS)
+            except Exception as exc:
+                failures.append(exc)
+        if failures:
+            raise GripperCommandError("Could not force both gripper outputs LOW") from failures[0]
+
+    def gripper_ctrl(self, action):
+        """Pulse one gripper motor direction, then leave both Tool DO outputs LOW."""
+        self._validate_gripper_config()
+        if action == config.GRIPPER_ACTION_OPEN:
+            target_id = self.gripper_open_do_id
+            pulse_seconds = config.GRIPPER_OPEN_PULSE_SEC
+            settle_seconds = config.GRIPPER_OPEN_SETTLE_SEC
+            label = "OPEN"
+        elif action == config.GRIPPER_ACTION_CLOSE:
+            target_id = self.gripper_close_do_id
+            pulse_seconds = config.GRIPPER_CLOSE_PULSE_SEC
+            settle_seconds = config.GRIPPER_CLOSE_SETTLE_SEC
+            label = "CLOSE"
+        else:
+            raise GripperCommandError(f"Unknown gripper action: {action!r}")
+
+        with self._gripper_lock:
+            self._set_gripper_safe_idle()
+            time.sleep(config.GRIPPER_DIRECTION_DEADTIME_SEC)
+            try:
+                print(f"[ROBOT] Gripper {label}: DO{target_id} ON for {pulse_seconds:.2f}s")
+                self._set_tool_do(target_id, config.GRIPPER_ACTIVE_STATUS)
+                time.sleep(pulse_seconds)
+            finally:
+                self._set_gripper_safe_idle()
+            time.sleep(settle_seconds)
+        return 0
 
     # -------------------------------------------------------------------------
     # QUY TRÌNH GẮP / ĐẶT / ĂN QUÂN
@@ -472,11 +524,10 @@ class FR5Robot:
             pose_pick = self.board_to_pose(col, row, config.PICK_Z, rotation=pick_rotation)
         print(f"[ROBOT] 🤏 Gắp tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
-        self.gripper_ctrl(config.GRIPPER_OPEN)   # Mở kẹp
+        self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
         self.move_safe_pose(pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
         self.movel_pose(pose_pick)                # Hạ xuống
-        self.gripper_ctrl(config.GRIPPER_CLOSE)  # Đóng kẹp (gắp)
-        time.sleep(0.5)                           # Đợi kẹp đóng
+        self.gripper_ctrl(config.GRIPPER_ACTION_CLOSE)
         self.movel_pose(pose_safe)                # Nhấc lên
         print(f"[ROBOT] ✅ Gắp xong ({col},{row})")
 
@@ -489,8 +540,7 @@ class FR5Robot:
 
         self.move_safe_pose(pose_safe, col=col, row=row)  # Đến vị trí an toàn
         self.movel_pose(pose_place)               # Hạ xuống
-        self.gripper_ctrl(config.GRIPPER_OPEN)   # Mở kẹp (thả)
-        time.sleep(0.5)                           # Đợi thả
+        self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
         self.movel_pose(pose_safe)                # Nhấc lên
         print(f"[ROBOT] ✅ Đặt xong ({col},{row})")
     
@@ -546,8 +596,7 @@ class FR5Robot:
             self.move_safe_pose(pose_safe)
         
         # Bước 3: Thả quân
-        self.gripper_ctrl(config.GRIPPER_OPEN)
-        time.sleep(0.5)
+        self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
         
         # Bước 4: Về home sau khi thả xong (chuẩn bị cho bước tiếp theo)
         print(f"[ROBOT] 🏠 Về home sau khi thả quân (chuẩn bị bước tiếp theo)")
