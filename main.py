@@ -68,8 +68,19 @@ hw = HardwareManager(config, _BASE_DIR).initialize_all()
 state = GameState(allow_mouse_move=config.DRY_RUN)
 input_mgr = InputHandler(state, hw)
 
+dashboard = None
+if getattr(config, "ENABLE_DEBUG_DASHBOARD", False):
+    try:
+        from src.ui.debug_dashboard import DebugDashboard
+        dashboard = DebugDashboard(dry_run=config.DRY_RUN, backend=hw.backend, robot=hw.robot)
+    except Exception as e:
+        print(f"[MAIN] ⚠️ Could not initialize DebugDashboard: {e}")
+
 def _cleanup_all():
     print("\n[CLEANUP] Đang dọn dẹp hệ thống...")
+    if dashboard is not None:
+        try: dashboard.close()
+        except: pass
     # [API] Force Kết thúc trận đấu khi thoát chương trình
     try:
         if state and state.api_client:
