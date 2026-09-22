@@ -17,6 +17,7 @@ from src.vision.visual_pick_estimator import VisualPickEstimator
 from src.vision.board_reconciler import BoardReconciler
 from src.vision.calibrate_camera import calibrate_perspective_camera
 from src.vision.auto_calibrate import run_calibration_flow
+from src.vision.turn_completion_monitor import TurnCompletionMonitor
 
 try:
     from ultralytics import YOLO
@@ -40,9 +41,11 @@ class HardwareManager:
         self.yolo_detector = None
         self.cchess_recognizer = None
         self.pick_estimator = None
-        self.center_pick_estimator = None
         self.board_reconciler = None
+        self.hand_model = None
+        self.turn_completion_monitor = None
         self._difficulty_availability = {"easy": False, "medium": False, "hard": False}
+        self._last_hand_check = 0.0
         self.perspective_path = Path(project_dir) / "perspective.npy"
         
         self.class_id_to_name = {
@@ -266,20 +269,25 @@ class HardwareManager:
                         max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
                         foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
                     )
-                    # The primary robot path picks at the geometric centre of
-                    # best.pt's measured box.  The existing foot-point estimator
-                    # stays available as the supervised fallback.
-                    self.center_pick_estimator = VisualPickEstimator(
-                        self.perspective_path,
-                        min_confidence=self.config.VISUAL_PICK_MIN_CONFIDENCE,
-                        max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
-                        foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
-                        point_mode="center",
-                    )
                     self.board_reconciler = BoardReconciler(self.pick_estimator)
                     print("[INIT] ✅ Visual pick / board reconciliation initialized.")
                 except Exception as e:
                     print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
+
+        if getattr(self.config, "AUTO_MOVE_CONFIRM_ENABLED", False) and YOLO is not None:
+            hand_path = Path(self.project_dir) / self.config.HAND_MODEL_PATH
+            try:
+                if hand_path.exists():
+                    self.hand_model = YOLO(str(hand_path))
+                    self.turn_completion_monitor = TurnCompletionMonitor(
+                        self.config.HAND_ABSENCE_SECONDS,
+                        self.config.HAND_MIN_PRESENT_SECONDS,
+                    )
+                    print("[INIT] ✅ Hand-aware automatic move confirmation enabled.")
+                else:
+                    print(f"[INIT] ⚠️ Hand model not found: {hand_path}")
+            except Exception as e:
+                print(f"[INIT] ⚠️ Hand-aware confirmation disabled: {e}")
 
     def cleanup(self):
         print("[CLEANUP] Đang dọn dẹp hardware...")
@@ -306,95 +314,6 @@ class HardwareManager:
             except: pass
 
     # --- WRAPPER VISION UTILS ---
-    def get_robot_center_pick_targets(self, expected_cells):
-        """Locate robot pick points from centres of fresh ``best.pt`` boxes.
-
-        CChess calibration owns ``perspective.npy`` (pixel -> 9x10 grid); YOLO
-        measures where a physical piece actually is.  After three unsuccessful
-        centre-box samples, retain the prior foot-point visual correction as a
-        fallback instead of making CChess/FEN identity a motion gate.
-        """
-        targets = {name: None for name in expected_cells}
-        if not self.center_pick_estimator or not self.cam_monitor:
-            print("[CENTER PICK] Unavailable; using legacy visual-pick fallback.")
-            return self.get_visual_pick_targets(expected_cells)
-
-        samples = {name: [] for name in expected_cells}
-        attempts = max(1, int(getattr(self.config, "VISUAL_CENTER_PICK_ATTEMPTS", 3)))
-        for attempt in range(1, attempts + 1):
-            try:
-                frame, detections = self.cam_monitor.get_fresh_snapshot()
-                if frame is None:
-                    print(f"[CENTER PICK] Attempt {attempt}/{attempts}: no camera frame.")
-                    continue
-                for name, (col, row) in expected_cells.items():
-                    samples[name].append(
-                        self.center_pick_estimator.estimate_pick_target(detections, col, row)
-                    )
-            except Exception as exc:
-                print(f"[CENTER PICK] Attempt {attempt}/{attempts} failed: {exc}")
-
-        minimum = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
-        max_jitter = float(getattr(self.config, "VISUAL_CENTER_PICK_MAX_JITTER_CELLS", 0.12))
-        for name, values in samples.items():
-            targets[name] = self.center_pick_estimator.aggregate_targets(
-                values, minimum, max_spread_cells=max_jitter
-            )
-
-        if all(target is not None for target in targets.values()):
-            print(f"[CENTER PICK] Using stable centres from best.pt ({attempts} attempts).")
-            return targets
-
-        missing = [name for name, target in targets.items() if target is None]
-        print(f"[CENTER PICK] No stable box centre after {attempts} attempts for {missing}; "
-              "using legacy foot-point correction.")
-        return self.get_visual_pick_targets(expected_cells)
-
-    def _cell_has_center_detection(self, detections, cell):
-        """Whether best.pt sees a confident box centre at a calibrated cell."""
-        col, row = cell
-        half_width = float(getattr(self.config, "VISUAL_OCCUPANCY_CELL_HALF_WIDTH", 0.5))
-        return self.center_pick_estimator.has_detection_in_cell(
-            detections, col, row, cell_half_width=half_width
-        )
-
-    def is_cell_visually_clear(self, cell):
-        """Confirm that a capture square is clear without using CChess identity."""
-        if not self.center_pick_estimator or not self.cam_monitor:
-            print("[CENTER PICK] Cannot confirm cleared capture square: vision unavailable.")
-            return False
-        attempts = max(1, int(getattr(self.config, "VISUAL_CENTER_PICK_ATTEMPTS", 3)))
-        required = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
-        clear_samples = 0
-        for _ in range(attempts):
-            frame, detections = self.cam_monitor.get_fresh_snapshot()
-            if frame is not None and not self._cell_has_center_detection(detections, cell):
-                clear_samples += 1
-        cleared = clear_samples >= required
-        print(f"[CENTER PICK] Capture square {cell} clear: {clear_samples}/{attempts}.")
-        return cleared
-
-    def verify_visual_move(self, source_cell, destination_cell):
-        """Verify the observed YOLO geometry after a robot move, not CChess/FEN."""
-        if not self.center_pick_estimator or not self.cam_monitor:
-            print("[CENTER PICK] Cannot verify completed move: vision unavailable.")
-            return False
-        attempts = max(1, int(getattr(self.config, "VISUAL_CENTER_PICK_ATTEMPTS", 3)))
-        required = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
-        matching_samples = 0
-        for _ in range(attempts):
-            frame, detections = self.cam_monitor.get_fresh_snapshot()
-            if frame is None:
-                continue
-            source_clear = not self._cell_has_center_detection(detections, source_cell)
-            destination_occupied = self._cell_has_center_detection(detections, destination_cell)
-            if source_clear and destination_occupied:
-                matching_samples += 1
-        verified = matching_samples >= required
-        print(f"[CENTER PICK] Move geometry {source_cell}->{destination_cell}: "
-              f"{matching_samples}/{attempts} matching snapshots.")
-        return verified
-
     def get_visual_pick_targets(self, expected_cells):
         """Lấy snapshot trước khi robot di chuyển và ước lượng điểm gắp thực tế.
         Bọc phòng thủ toàn diện: Mọi ngoại lệ đều tự động fallback về None (tâm ô lý thuyết).
@@ -514,6 +433,40 @@ class HardwareManager:
             f"{matches}/{sample_count} matching snapshots."
         )
         return verified
+
+    def hand_interaction_finished(self):
+        """Return True once after a hand has entered then cleared the board ROI."""
+        if self.hand_model is None or self.turn_completion_monitor is None or self.cam_monitor is None:
+            return False
+        now = time.monotonic()
+        if now - self._last_hand_check < 0.10:
+            return False
+        self._last_hand_check = now
+        frame, _ = self.cam_monitor.get_latest_frame_and_detections()
+        if frame is None:
+            return False
+        hand_on_board = False
+        try:
+            result = self.hand_model(frame, conf=self.config.HAND_CONFIDENCE, verbose=False)[0]
+            boxes = getattr(result, "boxes", None)
+            if boxes is not None and len(boxes) > 0:
+                polygon = self.cam_monitor._compute_board_polygon()
+                if polygon is None:
+                    print("[HAND] Board ROI unavailable; keeping SPACE fallback.")
+                    return False
+                for box in boxes.xyxy.cpu().tolist():
+                    cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+                    if cv2.pointPolygonTest(polygon, (cx, cy), False) >= 0:
+                        hand_on_board = True
+                        break
+        except Exception as e:
+            print(f"[HAND] ⚠️ Detection error: {e}")
+            return False
+        return self.turn_completion_monitor.observe(hand_on_board, now)
+
+    def reset_hand_interaction_monitor(self):
+        if self.turn_completion_monitor is not None:
+            self.turn_completion_monitor.reset()
 
     def capture_baseline_if_needed(self, force_delay=0.0):
         if self.cam_monitor and self.yolo_detector:

@@ -201,39 +201,38 @@ try:
                                 print(f"[AI] Robot executing move: {s}->{d}")
                                 try:
                                     pick_targets = {"moving": None, "captured": None}
-                                    # Verify only the piece that will be picked first.
-                                    # The moving piece is re-identified after a capture.
+                                    # CChess creates the calibration matrix; best.pt measures
+                                    # the physical box centre used for each robot pick.
                                     expected_cells = {"captured": d} if is_cap else {"moving": s}
-                                    if getattr(config, "VISUAL_BOARD_SYNC_REQUIRED", True):
-                                        # The source is picked at its observed physical offset;
-                                        # place_at still uses the calibrated logical destination.
-                                        pick_targets, board_verified = hw.get_verified_visual_pick_targets(
-                                            state.board, expected_cells
-                                        )
-                                        if not board_verified:
-                                            robot_success = False
-                                            state.physical_sync_fault = True
-                                            state.set_status(
-                                                "⚠️ Bàn thật không khớp FEN — robot chưa gắp quân.",
-                                                color=(180, 100, 0), duration=20.0,
-                                            )
-                                    elif getattr(config, "VISUAL_PICK_ENABLED", False):
-                                        pick_targets = hw.get_visual_pick_targets(expected_cells)
+                                    if getattr(config, "VISUAL_PICK_ENABLED", False):
+                                        pick_targets = hw.get_robot_center_pick_targets(expected_cells)
                                     if robot_success:
                                         def refresh_moving_target():
                                             if not is_cap:
                                                 return pick_targets.get("moving")
-                                            refreshed, verified = hw.get_verified_visual_pick_targets(
-                                                expected_after_capture, {"moving": s}
-                                            )
-                                            return refreshed.get("moving") if verified else None
+                                            refreshed = hw.get_robot_center_pick_targets({"moving": s})
+                                            return refreshed.get("moving")
+
+                                        def verify_capture_cleared():
+                                            return not is_cap or hw.is_cell_visually_clear(d)
 
                                         hw.robot.move_piece(
                                             s[0], s[1], d[0], d[1], is_cap,
                                             moving_visual_target=pick_targets.get("moving"),
                                             captured_visual_target=pick_targets.get("captured"),
                                             refresh_moving_visual_target=refresh_moving_target,
+                                            verify_capture_cleared=verify_capture_cleared,
                                         )
+                                        # Confirm the observed source->destination geometry. CChess
+                                        # identity/FEN is deliberately not a robot-motion gate.
+                                        if getattr(config, "VISUAL_PICK_ENABLED", False):
+                                            if not hw.verify_visual_move(s, d):
+                                                robot_success = False
+                                                state.physical_sync_fault = True
+                                                state.set_status(
+                                                    "⚠️ Không xác nhận được vị trí quân sau khi thả — FEN chưa được cập nhật.",
+                                                    color=(180, 100, 0), duration=20.0,
+                                                )
                                 except Exception as e:
                                     error_str = str(e)
                                     print(f"⚠️ Robot error: {error_str}")
@@ -244,14 +243,6 @@ try:
                                         robot_success = False
                                         state.physical_sync_fault = True
                                         time.sleep(2)
-                                if robot_success and getattr(config, "VISUAL_BOARD_SYNC_REQUIRED", True):
-                                    if not hw.verify_physical_board(expected_after):
-                                        robot_success = False
-                                        state.physical_sync_fault = True
-                                        state.set_status(
-                                            "❌ Không xác minh được quân robot đã thả — đã dừng để tránh đi lặp.",
-                                            color=(180, 0, 0), duration=20.0,
-                                        )
                             else:
                                 print(f"\n{'='*50}")
                                 print(f"🤖 AI đi: {state.board[s[1]][s[0]]} ({s[0]},{s[1]}) → ({d[0]},{d[1]}) {'ĂN' if is_cap else ''}")

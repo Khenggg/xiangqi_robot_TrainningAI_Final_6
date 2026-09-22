@@ -96,16 +96,13 @@ VISUAL_OCCUPANCY_CELL_HALF_WIDTH = 0.50
 # calibration plus best.pt box centres, so CChess identity cannot block a move.
 VISUAL_BOARD_SYNC_REQUIRED = False
 
-# --- HAND-AWARE AUTO MOVE CONFIRMATION ---
-# The hand model only gates when to inspect the board.  SnapshotDetector and
-# Xiangqi validation still decide whether a move is accepted.
+# --- BOARD-STABILITY AUTO MOVE CONFIRMATION ---
+# The board must show the same legal move in several observations before it is
+# accepted. This works whether a piece is moved by hand or another object.
 AUTO_MOVE_CONFIRM_ENABLED = True
-HAND_MODEL_PATH = "models/hand_best_egohands.pt"
-HAND_CONFIDENCE = 0.45
-HAND_ABSENCE_SECONDS = 0.8
-HAND_MIN_PRESENT_SECONDS = 0.25
-AUTO_MOVE_CONFIRM_RETRIES = 10
-AUTO_MOVE_CONFIRM_RETRY_SECONDS = 0.20
+BOARD_STABILITY_SECONDS = 1.2
+BOARD_STABILITY_MIN_SAMPLES = 3
+BOARD_STABILITY_SAMPLE_INTERVAL_SECONDS = 0.10
 
 # --- THÔNG SỐ AI ---
 AI_THINK_TIME = 10  # Time per move in seconds — AI gets 10s after subtracting TIME_BUFFER (0.5)

@@ -1,6 +1,7 @@
 import time
 from src.core import xiangqi  # type: ignore
 from src.ui.board_renderer import BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT, NUM_COLS, NUM_ROWS  # type: ignore
+from src.vision.board_stability_monitor import BoardStabilityMonitor
 
 class InputHandler:
     """Manages Pygame Key/Mouse events and bridges them to GameState and HardwareManager."""
@@ -8,6 +9,13 @@ class InputHandler:
         self.state = game_state
         self.hw = hw_manager
         self._last_move_confirmation_failure = None
+        stability_config = getattr(self.hw, "config", None)
+        self._board_stability_monitor = BoardStabilityMonitor(
+            stability_seconds=getattr(stability_config, "BOARD_STABILITY_SECONDS", 1.2),
+            min_samples=getattr(stability_config, "BOARD_STABILITY_MIN_SAMPLES", 3),
+        )
+        self._observed_baseline_time = None
+        self._last_stability_poll_at = 0.0
 
     def handle_mouse_down(self, mx, my):
         # Surrender Button
@@ -186,22 +194,109 @@ class InputHandler:
         if self.state.turn != "r" or self.state.game_over:
             return False
         if not self.hw.yolo_detector or not self.hw.yolo_detector.has_baseline():
-            self.hw.reset_hand_interaction_monitor()
+            reset_monitor = getattr(self.hw, "reset_hand_interaction_monitor", None)
+            if reset_monitor:
+                reset_monitor()
             self.state.set_status("⚠️ Chưa có baseline. Hãy nhấn SPACE để xác minh.", color=(180, 100, 0), duration=12.0)
             return False
         self._last_move_confirmation_failure = None
         self.state.set_status("✋ Hand left board — verifying move...", color=(0, 100, 180), duration=3.0)
         for attempt in range(1, int(retries) + 1):
             if self._handle_space_key(auto_retry=True):
-                self.hw.reset_hand_interaction_monitor()
+                reset_monitor = getattr(self.hw, "reset_hand_interaction_monitor", None)
+                if reset_monitor:
+                    reset_monitor()
                 return True
             if attempt < retries:
                 time.sleep(float(retry_seconds))
         self.state.manual_override_active = False
-        self.hw.reset_hand_interaction_monitor()
+        reset_monitor = getattr(self.hw, "reset_hand_interaction_monitor", None)
+        if reset_monitor:
+            reset_monitor()
         message = ("❌ NƯỚC ĐI KHÔNG HỢP LỆ"
                    if self._last_move_confirmation_failure == "invalid"
                    else "❌ KHÔNG NHẬN DIỆN ĐƯỢC NƯỚC ĐI MỚI")
         self.state.set_status(message, color=(180, 0, 0), duration=12.0)
         print("[AUTO CONFIRM] Failed after retry limit; waiting for SPACE fallback.")
         return False
+
+    def poll_board_stability(self):
+        """Commit one legal Red move after repeated stable board observations."""
+        if (self.state.turn != "r" or self.state.game_over
+                or getattr(self.state, "manual_override_active", False)):
+            self._board_stability_monitor.reset()
+            return False
+        now = time.monotonic()
+        sample_interval = getattr(
+            getattr(self.hw, "config", None), "BOARD_STABILITY_SAMPLE_INTERVAL_SECONDS", 0.10
+        )
+        if now - self._last_stability_poll_at < float(sample_interval):
+            return False
+        self._last_stability_poll_at = now
+        if not self.hw.yolo_detector or not self.hw.cam_monitor:
+            return False
+        if not self.hw.yolo_detector.has_baseline():
+            self._board_stability_monitor.reset()
+            self._observed_baseline_time = None
+            return False
+
+        baseline_time = self.hw.yolo_detector._baseline_time
+        if baseline_time != self._observed_baseline_time:
+            if self._board_stability_monitor.candidate is not None:
+                print("[STABILITY] Candidate reset: T1 baseline changed.")
+            self._board_stability_monitor.reset()
+            self._observed_baseline_time = baseline_time
+
+        frame, detections = self.hw.cam_monitor.get_fresh_snapshot()
+        if frame is None:
+            if self._board_stability_monitor.candidate is not None:
+                print("[STABILITY] Candidate reset: camera returned no frame.")
+            self._board_stability_monitor.observe(None)
+            return False
+
+        cchess_result = None
+        if getattr(self.hw, "cchess_recognizer", None) is not None:
+            try:
+                cchess_result = self.hw.recognize_board_state(frame)
+            except Exception as exc:
+                print(f"[STABILITY] CChess recognition error: {exc}")
+
+        src, dst, piece = self.hw.yolo_detector.detect_move(
+            frame, detections, self.state.board, cchess_result=cchess_result
+        )
+        candidate = None
+        rejection_reason = None
+        if src is None:
+            has_changed = self.hw.yolo_detector.has_new_human_move(
+                detections, self.state.board, frame=frame, cchess_result=cchess_result
+            )
+            rejection_reason = (
+                "board changed but no valid move was resolved"
+                if has_changed else "no board change from T1"
+            )
+        elif xiangqi.is_valid_move(src, dst, self.state.board, "r"):
+            candidate = (src, dst, piece)
+        else:
+            rejection_reason = f"illegal Red move {src}->{dst}"
+
+        previous_candidate = self._board_stability_monitor.candidate
+        if candidate is None and previous_candidate is not None:
+            print(f"[STABILITY] Candidate reset: {rejection_reason}.")
+        elif candidate is not None and candidate != previous_candidate:
+            print(f"[STABILITY] Candidate started: {candidate}")
+        stable_move = self._board_stability_monitor.observe(candidate)
+        if stable_move is None:
+            return False
+
+        src, dst, piece = stable_move
+        occ = [row[:] for row in self.hw.yolo_detector._baseline_occ]
+        self.state.save_rollback_state(occ, self.hw.yolo_detector._baseline_time)
+        print(
+            "[STABILITY] Stable legal move confirmed: "
+            f"{piece} {src}->{dst}; samples={self._board_stability_monitor.sample_count}, "
+            f"elapsed={self._board_stability_monitor.elapsed_seconds():.2f}s"
+        )
+        self._last_move_confirmation_failure = None
+        self.state.process_human_move(src, dst, piece)
+        self._board_stability_monitor.reset()
+        return True
