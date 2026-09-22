@@ -1,6 +1,7 @@
 import os
 import time
 import sys
+import math
 import numpy as np
 import cv2
 import threading
@@ -15,6 +16,8 @@ from src.domain.board_pose_provider import (
     FixedBoardPoseProvider,
     PhysicalTeachingPointBoardPoseProvider,
     BoardCalibrationResult,
+    BoardCalibrationProfile,
+    BoardCalibrationTolerancePolicy,
 )
 from src.motion.coordinator import MotionCoordinator, MotionProfile
 from src.ai.moonfish_engine import MoonfishEngine
@@ -33,10 +36,18 @@ except ImportError:
 
 class HardwareManager:
     """Manages Robot, Camera (Vision), and AI Engine connections."""
-    def __init__(self, config, project_dir):
+    def __init__(
+        self,
+        config,
+        project_dir,
+        board_calibration_profile: Optional[BoardCalibrationProfile] = None,
+        board_calibration_policy: Optional[BoardCalibrationTolerancePolicy] = None,
+    ):
         self.config = config
         self.project_dir = project_dir
         self.dry_run = config.DRY_RUN
+        self.board_calibration_profile = board_calibration_profile
+        self.board_calibration_policy = board_calibration_policy
         
         # Hardware instances
         self.robot = FR5Robot()
@@ -154,8 +165,76 @@ class HardwareManager:
             self.motion_coordinator = None
             return
 
+        # Explicit Physical Calibration Profile Resolution
+        cal_profile: Optional[BoardCalibrationProfile] = None
+        if self.board_calibration_profile is not None:
+            cal_profile = self.board_calibration_profile
+        else:
+            cal_mode = getattr(self.config, "BOARD_CALIBRATION_MODE", None)
+            if cal_mode == "POINTER_CONTACT":
+                cal_profile = BoardCalibrationProfile(
+                    tcp_to_board_contact_offset_mm=[0.0, 0.0, 0.0],
+                    offset_frame="ROBOT_BASE",
+                    provenance="CALIBRATED_POINTER_CONTACT",
+                )
+            elif cal_mode == "KNOWN_OFFSET":
+                offset = getattr(self.config, "BOARD_CALIBRATION_OFFSET_MM", None)
+                frame = getattr(self.config, "BOARD_CALIBRATION_OFFSET_FRAME", None)
+                prov = getattr(self.config, "BOARD_CALIBRATION_PROVENANCE", None)
+                if (
+                    not isinstance(offset, (list, tuple))
+                    or len(offset) != 3
+                    or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in offset)
+                    or frame not in ("TOOL", "ROBOT_BASE")
+                    or not prov
+                    or not str(prov).strip()
+                ):
+                    print(f"\n{'='*60}")
+                    print("❌ [CRITICAL] Cấu hình KNOWN_OFFSET không hợp lệ hoặc thiếu thông số:")
+                    print(f"   BOARD_CALIBRATION_OFFSET_MM: {offset}")
+                    print(f"   BOARD_CALIBRATION_OFFSET_FRAME: {frame}")
+                    print(f"   BOARD_CALIBRATION_PROVENANCE: {prov}")
+                    print("   Robot motion đã bị VÔ HIỆU HÓA. Physical board calibration failed closed.")
+                    print(f"{'='*60}\n")
+                    self.physical_motion_authorized = False
+                    self.board_pose_provider = None
+                    self.motion_coordinator = None
+                    return
+                cal_profile = BoardCalibrationProfile(
+                    tcp_to_board_contact_offset_mm=[float(offset[0]), float(offset[1]), float(offset[2])],
+                    offset_frame=frame,
+                    provenance=str(prov).strip(),
+                )
+            else:
+                print(f"\n{'='*60}")
+                print("❌ [CRITICAL] Thiếu hoặc sai cấu hình chế độ calibrate bàn cờ thật (BOARD_CALIBRATION_MODE):")
+                print(f"   BOARD_CALIBRATION_MODE hiện tại: {cal_mode}")
+                print("   PHYSICAL mode yêu cầu cấu hình rõ ràng: 'POINTER_CONTACT' hoặc 'KNOWN_OFFSET'.")
+                print("   Robot motion đã bị VÔ HIỆU HÓA. Physical board calibration failed closed.")
+                print(f"{'='*60}\n")
+                self.physical_motion_authorized = False
+                self.board_pose_provider = None
+                self.motion_coordinator = None
+                return
+
+        # Explicit Physical Calibration Tolerance Policy Resolution
+        cal_policy: BoardCalibrationTolerancePolicy
+        if self.board_calibration_policy is not None:
+            cal_policy = self.board_calibration_policy
+        else:
+            warning_tilt = getattr(self.config, "BOARD_MAX_TILT_WARNING_DEG", 2.5)
+            hard_fail_tilt = getattr(self.config, "BOARD_MAX_TILT_HARD_FAIL_DEG", 5.0)
+            cal_policy = BoardCalibrationTolerancePolicy(
+                max_board_tilt_warning_deg=float(warning_tilt),
+                max_board_tilt_hard_fail_deg=float(hard_fail_tilt),
+            )
+
         try:
-            provider = PhysicalTeachingPointBoardPoseProvider.from_controller(self.backend)
+            provider = PhysicalTeachingPointBoardPoseProvider.from_controller(
+                self.backend,
+                calibration_profile=cal_profile,
+                tolerance_policy=cal_policy,
+            )
             res = provider.calibration_result
 
             if not res.success:

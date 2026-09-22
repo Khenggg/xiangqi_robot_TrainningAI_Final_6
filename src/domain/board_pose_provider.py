@@ -164,7 +164,18 @@ class BoardCalibrationTolerancePolicy:
     max_plane_residual_hard_fail_mm: float = 3.0
     max_edge_length_diff_mm: float = 5.0
     max_diagonal_diff_mm: float = 8.0
-    min_normal_z: float = 0.707  # Max 45 deg tilt from upward +Z
+    max_board_tilt_warning_deg: float = 2.5
+    max_board_tilt_hard_fail_deg: float = 5.0
+    min_normal_z: Optional[float] = None  # Deprecated alias; if set, acts as secondary constraint
+
+    @classmethod
+    def permissive_se3(cls) -> "BoardCalibrationTolerancePolicy":
+        """Permissive tolerance policy for mathematical SE(3) reconstruction tests."""
+        return cls(
+            name="PERMISSIVE_SE3_TEST_POLICY",
+            max_board_tilt_warning_deg=45.0,
+            max_board_tilt_hard_fail_deg=85.0,
+        )
 
 
 @dataclass(frozen=True)
@@ -183,6 +194,7 @@ class BoardCalibrationResult:
     error_message: Optional[str] = None
     teaching_points: Optional[Dict[str, List[float]]] = None
     max_plane_residual_mm: float = 0.0
+    board_tilt_deg: float = 0.0
     calibration_profile: Optional[BoardCalibrationProfile] = None
     tolerance_policy: Optional[BoardCalibrationTolerancePolicy] = None
     warnings: List[str] = field(default_factory=list)
@@ -577,9 +589,16 @@ def calibrate_board_from_teaching_points(
         Vt[-1, :] *= -1.0
         R = Vt.T @ U.T
 
-    # Check that normal vector points upward (board surface facing +Z robot)
-    normal_z = R[2, 2]
-    if normal_z < policy.min_normal_z:
+    # Check that normal vector points upward and board is approximately horizontal (physical MVP requirement)
+    normal_z = float(R[2, 2])
+    tilt_deg = math.degrees(math.acos(max(-1.0, min(1.0, normal_z))))
+
+    tilt_hard_fail = policy.max_board_tilt_hard_fail_deg
+    if policy.min_normal_z is not None and policy.min_normal_z != 0.707:
+        tilt_from_min_z = math.degrees(math.acos(max(-1.0, min(1.0, policy.min_normal_z))))
+        tilt_hard_fail = min(tilt_hard_fail, tilt_from_min_z)
+
+    if tilt_deg > tilt_hard_fail or normal_z <= 0.0:
         return BoardCalibrationResult(
             success=False,
             state=None,
@@ -592,9 +611,10 @@ def calibrate_board_from_teaching_points(
             measured_width_mm=round(measured_width, 2),
             measured_length_mm=round(measured_length, 2),
             max_plane_residual_mm=round(max_plane_residual, 3),
+            board_tilt_deg=round(tilt_deg, 2),
             error_message=(
-                f"Inverted or excessive tilt for board normal: z-component={normal_z:.3f} < {policy.min_normal_z:.3f}. "
-                "Check whether R1-R4 teaching point order is swapped or inverted."
+                f"Board surface tilt too large: normal tilt={tilt_deg:.2f} deg > limit {tilt_hard_fail:.1f} deg "
+                f"(normal z={normal_z:.3f}). Physical board must be approximately horizontal for safe play."
             ),
             teaching_points=pts_mm_dict,
             calibration_profile=profile,
@@ -636,6 +656,11 @@ def calibrate_board_from_teaching_points(
 
     # 8. Record warnings if any parameter is between warning and hard fail
     warnings = []
+    if tilt_deg > policy.max_board_tilt_warning_deg:
+        warnings.append(
+            f"Board normal tilt {tilt_deg:.2f} deg exceeds recommended warning threshold "
+            f"({policy.max_board_tilt_warning_deg:.1f} deg). Verify physical board leveling."
+        )
     if rms_error > policy.max_rms_residual_warning_mm:
         warnings.append(
             f"RMS residual {rms_error:.2f} mm exceeds recommended warning threshold "
@@ -722,6 +747,7 @@ def calibrate_board_from_teaching_points(
         f"RMS residual: {rms_error:.3f} mm\n"
         f"Max residual: {max_error:.3f} mm\n"
         f"Plane residual: {max_plane_residual:.3f} mm\n"
+        f"Board surface tilt: {tilt_deg:.2f} deg (limit {tilt_hard_fail:.1f} deg)\n"
         f"Board surface pose: center={board_center_robot_m}, surface_z={surface_z_m:.4f} m\n"
         f"T_robot_from_board R matrix:\n{R}"
     )
@@ -738,6 +764,7 @@ def calibrate_board_from_teaching_points(
         measured_width_mm=measured_width,
         measured_length_mm=measured_length,
         max_plane_residual_mm=max_plane_residual,
+        board_tilt_deg=round(tilt_deg, 2),
         error_message=None,
         teaching_points=pts_mm_dict,
         calibration_profile=profile,

@@ -71,6 +71,21 @@ PLACE_TOOL_ROTATION = list(ROTATION)
 ROBOT_IP = "192.168.58.2"
 DRY_RUN = False # Đổi thành True nếu muốn test code mà không cần bật Robot
 
+# --- PHYSICAL BOARD CALIBRATION CONFIGURATION ---
+# Chế độ hiệu chuẩn bàn cờ thực tế từ điểm dạy R1-R4:
+# "POINTER_CONTACT": Dạy bằng bút đo/pointer tiếp xúc trực tiếp mặt bàn tại R1-R4 (offset = [0, 0, 0]).
+# "KNOWN_OFFSET": Dạy bằng TCP có khoảng cách xác định tới mặt bàn. Yêu cầu khai báo OFFSET_MM, OFFSET_FRAME, PROVENANCE.
+BOARD_CALIBRATION_MODE = "POINTER_CONTACT"
+BOARD_CALIBRATION_OFFSET_MM = [0.0, 0.0, 0.0]
+BOARD_CALIBRATION_OFFSET_FRAME = "ROBOT_BASE"  # "ROBOT_BASE" hoặc "TOOL"
+BOARD_CALIBRATION_PROVENANCE = "CALIBRATED_POINTER_CONTACT"
+
+# Giới hạn độ nghiêng mặt bàn cờ cho phép (Physical Board Tilt Policy):
+# Bàn cờ Xiangqi thực tế yêu cầu mặt phẳng gần như nằm ngang.
+BOARD_MAX_TILT_WARNING_DEG = 2.5    # Cảnh báo khi độ nghiêng vượt quá 2.5°
+BOARD_MAX_TILT_HARD_FAIL_DEG = 5.0   # Từ chối hiệu chuẩn & khóa chuyển động khi độ nghiêng >= 5.0°
+
+
 # Camera index (0 = built-in webcam, 1 = USB cam, 2 = DroidCam, etc.)
 # main.py will auto-try configured index first, then others if it fails.
 VIDEO_SOURCE = 2

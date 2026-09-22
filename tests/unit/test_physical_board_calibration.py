@@ -420,6 +420,7 @@ class TestPhysicalBoardCalibration:
             DRY_RUN = True
             ROBOT_BACKEND = "PHYSICAL"
             ROBOT_IP = "127.0.0.1"
+            BOARD_CALIBRATION_MODE = "POINTER_CONTACT"
             BOARD_ORIGIN_X = 200.0
             BOARD_ORIGIN_Y = -100.0
             ROTATION = [-179.164, -3.047, -26.304]
@@ -465,6 +466,7 @@ class TestPhysicalBoardCalibration:
             DRY_RUN = False
             ROBOT_BACKEND = "PHYSICAL"
             ROBOT_IP = "192.168.58.2"
+            BOARD_CALIBRATION_MODE = "POINTER_CONTACT"
 
         hw = HardwareManager(MockConfig(), ".")
 
@@ -604,3 +606,292 @@ class TestPhysicalBoardCalibration:
         assert diff_mm != pytest.approx(218.0, abs=1.0)
         # Must match canonical 150 mm tool profile
         assert diff_mm == pytest.approx(150.0, abs=1.0)
+
+    # -------------------------------------------------------------------------
+    # Matrix #18: Physical startup with missing calibration mode fails closed
+    # -------------------------------------------------------------------------
+    def test_physical_startup_missing_calibration_mode_fails_closed(self):
+        """
+        Matrix #18:
+        When BOARD_CALIBRATION_MODE is omitted or None in PHYSICAL backend,
+        HardwareManager must fail closed: physical_motion_authorized=False,
+        is_robot_ready=False, board_pose_provider=None.
+        """
+        class MissingModeConfig:
+            DRY_RUN = True
+            ROBOT_BACKEND = "PHYSICAL"
+            ROBOT_IP = "127.0.0.1"
+            # BOARD_CALIBRATION_MODE not defined!
+
+        hw = HardwareManager(MissingModeConfig(), ".")
+        backend = PhysicalFR3Backend(ip="127.0.0.1", dry_run=True)
+        # Even with perfect teaching points, missing mode must fail closed
+        backend.set_mock_teaching_points({
+            "R1": [40.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R2": [-280.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R3": [-280.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R4": [40.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+        })
+        hw.backend = backend
+        hw._calibrate_robot()
+
+        assert hw.physical_motion_authorized is False
+        assert hw.is_robot_ready is False
+        assert hw.board_pose_provider is None
+        assert hw.motion_coordinator is None
+
+    # -------------------------------------------------------------------------
+    # Matrix #19: Explicit POINTER_CONTACT mode allowed
+    # -------------------------------------------------------------------------
+    def test_physical_startup_explicit_pointer_contact_allowed(self):
+        """
+        Matrix #19:
+        Explicit BOARD_CALIBRATION_MODE = 'POINTER_CONTACT' constructs zero offset
+        profile with provenance CALIBRATED_POINTER_CONTACT and allows calibration.
+        """
+        class PointerContactConfig:
+            DRY_RUN = True
+            ROBOT_BACKEND = "PHYSICAL"
+            ROBOT_IP = "127.0.0.1"
+            BOARD_CALIBRATION_MODE = "POINTER_CONTACT"
+            PICK_TOOL_ROTATION = [-179.164, -3.047, -26.304]
+            SAFE_CLEARANCE_Z_MM = 40.0
+            PICK_TCP_HEIGHT_MM = 4.715
+            PLACE_TCP_HEIGHT_MM = 4.715
+            BOARD_ORIGIN_X = 0.0
+            BOARD_ORIGIN_Y = 0.0
+
+        hw = HardwareManager(PointerContactConfig(), ".")
+        backend = PhysicalFR3Backend(ip="127.0.0.1", dry_run=True)
+        backend.connect()
+        backend.set_mock_teaching_points({
+            "R1": [40.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R2": [-280.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R3": [-280.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R4": [40.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+        })
+        hw.backend = backend
+        hw._calibrate_robot()
+
+        assert hw.physical_motion_authorized is True
+        assert hw.is_robot_ready is True
+        assert hw.board_pose_provider is not None
+        profile = hw.board_pose_provider.calibration_result.calibration_profile
+        assert profile is not None
+        assert profile.provenance == "CALIBRATED_POINTER_CONTACT"
+        assert profile.tcp_to_board_contact_offset_mm == [0.0, 0.0, 0.0]
+
+    # -------------------------------------------------------------------------
+    # Matrix #20: Explicit KNOWN_OFFSET mode allowed
+    # -------------------------------------------------------------------------
+    def test_physical_startup_explicit_known_offset_allowed(self):
+        """
+        Matrix #20:
+        Explicit BOARD_CALIBRATION_MODE = 'KNOWN_OFFSET' with valid offset XYZ,
+        frame, and provenance allows calibration and applies the physical offset.
+        """
+        class KnownOffsetConfig:
+            DRY_RUN = True
+            ROBOT_BACKEND = "PHYSICAL"
+            ROBOT_IP = "127.0.0.1"
+            BOARD_CALIBRATION_MODE = "KNOWN_OFFSET"
+            BOARD_CALIBRATION_OFFSET_MM = [0.0, 0.0, 10.0]
+            BOARD_CALIBRATION_OFFSET_FRAME = "TOOL"
+            BOARD_CALIBRATION_PROVENANCE = "CALIPER_MEASURED_POINTER"
+            PICK_TOOL_ROTATION = [-179.164, -3.047, -26.304]
+            SAFE_CLEARANCE_Z_MM = 40.0
+            PICK_TCP_HEIGHT_MM = 4.715
+            PLACE_TCP_HEIGHT_MM = 4.715
+            BOARD_ORIGIN_X = 0.0
+            BOARD_ORIGIN_Y = 0.0
+
+        hw = HardwareManager(KnownOffsetConfig(), ".")
+        backend = PhysicalFR3Backend(ip="127.0.0.1", dry_run=True)
+        backend.connect()
+        # Points taught 10 mm above surface (Z = 28.0)
+        backend.set_mock_teaching_points({
+            "R1": [40.0, 180.0, 28.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R2": [-280.0, 180.0, 28.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R3": [-280.0, -180.0, 28.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R4": [40.0, -180.0, 28.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+        })
+        hw.backend = backend
+        hw._calibrate_robot()
+
+        assert hw.physical_motion_authorized is True
+        assert hw.is_robot_ready is True
+        assert hw.board_pose_provider is not None
+        profile = hw.board_pose_provider.calibration_result.calibration_profile
+        assert profile is not None
+        assert profile.provenance == "CALIPER_MEASURED_POINTER"
+        assert profile.tcp_to_board_contact_offset_mm == [0.0, 0.0, 10.0]
+        # Reconstructed board surface Z should be 28.0 - 10.0 = 18.0 mm (0.018 m)
+        state = hw.board_pose_provider.get_board_placement_state()
+        assert state.board_surface_z_robot_m == pytest.approx(0.018, abs=1e-3)
+
+    # -------------------------------------------------------------------------
+    # Matrix #21: Incomplete KNOWN_OFFSET rejected
+    # -------------------------------------------------------------------------
+    def test_physical_startup_incomplete_known_offset_rejected(self):
+        """
+        Matrix #21:
+        Incomplete KNOWN_OFFSET configs (missing offset, invalid frame, missing provenance)
+        must fail closed and reject physical motion.
+        """
+        class IncompleteOffsetConfig:
+            DRY_RUN = True
+            ROBOT_BACKEND = "PHYSICAL"
+            ROBOT_IP = "127.0.0.1"
+            BOARD_CALIBRATION_MODE = "KNOWN_OFFSET"
+            BOARD_CALIBRATION_OFFSET_MM = [0.0, 0.0]  # Only 2 elements!
+            BOARD_CALIBRATION_OFFSET_FRAME = "TOOL"
+            BOARD_CALIBRATION_PROVENANCE = "TEST"
+
+        hw = HardwareManager(IncompleteOffsetConfig(), ".")
+        backend = PhysicalFR3Backend(ip="127.0.0.1", dry_run=True)
+        backend.set_mock_teaching_points({
+            "R1": [40.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R2": [-280.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R3": [-280.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R4": [40.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+        })
+        hw.backend = backend
+        hw._calibrate_robot()
+        assert hw.physical_motion_authorized is False
+        assert hw.is_robot_ready is False
+
+        # Also test invalid frame
+        class InvalidFrameConfig:
+            DRY_RUN = True
+            ROBOT_BACKEND = "PHYSICAL"
+            ROBOT_IP = "127.0.0.1"
+            BOARD_CALIBRATION_MODE = "KNOWN_OFFSET"
+            BOARD_CALIBRATION_OFFSET_MM = [0.0, 0.0, 5.0]
+            BOARD_CALIBRATION_OFFSET_FRAME = "GLOBAL"  # Invalid! Must be TOOL or ROBOT_BASE
+            BOARD_CALIBRATION_PROVENANCE = "TEST"
+
+        hw2 = HardwareManager(InvalidFrameConfig(), ".")
+        hw2.backend = backend
+        hw2._calibrate_robot()
+        assert hw2.physical_motion_authorized is False
+
+        # Also test missing provenance
+        class MissingProvenanceConfig:
+            DRY_RUN = True
+            ROBOT_BACKEND = "PHYSICAL"
+            ROBOT_IP = "127.0.0.1"
+            BOARD_CALIBRATION_MODE = "KNOWN_OFFSET"
+            BOARD_CALIBRATION_OFFSET_MM = [0.0, 0.0, 5.0]
+            BOARD_CALIBRATION_OFFSET_FRAME = "TOOL"
+            BOARD_CALIBRATION_PROVENANCE = ""  # Empty string!
+
+        hw3 = HardwareManager(MissingProvenanceConfig(), ".")
+        hw3.backend = backend
+        hw3._calibrate_robot()
+        assert hw3.physical_motion_authorized is False
+
+    # -------------------------------------------------------------------------
+    # Matrix #22: Board tilt policy - Small realistic tilt (1 deg) passes
+    # -------------------------------------------------------------------------
+    def test_board_tilt_small_realistic_passes(self):
+        """
+        Matrix #22:
+        A small 1.0 deg physical board tilt is within acceptable tolerance (< 2.5 deg).
+        Calibration must succeed with no tilt warnings.
+        """
+        # Rotate nominal points by 1.0 deg around Y-axis at board center (-120, 0, 18)
+        theta_rad = math.radians(1.0)
+        c, s = math.cos(theta_rad), math.sin(theta_rad)
+        p0 = np.array([-120.0, 0.0, 18.0])
+        Ry = np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+
+        tilted_points = {}
+        for name, pt in NOMINAL_TEACHING_POINTS.items():
+            dp = np.array(pt[:3]) - p0
+            rot_pt = p0 + Ry @ dp
+            tilted_points[name] = rot_pt.tolist()
+
+        result = calibrate_board_from_teaching_points(tilted_points)
+        assert result.success is True
+        assert result.board_tilt_deg == pytest.approx(1.0, abs=0.1)
+        tilt_warnings = [w for w in result.warnings if "tilt" in w.lower()]
+        assert len(tilt_warnings) == 0
+
+    # -------------------------------------------------------------------------
+    # Matrix #23: Board tilt policy - Moderate tilt near warning threshold warns
+    # -------------------------------------------------------------------------
+    def test_board_tilt_near_warning_threshold_warns(self):
+        """
+        Matrix #23:
+        A moderate 3.0 deg board tilt exceeds warning threshold (2.5 deg) but is below
+        hard fail threshold (5.0 deg). Calibration succeeds but issues a warning.
+        """
+        theta_rad = math.radians(3.0)
+        c, s = math.cos(theta_rad), math.sin(theta_rad)
+        p0 = np.array([-120.0, 0.0, 18.0])
+        Ry = np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+
+        tilted_points = {}
+        for name, pt in NOMINAL_TEACHING_POINTS.items():
+            dp = np.array(pt[:3]) - p0
+            rot_pt = p0 + Ry @ dp
+            tilted_points[name] = rot_pt.tolist()
+
+        result = calibrate_board_from_teaching_points(tilted_points)
+        assert result.success is True
+        assert result.board_tilt_deg == pytest.approx(3.0, abs=0.1)
+        tilt_warnings = [w for w in result.warnings if "tilt" in w.lower()]
+        assert len(tilt_warnings) > 0
+        assert "3.0" in tilt_warnings[0] or "warning" in tilt_warnings[0].lower()
+
+    # -------------------------------------------------------------------------
+    # Matrix #24: Board tilt policy - Excessive tilt (10 deg) fails physical calibration
+    # -------------------------------------------------------------------------
+    def test_board_tilt_excessive_fails(self):
+        """
+        Matrix #24:
+        A clearly excessive 10.0 deg board tilt exceeds hard fail threshold (5.0 deg).
+        Physical calibration must fail closed.
+        """
+        theta_rad = math.radians(10.0)
+        c, s = math.cos(theta_rad), math.sin(theta_rad)
+        p0 = np.array([-120.0, 0.0, 18.0])
+        Ry = np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+
+        tilted_points = {}
+        for name, pt in NOMINAL_TEACHING_POINTS.items():
+            dp = np.array(pt[:3]) - p0
+            rot_pt = p0 + Ry @ dp
+            tilted_points[name] = rot_pt.tolist()
+
+        result = calibrate_board_from_teaching_points(tilted_points)
+        assert result.success is False
+        assert "tilt" in result.error_message.lower()
+        assert "10.0" in result.error_message
+
+    # -------------------------------------------------------------------------
+    # Matrix #25: Permissive SE(3) mode preserves mathematical reconstruction
+    # -------------------------------------------------------------------------
+    def test_permissive_se3_allows_tilted_reconstruction(self):
+        """
+        Matrix #25:
+        Distinguish mathematical SE(3) capability from physical MVP acceptance:
+        using permissive_se3 policy allows pure rigid reconstruction of a 10 deg tilted board.
+        """
+        theta_rad = math.radians(10.0)
+        c, s = math.cos(theta_rad), math.sin(theta_rad)
+        p0 = np.array([-120.0, 0.0, 18.0])
+        Ry = np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+
+        tilted_points = {}
+        for name, pt in NOMINAL_TEACHING_POINTS.items():
+            dp = np.array(pt[:3]) - p0
+            rot_pt = p0 + Ry @ dp
+            tilted_points[name] = rot_pt.tolist()
+
+        policy = BoardCalibrationTolerancePolicy.permissive_se3()
+        result = calibrate_board_from_teaching_points(tilted_points, tolerance_policy=policy)
+        assert result.success is True
+        assert result.board_tilt_deg == pytest.approx(10.0, abs=0.1)
+        assert result.state is not None
+
