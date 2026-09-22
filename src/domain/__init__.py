@@ -6,6 +6,11 @@ from src.domain.geometry import (
     BoardConvention,
     PhysicalGeometry,
     get_physical_geometry,
+    CANONICAL_GRID_WIDTH_MM,
+    CANONICAL_GRID_LENGTH_MM,
+    CANONICAL_BOARD_THICKNESS_MM,
+    CANONICAL_GRID_DIAGONAL_MM,
+    CANONICAL_CELL_SPACING_MM,
 )
 from src.domain.board_pose import (
     BoardCell,
@@ -19,6 +24,13 @@ from src.domain.board_pose import (
 from src.domain.board_pose_provider import (
     BoardPoseProvider,
     FixedBoardPoseProvider,
+    PhysicalTeachingPointBoardPoseProvider,
+    BoardCalibrationResult,
+    BoardCalibrationProfile,
+    BoardCalibrationTolerancePolicy,
+    TeachingPointObservation,
+    parse_teaching_point_observation,
+    calibrate_board_from_teaching_points,
 )
 
 __all__ = [
@@ -27,6 +39,11 @@ __all__ = [
     "BoardConvention",
     "PhysicalGeometry",
     "get_physical_geometry",
+    "CANONICAL_GRID_WIDTH_MM",
+    "CANONICAL_GRID_LENGTH_MM",
+    "CANONICAL_BOARD_THICKNESS_MM",
+    "CANONICAL_GRID_DIAGONAL_MM",
+    "CANONICAL_CELL_SPACING_MM",
     "BoardCell",
     "BoardPlacementState",
     "compute_rotation_matrix",
@@ -36,4 +53,11 @@ __all__ = [
     "DEFAULT_BOARD_YAW_DEG",
     "BoardPoseProvider",
     "FixedBoardPoseProvider",
+    "PhysicalTeachingPointBoardPoseProvider",
+    "BoardCalibrationResult",
+    "BoardCalibrationProfile",
+    "BoardCalibrationTolerancePolicy",
+    "TeachingPointObservation",
+    "parse_teaching_point_observation",
+    "calibrate_board_from_teaching_points",
 ]

@@ -607,3 +607,9 @@ def get_physical_constants_provenance() -> Dict[str, ProvenanceRecord]:
     }
 
 
+# Canonical board grid dimensions derived directly from shared/physical_geometry.json
+CANONICAL_GRID_WIDTH_MM: float = canonical_geometry.board.playable_grid_width_mm    # 320.0 mm
+CANONICAL_GRID_LENGTH_MM: float = canonical_geometry.board.playable_grid_length_mm  # 360.0 mm
+CANONICAL_BOARD_THICKNESS_MM: float = canonical_geometry.board.thickness            # 10.5 mm
+CANONICAL_CELL_SPACING_MM: float = canonical_geometry.board.column_spacing          # 40.0 mm
+CANONICAL_GRID_DIAGONAL_MM: float = math.hypot(CANONICAL_GRID_WIDTH_MM, CANONICAL_GRID_LENGTH_MM)  # ~481.66 mm

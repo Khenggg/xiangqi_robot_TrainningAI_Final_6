@@ -197,6 +197,10 @@ class BoardPlacementState:
     physical_board_center_robot_m: List[float] = field(default_factory=lambda: [-0.360, 0.0, 0.00525])
     board_center_world_m: List[float] = field(default_factory=lambda: [0.0, 0.0105, 0.360])
 
+    # Optional explicit 3x3 orthonormal rotation matrix in SO(3)
+    # When provided (e.g. from physical calibration), overrides board_yaw_deg computation.
+    rotation_matrix: Optional[List[List[float]]] = None
+
     placement_version: int = 1
     timestamp: float = field(default_factory=time.time)
 
@@ -206,6 +210,8 @@ class BoardPlacementState:
 
     @property
     def R_robot_from_board(self) -> np.ndarray:
+        if self.rotation_matrix is not None:
+            return np.array(self.rotation_matrix, dtype=float)
         return compute_rotation_matrix(self.board_yaw_deg)
 
     @property
@@ -300,11 +306,19 @@ class BoardPlacementState:
         return self.R_board_from_robot @ (p_robot - p_center)
 
     def cell_to_robot_xyz(
-        self, row: float, col: float, z_rel_m: float = 0.0
+        self,
+        row: float,
+        col: float,
+        z_rel_m: float = 0.0,
+        height_above_board_mm: Optional[float] = None,
     ) -> np.ndarray:
         """
         Map semantic grid cell (row, col) directly to robot base coordinates {B}.
+        z_rel_m: offset in meters above the playing surface.
+        height_above_board_mm: optional offset in millimeters (overrides z_rel_m if provided).
         """
+        if height_above_board_mm is not None:
+            z_rel_m = float(height_above_board_mm) / 1000.0
         u_m, v_m = self.cell_to_board_local(row, col)
         return self.board_local_to_robot(u_m, v_m, z_rel_m=z_rel_m)
 
@@ -362,6 +376,7 @@ class BoardPlacementState:
             "board_center_world_m": [round(v, 5) for v in self.board_center_world_m],
             "quat_robot_from_board": [round(v, 5) for v in self.quat_robot_from_board],
             "quat_world": [round(v, 5) for v in self.quat_world],
+            "R_robot_from_board": [[round(float(v), 6) for v in row] for row in self.R_robot_from_board.tolist()],
             "T_robot_from_board": [[round(float(v), 5) for v in row] for row in self.T_robot_from_board.tolist()],
             "placement_version": self.placement_version,
             "timestamp": self.timestamp,

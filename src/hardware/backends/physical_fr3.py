@@ -6,7 +6,7 @@ Adheres strictly to the canonical RobotBackend abstraction from src/hardware/bac
 Does NOT manage Xiangqi rules, camera homography, or game state.
 """
 
-from typing import Any, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence, Tuple
 import logging
 import math
 import time
@@ -52,7 +52,16 @@ class PhysicalFR3Backend(RobotBackend):
         # Internal state cache (for dry-run and between read cycles)
         self._current_joints_deg: List[float] = [0.0, -45.0, 90.0, -135.0, -90.0, 0.0]
         self._current_tcp_pose_mm_deg: List[float] = [-360.0, 0.0, 200.0, 180.0, 0.0, 90.0]
-        self._current_flange_pose_mm_deg: List[float] = [-360.0, 0.0, 418.0, 180.0, 0.0, 90.0]
+        # Canonical tool length is 150.0 mm (no legacy 218 mm residual). Flange Z = TCP Z + 150.0 = 350.0 mm
+        self._current_flange_pose_mm_deg: List[float] = [-360.0, 0.0, 350.0, 180.0, 0.0, 90.0]
+
+        # Standard FAIRINO SDK teaching point format (20 elements, tool 0, user 0)
+        self._dry_run_teaching_points: dict = {
+            "R1": [40.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 50, 50, 0, 0, 0, 0],
+            "R2": [-280.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 50, 50, 0, 0, 0, 0],
+            "R3": [-280.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 50, 50, 0, 0, 0, 0],
+            "R4": [40.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 50, 50, 0, 0, 0, 0],
+        }
 
     def connect(self) -> bool:
         """Connect to the physical robot controller or initialize dry-run mock."""
@@ -302,3 +311,33 @@ class PhysicalFR3Backend(RobotBackend):
             self._last_error = str(exc)
             logger.error(f"[PhysicalFR3Backend] StopMotion error: {exc}")
             return False
+
+    def set_mock_teaching_points(self, points: dict) -> None:
+        """Set mock teaching points for dry-run mode and unit testing."""
+        self._dry_run_teaching_points = {k: list(v) for k, v in points.items()}
+
+    def get_teaching_point(self, name: str) -> Tuple[int, List[float]]:
+        """
+        Query teaching point by name from FAIRINO controller.
+        Returns (err_code, data_list).
+        err_code == 0 indicates success.
+        """
+        if self.dry_run:
+            if name in self._dry_run_teaching_points:
+                return 0, list(self._dry_run_teaching_points[name])
+            return -1, []
+
+        if not self._connected or self._rpc is None:
+            return -1, []
+
+        try:
+            if hasattr(self._rpc, "GetRobotTeachingPoint"):
+                err, data = self._rpc.GetRobotTeachingPoint(name)
+                if err == 0 and data is not None and len(data) >= 3:
+                    parsed = [float(str(v).strip()) for v in data]
+                    return 0, parsed
+                return int(err), []
+            return -1, []
+        except Exception as exc:
+            logger.error(f"[PhysicalFR3Backend] Error reading teaching point '{name}': {exc}")
+            return -1, []
