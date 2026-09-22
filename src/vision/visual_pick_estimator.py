@@ -72,3 +72,17 @@ class VisualPickEstimator:
         print(f"[VISUAL PICK] Target ({expected_col},{expected_row}) -> "
               f"({col:.3f},{row:.3f}), conf={confidence:.2f}, offset={offset:.3f} cells")
         return target
+
+    @staticmethod
+    def aggregate_targets(targets, min_samples=2):
+        """Use medians so one noisy camera frame cannot steer the gripper."""
+        targets = [target for target in targets if target is not None]
+        if len(targets) < int(min_samples):
+            return None
+        return GridTarget(
+            col=float(np.median([target.col for target in targets])),
+            row=float(np.median([target.row for target in targets])),
+            confidence=float(np.median([target.confidence for target in targets])),
+            offset_cells=float(np.median([target.offset_cells for target in targets])),
+        )
+

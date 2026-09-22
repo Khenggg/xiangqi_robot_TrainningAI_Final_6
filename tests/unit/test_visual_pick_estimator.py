@@ -57,6 +57,14 @@ class VisualPickEstimatorTests(unittest.TestCase):
         self.assertAlmostEqual(target.row, 1.85, places=5)
         self.assertAlmostEqual(target.offset_cells, 0.0, places=5)
 
+    def test_aggregate_targets_uses_median_and_requires_stable_samples(self):
+        first = self.estimator.estimate_pick_target([(0, 0.9, (1.9, 1.0, 2.1, 2.0))], 2.0, 1.85)
+        second = self.estimator.estimate_pick_target([(0, 0.8, (2.0, 1.0, 2.2, 2.0))], 2.1, 1.85)
+        self.assertIsNone(self.estimator.aggregate_targets([first], min_samples=2))
+        target = self.estimator.aggregate_targets([first, second], min_samples=2)
+        self.assertIsNotNone(target)
+
+
 
 class PhysicalPoseTests(unittest.TestCase):
     def test_visual_grid_float_generates_physical_xy_and_pick_rotation(self):
