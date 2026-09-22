@@ -354,7 +354,7 @@ class CameraMonitor:
 
             n_pieces = len(detections)
             dev_tag = "GPU" if self.device != "cpu" else "CPU"
-            info = f"[{dev_tag}] Detected: {n_pieces} pieces | SPACE=confirm move"
+            info = f"[{dev_tag}] Detected: {n_pieces} pieces | SPACE=confirm | M=emergency client move"
             cv2.putText(display, info, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
         return display

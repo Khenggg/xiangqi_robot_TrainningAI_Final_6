@@ -47,6 +47,10 @@ class InputHandler:
                     
                     if xiangqi.is_valid_move(src, dst, self.state.board, "r"):
                         print("[UI] 🖱️ Người dùng đi cờ trên màn hình.")
+                        detector = getattr(self.hw, "yolo_detector", None)
+                        if detector and detector.has_baseline():
+                            occ = [row[:] for row in detector._baseline_occ]
+                            self.state.save_rollback_state(occ, detector._baseline_time)
                         self.state.process_human_move(src, dst, p_name)
                         self.state.selected_pos = None
                         self.state.manual_override_active = False
@@ -74,6 +78,16 @@ class InputHandler:
         # Z KEY: Rollback
         if key == pygame.K_z:
             self.state.handle_rollback(self.hw)
+
+        # M KEY: Emergency client-side move mode. This is intentionally
+        # explicit so a camera failure cannot silently switch control paths.
+        elif key == pygame.K_m:
+            self.state.manual_override_active = True
+            self._board_stability_monitor.reset()
+            self.state.set_status(
+                "⚠️ Emergency client mode: chọn quân Đỏ rồi chọn ô đích.",
+                color=(180, 100, 0), duration=12.0,
+            )
             
         # SPACE KEY: Trigger YOLO Detection
         elif key == pygame.K_SPACE:
@@ -186,6 +200,7 @@ class InputHandler:
         # Commit move (state đã được save ở trên rồi)
         self._last_move_confirmation_failure = None
         self.state.process_human_move(src, dst, piece)
+        self.state.manual_override_active = False
         return True
 
     def try_auto_confirm_move(self, retries=10, retry_seconds=0.2):

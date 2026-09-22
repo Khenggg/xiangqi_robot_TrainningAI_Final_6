@@ -41,6 +41,7 @@ class HardwareManager:
         self.yolo_detector = None
         self.cchess_recognizer = None
         self.pick_estimator = None
+        self.center_pick_estimator = None
         self.board_reconciler = None
         self.hand_model = None
         self.turn_completion_monitor = None
@@ -269,6 +270,16 @@ class HardwareManager:
                         max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
                         foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
                     )
+                    # The primary robot path picks at the geometric centre of
+                    # best.pt's measured box.  The existing foot-point estimator
+                    # stays available as the supervised fallback.
+                    self.center_pick_estimator = VisualPickEstimator(
+                        self.perspective_path,
+                        min_confidence=self.config.VISUAL_PICK_MIN_CONFIDENCE,
+                        max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
+                        foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
+                        point_mode="center",
+                    )
                     self.board_reconciler = BoardReconciler(self.pick_estimator)
                     print("[INIT] ✅ Visual pick / board reconciliation initialized.")
                 except Exception as e:
@@ -314,6 +325,95 @@ class HardwareManager:
             except: pass
 
     # --- WRAPPER VISION UTILS ---
+    def get_robot_center_pick_targets(self, expected_cells):
+        """Locate robot pick points from centres of fresh ``best.pt`` boxes.
+
+        CChess calibration owns ``perspective.npy`` (pixel -> 9x10 grid); YOLO
+        measures where a physical piece actually is.  After three unsuccessful
+        centre-box samples, retain the prior foot-point visual correction as a
+        fallback instead of making CChess/FEN identity a motion gate.
+        """
+        targets = {name: None for name in expected_cells}
+        if not self.center_pick_estimator or not self.cam_monitor:
+            print("[CENTER PICK] Unavailable; using legacy visual-pick fallback.")
+            return self.get_visual_pick_targets(expected_cells)
+
+        samples = {name: [] for name in expected_cells}
+        attempts = max(1, int(getattr(self.config, "VISUAL_CENTER_PICK_ATTEMPTS", 3)))
+        for attempt in range(1, attempts + 1):
+            try:
+                frame, detections = self.cam_monitor.get_fresh_snapshot()
+                if frame is None:
+                    print(f"[CENTER PICK] Attempt {attempt}/{attempts}: no camera frame.")
+                    continue
+                for name, (col, row) in expected_cells.items():
+                    samples[name].append(
+                        self.center_pick_estimator.estimate_pick_target(detections, col, row)
+                    )
+            except Exception as exc:
+                print(f"[CENTER PICK] Attempt {attempt}/{attempts} failed: {exc}")
+
+        minimum = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
+        max_jitter = float(getattr(self.config, "VISUAL_CENTER_PICK_MAX_JITTER_CELLS", 0.12))
+        for name, values in samples.items():
+            targets[name] = self.center_pick_estimator.aggregate_targets(
+                values, minimum, max_spread_cells=max_jitter
+            )
+
+        if all(target is not None for target in targets.values()):
+            print(f"[CENTER PICK] Using stable centres from best.pt ({attempts} attempts).")
+            return targets
+
+        missing = [name for name, target in targets.items() if target is None]
+        print(f"[CENTER PICK] No stable box centre after {attempts} attempts for {missing}; "
+              "using legacy foot-point correction.")
+        return self.get_visual_pick_targets(expected_cells)
+
+    def _cell_has_center_detection(self, detections, cell):
+        """Whether best.pt sees a confident box centre at a calibrated cell."""
+        col, row = cell
+        half_width = float(getattr(self.config, "VISUAL_OCCUPANCY_CELL_HALF_WIDTH", 0.5))
+        return self.center_pick_estimator.has_detection_in_cell(
+            detections, col, row, cell_half_width=half_width
+        )
+
+    def is_cell_visually_clear(self, cell):
+        """Confirm that a capture square is clear without using CChess identity."""
+        if not self.center_pick_estimator or not self.cam_monitor:
+            print("[CENTER PICK] Cannot confirm cleared capture square: vision unavailable.")
+            return False
+        attempts = max(1, int(getattr(self.config, "VISUAL_CENTER_PICK_ATTEMPTS", 3)))
+        required = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
+        clear_samples = 0
+        for _ in range(attempts):
+            frame, detections = self.cam_monitor.get_fresh_snapshot()
+            if frame is not None and not self._cell_has_center_detection(detections, cell):
+                clear_samples += 1
+        cleared = clear_samples >= required
+        print(f"[CENTER PICK] Capture square {cell} clear: {clear_samples}/{attempts}.")
+        return cleared
+
+    def verify_visual_move(self, source_cell, destination_cell):
+        """Verify the observed YOLO geometry after a robot move, not CChess/FEN."""
+        if not self.center_pick_estimator or not self.cam_monitor:
+            print("[CENTER PICK] Cannot verify completed move: vision unavailable.")
+            return False
+        attempts = max(1, int(getattr(self.config, "VISUAL_CENTER_PICK_ATTEMPTS", 3)))
+        required = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
+        matching_samples = 0
+        for _ in range(attempts):
+            frame, detections = self.cam_monitor.get_fresh_snapshot()
+            if frame is None:
+                continue
+            source_clear = not self._cell_has_center_detection(detections, source_cell)
+            destination_occupied = self._cell_has_center_detection(detections, destination_cell)
+            if source_clear and destination_occupied:
+                matching_samples += 1
+        verified = matching_samples >= required
+        print(f"[CENTER PICK] Move geometry {source_cell}->{destination_cell}: "
+              f"{matching_samples}/{attempts} matching snapshots.")
+        return verified
+
     def get_visual_pick_targets(self, expected_cells):
         """Lấy snapshot trước khi robot di chuyển và ước lượng điểm gắp thực tế.
         Bọc phòng thủ toàn diện: Mọi ngoại lệ đều tự động fallback về None (tâm ô lý thuyết).
