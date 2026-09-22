@@ -12,7 +12,7 @@ class AIController:
         ai_ctrl = AIController(local_engine, cloud_engine, config)
     """
 
-    def __init__(self, local_engine, cloud_engine, config):
+    def __init__(self, local_engine, cloud_engine, config, policy_engine=None):
         """
         Args:
             local_engine: MoonfishEngine instance (có thể None nếu config là CLOUD)
@@ -22,6 +22,7 @@ class AIController:
         self.local_engine = local_engine
         self.cloud_engine = cloud_engine
         self.config = config
+        self.policy_engine = policy_engine
 
     def pick_move(self, board_snapshot, color="b"):
         """Gọi Moonfish để lấy nước đi tốt nhất.
@@ -36,6 +37,32 @@ class AIController:
             (src, dst) tuple nếu tìm được nước đi
             None nếu thất bại hoặc engine chưa khởi động
         """
+        difficulty = getattr(self.config, "AI_DIFFICULTY", "hard")
+        if difficulty in ("easy", "medium"):
+            if self.policy_engine is not None:
+                try:
+                    return self.policy_engine.pick_best_move(board_snapshot, color)
+                except Exception as e:
+                    print(f"[AI] ⚠️ {difficulty} policy failed: {e}; falling back to Moonfish.")
+            if self.local_engine is not None:
+                try:
+                    return self.local_engine.pick_best_move(
+                        board_snapshot, color, movetime_ms=self.config.MOONFISH_THINK_MS
+                    )
+                except Exception as e:
+                    print(f"[AI] ⚠️ Moonfish fallback failed: {e}")
+
+        # The menu calls this level "MOONFISH", so it must not silently route
+        # to Cloud merely because ENGINE_TYPE happens to be HYBRID.
+        if difficulty == "hard" and self.local_engine is not None:
+            try:
+                return self.local_engine.pick_best_move(
+                    board_snapshot, color, movetime_ms=self.config.MOONFISH_THINK_MS
+                )
+            except Exception as e:
+                print(f"[AI] ⚠️ Moonfish hard-level engine failed: {e}")
+                return None
+
         engine_type = getattr(self.config, "ENGINE_TYPE", "LOCAL")
 
         # THỬ CLOUD ENGINE (Nếu mode là HYBRID hoặc CLOUD)

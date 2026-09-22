@@ -125,6 +125,14 @@ MOONFISH_EXE  = _os.path.join(_MOONFISH_DIR, 'moonfish_ucci.py')
 MOONFISH_NNUE = None  # Moonfish doesn't use NNUE
 MOONFISH_THINK_MS = 1000  # Thời gian suy nghĩ mỗi nước (milliseconds)
 
+# --- PLAYER-SELECTABLE AI DIFFICULTY ---
+# ``easy`` and ``medium`` require their trained policy checkpoints.  If a
+# checkpoint cannot load the controller falls back to the local Moonfish engine
+# instead of ever proposing an unvalidated robot move.
+AI_DIFFICULTY = "hard"  # "easy" | "medium" | "hard"
+EASY_POLICY_MODEL = _os.path.join(_BASE_DIR, "models", "xiangqi_easy_policy.pt")
+MEDIUM_POLICY_MODEL = _os.path.join(_BASE_DIR, "models", "xiangqi_medium_policy.pt")
+
 # Tọa độ về nhà (Home) để né Camera
 # IDLE_X = -72.027
 # IDLE_Y = 200.248

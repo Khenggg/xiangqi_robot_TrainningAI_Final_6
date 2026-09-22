@@ -25,6 +25,11 @@ BTN_COLOR = (200, 50, 50)
 BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT - 60, 120, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(SCREEN_WIDTH / 2 + 30, SCREEN_HEIGHT - 60, 120, 40)
+DIFFICULTY_OPTIONS = (
+    ("easy", "EASY", pygame.Rect(105, 380, 180, 72), (62, 129, 91)),
+    ("medium", "MEDIUM", pygame.Rect(310, 380, 180, 72), (197, 132, 48)),
+    ("hard", "MOONFISH", pygame.Rect(515, 380, 180, 72), (159, 59, 55)),
+)
 
 PIECE_DISPLAY_NAMES = {
     "r_K": "帥", "r_A": "仕", "r_E": "相", "r_R": "俥",
@@ -136,6 +141,36 @@ class BoardRenderer:
             bg_surf.fill((20, 100, 20, 210))
             self.screen.blit(bg_surf, bg_rect.topleft)
             self.screen.blit(think_surf, think_surf.get_rect(center=bg_rect.center))
+
+    def draw_difficulty_menu(self, availability, message=""):
+        """Overlay shown after camera calibration and before a game can begin."""
+        shade = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        shade.fill((25, 20, 16, 218))
+        self.screen.blit(shade, (0, 0))
+        title = self.game_font.render("CHOOSE YOUR OPPONENT", True, (246, 225, 184))
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 208)))
+        subtitle = self.ui_font.render("Select a difficulty to start after board calibration", True, (228, 214, 190))
+        self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 246)))
+        for key, label, rect, color in DIFFICULTY_OPTIONS:
+            enabled = availability.get(key, False)
+            card_color = color if enabled else (78, 72, 65)
+            pygame.draw.rect(self.screen, card_color, rect, border_radius=10)
+            pygame.draw.rect(self.screen, (239, 218, 177) if enabled else (125, 118, 107), rect, 2, border_radius=10)
+            text = self.ui_font.render(label, True, (255, 255, 255) if enabled else (185, 178, 166))
+            self.screen.blit(text, text.get_rect(center=(rect.centerx, rect.centery - 10)))
+            detail = "READY" if enabled else "MODEL NOT READY"
+            detail_surf = self.ui_font.render(detail, True, (246, 227, 193) if enabled else (190, 181, 166))
+            self.screen.blit(detail_surf, detail_surf.get_rect(center=(rect.centerx, rect.centery + 16)))
+        if message:
+            note = self.ui_font.render(message, True, (255, 204, 112))
+            self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 500)))
+
+    @staticmethod
+    def difficulty_from_pixel(px, py):
+        for key, _, rect, _ in DIFFICULTY_OPTIONS:
+            if rect.collidepoint(px, py):
+                return key
+        return None
 
     def draw_pieces(self, board):
         """Vẽ tất cả quân cờ trên bàn."""

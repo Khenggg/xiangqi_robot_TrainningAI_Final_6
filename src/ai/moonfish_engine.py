@@ -121,13 +121,13 @@ class MoonfishEngine:
             
             if line == 'ucciok':
                 self._ready = True
-                print("[MOONFISH] ✅ Engine ready!")
+                print("[MOONFISH] Engine ready!")
                 return
         
         if found_name:
             # Engine responded but didn't send ucciok - might be waiting for more input
             self._ready = True
-            print("[MOONFISH] ✅ Engine ready (name received)!")
+            print("[MOONFISH] Engine ready (name received)!")
             return
             
         raise RuntimeError("[MOONFISH] Engine did not respond with 'ucciok' in time.")
@@ -138,7 +138,7 @@ class MoonfishEngine:
             try:
                 self.process.kill()
                 self.process.wait(timeout=2)
-                print("[MOONFISH] 🛑 atexit: subprocess killed.")
+                print("[MOONFISH] atexit: subprocess killed.")
             except Exception:
                 pass
 
@@ -218,7 +218,7 @@ class MoonfishEngine:
             if best_move_str and best_move_str != '(none)' and best_move_str != 'null':
                 return self._uci_to_move(best_move_str)
 
-            print("[MOONFISH] ⚠️ No valid move returned.")
+            print("[MOONFISH] No valid move returned.")
             return None
 
     # -------------------------------------------------------------------------

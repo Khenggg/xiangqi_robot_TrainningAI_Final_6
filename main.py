@@ -67,6 +67,13 @@ renderer = BoardRenderer(screen)
 hw = HardwareManager(config, _BASE_DIR).initialize_all()
 state = GameState(allow_mouse_move=config.DRY_RUN)
 input_mgr = InputHandler(state, hw)
+difficulty_menu_active = True
+difficulty_menu_message = ""
+
+def _start_selected_game():
+    hw.capture_baseline_if_needed(force_delay=1.0)
+    if not config.DRY_RUN:
+        state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
 
 def _cleanup_all():
     print("\n[CLEANUP] Đang dọn dẹp hệ thống...")
@@ -91,13 +98,7 @@ clock = pygame.time.Clock()
 print(f"\n[GAME] === GAME STARTED ===")
 print(f"[FEN] {state.current_fen}")
 
-hw.capture_baseline_if_needed(force_delay=1.0)
-
-# [API] Bắt đầu khởi tạo trận đấu truyền hình trực tiếp
-if not config.DRY_RUN:
-    state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
-
-# Khởi chạy main loop (Đã bỏ Chọn độ khó)
+# Khởi chạy main loop.  The first game starts only after difficulty selection.
 try:
     while running:
         # 2a. Vẽ khung hình
@@ -106,11 +107,27 @@ try:
         renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
         if state.game_over:
             renderer.draw_game_over(state.winner)
+        if difficulty_menu_active:
+            renderer.draw_difficulty_menu(hw.difficulty_availability(), difficulty_menu_message)
 
         # 2b. Xử lý Input
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif difficulty_menu_active:
+                choice = None
+                if event.type == pygame.KEYDOWN:
+                    choice = {pygame.K_1: "easy", pygame.K_2: "medium", pygame.K_3: "hard"}.get(event.key)
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    choice = renderer.difficulty_from_pixel(event.pos[0], event.pos[1])
+                if choice:
+                    ok, reason = hw.select_difficulty(choice)
+                    if ok:
+                        difficulty_menu_active = False
+                        difficulty_menu_message = ""
+                        _start_selected_game()
+                    else:
+                        difficulty_menu_message = reason
             elif event.type == pygame.KEYDOWN:
                 input_mgr.handle_keyboard(event.key)
             elif event.type == pygame.MOUSEBUTTONDOWN:
@@ -123,7 +140,7 @@ try:
 
         # Only inspect for a move after the hand detector observes a complete
         # hand-in/hand-out interaction. SPACE remains the safe manual fallback.
-        if (state.turn == "r" and not state.game_over
+        if (not difficulty_menu_active and state.turn == "r" and not state.game_over
                 and hw.hand_interaction_finished()):
             input_mgr.try_auto_confirm_move(
                 retries=config.AUTO_MOVE_CONFIRM_RETRIES,
@@ -131,7 +148,8 @@ try:
             )
 
         # 2d. Xử lý AI Turn (Non-blocking)
-        if state.turn == "b" and not state.game_over and not state.physical_sync_fault:
+        if (not difficulty_menu_active and state.turn == "b" and not state.game_over
+                and not state.physical_sync_fault):
             
             # --- Khởi động Thread suy nghĩ ---
             if not state.ai_thinking and state.ai_thread is None:
