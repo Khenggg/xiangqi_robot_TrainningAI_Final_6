@@ -19,6 +19,9 @@ from src.domain.board_pose import (
 from src.domain.board_pose_provider import (
     BoardPoseProvider,
     FixedBoardPoseProvider,
+    PhysicalTeachingPointBoardPoseProvider,
+    BoardCalibrationResult,
+    calibrate_board_from_teaching_points,
 )
 
 __all__ = [
@@ -36,4 +39,7 @@ __all__ = [
     "DEFAULT_BOARD_YAW_DEG",
     "BoardPoseProvider",
     "FixedBoardPoseProvider",
+    "PhysicalTeachingPointBoardPoseProvider",
+    "BoardCalibrationResult",
+    "calibrate_board_from_teaching_points",
 ]
