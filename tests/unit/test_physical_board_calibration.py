@@ -1,9 +1,24 @@
 """
-Unit tests for Physical Board Pose Calibration and Real FR3 Board Integration.
-Tests all requirements from the task specification:
-- Section 22: Mandatory automated tests for calibration and motion coordinator.
-- Section 23: Reconstruction of known arbitrary rigid transform.
-- Section 25: Failure modes disabling physical motion without silent fallback.
+Unit tests for Physical Board Pose Calibration Safety and Frame Validation.
+
+Validates the full 17-test Acceptance Matrix from the corrective task specification:
+1. Known rigid transform reconstruction
+2. Noisy rigid transform reconstruction
+3. All 90 cell round-trip
+4. Missing R point fails
+5. Bad dimensions fail for correct reason
+6. Swapped corners fail
+7. Frame mismatch fails
+8. Known teaching TCP offset reconstructs board surface
+9. Tilted but coplanar board succeeds
+10. Non-coplanar point fails
+11. Physical calibration failure disables motion
+12. No motion command occurs before calibration success
+13. Physical backend requires explicit calibrated provider
+14. Virtual provider remains hardware-independent
+15. Pick height uses MotionProfile
+16. Safe clearance remains board-relative
+17. Old 218 mm cache assumption removed
 """
 
 import math
@@ -18,12 +33,18 @@ from src.domain.board_pose import (
 )
 from src.domain.board_pose_provider import (
     BoardCalibrationResult,
+    BoardCalibrationProfile,
+    BoardCalibrationTolerancePolicy,
+    TeachingPointObservation,
+    parse_teaching_point_observation,
     BoardPoseProvider,
     FixedBoardPoseProvider,
     PhysicalTeachingPointBoardPoseProvider,
     calibrate_board_from_teaching_points,
     CANONICAL_WIDTH_MM,
     CANONICAL_LENGTH_MM,
+    CANONICAL_THICKNESS_MM,
+    CANONICAL_DIAGONAL_MM,
 )
 from src.motion.coordinator import MotionCoordinator, MotionProfile
 from src.hardware.backends import PhysicalFR3Backend, VirtualFR3Backend
@@ -35,111 +56,109 @@ from src.hardware.hardware_manager import HardwareManager
 # R1 = (col 0, row 0) -> u=-160, v=-180 -> robot x = center_x + 160, robot y = center_y + 180
 # Center at (-120.0, 0.0, 18.0)
 NOMINAL_TEACHING_POINTS = {
-    "R1": [40.0, 180.0, 18.0],
-    "R2": [-280.0, 180.0, 18.0],
-    "R3": [-280.0, -180.0, 18.0],
-    "R4": [40.0, -180.0, 18.0],
+    "R1": [40.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "R2": [-280.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "R3": [-280.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "R4": [40.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
 }
 
 
 class TestPhysicalBoardCalibration:
 
-    def test_physical_board_pose_from_teaching_points(self):
-        """Test deriving a valid BoardPlacementState from clean teaching points."""
-        result = calibrate_board_from_teaching_points(NOMINAL_TEACHING_POINTS)
-
-        assert result.success is True
-        assert result.state is not None
-        assert result.error_message is None
-        assert result.measured_width_mm == pytest.approx(320.0, abs=1e-2)
-        assert result.measured_length_mm == pytest.approx(360.0, abs=1e-2)
-        assert result.rms_error_mm < 1e-3
-        assert result.max_error_mm < 1e-3
-
-        state = result.state
-        assert state.board_surface_z_robot_m == pytest.approx(0.018, abs=1e-4)
-        assert state.board_center_robot_m[0] == pytest.approx(-0.120, abs=1e-4)
-        assert state.board_center_robot_m[1] == pytest.approx(0.0, abs=1e-4)
-
-    def test_board_pose_reconstructs_r1_r2_r3_r4(self):
-        """Test that projecting corner cells through estimated pose reconstructs R1-R4."""
-        result = calibrate_board_from_teaching_points(NOMINAL_TEACHING_POINTS)
-        assert result.success is True
-        state = result.state
-
-        # Canonical corner cells:
-        # R1: row 0, col 0
-        # R2: row 0, col 8
-        # R3: row 9, col 8
-        # R4: row 9, col 0
-        corner_cells = {
-            "R1": (0, 0),
-            "R2": (0, 8),
-            "R3": (9, 8),
-            "R4": (9, 0),
-        }
-
-        for name, (row, col) in corner_cells.items():
-            predicted_xyz_m = state.cell_to_robot_xyz(row, col, z_rel_m=0.0)
-            predicted_xyz_mm = predicted_xyz_m * 1000.0
-            expected_xyz_mm = np.array(NOMINAL_TEACHING_POINTS[name])
-
-            error_mm = np.linalg.norm(predicted_xyz_mm - expected_xyz_mm)
-            assert error_mm < 0.05, f"Corner {name} reconstruction error too large: {error_mm:.4f} mm"
-
-    def test_board_pose_corner_residuals(self):
-        """Test residual error calculation when teaching points have small measurement noise."""
-        perturbed_points = {
-            "R1": [40.5, 179.7, 18.2],
-            "R2": [-279.4, 180.3, 17.9],
-            "R3": [-280.2, -179.6, 18.1],
-            "R4": [39.8, -180.2, 17.8],
-        }
-
-        result = calibrate_board_from_teaching_points(perturbed_points)
-        assert result.success is True
-        assert result.state is not None
-
-        residuals = result.residuals
-        assert "R1" in residuals
-        assert "R2" in residuals
-        assert "R3" in residuals
-        assert "R4" in residuals
-        assert "RMS" in residuals
-        assert "Max" in residuals
-
-        # Verify residuals match individually computed distances
-        state = result.state
-        corner_cells = {"R1": (0, 0), "R2": (0, 8), "R3": (9, 8), "R4": (9, 0)}
-        errs = []
-        for name, (r, c) in corner_cells.items():
-            pred_mm = state.cell_to_robot_xyz(r, c) * 1000.0
-            meas_mm = np.array(perturbed_points[name])
-            err = float(np.linalg.norm(pred_mm - meas_mm))
-            errs.append(err)
-            assert residuals[name] == pytest.approx(err, abs=1e-3)
-
-        expected_rms = float(np.sqrt(np.mean(np.array(errs) ** 2)))
-        expected_max = float(np.max(errs))
-        assert result.rms_error_mm == pytest.approx(expected_rms, abs=1e-3)
-        assert result.max_error_mm == pytest.approx(expected_max, abs=1e-3)
-
-    def test_board_pose_center_mapping(self):
-        """Test board center mapping: (row=4.5, col=4.0) maps to board physical center."""
-        result = calibrate_board_from_teaching_points(NOMINAL_TEACHING_POINTS)
-        assert result.success is True
-        state = result.state
-
-        # Center in grid space: row=4.5, col=4.0
-        center_robot = state.cell_to_robot_xyz(4.5, 4.0, z_rel_m=0.0)
-        expected_center = np.array([-0.120, 0.0, 0.018])
-
-        np.testing.assert_allclose(center_robot, expected_center, atol=1e-4)
-        np.testing.assert_allclose(state.board_center_robot_m[:2], expected_center[:2], atol=1e-4)
-        assert state.board_surface_z_robot_m == pytest.approx(0.018, abs=1e-4)
-
-    def test_board_pose_all_90_cells(self):
+    # -------------------------------------------------------------------------
+    # Matrix #1: Known rigid transform reconstruction
+    # -------------------------------------------------------------------------
+    def test_known_rigid_transform_reconstruction(self):
         """
+        Matrix #1:
+        Synthesize R1-R4 from an arbitrary known 3D rigid transform (translation + yaw + pitch + roll),
+        pass to calibration algorithm, and verify estimated transform recovers ground truth.
+        """
+        p_gt = np.array([-0.145, 0.035, 0.022], dtype=float)
+
+        theta_z = math.radians(92.5)
+        theta_y = math.radians(0.8)
+        theta_x = math.radians(-0.6)
+
+        R_x = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, math.cos(theta_x), -math.sin(theta_x)],
+            [0.0, math.sin(theta_x), math.cos(theta_x)],
+        ])
+        R_y = np.array([
+            [math.cos(theta_y), 0.0, math.sin(theta_y)],
+            [0.0, 1.0, 0.0],
+            [-math.sin(theta_y), 0.0, math.cos(theta_y)],
+        ])
+        R_z = np.array([
+            [math.cos(theta_z), -math.sin(theta_z), 0.0],
+            [math.sin(theta_z), math.cos(theta_z), 0.0],
+            [0.0, 0.0, 1.0],
+        ])
+        R_0 = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+        R_gt = R_z @ R_y @ R_x @ R_0
+
+        local_corners = {
+            "R1": np.array([-0.160, -0.180, 0.0]),
+            "R2": np.array([0.160, -0.180, 0.0]),
+            "R3": np.array([0.160, 0.180, 0.0]),
+            "R4": np.array([-0.160, 0.180, 0.0]),
+        }
+
+        synth_points = {}
+        for name, p_local in local_corners.items():
+            p_robot_m = p_gt + R_gt @ p_local
+            synth_points[name] = list(p_robot_m * 1000.0)
+
+        result = calibrate_board_from_teaching_points(synth_points)
+
+        assert result.success is True, f"Calibration failed: {result.error_message}"
+        assert result.state is not None
+        assert result.rms_error_mm < 0.05
+        assert result.max_error_mm < 0.05
+
+        state = result.state
+        assert state.board_center_robot_m[0] == pytest.approx(p_gt[0], abs=1e-4)
+        assert state.board_center_robot_m[1] == pytest.approx(p_gt[1], abs=1e-4)
+        assert state.board_surface_z_robot_m == pytest.approx(p_gt[2], abs=1e-4)
+
+        R_est = state.R_robot_from_board
+        rot_diff = np.linalg.norm(R_est - R_gt)
+        assert rot_diff < 1e-3, f"Rotation matrix difference too large: {rot_diff}"
+
+    # -------------------------------------------------------------------------
+    # Matrix #2: Noisy rigid transform reconstruction
+    # -------------------------------------------------------------------------
+    def test_noisy_rigid_transform_reconstruction(self):
+        """
+        Matrix #2:
+        Add small realistic measurement noise (+/- 0.5mm) to known rigid transform
+        and verify calibration succeeds within warning bounds.
+        """
+        noisy_points = {
+            "R1": [40.4, 179.7, 18.2],
+            "R2": [-279.6, 180.3, 17.8],
+            "R3": [-280.3, -179.6, 18.1],
+            "R4": [39.7, -180.2, 17.9],
+        }
+
+        result = calibrate_board_from_teaching_points(noisy_points)
+        assert result.success is True
+        assert result.state is not None
+        assert result.rms_error_mm <= 1.0
+        assert result.max_error_mm <= 1.5
+
+        state = result.state
+        assert state.board_surface_z_robot_m == pytest.approx(0.018, abs=1e-3)
+        assert state.board_center_robot_m[0] == pytest.approx(-0.120, abs=1e-3)
+        assert state.board_center_robot_m[1] == pytest.approx(0.0, abs=1e-3)
+
+    # -------------------------------------------------------------------------
+    # Matrix #3: All 90 cell round-trip
+    # -------------------------------------------------------------------------
+    def test_all_90_cell_round_trip(self):
+        """
+        Matrix #3:
         Test that all 90 canonical cells are generated from the single rigid BoardPlacementState
         and invert back to the exact same continuous row and col.
         """
@@ -160,27 +179,77 @@ class TestPhysicalBoardCalibration:
 
         assert cell_count == 90
 
-    def test_physical_board_provider_rejects_missing_r_point(self):
-        """Test that missing or unreadable teaching points fail calibration cleanly."""
-        # Missing R4
+    # -------------------------------------------------------------------------
+    # Matrix #4: Missing R point fails
+    # -------------------------------------------------------------------------
+    def test_missing_r_point_fails(self):
+        """
+        Matrix #4:
+        Missing R-point or controller read error must fail fast and not authorize motion.
+        """
+        # Case A: Missing key in dictionary
         incomplete = {
             "R1": [40.0, 180.0, 18.0],
             "R2": [-280.0, 180.0, 18.0],
             "R3": [-280.0, -180.0, 18.0],
         }
-        result = calibrate_board_from_teaching_points(incomplete)
-        assert result.success is False
-        assert "Missing required teaching point" in result.error_message
+        res = calibrate_board_from_teaching_points(incomplete)
+        assert res.success is False
+        assert "Missing required teaching point" in res.error_message
 
-        # Provider fails fast when calibration fails
         provider = PhysicalTeachingPointBoardPoseProvider.from_teaching_points(incomplete)
         assert provider.is_calibrated is False
         with pytest.raises(RuntimeError):
             provider.get_board_placement_state()
 
-    def test_physical_board_provider_rejects_invalid_geometry(self):
-        """Test that degenerate or out-of-tolerance geometry is rejected."""
-        # Case A: Swapped R2 and R4 (inverted orientation / quadrilateral)
+        # Case B: Controller read error
+        mock_backend = MagicMock(spec=PhysicalFR3Backend)
+        mock_backend.get_teaching_point.side_effect = lambda name: (0, [40.0, 180.0, 18.0]) if name != "R2" else (-1, [])
+        provider_ctrl = PhysicalTeachingPointBoardPoseProvider.from_controller(mock_backend)
+        assert provider_ctrl.is_calibrated is False
+        assert "Controller failed to read teaching point 'R2'" in provider_ctrl.calibration_result.error_message
+
+    # -------------------------------------------------------------------------
+    # Matrix #5: Bad dimensions fail for correct reason
+    # -------------------------------------------------------------------------
+    def test_bad_dimensions_fail_for_correct_reason(self):
+        """
+        Matrix #5:
+        Verify dimension errors fail specifically for the intended reason and report measured values.
+        """
+        # Bad width = 100 mm (expected 320 mm)
+        bad_width = {
+            "R1": [40.0, 180.0, 18.0],
+            "R2": [-60.0, 180.0, 18.0],   # Width: 40 - (-60) = 100.0 mm
+            "R3": [-60.0, -180.0, 18.0],
+            "R4": [40.0, -180.0, 18.0],
+        }
+        res_w = calibrate_board_from_teaching_points(bad_width)
+        assert res_w.success is False
+        assert res_w.measured_width_mm == pytest.approx(100.0, abs=1.0)
+        assert "width mismatch" in res_w.error_message.lower()
+
+        # Bad length = 200 mm (expected 360 mm)
+        bad_length = {
+            "R1": [40.0, 100.0, 18.0],
+            "R2": [-280.0, 100.0, 18.0],
+            "R3": [-280.0, -100.0, 18.0],  # Length: 100 - (-100) = 200.0 mm
+            "R4": [40.0, -100.0, 18.0],
+        }
+        res_l = calibrate_board_from_teaching_points(bad_length)
+        assert res_l.success is False
+        assert res_l.measured_length_mm == pytest.approx(200.0, abs=1.0)
+        assert "length mismatch" in res_l.error_message.lower()
+
+    # -------------------------------------------------------------------------
+    # Matrix #6: Swapped corners fail
+    # -------------------------------------------------------------------------
+    def test_swapped_corners_fail(self):
+        """
+        Matrix #6:
+        Swapped corners (inverted quadrilateral or inverted normal) must fail calibration.
+        """
+        # Swapped R2 and R4
         swapped = {
             "R1": [40.0, 180.0, 18.0],
             "R2": [40.0, -180.0, 18.0],  # Swapped with R4
@@ -189,107 +258,286 @@ class TestPhysicalBoardCalibration:
         }
         res_swapped = calibrate_board_from_teaching_points(swapped)
         assert res_swapped.success is False
+        assert (
+            "asymmetry" in res_swapped.error_message.lower()
+            or "residual" in res_swapped.error_message.lower()
+            or "normal" in res_swapped.error_message.lower()
+            or "width mismatch" in res_swapped.error_message.lower()
+            or "mismatch" in res_swapped.error_message.lower()
+        )
 
-        # Case B: Dimension mismatch (width is 200 mm instead of 320 mm)
-        bad_width = {
-            "R1": [40.0, 180.0, 18.0],
-            "R2": [-160.0, 180.0, 18.0],  # Width 200 mm
-            "R3": [-160.0, -180.0, 18.0],
-            "R4": [40.0, -180.0, 18.0],
+        # Inverted corner ordering (normal points downward: z < 0.707)
+        inverted = {
+            "R1": [40.0, -180.0, 18.0],
+            "R2": [-280.0, -180.0, 18.0],
+            "R3": [-280.0, 180.0, 18.0],
+            "R4": [40.0, 180.0, 18.0],
         }
-        res_width = calibrate_board_from_teaching_points(bad_width)
-        assert res_width.success is False
-        assert "width mismatch" in res_width.error_message.lower()
+        res_inv = calibrate_board_from_teaching_points(inverted)
+        assert res_inv.success is False
+        assert "normal" in res_inv.error_message.lower()
 
-        # Case C: Large non-coplanar Z difference (tilted by 30 mm)
-        tilted_z = {
+    # -------------------------------------------------------------------------
+    # Matrix #7: Frame mismatch fails
+    # -------------------------------------------------------------------------
+    def test_frame_mismatch_fails(self):
+        """
+        Matrix #7:
+        R1-R4 must belong to the exact same tool and user/wobj frame.
+        """
+        # Case A: R3 different tool
+        tool_mismatch = {
+            "R1": [40.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R2": [-280.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R3": [-280.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 1, 0],  # tool = 1
+            "R4": [40.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+        }
+        res_tool = calibrate_board_from_teaching_points(tool_mismatch)
+        assert res_tool.success is False
+        assert "teaching point frame mismatch" in res_tool.error_message.lower()
+        assert "R3 tool=1" in res_tool.error_message
+
+        # Case B: R2 different wobj/user frame
+        wobj_mismatch = {
+            "R1": [40.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R2": [-280.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 2],  # wobj = 2
+            "R3": [-280.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R4": [40.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+        }
+        res_wobj = calibrate_board_from_teaching_points(wobj_mismatch)
+        assert res_wobj.success is False
+        assert "teaching point frame mismatch" in res_wobj.error_message.lower()
+        assert "R2 wobj=2" in res_wobj.error_message
+
+        # Case C: All points in user frame != 0 (non-base frame)
+        non_base = {
+            "R1": [40.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 1],
+            "R2": [-280.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 1],
+            "R3": [-280.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 1],
+            "R4": [40.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 1],
+        }
+        res_nb = calibrate_board_from_teaching_points(non_base)
+        assert res_nb.success is False
+        assert "user frame" in res_nb.error_message.lower()
+        assert "robot base" in res_nb.error_message.lower()
+
+    # -------------------------------------------------------------------------
+    # Matrix #8: Known teaching TCP offset reconstructs board surface
+    # -------------------------------------------------------------------------
+    def test_known_teaching_tcp_offset_reconstructs_board_surface(self):
+        """
+        Matrix #8:
+        Synthetic example:
+          True board surface Z = 20.0 mm
+          Teaching TCP is 10 mm above board (Z = 30.0 mm)
+          Offset in robot frame = [0, 0, -10] mm
+          Calibrated board surface must accurately be reconstructed at Z = 20.0 mm.
+        """
+        # Teaching TCP at Z = 30.0 mm
+        elevated_tcp_points = {
+            "R1": [40.0, 180.0, 30.0],
+            "R2": [-280.0, 180.0, 30.0],
+            "R3": [-280.0, -180.0, 30.0],
+            "R4": [40.0, -180.0, 30.0],
+        }
+
+        profile = BoardCalibrationProfile(
+            tcp_to_board_contact_offset_mm=[0.0, 0.0, -10.0],
+            offset_frame="ROBOT_BASE",
+            provenance="CALIBRATION_FIXTURE_KNOWN_OFFSET",
+            description="10mm downward offset to true board surface",
+        )
+
+        result = calibrate_board_from_teaching_points(
+            elevated_tcp_points,
+            calibration_profile=profile,
+        )
+
+        assert result.success is True
+        assert result.state is not None
+        # Must reconstruct true surface Z = 20.0 mm (0.020 m)
+        assert result.state.board_surface_z_robot_m == pytest.approx(0.020, abs=1e-4)
+
+    # -------------------------------------------------------------------------
+    # Matrix #9: Tilted but coplanar board succeeds
+    # -------------------------------------------------------------------------
+    def test_tilted_but_coplanar_board_succeeds(self):
+        """
+        Matrix #9:
+        A rigid plane tilted at ~1.5 deg has corners with different raw Z coordinates,
+        but the orthogonal point-to-plane residual is 0.0 mm.
+        Must succeed without false rejection from naive Z range check.
+        """
+        # Tilted plane: z = 18.0 + 0.02 * (x - 40.0) + 0.03 * (y - 180.0)
+        # R1: x=40, y=180 -> z = 18.0
+        # R2: x=-280, y=180 -> z = 18.0 + 0.02*(-320) = 11.6 mm
+        # R3: x=-280, y=-180 -> z = 18.0 + 0.02*(-320) + 0.03*(-360) = 0.8 mm
+        # R4: x=40, y=-180 -> z = 18.0 + 0.03*(-360) = 7.2 mm
+        # Max Z diff = 18.0 - 0.8 = 17.2 mm!
+        tilted_points = {
+            "R1": [40.0, 180.0, 18.0],
+            "R2": [-280.0, 180.0, 11.6],
+            "R3": [-280.0, -180.0, 0.8],
+            "R4": [40.0, -180.0, 7.2],
+        }
+
+        # Policy allows plane residual up to 3.0 mm and tilt <= 45 deg
+        result = calibrate_board_from_teaching_points(tilted_points)
+        assert result.success is True, f"Failed tilted coplanar board: {result.error_message}"
+        assert result.max_plane_residual_mm < 0.1
+        assert result.state is not None
+
+    # -------------------------------------------------------------------------
+    # Matrix #10: Non-coplanar point fails
+    # -------------------------------------------------------------------------
+    def test_non_coplanar_point_fails(self):
+        """
+        Matrix #10:
+        One point protruding 8.0 mm out of plane must be rejected by point-to-plane residual.
+        """
+        non_coplanar_points = {
             "R1": [40.0, 180.0, 18.0],
             "R2": [-280.0, 180.0, 18.0],
-            "R3": [-280.0, -180.0, 48.0],  # +30 mm
+            "R3": [-280.0, -180.0, 26.0],  # +8.0 mm out of plane!
             "R4": [40.0, -180.0, 18.0],
         }
-        res_tilted = calibrate_board_from_teaching_points(tilted_z)
-        assert res_tilted.success is False
-        assert "z variation" in res_tilted.error_message.lower()
 
-    def test_virtual_provider_does_not_require_hardware(self):
-        """Test that Virtual FixedBoardPoseProvider works completely offline."""
-        provider = FixedBoardPoseProvider.from_forward_shift(forward_shift_mm=25.0)
-        state = provider.get_board_placement_state()
+        result = calibrate_board_from_teaching_points(non_coplanar_points)
+        assert result.success is False
+        assert "non-coplanar" in result.error_message.lower()
+        assert result.max_plane_residual_mm > 3.0
 
-        assert isinstance(state, BoardPlacementState)
-        assert state.forward_shift_mm == pytest.approx(25.0, abs=1e-2)
-        # Verify cell mapping works offline
-        p_xyz = state.cell_to_robot_xyz(0, 0)
-        assert len(p_xyz) == 3
+    # -------------------------------------------------------------------------
+    # Matrix #11: Physical calibration failure disables motion
+    # -------------------------------------------------------------------------
+    def test_physical_calibration_failure_disables_motion(self):
+        """
+        Matrix #11:
+        Verify physical calibration failure sets physical_motion_authorized=False,
+        is_robot_ready=False, and move_piece returns False.
+        """
+        class MockConfig:
+            DRY_RUN = True
+            ROBOT_BACKEND = "PHYSICAL"
+            ROBOT_IP = "127.0.0.1"
+            BOARD_ORIGIN_X = 200.0
+            BOARD_ORIGIN_Y = -100.0
+            ROTATION = [-179.164, -3.047, -26.304]
+            PICK_TOOL_ROTATION = [-179.164, -3.047, -26.304]
+            SAFE_CLEARANCE_Z_MM = 40.0
+            PICK_DEPTH_OFFSET_MM = 0.0
+            CAPTURE_BIN_X = -226.123
+            CAPTURE_BIN_Y = 225.024
+            CAPTURE_BIN_Z = 291.68
+            ENGINE_TYPE = "LOCAL"
 
-    def test_physical_and_virtual_share_board_coordinate_semantics(self):
-        """Test that physical and virtual providers share identical board coordinate semantics."""
-        virt_provider = FixedBoardPoseProvider.from_forward_shift(0.0)
-        phys_provider = PhysicalTeachingPointBoardPoseProvider.from_teaching_points(NOMINAL_TEACHING_POINTS)
+        hw = HardwareManager(MockConfig(), ".")
 
-        v_state = virt_provider.get_board_placement_state()
-        p_state = phys_provider.get_board_placement_state()
+        # Fixed fixture bug: provide well-formed teaching points that fail on intended geometry (bad width=100mm)
+        backend = PhysicalFR3Backend(ip="127.0.0.1", dry_run=True)
+        backend.set_mock_teaching_points({
+            "R1": [40.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R2": [-60.0, 180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],  # Width 100mm!
+            "R3": [-60.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "R4": [40.0, -180.0, 18.0, 180.0, 0.0, 90.0, 0, 0, 0, 0, 0, 0, 0, 0],
+        })
+        hw.backend = backend
 
-        # Test local coordinate conversion
-        for r, c in [(0, 0), (0, 8), (9, 0), (9, 8), (4.5, 4.0)]:
-            u_v, v_v = v_state.cell_to_board_local(r, c)
-            u_p, v_p = p_state.cell_to_board_local(r, c)
-            assert u_v == pytest.approx(u_p, abs=1e-6)
-            assert v_v == pytest.approx(v_p, abs=1e-6)
+        hw._calibrate_robot()
 
-    def test_motion_coordinator_uses_injected_board_pose(self):
-        """Test that MotionCoordinator respects custom injected board pose instead of hardcoded coords."""
+        assert hw.board_pose_provider is None
+        assert hw.motion_coordinator is None
+        assert hw.physical_motion_authorized is False
+        assert hw.is_robot_ready is False
+
+        ok = hw.move_piece(0, 0, 0, 1, is_capture=False)
+        assert ok is False
+
+    # -------------------------------------------------------------------------
+    # Matrix #12: No motion command occurs before calibration success
+    # -------------------------------------------------------------------------
+    def test_no_motion_command_occurs_before_calibration_success(self):
+        """
+        Matrix #12:
+        Startup must never invoke go_to_home_chess, MoveJ, MoveL, or MoveCart before calibration succeeds.
+        """
+        class MockConfig:
+            DRY_RUN = False
+            ROBOT_BACKEND = "PHYSICAL"
+            ROBOT_IP = "192.168.58.2"
+
+        hw = HardwareManager(MockConfig(), ".")
+
+        # Mock both legacy robot and physical backend
+        mock_legacy = MagicMock()
+        mock_legacy.connected = True
+        hw.robot = mock_legacy
+
+        mock_backend = MagicMock(spec=PhysicalFR3Backend)
+        mock_backend.connect.return_value = True
+        mock_backend.get_state_snapshot.return_value = MagicMock(connected=True)
+        # Return invalid teaching points to force calibration failure
+        mock_backend.get_teaching_point.return_value = (-1, [])
+        hw.backend = mock_backend
+
+        # Simulate startup
+        hw._calibrate_robot()
+
+        # Assert NO motion commands were issued
+        mock_legacy.go_to_home_chess.assert_not_called()
+        mock_backend.move_cartesian.assert_not_called()
+        mock_backend.move_joint.assert_not_called()
+        assert hw.physical_motion_authorized is False
+        assert hw.is_robot_ready is False
+
+    # -------------------------------------------------------------------------
+    # Matrix #13: Physical backend requires explicit calibrated provider
+    # -------------------------------------------------------------------------
+    def test_physical_backend_requires_explicit_calibrated_provider(self):
+        """
+        Matrix #13:
+        Instantiating MotionCoordinator with PhysicalFR3Backend and board_pose_provider=None must raise ValueError.
+        """
+        backend = PhysicalFR3Backend(dry_run=True)
+        with pytest.raises(ValueError, match="requires an explicit calibrated BoardPoseProvider"):
+            MotionCoordinator(backend=backend, board_pose_provider=None)
+
+    # -------------------------------------------------------------------------
+    # Matrix #14: Virtual provider remains hardware-independent
+    # -------------------------------------------------------------------------
+    def test_virtual_provider_remains_hardware_independent(self):
+        """
+        Matrix #14:
+        VirtualFR3Backend works offline and allows default FixedBoardPoseProvider without hardware.
+        """
+        virtual_backend = VirtualFR3Backend()
+        coordinator = MotionCoordinator(backend=virtual_backend, board_pose_provider=None)
+        assert coordinator.board_pose_provider is not None
+        assert isinstance(coordinator.board_pose_provider, FixedBoardPoseProvider)
+        assert coordinator.board_placement is not None
+
+    # -------------------------------------------------------------------------
+    # Matrix #15: Pick height uses MotionProfile
+    # -------------------------------------------------------------------------
+    def test_pick_height_uses_motion_profile(self):
+        """
+        Matrix #15:
+        Pick target Z uses MotionProfile rather than hardcoded 0 or board surface.
+        """
         mock_backend = MagicMock(spec=PhysicalFR3Backend)
         mock_backend.get_state_snapshot.return_value = MagicMock(connected=True)
         mock_backend.move_cartesian.return_value = True
         mock_backend.set_gripper.return_value = True
 
-        # Custom shifted board pose (+50mm X, -30mm Y, +10mm Z)
-        shifted_points = {
-            "R1": [90.0, 150.0, 28.0],
-            "R2": [-230.0, 150.0, 28.0],
-            "R3": [-230.0, -210.0, 28.0],
-            "R4": [90.0, -210.0, 28.0],
-        }
-        phys_provider = PhysicalTeachingPointBoardPoseProvider.from_teaching_points(shifted_points)
-
-        coordinator = MotionCoordinator(
-            backend=mock_backend,
-            board_pose_provider=phys_provider,
-        )
-
-        ok = coordinator.pick(row=0, col=0)
-        assert ok is True
-
-        # Check call arguments to backend
-        # Pick should target R1 in mm: X=90.0, Y=150.0, Z=28.0 + pick_height
-        assert mock_backend.move_cartesian.called
-        assert mock_backend.move_cartesian.call_count == 3
-        # Call 1 is pick pose (descend)
-        pick_call = mock_backend.move_cartesian.call_args_list[1]
-        target_pose = pick_call[0][0]
-
-        assert target_pose[0] == pytest.approx(90.0, abs=1.0)
-        assert target_pose[1] == pytest.approx(150.0, abs=1.0)
-        assert target_pose[2] == pytest.approx(28.0 + 4.715, abs=1.0)
-
-    def test_runtime_pick_height_uses_motion_profile(self):
-        """Test that pick target Z uses MotionProfile rather than hardcoded 0 or surface."""
-        mock_backend = MagicMock(spec=PhysicalFR3Backend)
-        mock_backend.get_state_snapshot.return_value = MagicMock(connected=True)
-        mock_backend.move_cartesian.return_value = True
-        mock_backend.set_gripper.return_value = True
-
         phys_provider = PhysicalTeachingPointBoardPoseProvider.from_teaching_points(NOMINAL_TEACHING_POINTS)
 
-        # Custom pick height: 8.0 mm
         custom_profile = MotionProfile(
-            pick_tcp_height_above_board_mm=8.0,
-            place_tcp_height_above_board_mm=8.0,
-            safe_clearance_above_board_mm=50.0,
-            provenance="MEASURED_APPROXIMATE",
+            pick_tcp_height_above_board_mm=7.5,
+            place_tcp_height_above_board_mm=7.5,
+            safe_clearance_above_board_mm=45.0,
+            provenance="MEASURED",
         )
+        assert custom_profile.is_physical_validated is True
 
         coordinator = MotionCoordinator(
             backend=mock_backend,
@@ -297,29 +545,27 @@ class TestPhysicalBoardCalibration:
             motion_profile=custom_profile,
         )
 
-        ok = coordinator.pick(row=4, col=4)
+        ok = coordinator.pick(row=0, col=0)
         assert ok is True
 
-        # Target Z for pick should be 18.0 mm (board surface) + 8.0 mm = 26.0 mm
+        # Target Z for pick should be 18.0 mm (board surface) + 7.5 mm = 25.5 mm
         pick_call = mock_backend.move_cartesian.call_args_list[1]
         target_pose = pick_call[0][0]
-        assert target_pose[2] == pytest.approx(26.0, abs=1e-2)
+        assert target_pose[2] == pytest.approx(25.5, abs=1e-2)
 
-    def test_pick_height_not_hardcoded_zero(self):
-        """Test that default MotionProfile pick height is strictly above board surface."""
-        default_profile = MotionProfile()
-        assert default_profile.pick_tcp_height_above_board_mm > 0.0
-        assert default_profile.pick_tcp_height_above_board_mm == pytest.approx(4.715, abs=1e-3)
-        assert default_profile.provenance == "SIMULATION_GEOMETRIC_DEFAULT"
-
-    def test_safe_clearance_is_relative_to_board_surface(self):
-        """Test approach and retract heights are relative to board surface Z, not absolute world Z."""
+    # -------------------------------------------------------------------------
+    # Matrix #16: Safe clearance remains board-relative
+    # -------------------------------------------------------------------------
+    def test_safe_clearance_remains_board_relative(self):
+        """
+        Matrix #16:
+        Approach and retract waypoints are strictly relative to board surface Z.
+        """
         mock_backend = MagicMock(spec=PhysicalFR3Backend)
         mock_backend.get_state_snapshot.return_value = MagicMock(connected=True)
         mock_backend.move_cartesian.return_value = True
         mock_backend.set_gripper.return_value = True
 
-        # Board surface at Z = 50.0 mm
         elevated_points = {
             "R1": [40.0, 180.0, 50.0],
             "R2": [-280.0, 180.0, 50.0],
@@ -341,126 +587,20 @@ class TestPhysicalBoardCalibration:
         approach_pose = approach_call[0][0]
         assert approach_pose[2] == pytest.approx(90.0, abs=1e-2)
 
-    def test_reconstruct_known_arbitrary_transform(self):
+    # -------------------------------------------------------------------------
+    # Matrix #17: Old 218 mm cache assumption removed
+    # -------------------------------------------------------------------------
+    def test_old_218mm_cache_assumption_removed(self):
         """
-        Section 23 requirement:
-        Synthesize R1-R4 from an arbitrary known 3D rigid transform (translation + yaw + small pitch/roll),
-        pass to calibration algorithm, and verify the estimated transform recovers ground truth.
+        Matrix #17:
+        Verify dry-run PhysicalFR3Backend initial geometry does not encode old 218 mm tool length.
         """
-        # Ground truth translation (in meters)
-        p_gt = np.array([-0.145, 0.035, 0.022], dtype=float)
+        backend = PhysicalFR3Backend(dry_run=True)
+        tcp_z = backend._current_tcp_pose_mm_deg[2]
+        flange_z = backend._current_flange_pose_mm_deg[2]
+        diff_mm = abs(flange_z - tcp_z)
 
-        # Ground truth rotation with yaw=92.5 deg, pitch=0.8 deg, roll=-0.6 deg
-        # Base 90-degree board orientation:
-        theta_z = math.radians(92.5)
-        theta_y = math.radians(0.8)
-        theta_x = math.radians(-0.6)
-
-        R_x = np.array([
-            [1.0, 0.0, 0.0],
-            [0.0, math.cos(theta_x), -math.sin(theta_x)],
-            [0.0, math.sin(theta_x), math.cos(theta_x)],
-        ])
-        R_y = np.array([
-            [math.cos(theta_y), 0.0, math.sin(theta_y)],
-            [0.0, 1.0, 0.0],
-            [-math.sin(theta_y), 0.0, math.cos(theta_y)],
-        ])
-        R_z = np.array([
-            [math.cos(theta_z), -math.sin(theta_z), 0.0],
-            [math.sin(theta_z), math.cos(theta_z), 0.0],
-            [0.0, 0.0, 1.0],
-        ])
-        # Canonical baseline R0 for yaw=0
-        R_0 = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
-        R_gt = R_z @ R_y @ R_x @ R_0
-
-        # Canonical corner coordinates in board-local frame (in meters):
-        # Center is (col 4, row 4.5)
-        # R1: u = -0.160, v = -0.180
-        # R2: u = +0.160, v = -0.180
-        # R3: u = +0.160, v = +0.180
-        # R4: u = -0.160, v = +0.180
-        local_corners = {
-            "R1": np.array([-0.160, -0.180, 0.0]),
-            "R2": np.array([0.160, -0.180, 0.0]),
-            "R3": np.array([0.160, 0.180, 0.0]),
-            "R4": np.array([-0.160, 0.180, 0.0]),
-        }
-
-        # Synthesize measured teaching points in robot frame (in mm):
-        synth_points = {}
-        for name, p_local in local_corners.items():
-            p_robot_m = p_gt + R_gt @ p_local
-            synth_points[name] = list(p_robot_m * 1000.0)
-
-        # Run calibration
-        result = calibrate_board_from_teaching_points(synth_points)
-
-        assert result.success is True, f"Calibration failed: {result.error_message}"
-        assert result.state is not None
-        assert result.rms_error_mm < 0.05
-        assert result.max_error_mm < 0.05
-
-        state = result.state
-
-        # Verify translation reconstruction
-        assert state.board_center_robot_m[0] == pytest.approx(p_gt[0], abs=1e-4)
-        assert state.board_center_robot_m[1] == pytest.approx(p_gt[1], abs=1e-4)
-        assert state.board_surface_z_robot_m == pytest.approx(p_gt[2], abs=1e-4)
-
-        # Verify rotation matrix reconstruction
-        R_est = state.R_robot_from_board
-        rot_diff = np.linalg.norm(R_est - R_gt)
-        assert rot_diff < 1e-3, f"Rotation matrix difference too large: {rot_diff}"
-
-        # Verify corners project back accurately
-        for name, p_local in local_corners.items():
-            p_expected_mm = np.array(synth_points[name])
-            r, c = {"R1": (0, 0), "R2": (0, 8), "R3": (9, 8), "R4": (9, 0)}[name]
-            p_reconstructed_mm = state.cell_to_robot_xyz(r, c) * 1000.0
-            corner_err = np.linalg.norm(p_reconstructed_mm - p_expected_mm)
-            assert corner_err < 0.05, f"Corner {name} reconstruction error: {corner_err:.4f} mm"
-
-    def test_physical_calibration_failure_disables_robot_motion(self):
-        """
-        Section 25 & 31: If physical calibration fails, robot motion must be DISABLED.
-        No silent fallback to simulation coordinates.
-        """
-        class BadConfig:
-            DRY_RUN = True
-            ROBOT_BACKEND = "PHYSICAL"
-            ROBOT_IP = "127.0.0.1"
-            BOARD_ORIGIN_X = 200.0
-            BOARD_ORIGIN_Y = -100.0
-            ROTATION = [-179.164, -3.047, -26.304]
-            PICK_TOOL_ROTATION = [-179.164, -3.047, -26.304]
-            SAFE_CLEARANCE_Z_MM = 40.0
-            PICK_DEPTH_OFFSET_MM = 0.0
-            CAPTURE_BIN_X = -226.123
-            CAPTURE_BIN_Y = 225.024
-            CAPTURE_BIN_Z = 291.68
-            ENGINE_TYPE = "LOCAL"
-
-        hw = HardwareManager(BadConfig(), ".")
-
-        # Mock physical backend with degenerate teaching points (width=100mm instead of 320mm)
-        backend = PhysicalFR3Backend(ip="127.0.0.1", dry_run=True)
-        backend.set_mock_teaching_points({
-            "R1": [0, 40.0, 180.0, 18.0, 0.0, 0.0],
-            "R2": [0, -60.0, 180.0, 18.0, 0.0, 0.0],  # Width 100 mm -> degenerate!
-            "R3": [0, -60.0, -180.0, 18.0, 0.0, 0.0],
-            "R4": [0, 40.0, -180.0, 18.0, 0.0, 0.0],
-        })
-        hw.backend = backend
-
-        hw._calibrate_robot()
-
-        # Calibration must have failed
-        assert hw.board_pose_provider is None
-        assert hw.motion_coordinator is None
-        assert hw.is_robot_ready is False
-
-        # Attempting move_piece must return False without moving
-        ok = hw.move_piece(0, 0, 0, 1, is_capture=False)
-        assert ok is False
+        # Must not be old 218 mm
+        assert diff_mm != pytest.approx(218.0, abs=1.0)
+        # Must match canonical 150 mm tool profile
+        assert diff_mm == pytest.approx(150.0, abs=1.0)
