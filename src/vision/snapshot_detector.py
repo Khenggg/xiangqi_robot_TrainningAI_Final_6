@@ -175,6 +175,98 @@ class SnapshotDetector:
         """Kiểm tra đã có T1 baseline chưa."""
         return self._baseline_occ is not None
 
+    def has_new_human_move(self, detections, board, frame=None, cchess_result=None):
+        """Return whether the current image shows a red piece changed from T1.
+
+        This is the *necessary* gate for confirming a human turn.  It does not
+        judge Xiangqi legality and deliberately remains separate from
+        :meth:`detect_move`, which is the sufficient legality gate.
+        """
+        if cchess_result and cchess_result.get("success"):
+            rec_board = cchess_result.get("board")
+            if rec_board and len(rec_board) == self.num_rows:
+                valid_shape = True
+                for r in range(self.num_rows):
+                    if len(rec_board[r]) != self.num_cols:
+                        valid_shape = False
+                        break
+                    for c in range(self.num_cols):
+                        # A red piece that no longer matches its T1 square is
+                        # evidence that the player has made a new physical move.
+                        if board[r][c].startswith("r") and rec_board[r][c] != board[r][c]:
+                            return True
+                if valid_shape:
+                    return False
+
+        if self._baseline_occ is None:
+            return False
+
+        current_occ = self._build_occupancy(detections)
+        red_sources_changed = []
+        changed_cells = set()
+        for r in range(self.num_rows):
+            for c in range(self.num_cols):
+                if self._baseline_occ[r][c] != current_occ[r][c]:
+                    changed_cells.add((c, r))
+                # Occupancy-only YOLO cannot identify the red piece at T2.
+                # It therefore needs both a departed red source and a separate
+                # changed destination/capture square.  A single missed YOLO
+                # detection at an unchanged source must not count as a move.
+                if (board[r][c].startswith("r")
+                        and self._baseline_occ[r][c]
+                        and not current_occ[r][c]):
+                    red_sources_changed.append((c, r))
+        if any(any(cell != src for cell in changed_cells)
+               for src in red_sources_changed):
+            return True
+
+        # A capture can keep occupancy unchanged at its destination because a
+        # red piece replaces a black one.  Confirm that special case from the
+        # actual image before declaring an invalid move; do not trust a lone
+        # source dropout as evidence.
+        stable_black_squares = [
+            (c, r)
+            for r in range(self.num_rows)
+            for c in range(self.num_cols)
+            if (board[r][c].startswith("b")
+                    and self._baseline_occ[r][c]
+                    and current_occ[r][c])
+        ]
+        return bool(red_sources_changed and self._has_capture_visual_change(
+            stable_black_squares, frame
+        ))
+
+    def _has_capture_visual_change(self, candidates, frame, min_mean_difference=8.0):
+        """Return True when a stable-occupancy black square changed visually."""
+        if self._baseline_frame is None or frame is None or not candidates:
+            return False
+        if not os.path.exists(self.perspective_path):
+            return False
+        try:
+            inv_M = np.linalg.inv(np.load(self.perspective_path))
+        except Exception:
+            return False
+
+        for col, row in candidates:
+            box = self._get_pixel_box_from_grid(col, row, inv_M, frame.shape)
+            if box is None:
+                continue
+            x1, y1, x2, y2 = box
+            previous = self._baseline_frame[y1:y2, x1:x2]
+            current = frame[y1:y2, x1:x2]
+            if previous.size == 0 or current.size == 0:
+                continue
+            try:
+                difference = cv2.absdiff(
+                    cv2.cvtColor(previous, cv2.COLOR_BGR2GRAY),
+                    cv2.cvtColor(current, cv2.COLOR_BGR2GRAY),
+                )
+                if float(np.mean(difference)) >= float(min_mean_difference):
+                    return True
+            except cv2.error:
+                continue
+        return False
+
     def clear_baseline(self):
         """Xóa T1 baseline (dùng khi reset game)."""
         self._baseline_occ = None

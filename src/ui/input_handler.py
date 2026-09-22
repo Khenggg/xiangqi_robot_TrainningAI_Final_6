@@ -7,6 +7,7 @@ class InputHandler:
     def __init__(self, game_state, hw_manager):
         self.state = game_state
         self.hw = hw_manager
+        self._last_move_confirmation_failure = None
 
     def handle_mouse_down(self, mx, my):
         # Surrender Button
@@ -146,22 +147,36 @@ class InputHandler:
         # Verify result
         if src is None:
             print("[SPACE] ❌ YOLO KHÔNG thấy nước đi hợp lệ!")
+            has_new_move = self.hw.yolo_detector.has_new_human_move(
+                detections, self.state.board, frame=frame, cchess_result=cchess_result
+            )
+            if has_new_move:
+                self._last_move_confirmation_failure = "invalid"
+                message = "❌ NƯỚC ĐI KHÔNG HỢP LỆ"
+            else:
+                # In auto-retry mode, retain earlier positive evidence of a
+                # changed move rather than letting a later noisy frame erase it.
+                if not auto_retry or self._last_move_confirmation_failure != "invalid":
+                    self._last_move_confirmation_failure = "missing"
+                message = "❌ KHÔNG NHẬN DIỆN ĐƯỢC NƯỚC ĐI MỚI"
             if not auto_retry:
-                self.state.set_status("❌  Không thấy nước đi! Di quân trên màn hình.", color=(180, 0, 0), duration=5.0)
+                self.state.set_status(message, color=(180, 0, 0), duration=8.0)
                 self.state.manual_override_active = True
                 self.hw.clear_yolo_baseline()
             return False
             
         if not xiangqi.is_valid_move(src, dst, self.state.board, "r"):
             print(f"[SPACE] ❌ YOLO báo nước đi không hợp lệ: {src}->{dst}")
+            self._last_move_confirmation_failure = "invalid"
             if not auto_retry:
-                self.state.set_status("⚠️  Lỗi nhận diện / Đi sai luật! Dùng chuột kéo thả.", color=(180, 100, 0), duration=60.0)
+                self.state.set_status("❌ NƯỚC ĐI KHÔNG HỢP LỆ", color=(180, 0, 0), duration=8.0)
                 self.state.set_invalid_flash(dst[0], dst[1])
                 self.state.manual_override_active = True
                 self.hw.clear_yolo_baseline()
             return False
 
         # Commit move (state đã được save ở trên rồi)
+        self._last_move_confirmation_failure = None
         self.state.process_human_move(src, dst, piece)
         return True
 
@@ -174,6 +189,7 @@ class InputHandler:
             self.hw.reset_hand_interaction_monitor()
             self.state.set_status("⚠️ Chưa có baseline. Hãy nhấn SPACE để xác minh.", color=(180, 100, 0), duration=12.0)
             return False
+        self._last_move_confirmation_failure = None
         self.state.set_status("✋ Hand left board — verifying move...", color=(0, 100, 180), duration=3.0)
         for attempt in range(1, int(retries) + 1):
             if self._handle_space_key(auto_retry=True):
@@ -183,6 +199,9 @@ class InputHandler:
                 time.sleep(float(retry_seconds))
         self.state.manual_override_active = False
         self.hw.reset_hand_interaction_monitor()
-        self.state.set_status("⚠️ Không xác minh được nước đi. Hãy nhấn SPACE.", color=(180, 100, 0), duration=12.0)
+        message = ("❌ NƯỚC ĐI KHÔNG HỢP LỆ"
+                   if self._last_move_confirmation_failure == "invalid"
+                   else "❌ KHÔNG NHẬN DIỆN ĐƯỢC NƯỚC ĐI MỚI")
+        self.state.set_status(message, color=(180, 0, 0), duration=12.0)
         print("[AUTO CONFIRM] Failed after retry limit; waiting for SPACE fallback.")
         return False
