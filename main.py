@@ -182,45 +182,43 @@ try:
                     if best:
                         try: s, d = best
                         except: s, d = best[0], best[1]
-                        state.move_history.append({"turn": "b", "src": s, "dst": d})
-                        
                         cap_p = state.board[d[1]][d[0]]
                         is_cap = cap_p != "."
-                        if is_cap: state.r_captured.append(cap_p)
 
                         robot_success = True
-                        if not config.DRY_RUN:
-                            if hw.is_robot_ready:
-                                print(f"[AI] Robot executing move: {s}->{d}")
-                                try:
-                                    pick_targets = {"moving": None, "captured": None}
-                                    if getattr(config, "VISUAL_PICK_ENABLED", False):
-                                        expected_cells = {"moving": s}
-                                        if is_cap:
-                                            expected_cells["captured"] = d
-                                        # Snapshot happens before the robot enters the board.
-                                        pick_targets = hw.get_visual_pick_targets(expected_cells)
-                                    robot_success = hw.move_piece(
-                                        s[0], s[1], d[0], d[1], is_cap,
-                                        moving_visual_target=pick_targets.get("moving"),
-                                        captured_visual_target=pick_targets.get("captured"),
-                                    )
-                                except Exception as e:
-                                    error_str = str(e)
-                                    print(f"⚠️ Robot error: {error_str}")
-                                    if "112" in error_str or "MoveCart" in error_str:
-                                        print("✅ Light error — counting as successful.")
-                                    else:
-                                        print("❌ [CRITICAL] Robot critical error, stopping game.")
-                                        robot_success = False
-                                        time.sleep(2)
-                            else:
-                                print(f"\n{'='*50}")
-                                print(f"🤖 AI đi: {state.board[s[1]][s[0]]} ({s[0]},{s[1]}) → ({d[0]},{d[1]}) {'ĂN' if is_cap else ''}")
-                                print(f"👉 Hãy di quân này trên bàn thật, rồi bấm SPACE!")
-                                print(f"{'='*50}\n")
+                        if not config.DRY_RUN and hw.is_robot_ready:
+                            print(f"[AI] Robot executing move: {s}->{d}")
+                            try:
+                                pick_targets = {"moving": None, "captured": None}
+                                if getattr(config, "VISUAL_PICK_ENABLED", False):
+                                    expected_cells = {"moving": s}
+                                    if is_cap:
+                                        expected_cells["captured"] = d
+                                    # Snapshot happens before the robot enters the board.
+                                    pick_targets = hw.get_visual_pick_targets(expected_cells)
+                                robot_success = hw.move_piece(
+                                    s[0], s[1], d[0], d[1], is_cap,
+                                    moving_visual_target=pick_targets.get("moving"),
+                                    captured_visual_target=pick_targets.get("captured"),
+                                )
+                                if not robot_success:
+                                    print(f"❌ [CRITICAL] Robot motion failed! (hw.move_piece returned False)")
+                            except Exception as e:
+                                error_str = str(e)
+                                print(f"❌ [CRITICAL] Robot motion exception: {error_str}")
+                                robot_success = False
+                                time.sleep(2)
+                        elif not config.DRY_RUN and not hw.is_robot_ready:
+                            print(f"\n{'='*50}")
+                            print(f"🤖 AI đi: {state.board[s[1]][s[0]]} ({s[0]},{s[1]}) → ({d[0]},{d[1]}) {'ĂN' if is_cap else ''}")
+                            print(f"👉 Hãy di quân này trên bàn thật, rồi bấm SPACE!")
+                            print(f"{'='*50}\n")
+                            robot_success = True  # Manual move by operator on physical board
 
                         if robot_success:
+                            state.move_history.append({"turn": "b", "src": s, "dst": d})
+                            if is_cap:
+                                state.r_captured.append(cap_p)
                             state.board, _ = xiangqi.make_temp_move(state.board, best)
                             state.last_move = best
                             state.turn = 'r'
@@ -241,6 +239,9 @@ try:
                                     hw.clear_yolo_baseline()
                                     state.set_status(f"🤖 AI: ({s[0]},{s[1]})→({d[0]},{d[1]}) | Di quân rồi SPACE", color=(0, 80, 160), duration=30.0)
                                 print("[GAME] Your turn...")
+                        else:
+                            print("❌ [SAFETY] Motion failed! Board state NOT updated. State remains recoverable.")
+                            state.set_status("⚠️ Robot di chuyển thất bại! Ván cờ chưa cập nhật.", color=(180, 0, 0), duration=5.0)
                     else:
                         print("[AI] No moves available -> AI Lost")
                         state.handle_game_over("r")
