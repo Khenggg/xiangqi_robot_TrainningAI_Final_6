@@ -129,10 +129,42 @@ MOONFISH_NNUE = None  # Moonfish doesn't use NNUE
 MOONFISH_THINK_MS = 1000  # Thời gian suy nghĩ mỗi nước (milliseconds)
 
 # --- PLAYER-SELECTABLE AI DIFFICULTY ---
-# ``easy`` and ``medium`` require their trained policy checkpoints.  If a
-# checkpoint cannot load the controller falls back to the local Moonfish engine
-# instead of ever proposing an unvalidated robot move.
-AI_DIFFICULTY = "hard"  # "easy" | "medium" | "hard"
+# All difficulty levels use the same local Moonfish engine.  The first three
+# profiles deliberately restrict its search; ``impossible`` preserves the
+# project's original Moonfish invocation (MOONFISH_THINK_MS, no added limits).
+AI_DIFFICULTY = "hard"  # "easy" | "medium" | "hard" | "impossible"
+AI_DIFFICULTY_PROFILES = {
+    "easy": {
+        "label": "Easy",
+        "depth": 3,
+        "nodes": 2_000,
+        "temperature": 1.35,
+        "think_ms": 200,
+    },
+    "medium": {
+        "label": "Medium",
+        "depth": 8,
+        "nodes": 20_000,
+        "temperature": 0.9,
+        "think_ms": 1_000,
+    },
+    "hard": {
+        "label": "Hard",
+        "depth": 11,
+        "nodes": 150_000,
+        "temperature": 0.4,
+        "think_ms": 2_000,
+    },
+    "impossible": {
+        "label": "Impossible",
+        "depth": None,
+        "nodes": None,
+        "temperature": None,
+        "think_ms": None,
+    },
+}
+# Legacy policy checkpoints remain available for training tooling, but they are
+# not required to choose a difficulty in the game UI.
 EASY_POLICY_MODEL = _os.path.join(_BASE_DIR, "models", "xiangqi_easy_policy.pt")
 MEDIUM_POLICY_MODEL = _os.path.join(_BASE_DIR, "models", "xiangqi_medium_policy.pt")
 

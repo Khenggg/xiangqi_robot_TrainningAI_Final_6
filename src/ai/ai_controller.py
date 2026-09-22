@@ -38,29 +38,31 @@ class AIController:
             None nếu thất bại hoặc engine chưa khởi động
         """
         difficulty = getattr(self.config, "AI_DIFFICULTY", "hard")
-        if difficulty in ("easy", "medium"):
-            if self.policy_engine is not None:
-                try:
-                    return self.policy_engine.pick_best_move(board_snapshot, color)
-                except Exception as e:
-                    print(f"[AI] ⚠️ {difficulty} policy failed: {e}; falling back to Moonfish.")
-            if self.local_engine is not None:
-                try:
+        profiles = getattr(self.config, "AI_DIFFICULTY_PROFILES", {})
+        profile = profiles.get(difficulty)
+
+        # Player-selected levels must always stay local: cloud fallback would
+        # make the advertised strength unpredictable.  Impossible deliberately
+        # uses the old call signature so it remains the project's original
+        # Moonfish strength.
+        if difficulty in ("easy", "medium", "hard", "impossible") and self.local_engine is not None:
+            try:
+                if difficulty == "impossible":
                     return self.local_engine.pick_best_move(
                         board_snapshot, color, movetime_ms=self.config.MOONFISH_THINK_MS
                     )
-                except Exception as e:
-                    print(f"[AI] ⚠️ Moonfish fallback failed: {e}")
-
-        # The menu calls this level "MOONFISH", so it must not silently route
-        # to Cloud merely because ENGINE_TYPE happens to be HYBRID.
-        if difficulty == "hard" and self.local_engine is not None:
-            try:
+                if profile is None:
+                    raise ValueError(f"Missing configuration for difficulty: {difficulty}")
                 return self.local_engine.pick_best_move(
-                    board_snapshot, color, movetime_ms=self.config.MOONFISH_THINK_MS
+                    board_snapshot,
+                    color,
+                    movetime_ms=profile["think_ms"],
+                    depth=profile["depth"],
+                    nodes=profile["nodes"],
+                    temperature=profile["temperature"],
                 )
             except Exception as e:
-                print(f"[AI] ⚠️ Moonfish hard-level engine failed: {e}")
+                print(f"[AI] ⚠️ Moonfish {difficulty}-level engine failed: {e}")
                 return None
 
         engine_type = getattr(self.config, "ENGINE_TYPE", "LOCAL")

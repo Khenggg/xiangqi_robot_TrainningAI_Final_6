@@ -8,7 +8,6 @@ from pathlib import Path
 
 from src.hardware.robot_VIP import FR5Robot
 from src.ai.moonfish_engine import MoonfishEngine
-from src.ai.policy_engine import PolicyEngine
 from src.ai.cloud_engine import CloudEngine
 from src.ai.ai_controller import AIController
 from src.vision.camera_monitor import CameraMonitor
@@ -113,19 +112,10 @@ class HardwareManager:
         engine_type = getattr(self.config, "ENGINE_TYPE", "LOCAL")
         local_engine = None
         cloud_engine = None
-        policy_engine = None
         difficulty = getattr(self.config, "AI_DIFFICULTY", "hard")
 
-        if difficulty in ("easy", "medium"):
-            model_path = getattr(self.config, f"{difficulty.upper()}_POLICY_MODEL")
-            try:
-                policy_engine = PolicyEngine(model_path, difficulty)
-                print(f"✅ {difficulty.title()} Xiangqi policy loaded: {model_path}")
-            except Exception as e:
-                print(f"⚠️ {difficulty.title()} policy unavailable: {e}")
-
         # 1. Khởi tạo Local Moonfish (nếu cần)
-        if engine_type in ["HYBRID", "LOCAL"] or difficulty in ("easy", "medium"):
+        if engine_type in ["HYBRID", "LOCAL"] or difficulty in ("easy", "medium", "hard", "impossible"):
             try:
                 exe_path = self.config.MOONFISH_EXE
                 nnue_path = self.config.MOONFISH_NNUE
@@ -155,19 +145,11 @@ class HardwareManager:
                 cloud_engine = None
 
         # 3. Giao cho AI Controller quản lý cả 2
-        self.ai_ctrl = AIController(local_engine, cloud_engine, self.config, policy_engine=policy_engine)
+        self.ai_ctrl = AIController(local_engine, cloud_engine, self.config)
         self._difficulty_availability = {
-            "easy": self._policy_checkpoint_is_valid("easy"),
-            "medium": self._policy_checkpoint_is_valid("medium"),
-            "hard": local_engine is not None and local_engine._ready,
+            difficulty_name: local_engine is not None and local_engine._ready
+            for difficulty_name in ("easy", "medium", "hard", "impossible")
         }
-
-    def _policy_checkpoint_is_valid(self, difficulty):
-        try:
-            PolicyEngine(getattr(self.config, f"{difficulty.upper()}_POLICY_MODEL"), difficulty)
-            return True
-        except Exception:
-            return False
 
     def difficulty_availability(self):
         """Return which menu options can be selected without weakening a choice."""
@@ -175,17 +157,21 @@ class HardwareManager:
 
     def select_difficulty(self, difficulty):
         """Switch engine only after its requested policy is usable."""
-        if difficulty not in ("easy", "medium", "hard"):
+        if difficulty not in ("easy", "medium", "hard", "impossible"):
             return False, "Unknown difficulty"
         if not self.difficulty_availability().get(difficulty, False):
             return False, f"{difficulty.title()} is not ready on this machine"
+        def confirmation():
+            profile = getattr(self.config, "AI_DIFFICULTY_PROFILES", {}).get(difficulty, {})
+            if difficulty == "impossible":
+                return "Đã chọn IMPOSSIBLE — Moonfish nguyên gốc đang được sử dụng."
+            return (f"Đã chọn {difficulty.upper()} — Moonfish depth {profile.get('depth')}, "
+                    f"≤{profile.get('nodes'):,} nodes, ≤{profile.get('think_ms') / 1000:g}s.")
+
         if difficulty == getattr(self.config, "AI_DIFFICULTY", "hard"):
-            return True, ""
-        if difficulty in ("easy", "medium"):
-            try:
-                PolicyEngine(getattr(self.config, f"{difficulty.upper()}_POLICY_MODEL"), difficulty)
-            except Exception as error:
-                return False, f"{difficulty.title()} model rejected: {error}"
+            message = confirmation()
+            print(f"[GAME] {message}")
+            return True, message
         if self.ai_ctrl is not None:
             if self.ai_ctrl.local_engine is not None:
                 self.ai_ctrl.local_engine.stop()
@@ -193,7 +179,9 @@ class HardwareManager:
                 self.ai_ctrl.cloud_engine.stop()
         self.config.AI_DIFFICULTY = difficulty
         self._init_ai()
-        return True, ""
+        message = confirmation()
+        print(f"[GAME] {message}")
+        return True, message
 
     def _init_camera(self):
         # Initialize CChessRecognizer (ONNX)

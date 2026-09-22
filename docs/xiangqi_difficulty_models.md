@@ -1,10 +1,15 @@
 # Các mức AI cờ tướng
 
-`AI_DIFFICULTY` trong `config.py` chọn một trong ba mức:
+`AI_DIFFICULTY` trong `config.py` chọn một trong bốn mức Moonfish. Người chơi chọn ở màn hình đầu bằng chuột hoặc phím `1`–`4`; game sẽ hiện thông báo xác nhận mức đang sử dụng.
 
-- `easy`: checkpoint `models/xiangqi_easy_policy.pt`; policy nhỏ, teacher Moonfish depth 2 và top-k ngẫu nhiên.
-- `medium`: checkpoint `models/xiangqi_medium_policy.pt`; policy lớn hơn, teacher Moonfish depth 5.
-- `hard`: Moonfish/cloud theo cấu hình engine hiện tại.
+| Mức | Search depth | Nodes tối đa | Temperature | Think time |
+| --- | ---: | ---: | ---: | ---: |
+| Easy | 3 plies | 2,000 | 1.35 | 0.2 giây |
+| Medium | 8 plies | 20,000 | 0.9 | 1 giây |
+| Hard | 11 plies | 150,000 | 0.4 | 2 giây |
+| Impossible | Moonfish nguyên gốc | Không thêm giới hạn | Không áp dụng | `MOONFISH_THINK_MS` hiện tại |
+
+Moonfish không có lệnh UCCI temperature gốc; giá trị này được lưu/ghi log như metadata của profile. Độ mạnh thực tế được hạ bằng depth, node limit và think time.
 
 Model policy **không** tạo nước đi trực tiếp. `src.core.xiangqi.find_all_valid_moves` sinh danh sách nước hợp lệ, rồi runtime chỉ xếp hạng các nước trong danh sách đó.
 

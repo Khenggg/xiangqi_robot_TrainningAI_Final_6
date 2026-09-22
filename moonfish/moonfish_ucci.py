@@ -66,6 +66,7 @@ def main():
             #  default options
             depth = 1000
             movetime = -1
+            nodes_limit = -1
 
             # parse parameters
             params = smove.split(' ')
@@ -80,6 +81,9 @@ def main():
                 if param == 'movetime':
                     i += 1
                     movetime = int(params[i])
+                if param == 'nodes':
+                    i += 1
+                    nodes_limit = int(params[i])
                 i += 1
 
             forced = False
@@ -106,6 +110,9 @@ def main():
                    break
             
                 if movetime > 0 and (time.time() - start) * 1000 > movetime:
+                    break
+
+                if nodes_limit > 0 and searcher.nodes >= nodes_limit:
                     break
 
                 if searcher.depth >= depth:

@@ -117,7 +117,7 @@ try:
             elif difficulty_menu_active:
                 choice = None
                 if event.type == pygame.KEYDOWN:
-                    choice = {pygame.K_1: "easy", pygame.K_2: "medium", pygame.K_3: "hard"}.get(event.key)
+                    choice = {pygame.K_1: "easy", pygame.K_2: "medium", pygame.K_3: "hard", pygame.K_4: "impossible"}.get(event.key)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     choice = renderer.difficulty_from_pixel(event.pos[0], event.pos[1])
                 if choice:
@@ -125,6 +125,7 @@ try:
                     if ok:
                         difficulty_menu_active = False
                         difficulty_menu_message = ""
+                        state.set_status(reason, color=(0, 110, 70), duration=6.0)
                         _start_selected_game()
                     else:
                         difficulty_menu_message = reason

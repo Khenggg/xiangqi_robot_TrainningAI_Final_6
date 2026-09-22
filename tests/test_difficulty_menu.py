@@ -18,9 +18,27 @@ def test_unavailable_policy_cannot_be_selected(tmp_path):
         MOONFISH_EXE=str(tmp_path / "missing-moonfish.py"),
         AI_DIFFICULTY="hard",
     )
-    manager._difficulty_availability = {"easy": False, "medium": False, "hard": False}
+    manager._difficulty_availability = {"easy": False, "medium": False, "hard": False, "impossible": False}
     available = manager.difficulty_availability()
-    assert available == {"easy": False, "medium": False, "hard": False}
+    assert available == {"easy": False, "medium": False, "hard": False, "impossible": False}
     ok, message = manager.select_difficulty("easy")
     assert not ok
     assert "not ready" in message
+
+
+def test_selecting_the_current_difficulty_still_confirms_the_profile():
+    manager = HardwareManager.__new__(HardwareManager)
+    manager.config = SimpleNamespace(
+        AI_DIFFICULTY="easy",
+        AI_DIFFICULTY_PROFILES={
+            "easy": {"depth": 3, "nodes": 2_000, "temperature": 1.35, "think_ms": 200},
+        },
+    )
+    manager.ai_ctrl = None
+    manager._difficulty_availability = {"easy": True}
+
+    ok, message = manager.select_difficulty("easy")
+
+    assert ok
+    assert "Đã chọn EASY" in message
+    assert "2,000 nodes" in message

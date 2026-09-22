@@ -26,9 +26,10 @@ BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT - 60, 120, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(SCREEN_WIDTH / 2 + 30, SCREEN_HEIGHT - 60, 120, 40)
 DIFFICULTY_OPTIONS = (
-    ("easy", "EASY", pygame.Rect(105, 380, 180, 72), (62, 129, 91)),
-    ("medium", "MEDIUM", pygame.Rect(310, 380, 180, 72), (197, 132, 48)),
-    ("hard", "MOONFISH", pygame.Rect(515, 380, 180, 72), (159, 59, 55)),
+    ("easy", "1 · EASY", pygame.Rect(105, 330, 275, 64), (62, 129, 91)),
+    ("medium", "2 · MEDIUM", pygame.Rect(420, 330, 275, 64), (197, 132, 48)),
+    ("hard", "3 · HARD", pygame.Rect(105, 414, 275, 64), (159, 59, 55)),
+    ("impossible", "4 · IMPOSSIBLE", pygame.Rect(420, 414, 275, 64), (103, 61, 152)),
 )
 
 PIECE_DISPLAY_NAMES = {
@@ -158,7 +159,7 @@ class BoardRenderer:
             pygame.draw.rect(self.screen, (239, 218, 177) if enabled else (125, 118, 107), rect, 2, border_radius=10)
             text = self.ui_font.render(label, True, (255, 255, 255) if enabled else (185, 178, 166))
             self.screen.blit(text, text.get_rect(center=(rect.centerx, rect.centery - 10)))
-            detail = "READY" if enabled else "MODEL NOT READY"
+            detail = "READY" if enabled else "MOONFISH NOT READY"
             detail_surf = self.ui_font.render(detail, True, (246, 227, 193) if enabled else (190, 181, 166))
             self.screen.blit(detail_surf, detail_surf.get_rect(center=(rect.centerx, rect.centery + 16)))
         if message:

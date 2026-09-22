@@ -53,34 +53,41 @@ def test_policy_engine_rejects_untrained_or_mismatched_checkpoints(tmp_path):
         assert "difficulty" in str(error)
 
 
-def test_controller_uses_selected_policy_before_other_engines():
-    class Policy:
-        def pick_best_move(self, board, color):
+def test_controller_uses_easy_moonfish_profile_before_other_engines():
+    class LocalEngine:
+        def pick_best_move(self, board, color, **kwargs):
+            assert kwargs == {"movetime_ms": 200, "depth": 3, "nodes": 2_000, "temperature": 1.35}
             return ((0, 0), (0, 1))
 
     class Config:
         AI_DIFFICULTY = "easy"
         ENGINE_TYPE = "CLOUD"
+        AI_DIFFICULTY_PROFILES = {"easy": {"depth": 3, "nodes": 2_000, "temperature": 1.35, "think_ms": 200}}
 
-    assert AIController(None, None, Config(), policy_engine=Policy()).pick_move(xiangqi.get_board()) == ((0, 0), (0, 1))
+    assert AIController(LocalEngine(), None, Config()).pick_move(xiangqi.get_board()) == ((0, 0), (0, 1))
 
 
 def test_controller_uses_moonfish_when_selected_checkpoint_is_missing():
     class LocalEngine:
-        def pick_best_move(self, board, color, movetime_ms):
+        def pick_best_move(self, board, color, **kwargs):
+            assert kwargs["depth"] == 8
+            assert kwargs["nodes"] == 20_000
+            assert kwargs["temperature"] == 0.9
+            assert kwargs["movetime_ms"] == 1_000
             return ((1, 2), (1, 3))
 
     class Config:
         AI_DIFFICULTY = "medium"
         ENGINE_TYPE = "CLOUD"
         MOONFISH_THINK_MS = 1000
+        AI_DIFFICULTY_PROFILES = {"medium": {"depth": 8, "nodes": 20_000, "temperature": 0.9, "think_ms": 1_000}}
 
     assert AIController(LocalEngine(), None, Config()).pick_move(xiangqi.get_board()) == ((1, 2), (1, 3))
 
 
 def test_hard_level_prefers_moonfish_over_cloud():
     class LocalEngine:
-        def pick_best_move(self, board, color, movetime_ms):
+        def pick_best_move(self, board, color, **kwargs):
             return ((2, 2), (2, 3))
 
     class CloudEngine:
@@ -91,13 +98,14 @@ def test_hard_level_prefers_moonfish_over_cloud():
         AI_DIFFICULTY = "hard"
         ENGINE_TYPE = "HYBRID"
         MOONFISH_THINK_MS = 1000
+        AI_DIFFICULTY_PROFILES = {"hard": {"depth": 11, "nodes": 150_000, "temperature": 0.4, "think_ms": 2_000}}
 
     assert AIController(LocalEngine(), CloudEngine(), Config()).pick_move(xiangqi.get_board()) == ((2, 2), (2, 3))
 
 
 def test_hard_level_never_falls_back_to_cloud():
     class LocalEngine:
-        def pick_best_move(self, board, color, movetime_ms):
+        def pick_best_move(self, board, color, **kwargs):
             raise RuntimeError("Moonfish unavailable")
 
     class CloudEngine:
@@ -108,5 +116,21 @@ def test_hard_level_never_falls_back_to_cloud():
         AI_DIFFICULTY = "hard"
         ENGINE_TYPE = "HYBRID"
         MOONFISH_THINK_MS = 1000
+        AI_DIFFICULTY_PROFILES = {"hard": {"depth": 11, "nodes": 150_000, "temperature": 0.4, "think_ms": 2_000}}
 
     assert AIController(LocalEngine(), CloudEngine(), Config()).pick_move(xiangqi.get_board()) is None
+
+
+def test_impossible_uses_the_original_moonfish_call_without_limits():
+    class LocalEngine:
+        def pick_best_move(self, board, color, movetime_ms):
+            assert movetime_ms == 1_000
+            return ((3, 2), (3, 3))
+
+    class Config:
+        AI_DIFFICULTY = "impossible"
+        ENGINE_TYPE = "LOCAL"
+        MOONFISH_THINK_MS = 1_000
+        AI_DIFFICULTY_PROFILES = {}
+
+    assert AIController(LocalEngine(), None, Config()).pick_move(xiangqi.get_board()) == ((3, 2), (3, 3))
