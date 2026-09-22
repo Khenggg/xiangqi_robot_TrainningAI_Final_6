@@ -126,8 +126,8 @@ MOONFISH_THINK_MS = 1000  # Thời gian suy nghĩ mỗi nước (milliseconds)
 # IDLE_Y = 200.248
 # IDLE_Z = 278.586  
 
-IDLE_X = -95.439
-IDLE_Y = 114.829
-IDLE_Z = 219.976
+IDLE_X = -104.274
+IDLE_Y = 149.608
+IDLE_Z = 348.199
 # --- CCHESS RECOGNITION (ONNX) ---
 CCHESS_RECOGNITION_ENABLED = True  # Bật/tắt CChess ONNX recognition bổ sung
