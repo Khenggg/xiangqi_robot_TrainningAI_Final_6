@@ -138,14 +138,11 @@ try:
             key = hw.cam_monitor.update_display()
             if key == ord("q"): running = False
 
-        # Only inspect for a move after the hand detector observes a complete
-        # hand-in/hand-out interaction. SPACE remains the safe manual fallback.
-        if (not difficulty_menu_active and state.turn == "r" and not state.game_over
-                and hw.hand_interaction_finished()):
-            input_mgr.try_auto_confirm_move(
-                retries=config.AUTO_MOVE_CONFIRM_RETRIES,
-                retry_seconds=config.AUTO_MOVE_CONFIRM_RETRY_SECONDS,
-            )
+        # Inspect the board itself rather than the object moving a piece.
+        # SPACE remains the safe manual fallback when camera confidence is poor.
+        if (getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False)
+                and not difficulty_menu_active and state.turn == "r" and not state.game_over):
+            input_mgr.poll_board_stability()
 
         # 2d. Xử lý AI Turn (Non-blocking)
         if (not difficulty_menu_active and state.turn == "b" and not state.game_over

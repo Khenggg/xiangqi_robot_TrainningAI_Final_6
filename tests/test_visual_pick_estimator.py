@@ -40,6 +40,19 @@ class VisualPickEstimatorTests(unittest.TestCase):
         self.assertAlmostEqual(target.col, 3.10, places=5)
         self.assertAlmostEqual(target.row, 2.0, places=5)
 
+    def test_center_mode_uses_geometric_box_center_for_robot_pick(self):
+        center_estimator = VisualPickEstimator(
+            Path(self.temp_dir.name) / "perspective.npy", min_confidence=0.45,
+            max_offset_cells=0.25, point_mode="center"
+        )
+        # Center is exactly (3, 2); the legacy foot point would be y=2.7.
+        target = center_estimator.estimate_pick_target(
+            [(0, 0.90, (2.0, 1.0, 4.0, 3.0))], expected_col=3.0, expected_row=2.0
+        )
+        self.assertIsNotNone(target)
+        self.assertAlmostEqual(target.col, 3.0, places=5)
+        self.assertAlmostEqual(target.row, 2.0, places=5)
+
     def test_rejects_low_confidence_out_of_board_and_far_detections(self):
         detections = [
             (0, 0.44, (2.0, 2.0, 2.0, 2.0)),
@@ -54,6 +67,23 @@ class VisualPickEstimatorTests(unittest.TestCase):
         self.assertIsNone(self.estimator.aggregate_targets([first], min_samples=2))
         target = self.estimator.aggregate_targets([first, second], min_samples=2)
         self.assertIsNotNone(target)
+
+    def test_center_pick_rejects_samples_that_do_not_form_a_tight_cluster(self):
+        first = GridTarget(1.80, 2.0, 0.9, 0.20)
+        second = GridTarget(2.20, 2.0, 0.9, 0.20)
+        self.assertIsNone(
+            self.estimator.aggregate_targets([first, second], min_samples=2, max_spread_cells=0.12)
+        )
+
+    def test_occupancy_uses_full_cell_even_when_piece_is_too_far_for_safe_pick(self):
+        center_estimator = VisualPickEstimator(
+            Path(self.temp_dir.name) / "perspective.npy", min_confidence=0.45,
+            max_offset_cells=0.25, point_mode="center"
+        )
+        # Center is (2.4, 2.0): still in cell (2,2), but too far for a safe pick offset.
+        detections = [(0, 0.90, (2.2, 1.8, 2.6, 2.2))]
+        self.assertIsNone(center_estimator.estimate_pick_target(detections, 2.0, 2.0))
+        self.assertTrue(center_estimator.has_detection_in_cell(detections, 2.0, 2.0))
 
     def test_returns_target_when_foot_is_within_safe_offset(self):
         detections = [(5, 0.70, (2.00, 1.00, 2.20, 2.00))]
@@ -103,6 +133,20 @@ class PhysicalPoseTests(unittest.TestCase):
         self.assertIn(("bin",), events)
         moving_pick = [event for event in events if event[0] == "pick"][1]
         self.assertIs(moving_pick[3], fresh)
+
+    def test_stops_capture_when_destination_is_not_visually_cleared(self):
+        robot = FR5Robot()
+        robot.connected = True
+        events = []
+        robot.pick_at = lambda *args, **kwargs: events.append("pick")
+        robot.move_to_extra_safe = lambda *args, **kwargs: events.append("safe")
+        robot.place_in_capture_bin = lambda **kwargs: events.append("bin")
+        robot.place_at = lambda *args, **kwargs: events.append("place")
+        robot.go_to_home_chess = lambda: events.append("home")
+
+        with self.assertRaisesRegex(RuntimeError, "not visually clear"):
+            robot.move_piece(2, 3, 4, 3, True, verify_capture_cleared=lambda: False)
+        self.assertEqual(events, ["pick", "safe", "bin"])
 
 
 class BoardReconcilerTests(unittest.TestCase):

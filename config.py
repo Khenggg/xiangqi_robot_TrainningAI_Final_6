@@ -85,10 +85,16 @@ VISUAL_PICK_MAX_OFFSET_CELLS = 0.25
 VISUAL_PICK_FOOT_RATIO = 0.85
 VISUAL_PICK_SAMPLE_COUNT = 3
 VISUAL_PICK_MIN_STABLE_SAMPLES = 2
+VISUAL_CENTER_PICK_ATTEMPTS = 3
+VISUAL_CENTER_PICK_MAX_JITTER_CELLS = 0.12
+# Occupancy checks use the whole calibrated square, not the narrower safe-pick radius.
+VISUAL_OCCUPANCY_CELL_HALF_WIDTH = 0.50
 # When enabled, physical robot moves require CChess layout identity checks to
 # match the in-memory FEN before the gripper may pick.  Set False only for
 # supervised fallback operation when the layout model is unavailable.
-VISUAL_BOARD_SYNC_REQUIRED = True
+# Kept only for legacy/manual verification calls. Robot motion now uses CChess
+# calibration plus best.pt box centres, so CChess identity cannot block a move.
+VISUAL_BOARD_SYNC_REQUIRED = False
 
 # --- HAND-AWARE AUTO MOVE CONFIRMATION ---
 # The hand model only gates when to inspect the board.  SnapshotDetector and

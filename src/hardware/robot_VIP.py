@@ -610,7 +610,7 @@ class FR5Robot:
 
     def move_piece(self, s_col, s_row, d_col, d_row, is_capture,
                    moving_visual_target=None, captured_visual_target=None,
-                   refresh_moving_visual_target=None):
+                   refresh_moving_visual_target=None, verify_capture_cleared=None):
         """Quy trình di chuyển hoàn chỉnh, bao gồm xử lý ăn quân.
         
         Args:
@@ -648,13 +648,15 @@ class FR5Robot:
             
             # Bay thẳng đến bãi thải ở độ cao SAFE_Z (giữ nguyên Z)
             self.place_in_capture_bin(current_z=config.SAFE_Z)
+            if verify_capture_cleared is not None and not verify_capture_cleared():
+                raise RuntimeError("Capture square is not visually clear after removal")
 
         # A capture changes the physical board.  Do not reuse a target measured
         # before that operation for the next pick; ask vision for a fresh pose.
         if refresh_moving_visual_target is not None:
             moving_visual_target = refresh_moving_visual_target()
             if moving_visual_target is None:
-                raise RuntimeError("Fresh physical pose for moving piece was not verified")
+                print("[ROBOT] Visual correction unavailable after refresh; picking logical cell centre.")
 
         # 2. Gắp quân mình ở nguồn
         print(f"[ROBOT] 🤏 Gắp quân mình tại nguồn ({s_col},{s_row})")
