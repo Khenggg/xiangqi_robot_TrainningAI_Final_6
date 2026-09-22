@@ -1,0 +1,110 @@
+"""
+Unit tests for PhysicalFR3Backend.
+Verifies interface compliance, dry-run state transitions, and mock RPC call contracts.
+"""
+
+import unittest
+from unittest.mock import MagicMock
+
+from src.hardware.backends.base import RobotBackend, RobotStateSnapshot
+from src.hardware.backends.physical_fr3 import PhysicalFR3Backend
+
+
+class PhysicalFR3BackendTests(unittest.TestCase):
+
+    def test_implements_robot_backend_interface(self):
+        backend = PhysicalFR3Backend(dry_run=True)
+        self.assertIsInstance(backend, RobotBackend)
+
+    def test_dry_run_connection_and_state_snapshot(self):
+        backend = PhysicalFR3Backend(dry_run=True)
+        self.assertFalse(backend.is_connected())
+        
+        # Connect in dry run
+        ok = backend.connect()
+        self.assertTrue(ok)
+        self.assertTrue(backend.is_connected())
+
+        snap = backend.get_state_snapshot()
+        self.assertIsInstance(snap, RobotStateSnapshot)
+        self.assertEqual(snap.robot_model, "FR3")
+        self.assertTrue(snap.connected)
+        self.assertEqual(snap.motion_state, "IDLE")
+        self.assertEqual(len(snap.joints_deg), 6)
+        self.assertEqual(len(snap.tcp_pose_mm_deg), 6)
+
+        # Disconnect
+        backend.disconnect()
+        self.assertFalse(backend.is_connected())
+
+    def test_dry_run_motion_and_gripper(self):
+        backend = PhysicalFR3Backend(dry_run=True)
+        backend.connect()
+
+        # Move joint
+        target_q = [10.0, -30.0, 60.0, -120.0, -90.0, 15.0]
+        ok = backend.move_joint(target_q)
+        self.assertTrue(ok)
+        snap = backend.get_state_snapshot()
+        self.assertEqual(snap.joints_deg, target_q)
+
+        # Invalid joint length raises ValueError
+        with self.assertRaises(ValueError):
+            backend.move_joint([1.0, 2.0, 3.0])
+
+        # Move cartesian
+        target_tcp = [-350.0, 50.0, 180.0, 180.0, 0.0, 90.0]
+        ok = backend.move_cartesian(target_tcp)
+        self.assertTrue(ok)
+        snap = backend.get_state_snapshot()
+        self.assertEqual(snap.tcp_pose_mm_deg, target_tcp)
+
+        with self.assertRaises(ValueError):
+            backend.move_cartesian([1.0, 2.0])
+
+        # Gripper
+        self.assertTrue(backend.set_gripper(closed=True))
+        self.assertTrue(backend.get_state_snapshot().gripper_closed)
+        self.assertTrue(backend.set_gripper(closed=False))
+        self.assertFalse(backend.get_state_snapshot().gripper_closed)
+
+        # Stop
+        self.assertTrue(backend.stop())
+
+    def test_mock_rpc_controller_calls(self):
+        backend = PhysicalFR3Backend(ip="192.168.58.2", dry_run=False)
+        mock_rpc = MagicMock()
+        mock_rpc.SDK_state = True
+        mock_rpc.RobotEnable.return_value = 0
+        mock_rpc.Mode.return_value = 0
+        mock_rpc.MoveJ.return_value = 0
+        mock_rpc.MoveCart.return_value = 0
+        mock_rpc.SetToolDO.return_value = 0
+        mock_rpc.StopMotion.return_value = 0
+        mock_rpc.GetActualJointPosDegree.return_value = (0, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        mock_rpc.GetActualTCPPose.return_value = (0, [100.0, 200.0, 300.0, 180.0, 0.0, 90.0])
+
+        backend._rpc = mock_rpc
+        backend._connected = True
+        backend._motion_state = "IDLE"
+
+        # MoveJ invokes mock RPC
+        backend.move_joint([0.0, -45.0, 90.0, -135.0, -90.0, 0.0], speed_factor=0.4)
+        mock_rpc.MoveJ.assert_called_once()
+        self.assertEqual(mock_rpc.MoveJ.call_args[1]["vel"], 40.0)
+
+        # MoveCart invokes mock RPC
+        backend.move_cartesian([-300.0, 0.0, 200.0, 180.0, 0.0, 90.0])
+        mock_rpc.MoveCart.assert_called_once()
+
+        # Gripper calls SetToolDO
+        backend.set_gripper(closed=True)
+        self.assertTrue(mock_rpc.SetToolDO.called)
+
+        # Stop calls StopMotion
+        backend.stop()
+        mock_rpc.StopMotion.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main()
