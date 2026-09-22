@@ -16,6 +16,10 @@ from src.domain.board_pose import (
     find_nearest_cell,
     DEFAULT_BOARD_YAW_DEG,
 )
+from src.domain.board_pose_provider import (
+    BoardPoseProvider,
+    FixedBoardPoseProvider,
+)
 
 __all__ = [
     "BoardGeometry",
@@ -30,4 +34,6 @@ __all__ = [
     "canonical_cell_to_robot_xyz_m",
     "find_nearest_cell",
     "DEFAULT_BOARD_YAW_DEG",
+    "BoardPoseProvider",
+    "FixedBoardPoseProvider",
 ]
