@@ -110,6 +110,25 @@ class PhysicalFR3Backend(RobotBackend):
             raise
 
     @property
+    def operational_mode(self) -> Optional[int]:
+        """Return the current operational mode of the controller (0=auto, 1=manual, None=unconfigured)."""
+        return self._operational_mode
+
+    @property
+    def lifecycle_state(self) -> str:
+        """
+        Operational lifecycle state:
+        DISCONNECTED -> CONNECTED -> ENABLED -> MODE_CONFIGURED
+        """
+        if not self._connected:
+            return "DISCONNECTED"
+        if not self._enabled:
+            return "CONNECTED"
+        if self._operational_mode != 0:
+            return "ENABLED"
+        return "MODE_CONFIGURED"
+
+    @property
     def is_enabled(self) -> bool:
         """Return True if robot motors are explicitly enabled and active."""
         if self.dry_run:
@@ -204,20 +223,16 @@ class PhysicalFR3Backend(RobotBackend):
 
         CRITICAL SAFETY INVARIANT:
         connect() is strictly READ-ONLY. It opens the RPC interface and queries telemetry,
-        but NEVER energizes robot servos (no RobotEnable(1)) or modifies controller mode
-        (no Mode(0)). Motors remain unpowered until explicit enable_robot() is called.
+        but NEVER energizes robot servos (no RobotEnable(1)), NEVER modifies controller mode
+        (no Mode(0)), and NEVER issues Tool DO writes / safe_idle (no SetToolDO).
+        Motors remain unpowered and I/O unwritten until explicit authorization.
         """
         if self.dry_run:
             logger.info("[PhysicalFR3Backend] DRY_RUN mode enabled — skipping physical connection.")
             self._connected = True
             self._enabled = False
+            self._operational_mode = None
             self._motion_state = "IDLE"
-            if self.gripper_driver is None:
-                from src.hardware.gripper.two_output import TwoOutputGripperDriver
-                self.gripper_driver = TwoOutputGripperDriver(
-                    set_do_fn=self.set_tool_do,
-                    dry_run=True,
-                )
             return True
 
         if robot_sdk_core is None:
@@ -226,6 +241,7 @@ class PhysicalFR3Backend(RobotBackend):
             self._last_error = err
             self._connected = False
             self._enabled = False
+            self._operational_mode = None
             self._motion_state = "ERROR"
             return False
 
@@ -241,33 +257,41 @@ class PhysicalFR3Backend(RobotBackend):
 
             self._connected = True
             self._enabled = False
+            self._operational_mode = None
             self._motion_state = "IDLE"
             self._last_error = None
-            logger.info(f"[PhysicalFR3Backend] Successfully connected to FR3 at {self.ip} (servos unpowered)")
+            logger.info(f"[PhysicalFR3Backend] Successfully connected to FR3 at {self.ip} (servos unpowered, mode unconfigured)")
             self._sync_hardware_state()
-
-            # Ensure gripper driver is bound to Tool DO and in safe idle (both outputs LOW)
-            if self.gripper_driver is None:
-                from src.hardware.gripper.two_output import TwoOutputGripperDriver
-                self.gripper_driver = TwoOutputGripperDriver(
-                    set_do_fn=self.set_tool_do,
-                    dry_run=self.dry_run,
-                )
-            if hasattr(self.gripper_driver, "safe_idle"):
-                try:
-                    self.gripper_driver.safe_idle()
-                except Exception as exc:
-                    logger.warning(f"[PhysicalFR3Backend] Initial safe_idle warning: {exc}")
-
             return True
 
         except Exception as exc:
             self._last_error = str(exc)
             self._connected = False
             self._enabled = False
+            self._operational_mode = None
             self._motion_state = "ERROR"
             logger.error(f"[PhysicalFR3Backend] Connection error: {exc}")
             return False
+
+    def initialize_gripper_outputs(self) -> bool:
+        """
+        Explicit post-connect commissioning operation to safe-idle gripper outputs.
+        MUST NOT be called automatically during read-only connect().
+        """
+        if self.gripper_driver is None:
+            from src.hardware.gripper.two_output import TwoOutputGripperDriver
+            self.gripper_driver = TwoOutputGripperDriver(
+                set_do_fn=self.set_tool_do,
+                dry_run=self.dry_run,
+            )
+        if hasattr(self.gripper_driver, "safe_idle"):
+            try:
+                self.gripper_driver.safe_idle()
+                return True
+            except Exception as exc:
+                logger.error(f"[PhysicalFR3Backend] initialize_gripper_outputs error: {exc}")
+                return False
+        return True
 
     def disconnect(self) -> bool:
         """Disconnect and release the RPC handle, ensuring servos are disabled."""
@@ -278,6 +302,7 @@ class PhysicalFR3Backend(RobotBackend):
                 pass
         self._connected = False
         self._enabled = False
+        self._operational_mode = None
         self._motion_state = "DISCONNECTED"
         if self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
             try:
@@ -333,6 +358,45 @@ class PhysicalFR3Backend(RobotBackend):
             if not flange_queried:
                 self._flange_authoritative = False
                 self._flange_pose_source = "UNAVAILABLE"
+
+            # Controller Motion State Synchronization (P1-3):
+            # Authoritative SDK queries:
+            # 1. GetRobotEmergencyStopState() -> 0: Normal, 1: Emergency Stop active
+            # 2. GetRobotErrorCode() -> [main_code, sub_code]
+            # 3. GetRobotMotionDone() -> 1: Idle, 0: Moving
+            # If RPC is unavailable or mock does not implement, retain internal motion tracking.
+            if hasattr(self._rpc, "GetRobotEmergencyStopState"):
+                res_es = self._rpc.GetRobotEmergencyStopState()
+                if isinstance(res_es, (tuple, list)) and len(res_es) >= 2:
+                    err_es, es_state = res_es[0], res_es[1]
+                    if isinstance(err_es, int) and err_es == 0 and isinstance(es_state, (int, float)) and int(es_state) == 1:
+                        self._motion_state = "ERROR"
+                        self._last_error = "Controller E-Stop active"
+                        return
+
+            if hasattr(self._rpc, "GetRobotErrorCode"):
+                res_ec = self._rpc.GetRobotErrorCode()
+                if isinstance(res_ec, (tuple, list)) and len(res_ec) >= 2:
+                    err_ec, err_codes = res_ec[0], res_ec[1]
+                    if isinstance(err_ec, int) and err_ec == 0 and isinstance(err_codes, (list, tuple)) and len(err_codes) >= 2:
+                        c0, c1 = err_codes[0], err_codes[1]
+                        if isinstance(c0, (int, float)) and isinstance(c1, (int, float)):
+                            main_c, sub_c = int(c0), int(c1)
+                            if main_c != 0 or sub_c != 0:
+                                self._motion_state = "ERROR"
+                                self._last_error = f"Controller error: main={main_c}, sub={sub_c}"
+                                return
+
+            if hasattr(self._rpc, "GetRobotMotionDone"):
+                res_md = self._rpc.GetRobotMotionDone()
+                if isinstance(res_md, (tuple, list)) and len(res_md) >= 2:
+                    err_md, motion_done = res_md[0], res_md[1]
+                    if isinstance(err_md, int) and err_md == 0 and isinstance(motion_done, (int, float)):
+                        if int(motion_done) == 0:
+                            self._motion_state = "MOVING"
+                        elif self._motion_state == "MOVING":
+                            self._motion_state = "IDLE"
+
         except Exception as exc:
             logger.debug(f"[PhysicalFR3Backend] Hardware state sync failed: {exc}")
             self._flange_authoritative = False
@@ -362,6 +426,10 @@ class PhysicalFR3Backend(RobotBackend):
         """Execute joint-space motion (MoveJ) to target angles."""
         if not self._connected:
             self._last_error = "Cannot move_joint: Robot not connected"
+            return False
+
+        if not self.dry_run and not self._enabled:
+            self._last_error = "Cannot move_joint: Robot not enabled"
             return False
 
         if len(target_joints_deg) < 6:
@@ -415,6 +483,10 @@ class PhysicalFR3Backend(RobotBackend):
         """Execute Cartesian-space linear motion (MoveL/MoveCart) to target end-effector pose."""
         if not self._connected:
             self._last_error = "Cannot move_cartesian: Robot not connected"
+            return False
+
+        if not self.dry_run and not self._enabled:
+            self._last_error = "Cannot move_cartesian: Robot not enabled"
             return False
 
         if len(target_pose_mm_deg) < 6:

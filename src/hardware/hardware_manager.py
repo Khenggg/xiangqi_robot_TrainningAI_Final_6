@@ -131,20 +131,20 @@ class HardwareManager:
                 provenance="SIMULATION_GEOMETRIC_DEFAULT",
             )
 
-            # Create payload verifier for virtual simulation
-            def virtual_payload_verifier(state: PayloadState) -> bool:
-                if self.simulation_runtime is not None and hasattr(self.simulation_runtime, "world"):
-                    piece = self.simulation_runtime.world.get_attached_piece()
+            # Create payload verifier for virtual simulation (only if world is available)
+            virtual_payload_verifier = None
+            if self.simulation_runtime is not None and getattr(self.simulation_runtime, "world", None) is not None:
+                def _verifier(state: PayloadState) -> bool:
+                    world = getattr(self.simulation_runtime, "world", None)
+                    if world is None:
+                        return False
+                    piece = world.get_attached_piece()
                     if state in (PayloadState.EXPECTED_ATTACHED, PayloadState.ATTACHED):
                         return piece is not None
                     elif state in (PayloadState.EXPECTED_RELEASED, PayloadState.RELEASED, PayloadState.NONE):
                         return piece is None
-                elif self.backend is not None and hasattr(self.backend, "is_gripper_closed"):
-                    if state in (PayloadState.EXPECTED_ATTACHED, PayloadState.ATTACHED):
-                        return bool(self.backend.is_gripper_closed())
-                    elif state in (PayloadState.EXPECTED_RELEASED, PayloadState.RELEASED, PayloadState.NONE):
-                        return not bool(self.backend.is_gripper_closed())
-                return True
+                    return False
+                virtual_payload_verifier = _verifier
 
             tool_rot = getattr(self.config, "PICK_TOOL_ROTATION", [-179.164, -3.047, -26.304])
             if self.backend is not None:
@@ -156,6 +156,7 @@ class HardwareManager:
                 self.motion_executor = MotionExecutor(
                     backend=self.backend,
                     payload_verifier=virtual_payload_verifier,
+                    board_pose_provider=self.board_pose_provider,
                 )
                 self.motion_coordinator = MotionCoordinator(
                     backend=self.backend,
@@ -335,6 +336,7 @@ class HardwareManager:
             self.motion_executor = MotionExecutor(
                 backend=self.backend,
                 payload_verifier=None,
+                board_pose_provider=self.board_pose_provider,
             )
             self.motion_coordinator = MotionCoordinator(
                 backend=self.backend,
@@ -554,15 +556,48 @@ class HardwareManager:
         return True
 
     @property
+    def lifecycle_state(self) -> str:
+        """
+        Operational lifecycle state:
+        DISCONNECTED -> CONNECTED -> ENABLED -> MODE_CONFIGURED -> CALIBRATED -> MOTION_AUTHORIZED
+        """
+        if self.backend is None:
+            return "DISCONNECTED"
+        snap = self.backend.get_state_snapshot()
+        if not snap.connected:
+            return "DISCONNECTED"
+
+        backend_enabled = getattr(self.backend, "is_enabled", False)
+        if not backend_enabled:
+            return "CONNECTED"
+
+        op_mode = getattr(self.backend, "operational_mode", None)
+        if op_mode != 0:
+            return "ENABLED"
+
+        board_calibrated = (
+            self.board_pose_provider is not None
+            and getattr(self.board_pose_provider, "is_calibrated", False)
+        )
+        if not board_calibrated:
+            return "MODE_CONFIGURED"
+
+        if self.motion_resolver is None or self.motion_executor is None or not self.physical_motion_authorized:
+            return "CALIBRATED"
+
+        return "MOTION_AUTHORIZED"
+
+    @property
     def is_robot_ready(self) -> bool:
         """
         Returns True if authoritative backend is ready for motion.
         For Physical mode, strictly requires:
           1. backend connected
           2. backend enabled (or dry_run)
-          3. board provider calibrated
-          4. motion_resolver and motion_executor available
-          5. physical motion authorized
+          3. operational mode explicitly configured to 0 (for live physical mode)
+          4. board provider calibrated
+          5. motion_resolver and motion_executor available
+          6. physical motion authorized
         For Virtual mode, requires:
           1. backend connected
           2. board_pose_provider available
@@ -578,6 +613,10 @@ class HardwareManager:
             backend_enabled = getattr(self.backend, "is_enabled", False)
             if not self.dry_run and not backend_enabled:
                 return False
+            if not self.dry_run:
+                op_mode = getattr(self.backend, "operational_mode", None)
+                if op_mode != 0:
+                    return False
             board_calibrated = (
                 self.board_pose_provider is not None
                 and getattr(self.board_pose_provider, "is_calibrated", False)

@@ -193,6 +193,7 @@ class TestPhase3BWiring(unittest.TestCase):
         mock_rpc.GetActualJointPosDegree.return_value = (0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         mock_rpc.GetActualTCPPose.return_value = (0, [200.0, -100.0, 100.0, 180.0, 0.0, 0.0])
         mock_rpc.RobotEnable.return_value = 0
+        mock_rpc.Mode.return_value = 0
         mock_rpc.SetToolDO.return_value = 0
         mock_sdk_core.RPC.return_value = mock_rpc
 
@@ -212,16 +213,25 @@ class TestPhase3BWiring(unittest.TestCase):
         # Calibrated and connected, but NOT enabled
         self.assertFalse(hw.backend.is_enabled)
         self.assertFalse(hw.is_robot_ready)
+        self.assertEqual(hw.lifecycle_state, "CONNECTED")
 
-        # Explicitly enable robot
+        # Explicitly enable robot: enabled but operational mode still unconfigured (None)
         hw.enable_robot()
         self.assertTrue(hw.backend.is_enabled)
+        self.assertFalse(hw.is_robot_ready)
+        self.assertEqual(hw.lifecycle_state, "ENABLED")
+
+        # Explicitly configure operational mode to 0 -> ready becomes True
+        hw.set_operational_mode(0)
+        self.assertEqual(hw.backend.operational_mode, 0)
         self.assertTrue(hw.is_robot_ready)
+        self.assertEqual(hw.lifecycle_state, "MOTION_AUTHORIZED")
 
         # Explicitly disable robot -> ready turns False again
         hw.disable_robot()
         self.assertFalse(hw.backend.is_enabled)
         self.assertFalse(hw.is_robot_ready)
+        self.assertEqual(hw.lifecycle_state, "CONNECTED")
 
         hw.cleanup()
 
