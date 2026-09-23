@@ -28,6 +28,7 @@ class RobotStateSnapshot:
     last_error: Optional[str] = None
     trajectory_stage: Optional[str] = None  # "PREPOSITION", "LIFT", "TRANSIT", "LAND", "COMPLETE", etc.
     placement_version: int = 1
+    collision_validated: bool = False
 
     @property
     def joints_rad(self) -> List[float]:

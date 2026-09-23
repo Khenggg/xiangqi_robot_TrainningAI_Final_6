@@ -59,6 +59,7 @@ class VirtualBackendStateSnapshot:
     gripper_closed: bool
     attached_piece_id: Optional[str]
     last_error: Optional[str]
+    collision_validated: bool = False
 
 
 DEFAULT_HOME_JOINTS_DEG = [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
@@ -103,6 +104,7 @@ class VirtualFR3Backend(RobotBackend):
         self._trajectory_stage: Optional[str] = None
         self._gripper_closed = False
         self._last_error = None
+        self._collision_validated = False
 
         # Authoritative state values (degrees, radians, mm, deg)
         self._current_joints_deg = list(self.DEFAULT_HOME_JOINTS_DEG)
@@ -159,6 +161,9 @@ class VirtualFR3Backend(RobotBackend):
     def set_collision_guard(self, guard) -> None:
         """Attach collision guard validator."""
         self.collision_guard = guard
+        with self._state_lock:
+            self._collision_validated = False
+            self._sync_telemetry()
 
     def set_collision_guard_enabled(self, enabled: bool) -> None:
         """Dynamically enable or disable collision guard checking."""
@@ -167,6 +172,9 @@ class VirtualFR3Backend(RobotBackend):
             self.collision_guard_enabled = True
             return
         self.collision_guard_enabled = bool(enabled)
+        with self._state_lock:
+            self._collision_validated = False
+            self._sync_telemetry()
         logger.info(f"[BACKEND] Collision guard enabled set to: {self.collision_guard_enabled}")
 
     def set_placement_version(self, version: int) -> None:
@@ -201,8 +209,8 @@ class VirtualFR3Backend(RobotBackend):
         with self._state_lock:
             return self._attached_piece_id
 
-    def set_authoritative_joints(self, joints_deg_or_rad: Sequence[float], is_deg: bool = True) -> None:
-        """Directly set authoritative robot joints without motion (for testing/setup)."""
+    def set_authoritative_joints(self, joints_deg_or_rad: Sequence[float], is_deg: bool = True) -> bool:
+        """Set setup joints only when the attached collision guard accepts the pose."""
         if is_deg:
             q_deg = [round(float(v), 3) for v in joints_deg_or_rad]
             q_rad = np.radians(q_deg)
@@ -211,6 +219,16 @@ class VirtualFR3Backend(RobotBackend):
             q_deg = [round(math.degrees(v), 3) for v in q_rad]
         flange = self._compute_flange_pose_mm_deg(q_rad)
         tcp = self._compute_tcp_pose_mm_deg(q_rad)
+        collision_validated = False
+        if self.collision_guard is not None and getattr(self, "collision_guard_enabled", True):
+            result = self.collision_guard.validate_configuration(q_rad, restore_state=True)
+            if not result.safe:
+                with self._state_lock:
+                    self._motion_state = "COLLISION_REJECTED"
+                    self._last_error = f"Authoritative joint setup rejected by collision guard: {result.failure_reason}"
+                    self._sync_telemetry()
+                return False
+            collision_validated = True
         with self._state_lock:
             self._current_joints_rad = q_rad.copy()
             self._current_joints_deg = q_deg
@@ -218,7 +236,9 @@ class VirtualFR3Backend(RobotBackend):
             self._tcp_pose_mm_deg = tcp
             self._motion_state = "IDLE"
             self._last_error = None
+            self._collision_validated = collision_validated
             self._sync_telemetry()
+        return True
 
     def get_state_snapshot(self) -> VirtualBackendStateSnapshot:
         """Return an immutable snapshot of current authoritative backend state."""
@@ -233,6 +253,7 @@ class VirtualFR3Backend(RobotBackend):
                 gripper_closed=bool(self._gripper_closed),
                 attached_piece_id=self._attached_piece_id,
                 last_error=self._last_error,
+                collision_validated=self._collision_validated,
             )
 
     def _compute_flange_pose_mm_deg(self, joints_rad: np.ndarray) -> List[float]:
@@ -248,12 +269,39 @@ class VirtualFR3Backend(RobotBackend):
 
     def connect(self) -> bool:
         """Connect virtual backend and initialize authoritative state."""
+        if self.collision_guard is not None:
+            if not getattr(self, "collision_guard_enabled", True):
+                return self.refuse_connection("Simulation startup refused: collision guard is disabled")
+            result = self.collision_guard.validate_configuration(
+                self._current_joints_rad.copy(),
+                restore_state=True,
+            )
+            if not result.safe:
+                return self.refuse_connection(
+                    f"Simulation startup pose rejected by collision guard: {result.failure_reason}"
+                )
+            collision_validated = True
+        else:
+            # A bare backend may be used for isolated kinematics tests, but is
+            # never considered safe to render as an operational simulator pose.
+            collision_validated = False
         with self._state_lock:
             self._connected = True
             self._motion_state = "IDLE"
             self._last_error = None
+            self._collision_validated = collision_validated
             self._sync_telemetry()
         return True
+
+    def refuse_connection(self, reason: str) -> bool:
+        """Leave the backend non-operational when startup cannot be validated."""
+        with self._state_lock:
+            self._connected = False
+            self._motion_state = "COLLISION_REJECTED"
+            self._last_error = str(reason)
+            self._collision_validated = False
+            self._sync_telemetry()
+        return False
 
     def disconnect(self) -> bool:
         """Disconnect virtual backend."""
@@ -409,6 +457,7 @@ class VirtualFR3Backend(RobotBackend):
                 last_error=self._last_error,
                 trajectory_stage=self._trajectory_stage,
                 placement_version=self.placement_version,
+                collision_validated=self._collision_validated,
             )
 
     def _sync_telemetry(self):
@@ -426,6 +475,7 @@ class VirtualFR3Backend(RobotBackend):
             last_error=self._last_error,
             trajectory_stage=self._trajectory_stage,
             placement_version=self.placement_version,
+            collision_validated=self._collision_validated,
         )
 
         if self.telemetry_publisher is not None:
@@ -441,6 +491,8 @@ class VirtualFR3Backend(RobotBackend):
                         motion_state=self._motion_state,
                         trajectory_stage=self._trajectory_stage,
                         last_error=self._last_error,
+                        connected=self._connected,
+                        collision_validated=self._collision_validated,
                     )
             except Exception as e:
                 self._last_error = f"Telemetry sync warning: {e}"
@@ -536,6 +588,11 @@ class VirtualFR3Backend(RobotBackend):
                     self._tcp_pose_mm_deg = self._compute_tcp_pose_mm_deg(start_rad)
                     self._sync_telemetry()
                 return False
+            with self._state_lock:
+                self._collision_validated = True
+        else:
+            with self._state_lock:
+                self._collision_validated = False
 
         # Physical motion duration constrained by URDF maximum joint velocities:
         # t_i = |Delta q_i| / v_max,i

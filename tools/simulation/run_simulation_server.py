@@ -41,12 +41,17 @@ def main():
     print("=" * 65)
 
     telemetry = TelemetryPublisher.get_instance(host=args.host, port=args.port, robot_model="FR3")
-    telemetry.start()
-
     world = VirtualPhysicalWorld()
     backend = VirtualFR3Backend(telemetry_publisher=telemetry, default_speed_factor=args.speed_factor)
     sim = VirtualXiangqiSimulation(backend=backend, world=world, telemetry=telemetry, enable_collision_guard=not args.disable_collision_guard)
-    sim.connect()
+    if not sim.connect():
+        reason = backend.get_state_snapshot().last_error or "startup pose was not collision validated"
+        print(f"\n[NOT READY] {reason}")
+        sim.stop()
+        telemetry.stop()
+        return 2
+
+    telemetry.start()
 
     print("\n[READY] Server running. Listening for viewer commands...")
     print("Press Ctrl+C to stop.\n")
@@ -60,7 +65,8 @@ def main():
         sim.stop()
         telemetry.stop()
         print("Server stopped cleanly.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

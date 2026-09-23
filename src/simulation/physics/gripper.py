@@ -94,6 +94,59 @@ class VirtualGripper:
         self.palm_body_id: int = -1
         self.left_jaw_body_id: int = -1
         self.right_jaw_body_id: int = -1
+        self.visual_tool_guard_body_ids: List[int] = []
+        self.visual_tool_guard_body_roles: Dict[int, str] = {}
+
+        # These simulation-only boxes conservatively follow the rendered FR3
+        # STEP mesh in the wrist3_link frame. They do not alter TCP calibration.
+        visual_asset_path = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "shared"
+            / "gripper_visual_asset.json"
+        )
+        with open(visual_asset_path, "r", encoding="utf-8-sig") as f:
+            visual_asset_cfg = json.load(f)
+        visual_envelope = visual_asset_cfg.get("simulation_collision_envelope_j6", {})
+        if visual_envelope.get("frame") != "wrist3_link":
+            raise ValueError("Rendered gripper collision envelope must use wrist3_link frame")
+
+        def box_from_bounds(bounds: Dict[str, Sequence[float]], role: str):
+            minimum = np.asarray(bounds.get("min", []), dtype=float)
+            maximum = np.asarray(bounds.get("max", []), dtype=float)
+            if (
+                minimum.shape != (3,)
+                or maximum.shape != (3,)
+                or not np.isfinite(minimum).all()
+                or not np.isfinite(maximum).all()
+                or np.any(maximum <= minimum)
+            ):
+                raise ValueError(f"Invalid rendered gripper collision bounds for {role}")
+            return {
+                "role": role,
+                "center": (minimum + maximum) / 2.0,
+                "half_extents": (maximum - minimum) / 2.0,
+            }
+
+        self.visual_tool_guard_boxes = [
+            box_from_bounds(visual_envelope.get("housing_bounds_m", {}), "housing")
+        ]
+        finger_travel_m = (
+            float(visual_asset_cfg["finger_travel_mm"])
+            * float(visual_asset_cfg["scale_to_m"])
+        )
+        if not math.isfinite(finger_travel_m) or finger_travel_m < 0.0:
+            raise ValueError("Invalid rendered gripper finger travel for collision envelope")
+        for index, bounds in enumerate(visual_envelope.get("finger_bounds_open_m", [])):
+            box = box_from_bounds(bounds, f"finger_{index}")
+            direction = int(bounds.get("closed_motion_direction_x", 0))
+            if direction not in (-1, 1):
+                raise ValueError(f"Invalid close direction for rendered gripper finger {index}")
+            sweep = finger_travel_m / 2.0
+            box["center"][0] += direction * sweep
+            box["half_extents"][0] += sweep
+            self.visual_tool_guard_boxes.append(box)
+        if len(self.visual_tool_guard_boxes) != 3:
+            raise ValueError("Rendered gripper collision envelope requires housing and two fingers")
 
         # Runtime state
         self.is_closed = False
@@ -125,7 +178,17 @@ class VirtualGripper:
     @property
     def collision_tool_body_ids(self) -> List[int]:
         """Simulation collision tool body IDs including conservative tool bridge."""
-        return [b for b in (self.tool_bridge_body_id, self.palm_body_id, self.left_jaw_body_id, self.right_jaw_body_id) if b >= 0]
+        return [
+            b
+            for b in (
+                self.tool_bridge_body_id,
+                self.palm_body_id,
+                self.left_jaw_body_id,
+                self.right_jaw_body_id,
+                *self.visual_tool_guard_body_ids,
+            )
+            if b >= 0
+        ]
 
     @property
     def proxy_body_ids(self) -> List[int]:
@@ -153,6 +216,7 @@ class VirtualGripper:
             basePosition=[0.0, 0.0, -10.0],
             physicsClientId=client_id,
         )
+        p.setCollisionFilterGroupMask(self.tool_bridge_body_id, -1, 0, 0, physicsClientId=client_id)
 
         palm_half = (self.palm_dimensions_m / 2.0).tolist()
         jaw_half = (self.jaw_dimensions_m / 2.0).tolist()
@@ -186,12 +250,35 @@ class VirtualGripper:
             basePosition=[0.0, 0.0, -10.0],
             physicsClientId=client_id,
         )
+        self.visual_tool_guard_body_ids = []
+        self.visual_tool_guard_body_roles = {}
+        for box in self.visual_tool_guard_boxes:
+            shape_id = p.createCollisionShape(
+                p.GEOM_BOX,
+                halfExtents=box["half_extents"].tolist(),
+                physicsClientId=client_id,
+            )
+            body_id = p.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=shape_id,
+                basePosition=[0.0, 0.0, -10.0],
+                physicsClientId=client_id,
+            )
+            p.setCollisionFilterGroupMask(body_id, -1, 0, 0, physicsClientId=client_id)
+            self.visual_tool_guard_body_ids.append(body_id)
+            self.visual_tool_guard_body_roles[body_id] = box["role"]
         self._update_proxy_poses()
 
     def remove_proxies(self) -> None:
         """Safely remove proxy bodies from PyBullet."""
         if self.client_id >= 0:
-            for b in (self.tool_bridge_body_id, self.palm_body_id, self.left_jaw_body_id, self.right_jaw_body_id):
+            for b in (
+                self.tool_bridge_body_id,
+                self.palm_body_id,
+                self.left_jaw_body_id,
+                self.right_jaw_body_id,
+                *self.visual_tool_guard_body_ids,
+            ):
                 if b >= 0:
                     try:
                         p.removeBody(b, physicsClientId=self.client_id)
@@ -201,6 +288,8 @@ class VirtualGripper:
         self.palm_body_id = -1
         self.left_jaw_body_id = -1
         self.right_jaw_body_id = -1
+        self.visual_tool_guard_body_ids = []
+        self.visual_tool_guard_body_roles = {}
 
     def set_collision_proxy_pose(
         self,
@@ -218,6 +307,9 @@ class VirtualGripper:
         p_tcp = np.asarray(pos_m, dtype=float)
         q_tcp = np.asarray(quat, dtype=float)
         R_tcp = quat_to_rot_matrix(q_tcp)
+        # The current scene uses an identity flange-to-TCP rotation. Recover the
+        # wrist3_link origin for visual CAD guard boxes without changing the TCP.
+        p_flange = p_tcp - R_tcp @ self.flange_to_tcp_xyz_m
 
         palm_dz = float(self.palm_dimensions_m[2])
         jaw_dz = float(self.jaw_dimensions_m[2])
@@ -231,6 +323,15 @@ class VirtualGripper:
             p.resetBasePositionAndOrientation(
                 self.tool_bridge_body_id,
                 p_bridge.tolist(),
+                list(q_tcp),
+                physicsClientId=self.client_id,
+            )
+
+        for body_id, box in zip(self.visual_tool_guard_body_ids, self.visual_tool_guard_boxes):
+            p_visual = p_flange + R_tcp @ box["center"]
+            p.resetBasePositionAndOrientation(
+                body_id,
+                p_visual.tolist(),
                 list(q_tcp),
                 physicsClientId=self.client_id,
             )
@@ -427,7 +528,7 @@ class VirtualGripper:
 
         # Disable collision between attached piece and gripper collision proxies
         if self.client_id >= 0:
-            for gb in self.collision_tool_body_ids:
+            for gb in self.proxy_body_ids:
                 p.setCollisionFilterPair(
                     piece.body_id,
                     gb,
@@ -455,7 +556,7 @@ class VirtualGripper:
 
         # Re-enable collision between piece and gripper collision proxies
         if self.client_id >= 0:
-            for gb in self.collision_tool_body_ids:
+            for gb in self.proxy_body_ids:
                 p.setCollisionFilterPair(
                     piece.body_id,
                     gb,

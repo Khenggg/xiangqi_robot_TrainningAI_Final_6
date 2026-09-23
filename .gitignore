@@ -32,3 +32,6 @@ fairino3_v6_pybullet.urdf
 # Node.js dependencies
 node_modules/
 
+# Local tooling & MCP caches
+.codebase-memory/
+.playwright-cli/

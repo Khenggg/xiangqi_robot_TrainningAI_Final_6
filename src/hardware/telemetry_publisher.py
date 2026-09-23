@@ -154,6 +154,8 @@ class TelemetryPublisher:
             self.current_joints = FR5Kinematics.inverse_kinematics(self.current_tcp)
         self.is_gripper_active = False
         self._motion_state = "IDLE"
+        self._connected = True
+        self._collision_validated = True
         self._trajectory_stage: Optional[str] = None
         self._last_error: Optional[str] = None
         self._command_handlers: List = []
@@ -253,6 +255,8 @@ class TelemetryPublisher:
                 "tcp": list(self.current_tcp),
                 "gripper": self.is_gripper_active,
                 "motion_state": self._motion_state,
+                "connected": self._connected,
+                "collision_validated": self._collision_validated,
                 "trajectory_stage": self._trajectory_stage,
                 "last_error": self._last_error,
                 "placement_version": self.placement_version,
@@ -267,6 +271,8 @@ class TelemetryPublisher:
             self.current_tcp = list(snapshot.tcp_pose_mm_deg)
             self.is_gripper_active = bool(snapshot.gripper_closed)
             self._motion_state = snapshot.motion_state
+            self._connected = bool(getattr(snapshot, "connected", False))
+            self._collision_validated = bool(getattr(snapshot, "collision_validated", False))
             self._trajectory_stage = getattr(snapshot, "trajectory_stage", None)
             self._last_error = snapshot.last_error
             self.placement_version = getattr(snapshot, "placement_version", 1)
@@ -281,6 +287,8 @@ class TelemetryPublisher:
         motion_state: str = "IDLE",
         trajectory_stage: Optional[str] = None,
         last_error: Optional[str] = None,
+        connected: bool = False,
+        collision_validated: bool = False,
     ):
         """Update telemetry state with explicit values."""
         with self._state_lock:
@@ -289,6 +297,8 @@ class TelemetryPublisher:
             self.current_tcp = list(tcp_mm_deg)
             self.is_gripper_active = bool(gripper)
             self._motion_state = motion_state
+            self._connected = bool(connected)
+            self._collision_validated = bool(collision_validated)
             self._trajectory_stage = trajectory_stage
             self._last_error = last_error
         self._broadcast_sync()

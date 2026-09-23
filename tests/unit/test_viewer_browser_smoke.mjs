@@ -20,7 +20,8 @@ if (!fs.existsSync(CHROME_PATH)) {
 }
 
 const CDP_PORT = 9444;
-const TARGET_URL = "http://localhost:8085/index.html";
+const TARGET_URL = process.env.VIEWER_SMOKE_URL || "http://localhost:8085/index.html";
+const TARGET_HOST = new URL(TARGET_URL).host;
 
 // Launch headless Chrome
 const chromeProc = spawn(CHROME_PATH, [
@@ -57,7 +58,7 @@ async function waitForCDP(maxAttempts = 30) {
       const res = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`);
       if (res.ok) {
         const pages = await res.json();
-        const target = pages.find((p) => p.type === "page" && p.url.includes("localhost:8085"));
+        const target = pages.find((p) => p.type === "page" && p.url.includes(TARGET_HOST));
         if (target && target.webSocketDebuggerUrl) {
           return target.webSocketDebuggerUrl;
         }
@@ -138,6 +139,103 @@ try {
   console.log("  [PASS] V90-02: WebGL canvas initialized with positive client dimensions.");
 
   // V90-03: HUD readouts exist and report expected 90° board metadata
+  let viewerReady = false;
+  for (let attempt = 0; attempt < 80; attempt++) {
+    viewerReady = await evaluate("Boolean(window.__state?.currentArm && document.querySelector('#joint-slider-1'))");
+    if (viewerReady) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  assert.ok(viewerReady, "FR3 geometry and joint controls must finish loading");
+
+  // V90-06: Offline startup cannot show a frontend-owned pose or accept slider motion.
+  const offlineState = await evaluate("(() => { const s = window.__state; const arm = s.currentArm; const slider = document.querySelector('#joint-slider-1'); const before = [...s.jointsDeg]; slider.value = '-60'; slider.dispatchEvent(new Event('input', { bubbles: true })); return { validated: s.poseValidated, visible: arm.group.visible, sliderDisabled: slider.disabled, before, after: [...s.jointsDeg] }; })()");
+  assert.equal(offlineState.validated, false, "offline startup must await backend collision validation");
+  assert.equal(offlineState.visible, false, "unvalidated robot geometry must remain hidden");
+  assert.equal(offlineState.sliderDisabled, true, "offline joint slider must be unavailable");
+  assert.deepEqual(offlineState.after, offlineState.before, "slider input must not mutate offline joints");
+  console.log("  [PASS] V90-06: Offline startup and slider input cannot create an operational robot pose.");
+
+  // V90-07: The simulation guard bounds cover actual rendered STEP vertices in
+  // wrist3_link coordinates, both open and across the full close sweep.
+  const inspectRenderedGripper = async (closed) => {
+    const browserFunction = async function inspect(isClosed) {
+      const asset = await (await fetch('/shared/gripper_visual_asset.json')).json();
+      const envelope = asset.simulation_collision_envelope_j6;
+      const arm = window.__state.currentArm;
+      if (arm.gripper.group.userData.robotVisualRole !== 'j6-tool-mount') {
+        throw new Error('FR3 STEP gripper mount is not active');
+      }
+      arm.group.updateWorldMatrix(true, true);
+      const j6 = arm.jointRotators[5];
+      const V = j6.position.constructor;
+      const Q = j6.quaternion.constructor;
+      const origin = j6.getWorldPosition(new V());
+      const inverse = j6.getWorldQuaternion(new Q()).invert();
+      const rows = [];
+      arm.gripper.group.traverse((mesh) => {
+        if (!mesh.isMesh) return;
+        const attr = mesh.geometry.attributes.position;
+        const min = [Infinity, Infinity, Infinity];
+        const max = [-Infinity, -Infinity, -Infinity];
+        for (let i = 0; i < attr.count; i++) {
+          const point = new V().fromBufferAttribute(attr, i)
+            .applyMatrix4(mesh.matrixWorld).sub(origin).applyQuaternion(inverse);
+          for (let axis = 0; axis < 3; axis++) {
+            min[axis] = Math.min(min[axis], point.getComponent(axis));
+            max[axis] = Math.max(max[axis], point.getComponent(axis));
+          }
+        }
+        rows.push({ finger: Boolean(mesh.userData.isGripperFinger), min, max });
+      });
+      const tolerance = 0.00005;
+      let withinEnvelope = rows.length > 0;
+      const violations = [];
+      for (const row of rows) {
+        let box;
+        if (row.finger) {
+          const centerX = (row.min[0] + row.max[0]) / 2;
+          const finger = envelope.finger_bounds_open_m[centerX >= 0 ? 0 : 1];
+          box = { min: [...finger.min], max: [...finger.max] };
+          if (isClosed) {
+            const travel = asset.finger_travel_mm * asset.scale_to_m;
+            if (finger.closed_motion_direction_x < 0) box.min[0] -= travel;
+            else box.max[0] += travel;
+          }
+        } else {
+          box = envelope.housing_bounds_m;
+        }
+        if ([0, 1, 2].some((axis) =>
+          row.min[axis] < box.min[axis] - tolerance ||
+          row.max[axis] > box.max[axis] + tolerance
+        )) {
+          withinEnvelope = false;
+          violations.push({ finger: row.finger, min: row.min, max: row.max, box });
+        }
+      }
+      return {
+        isClosed,
+        withinEnvelope,
+        meshCount: rows.length,
+        violations,
+        bounds: [
+          [Math.min(...rows.map((row) => row.min[0])), Math.max(...rows.map((row) => row.max[0]))],
+          [Math.min(...rows.map((row) => row.min[1])), Math.max(...rows.map((row) => row.max[1]))],
+          [Math.min(...rows.map((row) => row.min[2])), Math.max(...rows.map((row) => row.max[2]))],
+        ],
+      };
+    };
+    return evaluate("(" + browserFunction.toString() + ")(" + JSON.stringify(closed) + ")");
+  };
+
+  const openGripperBounds = await inspectRenderedGripper(false);
+  assert.ok(openGripperBounds.withinEnvelope, "open STEP mesh escaped simulation guard: " + JSON.stringify(openGripperBounds));
+  assert.ok(openGripperBounds.meshCount >= 2, "loaded CAD gripper meshes must be measured");
+  await evaluate("window.__state.currentArm.gripper.setClosed(true)");
+  const closedGripperBounds = await inspectRenderedGripper(true);
+  assert.ok(closedGripperBounds.withinEnvelope, "closed STEP mesh escaped simulation guard: " + JSON.stringify(closedGripperBounds));
+  await evaluate("window.__state.currentArm.gripper.setClosed(false)");
+  console.log("  [PASS] V90-07: " + openGripperBounds.meshCount + " rendered STEP meshes fit the PyBullet guard (open and closed); bounds " + JSON.stringify(openGripperBounds.bounds) + " m.");
+
   const yawText = await evaluate("document.querySelector('#readoutBoardYaw')?.textContent");
   assert.ok(yawText && yawText.includes("+90.0°"), `Board Yaw must display +90.0°, got: '${yawText}'`);
 
@@ -178,6 +276,92 @@ try {
   const updatedRow9 = await evaluate("document.querySelector('#readoutFarGridDepth, #readoutRow9Dist')?.textContent");
   assert.ok(updatedRow9 && updatedRow9.includes("535.0 mm"), `readoutFarGridDepth must be 535.0 mm after +15mm shift, got: '${updatedRow9}'`);
   console.log("  [PASS] V90-05: Dynamic placement packet updates UI readouts with 90° shift math.");
+
+  // Optional live reproduction: run against the actual virtual backend and
+  // prove a rejected target never replaces the last safe rendered pose.
+  if (process.env.VIEWER_SMOKE_WS_URL) {
+    await sendCDP("Page.navigate", { url: TARGET_URL });
+    let reloadedViewerReady = false;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      reloadedViewerReady = await evaluate("Boolean(window.__state?.currentArm && document.getElementById('wsUrl'))");
+      if (reloadedViewerReady) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    assert.ok(reloadedViewerReady, "viewer must reload canonical board placement before live reproduction");
+
+    const wsUrl = JSON.stringify(process.env.VIEWER_SMOKE_WS_URL);
+    await evaluate("(() => { document.getElementById('wsUrl').value = " + wsUrl + "; document.getElementById('liveBtn').click(); })()");
+    let livePoseReady = false;
+    for (let attempt = 0; attempt < 80; attempt++) {
+      livePoseReady = await evaluate("Boolean(window.__state.poseValidated && window.__state.liveSocket?.readyState === WebSocket.OPEN)");
+      if (livePoseReady) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    assert.ok(livePoseReady, "viewer must receive a collision-validated startup pose from the virtual backend");
+    const safeJoints = await evaluate("window.__state.jointsDeg");
+    const expectedStartJoints = process.env.VIEWER_EXPECTED_START_JOINTS
+      ? JSON.parse(process.env.VIEWER_EXPECTED_START_JOINTS)
+      : [0, -45, 90, -45, -90, 0];
+    assert.deepEqual(safeJoints, expectedStartJoints, "viewer must render the collision-validated backend startup joints");
+
+    const boardClearance = await evaluate("(" + (async function measureClearance() {
+      const scene = await (await fetch('/shared/virtual_fr3_scene.json')).json();
+      const geometry = await (await fetch('/shared/physical_geometry.json')).json();
+      const center = scene.virtual_board_placement.board_center_in_3d_world_m;
+      const halfX = geometry.board.outer_length / 2000;
+      const halfZ = geometry.board.outer_width / 2000;
+      const arm = window.__state.currentArm;
+      arm.group.updateWorldMatrix(true, true);
+      const link = arm.jointRotators[5];
+      const V = link.position.constructor;
+      let minimum = Infinity;
+      let sampled = 0;
+      arm.gripper.group.traverse((mesh) => {
+        if (!mesh.isMesh) return;
+        const attr = mesh.geometry.attributes.position;
+        for (let i = 0; i < attr.count; i++) {
+          const point = new V().fromBufferAttribute(attr, i).applyMatrix4(mesh.matrixWorld);
+          if (Math.abs(point.x - center[0]) <= halfX && Math.abs(point.z - center[2]) <= halfZ) {
+            minimum = Math.min(minimum, point.y - center[1]);
+            sampled++;
+          }
+        }
+      });
+      return { minimum_clearance_m: minimum, sampled_vertices: sampled };
+    }).toString() + ")()");
+    assert.ok(boardClearance.sampled_vertices > 0, "safe live tool pose must overlap the board footprint for the clearance check");
+    assert.ok(boardClearance.minimum_clearance_m >= 0.0005, "rendered CAD tool must clear the board by the guard margin: " + JSON.stringify(boardClearance));
+
+    await evaluate("window.__smokeTelemetry = []; window.__state.liveSocket.addEventListener('message', event => { try { const packet = JSON.parse(event.data); if (packet.type === 'robot_state') window.__smokeTelemetry.push(packet); } catch (_) {} });");
+    const rejectedTarget = [0, -60, 110, -105, -120, 0];
+    await evaluate("window.__state.liveSocket.send(JSON.stringify({ command: 'MOVE_JOINT', joints_deg: " + JSON.stringify(rejectedTarget) + " }))");
+    let rejectionPacket = null;
+    for (let attempt = 0; attempt < 120; attempt++) {
+      rejectionPacket = await evaluate("window.__smokeTelemetry.filter(packet => packet.motion_state === 'COLLISION_REJECTED').pop()");
+      if (rejectionPacket) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    assert.ok(rejectionPacket, "virtual backend must return COLLISION_REJECTED telemetry for the board-penetrating target");
+    assert.equal(rejectionPacket.connected, true);
+    assert.equal(rejectionPacket.collision_validated, true, "rejection telemetry must carry the preserved validated pose");
+    assert.notDeepEqual(rejectionPacket.joints, rejectedTarget, "backend telemetry must retain the previous safe joints");
+
+    const renderedAfterReject = await evaluate("(() => { const s = window.__state; return { validated: s.poseValidated, visible: s.currentArm.group.visible, joints: s.jointsDeg, rendered: s.currentArm.jointRotators.map(rotator => rotator.rotation.z * 180 / Math.PI) }; })()");
+    assert.equal(renderedAfterReject.validated, true);
+    assert.equal(renderedAfterReject.visible, true);
+    assert.deepEqual(renderedAfterReject.joints, safeJoints, "rejected target must not replace displayed authoritative joints");
+    for (let index = 0; index < safeJoints.length; index++) {
+      assert.ok(Math.abs(renderedAfterReject.rendered[index] - safeJoints[index]) < 1e-6, "rendered link rotation must remain at the last safe state");
+    }
+
+    await sendCDP("Emulation.setDeviceMetricsOverride", { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+    await evaluate("document.getElementById('closeControlsBtn').click()");
+    await new Promise((r) => setTimeout(r, 300));
+    fs.mkdirSync("output/playwright", { recursive: true });
+    const screenshot = await sendCDP("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+    fs.writeFileSync("output/playwright/backend-rejection-safe-pose.png", Buffer.from(screenshot.data, "base64"));
+    console.log("  [PASS] V90-08: Live backend rejected the board-penetrating target; viewer stayed at the validated pose. " + (rejectionPacket.last_error || ""));
+  }
 
   ws.close();
   cleanup();

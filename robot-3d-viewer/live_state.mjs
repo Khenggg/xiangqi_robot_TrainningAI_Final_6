@@ -5,6 +5,12 @@ export function validateLivePacket(payload, jointLimits, expectedModel = "FR5") 
   if (payload.robot_model !== expectedModel) {
     return { ok: false, reason: `expected robot_model ${expectedModel}` };
   }
+  if (payload.connected !== true) {
+    return { ok: false, reason: "backend is not connected" };
+  }
+  if (payload.collision_validated !== true) {
+    return { ok: false, reason: "backend pose has not passed collision validation" };
+  }
   if (!Array.isArray(payload.joints) || payload.joints.length < 6) {
     return { ok: false, reason: "six joint values are required" };
   }

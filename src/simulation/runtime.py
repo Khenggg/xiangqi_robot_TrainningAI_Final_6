@@ -304,6 +304,8 @@ class VirtualXiangqiSimulation:
 
     def _on_robot_state_update(self, snapshot: RobotStateSnapshot):
         """Called automatically when VirtualFR3Backend state changes."""
+        if not getattr(snapshot, "collision_validated", False):
+            return
         if not hasattr(self.world, "client_id") or self.world.client_id < 0 or not p.isConnected(self.world.client_id):
             return
         # Blocker 3: Actual PyBullet articulated FR3 follows runtime execution samples (backend q == PyBullet q == Three.js q)
@@ -360,7 +362,16 @@ class VirtualXiangqiSimulation:
 
     def connect(self) -> bool:
         """Connect backend and settle simulation."""
+        if (
+            self.collision_guard is None
+            or not getattr(self.backend, "collision_guard_enabled", True)
+        ):
+            return self.backend.refuse_connection(
+                "Simulation startup refused: an active collision guard is required"
+            )
         ok = self.backend.connect()
+        if not ok:
+            return False
         self.world.step_until_settled(max_steps=60)
         if self.telemetry and self.auto_sync_telemetry:
             self.telemetry.update_from_snapshot(self.backend.get_state_snapshot())
@@ -833,7 +844,7 @@ class VirtualXiangqiSimulation:
 
                     # 4. Settle (SETTLE)
                     self.backend.set_trajectory_stage("SETTLE")
-                    self.world.step_until_settled(max_steps=40)
+                    self.world.step_until_settled(max_steps=max(self.POST_RELEASE_SETTLE_MAX_STEPS, 80))
 
                     # Physical placement verification
                     piece_released = True
@@ -944,6 +955,7 @@ class VirtualXiangqiSimulation:
                         )
 
                     # 8. Physical SERVICE_SAFE verification using Pass B predicate
+                    self.world.step_until_settled(max_steps=max(self.POST_RELEASE_SETTLE_MAX_STEPS, 80))
                     rep = self.evaluate_service_safety()
                     if not rep.service_safe:
                         self.backend.set_trajectory_stage("FAILED")
@@ -3018,6 +3030,51 @@ class VirtualXiangqiSimulation:
             dst_grasp_pose_mm = to_mm_deg(dst_grasp_m)
             dst_app_pose_mm = to_mm_deg(dst_app_m)
 
+            # Detect pieces at src_cell and dst_cell
+            piece_at_src = None
+            piece_at_dst = None
+            if hasattr(self.world, "pieces"):
+                for p_id, p_body in self.world.pieces.items():
+                    if p_body.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
+                        continue
+                    r_p, c_p, d_p = p_body.get_nearest_intersection()
+                    if (r_p, c_p) == (r_src, c_src) and d_p < 0.025:
+                        piece_at_src = p_id
+                    elif (r_p, c_p) == (r_dst, c_dst) and d_p < 0.025:
+                        piece_at_dst = p_id
+
+            # Determine whether this trajectory executes a pick & place or an arm transit:
+            # - If grasp_piece is explicitly True: requires valid piece_at_src and empty dst_cell.
+            # - If grasp_piece is False or None (default): strictly arm-only transit.
+            #   Lack of explicit grasp flag is never interpreted as permission to manipulate pieces.
+            should_grasp = False
+            if grasp_piece is True:
+                if piece_at_src is None:
+                    err_msg = f"Pick & place rejected: Source cell {src_cell} has no piece to grasp"
+                    self.backend._last_error = err_msg
+                    self.backend.set_trajectory_stage("IDLE")
+                    return {
+                        "success": False,
+                        "status": "PRECHECK_NO_SOURCE_PIECE",
+                        "failed_stage": "PRECHECK",
+                        "error": err_msg,
+                        "placement_version": current_ver,
+                    }
+                if piece_at_dst is not None:
+                    err_msg = f"Cannot pick and place to occupied destination cell {dst_cell} (occupied by {piece_at_dst})"
+                    self.backend._last_error = err_msg
+                    self.backend.set_trajectory_stage("IDLE")
+                    return {
+                        "success": False,
+                        "status": "PRECHECK_DESTINATION_OCCUPIED",
+                        "failed_stage": "PRECHECK",
+                        "error": err_msg,
+                        "placement_version": current_ver,
+                    }
+                should_grasp = True
+            else:
+                should_grasp = False
+
             # Multi-candidate selection ensuring entire 3-stage chain (src_land, transit, dst_land) is collision-safe
             cands_src_app = self.backend.solve_tcp_ik_candidates(
                 src_app_pose_mm,
@@ -3033,6 +3090,7 @@ class VirtualXiangqiSimulation:
                     target_pose_mm_deg=[src_grasp_m[0]*1000.0, src_grasp_m[1]*1000.0, src_grasp_m[2]*1000.0] + list(rpy_c),
                     samples=samples_per_stage,
                     check_collision=True,
+                    allowed_grasp_piece_id=piece_at_src,
                 )
                 if not p_sl.success:
                     continue
@@ -3079,50 +3137,6 @@ class VirtualXiangqiSimulation:
                 return {"success": False, "failed_stage": "PREPOSITION", "error": err_msg, "placement_version": current_ver}
 
             try:
-                # Detect pieces at src_cell and dst_cell
-                piece_at_src = None
-                piece_at_dst = None
-                if hasattr(self.world, "pieces"):
-                    for p_id, p_body in self.world.pieces.items():
-                        if p_body.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
-                            continue
-                        r_p, c_p, d_p = p_body.get_nearest_intersection()
-                        if (r_p, c_p) == (r_src, c_src) and d_p < 0.025:
-                            piece_at_src = p_id
-                        elif (r_p, c_p) == (r_dst, c_dst) and d_p < 0.025:
-                            piece_at_dst = p_id
-
-                # Determine whether this trajectory executes a pick & place or an arm transit:
-                # - If grasp_piece is explicitly True: requires valid piece_at_src and empty dst_cell.
-                # - If grasp_piece is False or None (default): strictly arm-only transit.
-                #   Lack of explicit grasp flag is never interpreted as permission to manipulate pieces.
-                should_grasp = False
-                if grasp_piece is True:
-                    if piece_at_src is None:
-                        err_msg = f"Pick & place rejected: Source cell {src_cell} has no piece to grasp"
-                        self.backend._last_error = err_msg
-                        self.backend.set_trajectory_stage("IDLE")
-                        return {
-                            "success": False,
-                            "status": "PRECHECK_NO_SOURCE_PIECE",
-                            "failed_stage": "PRECHECK",
-                            "error": err_msg,
-                            "placement_version": current_ver,
-                        }
-                    if piece_at_dst is not None:
-                        err_msg = f"Cannot pick and place to occupied destination cell {dst_cell} (occupied by {piece_at_dst})"
-                        self.backend._last_error = err_msg
-                        self.backend.set_trajectory_stage("IDLE")
-                        return {
-                            "success": False,
-                            "status": "PRECHECK_DESTINATION_OCCUPIED",
-                            "failed_stage": "PRECHECK",
-                            "error": err_msg,
-                            "placement_version": current_ver,
-                        }
-                    should_grasp = True
-                else:
-                    should_grasp = False
 
                 if piece_at_src:
                     self.backend.set_allowed_grasp_piece_id(piece_at_src)

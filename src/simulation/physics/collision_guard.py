@@ -189,8 +189,13 @@ class FR3CollisionGuard:
                         hasattr(self.world.gripper, "tool_bridge_body_id")
                         and proxy_id == self.world.gripper.tool_bridge_body_id
                     )
-                    c_body = "tool_bridge" if is_bridge else "gripper"
-                    desc = "Tool bridge" if is_bridge else "Gripper proxy"
+                    visual_role = getattr(self.world.gripper, "visual_tool_guard_body_roles", {}).get(proxy_id)
+                    if is_bridge:
+                        c_body, desc = "tool_bridge", "Tool bridge"
+                    elif visual_role is not None:
+                        c_body, desc = "visual_tool_envelope", f"Rendered gripper {visual_role} envelope"
+                    else:
+                        c_body, desc = "gripper", "Gripper proxy"
                     return CollisionResult(
                         safe=False,
                         colliding_body=c_body,
@@ -263,7 +268,7 @@ class FR3CollisionGuard:
                                 ),
                             )
             else:
-                for proxy_id in tool_bodies:
+                for proxy_id in self.world.gripper.proxy_body_ids:
                     pts = p.getClosestPoints(proxy_id, piece.body_id, distance=margin, physicsClientId=client)
                     for pt in pts:
                         dist = float(pt[8])
@@ -272,7 +277,14 @@ class FR3CollisionGuard:
                                 hasattr(self.world.gripper, "tool_bridge_body_id")
                                 and proxy_id == self.world.gripper.tool_bridge_body_id
                             )
-                            c_body = "tool_bridge" if is_bridge else "gripper"
+                            visual_role = getattr(self.world.gripper, "visual_tool_guard_body_roles", {}).get(proxy_id)
+                            c_body = (
+                                "tool_bridge"
+                                if is_bridge
+                                else "visual_tool_envelope"
+                                if visual_role is not None
+                                else "gripper"
+                            )
                             return CollisionResult(
                                 safe=False,
                                 colliding_body=c_body,

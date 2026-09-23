@@ -550,7 +550,8 @@ const state = {
   gripperProfile: null,
   currentArm: null,
   jointsDeg: [0, -45, 90, -45, -90, 0],
-  homePoseDeg: [0, -45, 90, -45, -90, 0],
+  poseValidated: false,
+  authoritativeRobotModel: null,
   cellDataset: null,
   selectedCell: { row: 4, col: 4 },
   currentCell: null,
@@ -567,6 +568,10 @@ window.__state = state;
 
 async function switchRobotProfile(profileId) {
   const profile = getRobotProfile(profileId);
+  state.poseValidated = false;
+  state.authoritativeRobotModel = null;
+  if (state.currentArm) state.currentArm.group.visible = false;
+  syncRobotControlAvailability();
   state.robotProfileId = profile.id;
   const next = await buildRobotArm(profile, state.gripperProfile);
   if (state.currentArm) {
@@ -577,8 +582,9 @@ async function switchRobotProfile(profileId) {
     disposeRobotArm(state.currentArm);
   }
   state.currentArm = next;
+  next.group.visible = false;
   scene.add(next.group);
-  applyJointsDeg(next, state.jointsDeg);
+  syncRobotControlAvailability();
 }
 
 // ---------------------------------------------------------------------------
@@ -592,6 +598,28 @@ function setLiveBadge(text, kind = "") {
   liveStateEl.className = kind;
 }
 
+function hasRobotCommandAuthority() {
+  const expectedModel = getRobotProfile(state.robotProfileId).label.includes("FR3")
+    ? "FR3"
+    : "FR5";
+  return Boolean(
+    state.poseValidated &&
+    state.authoritativeRobotModel === expectedModel &&
+    state.liveSocket?.readyState === WebSocket.OPEN,
+  );
+}
+
+function syncRobotControlAvailability() {
+  const available = hasRobotCommandAuthority();
+  document.querySelectorAll("#jointControlsList input").forEach((input) => {
+    input.disabled = !available;
+  });
+  for (const id of ["homeBtn", "gripperBtn"]) {
+    const button = document.getElementById(id);
+    if (button) button.disabled = !available;
+  }
+}
+
 function applyLiveState(payload) {
   const expectedModel = getRobotProfile(state.robotProfileId).label.includes("FR3")
     ? "FR3"
@@ -599,17 +627,41 @@ function applyLiveState(payload) {
   const validation = validateLivePacket(payload, LIVE_JOINT_LIMITS_DEG, expectedModel);
   if (!validation.ok) {
     console.warn("Live packet rejected:", validation.reason);
-    return;
+    if (payload?.type === "robot_state") {
+      state.poseValidated = false;
+      state.authoritativeRobotModel = null;
+      if (state.currentArm) state.currentArm.group.visible = false;
+      if (state.liveSocket?.readyState === WebSocket.OPEN) {
+        setLiveBadge("POSE NOT VALIDATED", "error");
+      }
+      syncRobotControlAvailability();
+    }
+    return false;
   }
   // Authoritative joints directly from backend telemetry
   state.jointsDeg = [...validation.joints];
+  state.poseValidated = true;
+  state.authoritativeRobotModel = payload.robot_model;
   syncAllJointSliders();
   if (state.currentArm) {
     applyJointsDeg(state.currentArm, state.jointsDeg);
+    state.currentArm.group.visible = true;
   }
   if (jointsReadoutEl) {
     jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ");
   }
+
+  if (payload.gripper !== undefined) {
+    state.gripperClosed = Boolean(payload.gripper);
+    state.currentArm?.gripper?.setClosed(state.gripperClosed);
+    const gripperBtn = document.getElementById("gripperBtn");
+    if (gripperBtn) {
+      gripperBtn.textContent = state.gripperClosed ? "🗜️ Đang Kẹp" : "🗜️ Kẹp / Nhả";
+      gripperBtn.style.color = state.gripperClosed ? "#f0883e" : "#c9d1d9";
+    }
+  }
+  setLiveBadge("LIVE", "live");
+  syncRobotControlAvailability();
 
   // Authoritative trajectory stage directly from backend telemetry
   if (payload.trajectory_stage) {
@@ -621,6 +673,7 @@ function applyLiveState(payload) {
   if (payload.motion_state === "COLLISION_REJECTED" || payload.last_error) {
     handleBackendError(payload.last_error || "Chuyển động bị từ chối bởi Collision Guard");
   }
+  return true;
 }
 
 function connectLive() {
@@ -638,15 +691,15 @@ function connectLive() {
   }
   state.liveSocket = socket;
   setLiveBadge("ĐANG KẾT NỐI…");
-  socket.onopen = () => setLiveBadge("LIVE", "live");
+  socket.onopen = () => {
+    setLiveBadge("CONNECTED; VALIDATING POSE");
+    syncRobotControlAvailability();
+  };
   socket.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
       if (data.type === "robot_state") {
-        applyLiveState(data);
-        if (data.gripper !== undefined && state.currentArm?.gripper) {
-          state.currentArm.gripper.setClosed(Boolean(data.gripper));
-        }
+        if (!applyLiveState(data)) return;
         if (data.placement_version !== undefined) {
           state.placementVersion = Number(data.placement_version);
           const verBadge = document.getElementById("placementVersionBadge");
@@ -658,7 +711,7 @@ function connectLive() {
           if (piecesGroupRef && xiangqiPieces) {
             updatePiecesFromWorldState(piecesGroupRef, xiangqiPieces, val.pieces);
           }
-          if (val.gripper && state.currentArm?.gripper) {
+          if (state.poseValidated && val.gripper && state.currentArm?.gripper) {
             state.currentArm.gripper.setClosed(Boolean(val.gripper.closed));
           }
         }
@@ -704,9 +757,19 @@ function connectLive() {
       console.warn("Live message error:", error.message);
     }
   };
-  socket.onerror = () => setLiveBadge("LỖI", "error");
+  socket.onerror = () => {
+    setLiveBadge("LỖI", "error");
+    state.poseValidated = false;
+    state.authoritativeRobotModel = null;
+    if (state.currentArm) state.currentArm.group.visible = false;
+    syncRobotControlAvailability();
+  };
   socket.onclose = () => {
     state.liveSocket = null;
+    state.poseValidated = false;
+    state.authoritativeRobotModel = null;
+    if (state.currentArm) state.currentArm.group.visible = false;
+    syncRobotControlAvailability();
     setLiveBadge("OFFLINE");
   };
 }
@@ -783,6 +846,10 @@ function renderJointControls() {
 }
 
 function updateSingleJoint(index, val) {
+  if (!hasRobotCommandAuthority()) {
+    syncAllJointSliders();
+    return;
+  }
   const def = JOINT_DEFINITIONS[index];
   const clamped = Math.max(def.min, Math.min(def.max, Number(val) || 0));
 
@@ -791,41 +858,14 @@ function updateSingleJoint(index, val) {
   if (slider) slider.value = clamped;
   if (num) num.value = clamped.toFixed(1);
 
-  if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
-    // Single Motion Authority: slider input dispatches intent to backend
-    // Backend validates, collision-checks, moves physics, and returns authoritative telemetry
-    const targetJoints = [...state.jointsDeg];
-    targetJoints[index] = clamped;
-    state.liveSocket.send(JSON.stringify({
-      command: "MOVE_JOINT",
-      joints_deg: targetJoints,
-    }));
-  } else {
-    // Non-authoritative offline preview
-    state.jointsDeg[index] = clamped;
-    state.currentCell = null;
-    updateStepperUI(null, []);
-    if (jointsReadoutEl) {
-      jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ") + " (UNVALIDATED PREVIEW)";
-    }
-    const badge = document.getElementById("trajectoryBadge");
-    if (badge) {
-      badge.className = "badge-warn";
-      badge.textContent = "⚠️ UNSAFE VISUAL PREVIEW (COLLISION NOT VALIDATED)";
-    }
-    const clearanceVal = document.getElementById("analysisClearanceVal");
-    if (clearanceVal) {
-      clearanceVal.textContent = "⚠️ Khớp chỉnh thủ công offline — Chưa kiểm tra va chạm qua backend";
-      clearanceVal.style.color = "#d29922";
-    }
-    const expl = document.getElementById("trajectoryExplanation");
-    if (expl) {
-      expl.innerHTML = "⚠️ <strong>Chế độ xem trước thủ công (Offline):</strong> Góc khớp đang được chỉnh cục bộ trên trình duyệt. <strong>COLLISION NOT VALIDATED</strong>. Chưa được xác thực an toàn qua backend PyBullet.";
-    }
-    if (state.currentArm) {
-      applyJointsDeg(state.currentArm, state.jointsDeg);
-    }
-  }
+  // Slider input is intent only. The rendered joints change exclusively when
+  // collision-validated backend telemetry is received.
+  const targetJoints = [...state.jointsDeg];
+  targetJoints[index] = clamped;
+  state.liveSocket.send(JSON.stringify({
+    command: "MOVE_JOINT",
+    joints_deg: targetJoints,
+  }));
 }
 
 function syncAllJointSliders() {
@@ -836,8 +876,11 @@ function syncAllJointSliders() {
     if (num && document.activeElement !== num) num.value = deg.toFixed(1);
   });
   if (jointsReadoutEl) {
-    jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ");
+    jointsReadoutEl.textContent = state.poseValidated
+      ? state.jointsDeg.map((v) => v.toFixed(1)).join(", ")
+      : "Waiting for collision-validated backend pose";
   }
+  syncRobotControlAvailability();
 }
 
 // ---------------------------------------------------------------------------
@@ -1395,22 +1438,17 @@ function initJointControlPanelEvents() {
   const homeBtn = document.getElementById("homeBtn");
   if (homeBtn) {
     homeBtn.addEventListener("click", () => {
-      if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
-        state.liveSocket.send(JSON.stringify({ command: "RESET" }));
-      } else {
-        const homeDeg = state.homePoseDeg || [0.0, -45.0, 90.0, -45.0, -90.0, 0.0];
-        state.jointsDeg = [...homeDeg];
-        syncAllJointSliders();
-        if (state.currentArm) {
-          applyJointsDeg(state.currentArm, state.jointsDeg);
-        }
+      if (!hasRobotCommandAuthority()) {
+        handleBackendError("Connect to a collision-validated backend pose before resetting the robot.");
+        return;
       }
+      state.liveSocket.send(JSON.stringify({ command: "RESET" }));
       state.currentCell = null;
       updateStepperUI(null, []);
       const badge = document.getElementById("diagStatusBadge");
       if (badge) {
-        badge.className = "badge-safe";
-        badge.textContent = "ĐÃ VỀ HOME";
+        badge.className = "badge-warn";
+        badge.textContent = "RESET REQUESTED";
       }
     });
   }
@@ -1418,14 +1456,11 @@ function initJointControlPanelEvents() {
   const gripperBtn = document.getElementById("gripperBtn");
   if (gripperBtn) {
     gripperBtn.addEventListener("click", () => {
-      state.gripperClosed = !state.gripperClosed;
-      if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
-        state.liveSocket.send(JSON.stringify({ command: "SET_GRIPPER", closed: state.gripperClosed }));
-      } else if (state.currentArm?.gripper) {
-        state.currentArm.gripper.setClosed(state.gripperClosed);
+      if (!hasRobotCommandAuthority()) {
+        handleBackendError("Connect to a collision-validated backend pose before operating the gripper.");
+        return;
       }
-      gripperBtn.textContent = state.gripperClosed ? "🗜️ Đang Kẹp" : "🗜️ Kẹp / Nhả";
-      gripperBtn.style.color = state.gripperClosed ? "#f0883e" : "#c9d1d9";
+      state.liveSocket.send(JSON.stringify({ command: "SET_GRIPPER", closed: !state.gripperClosed }));
     });
   }
 
@@ -1894,8 +1929,10 @@ function goToCell(row, col) {
 function loop() {
   requestAnimationFrame(loop);
   if (state.currentArm) {
-    applyJointsDeg(state.currentArm, state.jointsDeg);
-    state.currentArm.gripper?.update();
+    if (state.poseValidated) {
+      applyJointsDeg(state.currentArm, state.jointsDeg);
+      state.currentArm.gripper?.update();
+    }
   }
   controls.update();
   renderer.render(scene, camera);
@@ -1913,18 +1950,8 @@ async function initApp() {
     const cellDataset = await fetchCellReachabilityDataset();
     state.cellDataset = cellDataset;
 
-    const sceneConfig = await fetchSceneConfig();
-    if (
-      sceneConfig?.home_pose?.joints_deg &&
-      Array.isArray(sceneConfig.home_pose.joints_deg) &&
-      sceneConfig.home_pose.joints_deg.length === 6 &&
-      sceneConfig.home_pose.joints_deg.every((v) => typeof v === "number" && Number.isFinite(v))
-    ) {
-      state.jointsDeg = [...sceneConfig.home_pose.joints_deg];
-      state.homePoseDeg = [...sceneConfig.home_pose.joints_deg];
-    }
     if (jointsReadoutEl) {
-      jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ");
+      jointsReadoutEl.textContent = "Waiting for collision-validated backend pose";
     }
 
     const startLayout = await fetchStartLayout();
@@ -1944,6 +1971,7 @@ async function initApp() {
     renderJointControls();
     initJointControlPanelEvents();
     syncAllJointSliders();
+    syncRobotControlAvailability();
     loop(performance.now());
   } catch (err) {
     console.error("[VIEWER] ❌ Failed to initialize 3D viewer:", err);
