@@ -344,6 +344,11 @@ Sử dụng:
 
 Không thay thế bằng chứng thực thi bằng các giả định chủ quan.
 
+## 11.1 Định tuyến hạ tầng kiểm thử (Fast Testing Routing)
+* Đối với việc thực thi tests trên repository, bắt buộc sử dụng skill `fast-testing` (`.agents/skills/fast-testing/SKILL.md`) và các project test runners (`tools/test_fast.ps1`, `tools/test_serial.ps1`).
+* Tuyệt đối không chạy full regression không đánh dấu slow bằng lệnh bare serial pytest (`pytest tests/unit -m "not slow" -q`) trừ khi cần debug hành vi serial một cách tường minh.
+* Các kiểm thử phần cứng vật lý (`tools/hardware_tests/`) luôn luôn phải chạy tuần tự (serial) và bắt buộc phải có sự ủy quyền rõ ràng từ user. Chi tiết quy trình xem tại `.agents/skills/fast-testing/SKILL.md`.
+
 ---
 
 # 12. QUY TẮC DẪN CHỨNG TRƯỚC TIÊN (EVIDENCE-FIRST RULE)
