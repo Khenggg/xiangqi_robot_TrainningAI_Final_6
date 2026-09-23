@@ -20,6 +20,20 @@ from src.domain.board_pose_provider import (
     BoardCalibrationTolerancePolicy,
 )
 from src.motion.coordinator import MotionCoordinator, MotionProfile
+from src.motion.stages import MotionStage
+from src.motion.contracts import (
+    MotionType,
+    GripperCommand,
+)
+from src.motion.plan import PieceMoveIntent, CaptureIntent
+from src.motion.resolver import MotionResolver
+from src.motion.executor import MotionExecutor
+from src.motion.result import (
+    PayloadState,
+    MotionFailureCategory,
+    ExecutionFailureCategory,
+    MotionExecutionResult,
+)
 from src.ai.moonfish_engine import MoonfishEngine
 from src.ai.cloud_engine import CloudEngine
 from src.ai.ai_controller import AIController
@@ -42,19 +56,24 @@ class HardwareManager:
         project_dir,
         board_calibration_profile: Optional[BoardCalibrationProfile] = None,
         board_calibration_policy: Optional[BoardCalibrationTolerancePolicy] = None,
+        simulation_runtime: Optional[Any] = None,
     ):
         self.config = config
         self.project_dir = project_dir
         self.dry_run = config.DRY_RUN
         self.board_calibration_profile = board_calibration_profile
         self.board_calibration_policy = board_calibration_policy
+        self.simulation_runtime = simulation_runtime
         
         # Hardware instances
         self.robot = FR5Robot()
         self.backend = None
         self.gripper_driver = None
         self.board_pose_provider = None
+        self.motion_profile = None
         self.motion_coordinator = None
+        self.motion_resolver = None
+        self.motion_executor = None
         self.physical_motion_authorized = False
         self.engine = None
         self.ai_ctrl = None
@@ -86,33 +105,66 @@ class HardwareManager:
         backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
         if backend_type == "VIRTUAL":
             print("[MAIN] 🎮 Initializing Virtual FR3 Backend (Simulation)...")
-            try:
-                self.backend = VirtualFR3Backend()
-                self.backend.connect()
-                print("[MAIN] ✅ Virtual FR3 Backend connected.")
-            except Exception as e:
-                print(f"⚠️ [MAIN] Virtual FR3 init error: {e}")
-                self.backend = None
+            if self.simulation_runtime is not None:
+                self.backend = self.simulation_runtime.backend
+                if not getattr(self.backend, "connected", False):
+                    self.backend.connect()
+                print("[MAIN] ✅ Virtual FR3 Backend connected via simulation runtime.")
+            elif self.backend is None:
+                try:
+                    self.backend = VirtualFR3Backend()
+                    self.backend.connect()
+                    print("[MAIN] ✅ Virtual FR3 Backend connected.")
+                except Exception as e:
+                    print(f"⚠️ [MAIN] Virtual FR3 init error: {e}")
+                    self.backend = None
 
-            # Setup Board Pose Provider & Motion Coordinator for Virtual Backend
+            # Setup Board Pose Provider & Motion Pipeline for Virtual Backend
             forward_shift_mm = getattr(self.config, "FORWARD_SHIFT_MM", 0.0)
             self.board_pose_provider = FixedBoardPoseProvider.from_forward_shift(
                 forward_shift_mm=forward_shift_mm
             )
-            motion_profile = MotionProfile(
+            self.motion_profile = MotionProfile(
                 pick_tcp_height_above_board_mm=getattr(self.config, "PICK_TCP_HEIGHT_MM", 4.715),
                 place_tcp_height_above_board_mm=getattr(self.config, "PLACE_TCP_HEIGHT_MM", 4.715),
                 safe_clearance_above_board_mm=getattr(self.config, "SAFE_CLEARANCE_Z_MM", 40.0),
                 provenance="SIMULATION_GEOMETRIC_DEFAULT",
             )
+
+            # Create payload verifier for virtual simulation
+            def virtual_payload_verifier(state: PayloadState) -> bool:
+                if self.simulation_runtime is not None and hasattr(self.simulation_runtime, "world"):
+                    piece = self.simulation_runtime.world.get_attached_piece()
+                    if state in (PayloadState.EXPECTED_ATTACHED, PayloadState.ATTACHED):
+                        return piece is not None
+                    elif state in (PayloadState.EXPECTED_RELEASED, PayloadState.RELEASED, PayloadState.NONE):
+                        return piece is None
+                elif self.backend is not None and hasattr(self.backend, "is_gripper_closed"):
+                    if state in (PayloadState.EXPECTED_ATTACHED, PayloadState.ATTACHED):
+                        return bool(self.backend.is_gripper_closed())
+                    elif state in (PayloadState.EXPECTED_RELEASED, PayloadState.RELEASED, PayloadState.NONE):
+                        return not bool(self.backend.is_gripper_closed())
+                return True
+
+            tool_rot = getattr(self.config, "PICK_TOOL_ROTATION", [-179.164, -3.047, -26.304])
             if self.backend is not None:
+                self.motion_resolver = MotionResolver(
+                    board_pose_provider=self.board_pose_provider,
+                    motion_profile=self.motion_profile,
+                    tool_rotation_deg=tool_rot,
+                )
+                self.motion_executor = MotionExecutor(
+                    backend=self.backend,
+                    payload_verifier=virtual_payload_verifier,
+                )
                 self.motion_coordinator = MotionCoordinator(
                     backend=self.backend,
                     board_pose_provider=self.board_pose_provider,
-                    motion_profile=motion_profile,
-                    tool_rotation_deg=getattr(self.config, "PICK_TOOL_ROTATION", [-179.164, -3.047, -26.304]),
+                    motion_profile=self.motion_profile,
+                    tool_rotation_deg=tool_rot,
                 )
-                print("[MAIN] 🧭 MotionCoordinator initialized (Virtual Mode).")
+                print("[MAIN] 🧭 MotionResolver & MotionExecutor initialized (Virtual Mode).")
+            self.physical_motion_authorized = True
         else:
             print("[MAIN] 🦾 Initializing Physical FR3 Backend...")
             try:
@@ -132,23 +184,14 @@ class HardwareManager:
                 self.backend.gripper_driver = self.gripper_driver
                 self.backend.connect()
                 if not self.dry_run:
-                    print("[MAIN] ✅ Physical FR3 Backend connected.")
+                    print("[MAIN] ✅ Physical FR3 Backend connected (READ-ONLY).")
             except Exception as e:
                 print(f"⚠️ [MAIN] Physical FR3 Backend init error: {e}")
                 self.backend = None
 
-            # Legacy fallback connection for existing code/tests (WITHOUT ANY MOTION)
-            if not self.dry_run:
-                try:
-                    self.robot.connect()
-                    print("[MAIN] ✅ Robot kết nối thành công (NO MOTION until board calibrated).")
-                except Exception as e:
-                    print(f"⚠️ [MAIN] Robot connection error: {e}")
-                    print("   → Tiếp tục chạy KHÔNG có robot (camera + calibrate vẫn hoạt động)")
-                    self.robot.connected = False
-            else:
-                print("[MAIN] DRY_RUN: Skipping physical robot connection.")
-                self.robot.connected = False
+            # Legacy double connection REMOVED: Do NOT call self.robot.connect()!
+            # HardwareManager interacts with physical hardware exclusively through self.backend.
+            self.robot.connected = False
 
             # Physical board calibration from R1-R4 teaching points
             # TUYỆT ĐỐI KHÔNG GỌI MOTION (go_to_home_chess, MoveJ, MoveL, MoveCart) TRƯỚC KHI CALIBRATE
@@ -165,6 +208,9 @@ class HardwareManager:
             print("  ⚠️ Backend không khả dụng — không thể calibrate physical board pose.")
             self.physical_motion_authorized = False
             self.board_pose_provider = None
+            self.motion_profile = None
+            self.motion_resolver = None
+            self.motion_executor = None
             self.motion_coordinator = None
             return
 
@@ -201,6 +247,9 @@ class HardwareManager:
                     print(f"{'='*60}\n")
                     self.physical_motion_authorized = False
                     self.board_pose_provider = None
+                    self.motion_profile = None
+                    self.motion_resolver = None
+                    self.motion_executor = None
                     self.motion_coordinator = None
                     return
                 cal_profile = BoardCalibrationProfile(
@@ -217,6 +266,9 @@ class HardwareManager:
                 print(f"{'='*60}\n")
                 self.physical_motion_authorized = False
                 self.board_pose_provider = None
+                self.motion_profile = None
+                self.motion_resolver = None
+                self.motion_executor = None
                 self.motion_coordinator = None
                 return
 
@@ -248,6 +300,9 @@ class HardwareManager:
                 print(f"{'='*60}\n")
                 self.physical_motion_authorized = False
                 self.board_pose_provider = None
+                self.motion_profile = None
+                self.motion_resolver = None
+                self.motion_executor = None
                 self.motion_coordinator = None
                 return
 
@@ -262,25 +317,35 @@ class HardwareManager:
 
             # Setup MotionProfile with explicit provenance
             prov = getattr(self.config, "PICK_HEIGHT_PROVENANCE", "PROVISIONAL_SIMULATION")
-            motion_profile = MotionProfile(
+            self.motion_profile = MotionProfile(
                 pick_tcp_height_above_board_mm=getattr(self.config, "PICK_TCP_HEIGHT_MM", 4.715),
                 place_tcp_height_above_board_mm=getattr(self.config, "PLACE_TCP_HEIGHT_MM", 4.715),
                 safe_clearance_above_board_mm=getattr(self.config, "SAFE_CLEARANCE_Z_MM", 40.0),
                 provenance=prov,
             )
-            if not motion_profile.is_physical_validated:
+            if not self.motion_profile.is_physical_validated:
                 print(f"  ⚠️ [MAIN WARNING] Physical grasp height is {prov}, not measured physical truth.")
 
+            tool_rot = getattr(self.config, "PICK_TOOL_ROTATION", [-179.164, -3.047, -26.304])
+            self.motion_resolver = MotionResolver(
+                board_pose_provider=self.board_pose_provider,
+                motion_profile=self.motion_profile,
+                tool_rotation_deg=tool_rot,
+            )
+            self.motion_executor = MotionExecutor(
+                backend=self.backend,
+                payload_verifier=None,
+            )
             self.motion_coordinator = MotionCoordinator(
                 backend=self.backend,
                 board_pose_provider=self.board_pose_provider,
-                motion_profile=motion_profile,
-                tool_rotation_deg=getattr(self.config, "PICK_TOOL_ROTATION", [-179.164, -3.047, -26.304]),
+                motion_profile=self.motion_profile,
+                tool_rotation_deg=tool_rot,
             )
-            print("[MAIN] 🧭 MotionCoordinator initialized with Calibrated Physical Board Pose.")
+            print("[MAIN] 🧭 MotionResolver & MotionExecutor initialized with Calibrated Physical Board Pose.")
 
             # Deprecated: Keep legacy config variables populated for non-migrated code
-            # Note: The new motion path (MotionCoordinator) does NOT depend on these.
+            # Note: The new motion path (MotionResolver/Executor) does NOT depend on these.
             state = self.board_pose_provider.get_board_placement_state()
             p_r1 = state.cell_to_robot_xyz(0, 0, height_above_board_mm=0.0)
             self.config.BOARD_ORIGIN_X = float(p_r1[0]) * 1000.0
@@ -294,6 +359,9 @@ class HardwareManager:
             print(f"{'='*60}\n")
             self.physical_motion_authorized = False
             self.board_pose_provider = None
+            self.motion_profile = None
+            self.motion_resolver = None
+            self.motion_executor = None
             self.motion_coordinator = None
 
     def _init_ai(self):
@@ -467,29 +535,176 @@ class HardwareManager:
         if self.turn_completion_monitor is not None:
             self.turn_completion_monitor.reset()
 
+    def enable_robot(self) -> bool:
+        """Explicitly enable robot actuators for motion (non-read-only)."""
+        if self.backend is not None and hasattr(self.backend, "enable_robot"):
+            return self.backend.enable_robot()
+        return True
+
+    def disable_robot(self) -> bool:
+        """Explicitly disable robot actuators (safe idling)."""
+        if self.backend is not None and hasattr(self.backend, "disable_robot"):
+            return self.backend.disable_robot()
+        return True
+
+    def set_operational_mode(self, mode: int = 0) -> bool:
+        """Set robot controller operational mode (0: automatic, 1: manual)."""
+        if self.backend is not None and hasattr(self.backend, "set_operational_mode"):
+            return self.backend.set_operational_mode(mode)
+        return True
+
     @property
     def is_robot_ready(self) -> bool:
         """
-        Returns True if authoritative backend or legacy robot is ready for motion.
+        Returns True if authoritative backend is ready for motion.
         For Physical mode, strictly requires:
           1. backend connected
-          2. board provider calibrated
-          3. motion coordinator available
-          4. physical motion authorized
+          2. backend enabled (or dry_run)
+          3. board provider calibrated
+          4. motion_resolver and motion_executor available
+          5. physical motion authorized
+        For Virtual mode, requires:
+          1. backend connected
+          2. board_pose_provider available
+          3. motion_resolver and motion_executor available
         """
         backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
         if backend_type == "PHYSICAL":
-            return bool(
-                self.backend is not None
-                and self.backend.get_state_snapshot().connected
-                and self.board_pose_provider is not None
+            if self.backend is None:
+                return False
+            snapshot = self.backend.get_state_snapshot()
+            if not snapshot.connected:
+                return False
+            backend_enabled = getattr(self.backend, "is_enabled", False)
+            if not self.dry_run and not backend_enabled:
+                return False
+            board_calibrated = (
+                self.board_pose_provider is not None
                 and getattr(self.board_pose_provider, "is_calibrated", False)
-                and self.motion_coordinator is not None
-                and self.physical_motion_authorized
             )
-        elif self.backend is not None:
-            return bool(self.backend.get_state_snapshot().connected and self.motion_coordinator is not None)
-        return bool(self.robot and self.robot.connected and self.physical_motion_authorized)
+            if not board_calibrated:
+                return False
+            if self.motion_resolver is None or self.motion_executor is None:
+                return False
+            return bool(self.physical_motion_authorized)
+        elif backend_type == "VIRTUAL":
+            if self.backend is None:
+                return False
+            snapshot = self.backend.get_state_snapshot()
+            return bool(
+                snapshot.connected
+                and self.board_pose_provider is not None
+                and self.motion_resolver is not None
+                and self.motion_executor is not None
+            )
+        else:
+            if self.backend is not None:
+                return bool(
+                    self.backend.get_state_snapshot().connected
+                    and self.motion_resolver is not None
+                    and self.motion_executor is not None
+                )
+            return bool(self.robot and self.robot.connected and self.physical_motion_authorized)
+
+    def execute_piece_move(
+        self,
+        s_col: int,
+        s_row: int,
+        d_col: int,
+        d_row: int,
+        is_capture: bool,
+        moving_visual_target: Optional[object] = None,
+        captured_visual_target: Optional[object] = None,
+        piece_id: Optional[str] = None,
+        captured_piece_id: Optional[str] = None,
+    ) -> MotionExecutionResult:
+        """
+        Execute pick-and-place move through the authoritative MotionResolver and MotionExecutor.
+        """
+        backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
+        if not self.is_robot_ready:
+            print("[ROBOT] ❌ Motion rejected: robot is not ready or calibration failed.")
+            return MotionExecutionResult.fail(
+                failed_stage=MotionStage.PREPOSITION,
+                category=ExecutionFailureCategory.PRECONDITION_FAILED,
+                message=f"Robot is not ready for motion (backend_type={backend_type}, dry_run={self.dry_run}).",
+            )
+
+        if is_capture and backend_type == "PHYSICAL":
+            if not getattr(self.config, "CAPTURE_BIN_VALIDATED", False):
+                print("[ROBOT] ❌ Physical capture rejected: CAPTURE_BIN_VALIDATED is False.")
+                return MotionExecutionResult.fail(
+                    failed_stage=MotionStage.PREPOSITION,
+                    category=ExecutionFailureCategory.SAFETY_INTERLOCK,
+                    message="Physical capture bin is not validated (CAPTURE_BIN_VALIDATED=False). Autonomous physical captures disabled until Phase 4 validation.",
+                )
+
+        if self.motion_resolver is None or self.motion_executor is None:
+            return MotionExecutionResult.fail(
+                failed_stage=MotionStage.PREPOSITION,
+                category=ExecutionFailureCategory.PRECONDITION_FAILED,
+                message="MotionResolver or MotionExecutor is not initialized.",
+            )
+
+        capture_pose = getattr(self.config, "CAPTURE_BIN_POSE_MM_DEG", None)
+        if capture_pose is None:
+            capture_pose = [
+                getattr(self.config, "CAPTURE_BIN_X", -226.123),
+                getattr(self.config, "CAPTURE_BIN_Y", 225.024),
+                getattr(self.config, "CAPTURE_BIN_Z", 291.68),
+            ] + list(getattr(self.config, "ROTATION", [-179.164, -3.047, -26.304]))
+
+        try:
+            if is_capture:
+                intent = CaptureIntent(
+                    src_row=float(s_row),
+                    src_col=float(s_col),
+                    dst_row=float(d_row),
+                    dst_col=float(d_col),
+                    bin_pose_mm_deg=tuple(float(v) for v in capture_pose),  # type: ignore
+                    attacker_piece_id=piece_id,
+                    captured_piece_id=captured_piece_id,
+                )
+                plan = self.motion_resolver.resolve_capture(
+                    intent=intent,
+                    moving_visual_target=moving_visual_target,
+                    captured_visual_target=captured_visual_target,
+                )
+            else:
+                intent = PieceMoveIntent(
+                    src_row=float(s_row),
+                    src_col=float(s_col),
+                    dst_row=float(d_row),
+                    dst_col=float(d_col),
+                    piece_id=piece_id,
+                )
+                plan = self.motion_resolver.resolve_move(
+                    intent=intent,
+                    moving_visual_target=moving_visual_target,
+                )
+        except Exception as e:
+            return MotionExecutionResult.fail(
+                failed_stage=MotionStage.PREPOSITION,
+                category=ExecutionFailureCategory.INVALID_PLAN,
+                message=f"Plan resolution error: {e}",
+            )
+
+        if self.simulation_runtime is not None and hasattr(self.simulation_runtime, "acquire_operation_state"):
+            try:
+                from src.simulation.runtime import RuntimeOperationState
+                with self.simulation_runtime.acquire_operation_state(RuntimeOperationState.MOTION):
+                    res = self.motion_executor.execute_plan(plan)
+            except Exception as e:
+                return MotionExecutionResult.fail(
+                    failed_stage=MotionStage.PREPOSITION,
+                    category=ExecutionFailureCategory.ROBOT_BUSY,
+                    message=f"Simulation runtime operation error: {e}",
+                )
+        else:
+            res = self.motion_executor.execute_plan(plan)
+
+        self._last_execution_result = res
+        return res
 
     def move_piece(
         self,
@@ -500,47 +715,33 @@ class HardwareManager:
         is_capture: bool,
         moving_visual_target: Optional[object] = None,
         captured_visual_target: Optional[object] = None,
+        piece_id: Optional[str] = None,
+        captured_piece_id: Optional[str] = None,
     ) -> bool:
         """
-        Execute pick-and-place move through the authoritative MotionCoordinator.
-        Falls back to legacy FR5Robot if coordinator is unavailable (virtual/legacy only).
+        Legacy compatibility wrapper over execute_piece_move.
+        Returns True if execution succeeded, False otherwise.
         """
-        backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
-        if backend_type == "PHYSICAL" and not self.is_robot_ready:
-            print("[ROBOT] ❌ Physical motion is DISABLED because robot is not ready or board calibration failed.")
-            return False
-
-        if self.motion_coordinator is not None and self.is_robot_ready:
-            capture_pose = [
-                getattr(self.config, "CAPTURE_BIN_X", -226.123),
-                getattr(self.config, "CAPTURE_BIN_Y", 225.024),
-                getattr(self.config, "CAPTURE_BIN_Z", 291.68),
-            ] + list(getattr(self.config, "ROTATION", [-179.164, -3.047, -26.304]))
-
-            return self.motion_coordinator.execute_move(
-                src_row=float(s_row),
-                src_col=float(s_col),
-                dst_row=float(d_row),
-                dst_col=float(d_col),
-                is_capture=is_capture,
-                capture_bin_pose_mm=capture_pose,
-                moving_visual_target=moving_visual_target,
-                captured_visual_target=captured_visual_target,
-            )
-        elif self.robot and self.robot.connected and backend_type != "PHYSICAL":
-            return self.robot.move_piece(
-                s_col, s_row, d_col, d_row, is_capture,
-                moving_visual_target=moving_visual_target,
-                captured_visual_target=captured_visual_target,
-            )
-        else:
-            print("[ROBOT] Robot not connected / ready for move.")
-            return False
+        res = self.execute_piece_move(
+            s_col=s_col,
+            s_row=s_row,
+            d_col=d_col,
+            d_row=d_row,
+            is_capture=is_capture,
+            moving_visual_target=moving_visual_target,
+            captured_visual_target=captured_visual_target,
+            piece_id=piece_id,
+            captured_piece_id=captured_piece_id,
+        )
+        return bool(res.success)
 
     def cleanup(self):
         print("[CLEANUP] Đang dọn dẹp hardware...")
         if self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
             try: self.gripper_driver.safe_idle()
+            except: pass
+        if self.simulation_runtime is not None and hasattr(self.simulation_runtime, "stop"):
+            try: self.simulation_runtime.stop()
             except: pass
         if self.backend is not None:
             try: self.backend.disconnect()
@@ -561,7 +762,7 @@ class HardwareManager:
         if self.cap and self.cap.isOpened():
             try: self.cap.release()
             except: pass
-        if self.robot and self.robot.connected and not self.dry_run:
+        if self.robot and getattr(self.robot, "connected", False) and not self.dry_run:
             try: self.robot.robot.RobotEnable(0)
             except: pass
 

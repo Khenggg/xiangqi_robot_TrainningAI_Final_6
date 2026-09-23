@@ -154,10 +154,14 @@ class MotionResolver:
         clear_board_pose_mm_deg: Optional[Sequence[float]] = None,
         service_safe_pose_mm_deg: Optional[Sequence[float]] = None,
         task_id: Optional[str] = None,
+        moving_visual_target: Optional[Any] = None,
     ) -> ResolvedMotionPlan:
         """
         Resolve a standard PieceMoveIntent into an end-to-end motion plan:
         Pick(src) -> TRANSIT -> Place(dst) -> [Optional CLEAR_BOARD -> SERVICE_RETREAT].
+
+        If moving_visual_target is provided, continuous (row, col) refines the pick
+        approach and grasp poses without corrupting the exact logical destination place poses.
         """
         state = self._get_placement_state(board_placement)
         prof = motion_profile or self.motion_profile
@@ -168,8 +172,18 @@ class MotionResolver:
         pick_z_m = prof.pick_tcp_height_above_board_mm / 1000.0
         place_z_m = prof.place_tcp_height_above_board_mm / 1000.0
 
-        src_app = self._cell_to_pose_mm_deg(state, intent.src_row, intent.src_col, clearance_m, rot)
-        src_pick = self._cell_to_pose_mm_deg(state, intent.src_row, intent.src_col, pick_z_m, rot)
+        src_row = intent.src_row
+        src_col = intent.src_col
+        if moving_visual_target is not None:
+            if hasattr(moving_visual_target, "row") and hasattr(moving_visual_target, "col"):
+                src_row = float(moving_visual_target.row)
+                src_col = float(moving_visual_target.col)
+            elif isinstance(moving_visual_target, (tuple, list)) and len(moving_visual_target) >= 2:
+                src_row = float(moving_visual_target[0])
+                src_col = float(moving_visual_target[1])
+
+        src_app = self._cell_to_pose_mm_deg(state, src_row, src_col, clearance_m, rot)
+        src_pick = self._cell_to_pose_mm_deg(state, src_row, src_col, pick_z_m, rot)
         dst_app = self._cell_to_pose_mm_deg(state, intent.dst_row, intent.dst_col, clearance_m, rot)
         dst_place = self._cell_to_pose_mm_deg(state, intent.dst_row, intent.dst_col, place_z_m, rot)
 
@@ -204,15 +218,17 @@ class MotionResolver:
         clear_board_pose_mm_deg: Optional[Sequence[float]] = None,
         service_safe_pose_mm_deg: Optional[Sequence[float]] = None,
         task_id: Optional[str] = None,
+        moving_visual_target: Optional[Any] = None,
+        captured_visual_target: Optional[Any] = None,
     ) -> ResolvedMotionPlan:
         """
         Resolve a CaptureIntent:
-        1. Pick opponent piece at destination square
+        1. Pick opponent piece at destination square (optionally refined by captured_visual_target)
         2. Transit to capture bin and release
-        3. Pick attacking piece at source square
-        4. Transit to destination square and place
+        3. Pick attacking piece at source square (optionally refined by moving_visual_target)
+        4. Transit to destination square and place (strictly at logical destination)
         5. [Optional retreat]
-        
+
         Guarantees that the captured piece is evicted before the attacking piece moves.
         """
         state = self._get_placement_state(board_placement)
@@ -225,8 +241,18 @@ class MotionResolver:
         place_z_m = prof.place_tcp_height_above_board_mm / 1000.0
 
         # Poses for captured piece at destination
-        c_app = self._cell_to_pose_mm_deg(state, intent.dst_row, intent.dst_col, clearance_m, rot)
-        c_pick = self._cell_to_pose_mm_deg(state, intent.dst_row, intent.dst_col, pick_z_m, rot)
+        cap_row = intent.dst_row
+        cap_col = intent.dst_col
+        if captured_visual_target is not None:
+            if hasattr(captured_visual_target, "row") and hasattr(captured_visual_target, "col"):
+                cap_row = float(captured_visual_target.row)
+                cap_col = float(captured_visual_target.col)
+            elif isinstance(captured_visual_target, (tuple, list)) and len(captured_visual_target) >= 2:
+                cap_row = float(captured_visual_target[0])
+                cap_col = float(captured_visual_target[1])
+
+        c_app = self._cell_to_pose_mm_deg(state, cap_row, cap_col, clearance_m, rot)
+        c_pick = self._cell_to_pose_mm_deg(state, cap_row, cap_col, pick_z_m, rot)
 
         # Poses for capture bin
         if intent.bin_pose_mm_deg is not None:
@@ -243,10 +269,20 @@ class MotionResolver:
             )
 
         # Poses for attacking piece at source
-        a_app = self._cell_to_pose_mm_deg(state, intent.src_row, intent.src_col, clearance_m, rot)
-        a_pick = self._cell_to_pose_mm_deg(state, intent.src_row, intent.src_col, pick_z_m, rot)
+        atk_row = intent.src_row
+        atk_col = intent.src_col
+        if moving_visual_target is not None:
+            if hasattr(moving_visual_target, "row") and hasattr(moving_visual_target, "col"):
+                atk_row = float(moving_visual_target.row)
+                atk_col = float(moving_visual_target.col)
+            elif isinstance(moving_visual_target, (tuple, list)) and len(moving_visual_target) >= 2:
+                atk_row = float(moving_visual_target[0])
+                atk_col = float(moving_visual_target[1])
 
-        # Destination placement poses
+        a_app = self._cell_to_pose_mm_deg(state, atk_row, atk_col, clearance_m, rot)
+        a_pick = self._cell_to_pose_mm_deg(state, atk_row, atk_col, pick_z_m, rot)
+
+        # Destination placement poses (strictly logical destination)
         d_app = self._cell_to_pose_mm_deg(state, intent.dst_row, intent.dst_col, clearance_m, rot)
         d_place = self._cell_to_pose_mm_deg(state, intent.dst_row, intent.dst_col, place_z_m, rot)
 

@@ -27,6 +27,7 @@ from src.motion.contracts import (
 from src.motion.result import (
     PayloadState,
     MotionFailureCategory,
+    ExecutionFailureCategory,
     MotionExecutionResult,
 )
 from src.motion.plan import (
@@ -63,6 +64,7 @@ __all__ = [
     # Result & Payload Semantics
     "PayloadState",
     "MotionFailureCategory",
+    "ExecutionFailureCategory",
     "MotionExecutionResult",
     # Plan & Task Intents
     "MotionStep",

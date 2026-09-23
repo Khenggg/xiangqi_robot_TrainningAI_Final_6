@@ -93,9 +93,19 @@ class MotionFailureCategory(Enum):
     ABORTED = auto()
     """Operation was explicitly aborted by user, emergency stop, or safety guard."""
 
+    SAFETY_INTERLOCK = auto()
+    """Safety interlock prevented execution (e.g. unvalidated capture bin)."""
 
-# Canonical alias
+    PRECONDITION_FAILED = auto()
+    """Preconditions for motion were not satisfied (e.g. uncalibrated or uninitialized)."""
+
+    ROBOT_BUSY = auto()
+    """Robot or execution backend is actively moving or locked by another task."""
+
+
+# Canonical aliases
 MotionFailureCategory.STALE_PLACEMENT = MotionFailureCategory.STALE_PLACEMENT_VERSION  # type: ignore[attr-defined]
+ExecutionFailureCategory = MotionFailureCategory
 
 
 @dataclass
@@ -204,7 +214,6 @@ class MotionExecutionResult:
         if self.payload_state in (
             PayloadState.ATTACHED,
             PayloadState.EXPECTED_ATTACHED,
-            PayloadState.EXPECTED_RELEASED,
         ):
             return True
         carrying_stages = {
@@ -225,7 +234,7 @@ class MotionExecutionResult:
         """
         if self.success:
             return False
-        if self.payload_state == PayloadState.RELEASED:
+        if self.payload_state in (PayloadState.RELEASED, PayloadState.EXPECTED_RELEASED):
             return True
         post_release_stages = {
             MotionStage.SETTLE,

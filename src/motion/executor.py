@@ -299,13 +299,19 @@ class MotionExecutor:
             assert step.wait_duration_s is not None
             if step.wait_duration_s > 0.0:
                 self.sleep_fn(step.wait_duration_s)
-            # Settle dwell upgrades EXPECTED_RELEASED to RELEASED
-            if self._current_payload_state == PayloadState.EXPECTED_RELEASED:
-                self._current_payload_state = PayloadState.RELEASED
+            # Settle dwell DOES NOT fabricate physical sensor certainty.
+            # In unverified Physical mode, EXPECTED_RELEASED remains EXPECTED_RELEASED.
+            # Only if an independent payload_verifier explicitly confirms released does it become RELEASED.
+            if self.payload_verifier is not None:
+                try:
+                    if self.payload_verifier(PayloadState.EXPECTED_RELEASED):
+                        self._current_payload_state = PayloadState.RELEASED
+                except Exception as e:
+                    logger.warning(f"Payload verifier error on wait/settle: {e}")
             if step.expected_payload_state is not None:
                 if (
                     step.expected_payload_state == PayloadState.NONE
-                    and self._current_payload_state == PayloadState.RELEASED
+                    and self._current_payload_state in (PayloadState.RELEASED, PayloadState.EXPECTED_RELEASED)
                 ):
                     self._current_payload_state = PayloadState.NONE
 
@@ -340,7 +346,7 @@ class MotionExecutor:
         # Post-step payload cleanup: clear state to NONE once safely retreated after release
         if (
             step.expected_payload_state == PayloadState.NONE
-            and self._current_payload_state == PayloadState.RELEASED
+            and self._current_payload_state in (PayloadState.RELEASED, PayloadState.EXPECTED_RELEASED)
             and step.stage in (
                 MotionStage.POST_RELEASE_LIFT,
                 MotionStage.CLEAR_BOARD,

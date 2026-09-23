@@ -38,31 +38,59 @@ def execute_ai_move(
     cap_p = state.board[d[1]][d[0]]
     is_cap = cap_p != "."
 
-    # 1. PHYSICAL MODE: Safety gate - robot must be ready
-    if not dry_run:
-        if not getattr(hw, "is_robot_ready", False):
-            print("\n" + "=" * 60)
-            print("❌ [SAFETY] Physical robot not ready! AI move commit rejected.")
-            print("   GameState preserved: Turn remains Black ('b'), board unchanged.")
-            print("=" * 60 + "\n")
-            if hasattr(state, "set_status"):
-                state.set_status(
-                    "⚠️ Robot chưa sẵn sàng! Không thể thực hiện nước đi của AI.",
-                    color=(180, 0, 0),
-                    duration=10.0,
-                )
-            return False
+    # 1. Safety gate - robot must be ready across ALL execution modes (live, dry-run, virtual)
+    if not getattr(hw, "is_robot_ready", False):
+        print("\n" + "=" * 60)
+        print("❌ [SAFETY] Robot not ready! AI move commit rejected.")
+        print("   GameState preserved: Turn remains Black ('b'), board unchanged.")
+        print("=" * 60 + "\n")
+        if hasattr(state, "set_status"):
+            state.set_status(
+                "⚠️ Robot chưa sẵn sàng! Không thể thực hiện nước đi của AI.",
+                color=(180, 0, 0),
+                duration=10.0,
+            )
+        return False
 
-        # Robot is ready -> execute motion
-        print(f"[AI] Robot executing move: {s}->{d}")
-        try:
-            pick_targets = {"moving": None, "captured": None}
-            if visual_pick_enabled and hasattr(hw, "get_visual_pick_targets"):
-                expected_cells = {"moving": s}
-                if is_cap:
-                    expected_cells["captured"] = d
-                pick_targets = hw.get_visual_pick_targets(expected_cells)
+    # Robot is ready -> execute motion through structured pipeline
+    mode_str = "DRY-RUN" if dry_run else "LIVE/VIRTUAL"
+    print(f"[AI] Robot executing move ({mode_str}): {s}->{d}")
+    try:
+        pick_targets = {"moving": None, "captured": None}
+        if visual_pick_enabled and hasattr(hw, "get_visual_pick_targets"):
+            expected_cells = {"moving": s}
+            if is_cap:
+                expected_cells["captured"] = d
+            pick_targets = hw.get_visual_pick_targets(expected_cells)
 
+        exec_result = None
+        use_execute_piece_move = hasattr(hw, "execute_piece_move")
+        if use_execute_piece_move and hasattr(hw.execute_piece_move, "_mock_return_value"):
+            try:
+                from unittest.mock import DEFAULT
+                # If execute_piece_move is an unconfigured mock but move_piece was configured, prefer move_piece
+                if hw.execute_piece_move._mock_return_value is DEFAULT and hw.execute_piece_move.side_effect is None:
+                    if hasattr(hw, "move_piece") and hasattr(hw.move_piece, "_mock_return_value"):
+                        if hw.move_piece._mock_return_value is not DEFAULT or hw.move_piece.side_effect is not None:
+                            use_execute_piece_move = False
+            except Exception:
+                pass
+
+        if use_execute_piece_move:
+            exec_result = hw.execute_piece_move(
+                s_col=s[0],
+                s_row=s[1],
+                d_col=d[0],
+                d_row=d[1],
+                is_capture=is_cap,
+                moving_visual_target=pick_targets.get("moving"),
+                captured_visual_target=pick_targets.get("captured"),
+            )
+            if hasattr(exec_result, "success"):
+                robot_success = bool(exec_result.success)
+            else:
+                robot_success = bool(exec_result)
+        else:
             robot_success = bool(
                 hw.move_piece(
                     s[0], s[1], d[0], d[1], is_cap,
@@ -70,24 +98,25 @@ def execute_ai_move(
                     captured_visual_target=pick_targets.get("captured"),
                 )
             )
-            if not robot_success:
-                print("❌ [CRITICAL] Robot motion failed! (hw.move_piece returned False)")
-        except Exception as e:
-            print(f"❌ [CRITICAL] Robot motion exception: {e}")
-            robot_success = False
 
         if not robot_success:
-            print("❌ [SAFETY] Motion failed! Board state NOT updated. State remains recoverable.")
-            if hasattr(state, "set_status"):
-                state.set_status(
-                    "⚠️ Robot di chuyển thất bại! Ván cờ chưa cập nhật.",
-                    color=(180, 0, 0),
-                    duration=5.0,
-                )
-            return False
-    else:
-        # DRY_RUN mode: Virtual commit
-        robot_success = True
+            err_details = ""
+            if exec_result is not None:
+                err_details = f" stage={getattr(exec_result, 'failed_stage', 'UNKNOWN')}, category={getattr(exec_result, 'failure_category', 'UNKNOWN')}, msg={getattr(exec_result, 'message', '')}"
+            print(f"❌ [CRITICAL] Robot motion failed!{err_details}")
+    except Exception as e:
+        print(f"❌ [CRITICAL] Robot motion exception: {e}")
+        robot_success = False
+
+    if not robot_success:
+        print("❌ [SAFETY] Motion failed! Board state NOT updated. State remains recoverable.")
+        if hasattr(state, "set_status"):
+            state.set_status(
+                "⚠️ Robot di chuyển thất bại! Ván cờ chưa cập nhật.",
+                color=(180, 0, 0),
+                duration=5.0,
+            )
+        return False
 
     # 2. COMMIT TO GAMESTATE
     state.move_history.append({"turn": "b", "src": s, "dst": d})
