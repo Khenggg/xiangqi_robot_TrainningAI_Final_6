@@ -38,15 +38,15 @@ Each script is assigned one of the following canonical classifications:
 
 ### 3.1. `run_gripper_test.py`
 * **File Path:** `tools/hardware_tests/run_gripper_test.py`
-* **Classification:** `LEGACY / UNSAFE`
+* **Classification:** `DIRECT HARDWARE ACTUATION` / `LEGACY / UNSAFE`
 * **Identified Mechanisms:**
-  * Connects to RPC and immediately invokes `robot.RobotEnable(1)`.
-  * Pulses Tool DO0 and DO1 for **3.0 seconds** consecutively.
-  * Attempts to actuate Controller Box DO0 and DO1 (`SetDO(0, 1)` / `SetDO(1, 1)`), which are not connected to the end-effector gripper driver.
+  * Connects to RPC directly (`robot.RPC('192.168.58.2')`); does **NOT** invoke `RobotEnable(1)`.
+  * Bypasses `TwoOutputGripperDriver` and raw-pulses Tool DO0 and DO1 for **3.0 seconds** consecutively via `SetToolDO`.
+  * Attempts to actuate Controller Box DO0 and DO1 (`SetDO(0, 1)` / `SetDO(1, 1)` for 2.0 s), which are not connected to the end-effector gripper driver.
 * **Failure Modes & Risks:**
   1. *Motor Stall & Overheating:* Custom rack-and-pinion DC gripper full travel is estimated under 0.5 s. A 3.0 s pulse holds motor at stall against physical end-stops, inducing high current, relay wear, and motor winding heat.
-  2. *Uncommanded Arm Power-On:* `RobotEnable(1)` energizes servo drives upon script start without manual confirmation or brake check.
-  3. *Control Domain Confusion:* Firing Controller Cabinet DOs instead of Tool Flange DOs can trigger unintended external hardware.
+  2. *Bypassing Driver Abstraction & Interlocks:* Direct RPC calls to digital outputs lack state tracking, mutual exclusion, and software-enforced deadtime.
+  3. *Control Domain Confusion:* Firing Controller Cabinet DOs instead of Tool Flange DOs can trigger unintended external cabinet circuitry.
 * **Disposition:** **PROHIBITED**. Superseded by `TwoOutputGripperDriver` with 0.10 s – 0.30 s clamped pulses.
 
 ---
@@ -55,25 +55,26 @@ Each script is assigned one of the following canonical classifications:
 * **File Path:** `tools/hardware_tests/test_gripper_diagnose.py`
 * **Classification:** `DIRECT HARDWARE ACTUATION` / `LEGACY / UNSAFE`
 * **Identified Mechanisms:**
-  * Interactive terminal menu allowing manual toggling of Tool DO0 and Tool DO1 via `SetToolDO(ch, val, 0)`.
-  * Commands manual pulses with hardcoded durations of **2.5 s to 3.0 s**.
+  * Interactive terminal menu allowing manual toggling of Tool DO0 and Tool DO1 via `SetToolDO(ch, val, 0)`; does **NOT** invoke `RobotEnable(1)`.
+  * Commands manual pulses with hardcoded durations of **1.5 s to 3.0 s**.
   * Contains no software mutex or mutual-exclusion guard against commanding DO0 and DO1 simultaneously.
 * **Failure Modes & Risks:**
   1. *Simultaneous Output Fire (H-Bridge Shoot-Through / Relay Conflict):* If DO0 (Close) and DO1 (Open) are driven HIGH together, the bidirectional driver circuit may short or enter an undefined electrical state.
-  2. *Excessive Pulse Duration:* 2.5 s continuous drive forces gripper motor into mechanical stall.
+  2. *Excessive Pulse Duration:* Up to 3.0 s continuous drive forces gripper motor into mechanical stall.
 * **Disposition:** **PROHIBITED in current form**. Must be rewritten to import `TwoOutputGripperDriver` with guaranteed mutual exclusion and pulse duration limits.
 
 ---
 
 ### 3.3. `test_tool_do0.py`
 * **File Path:** `tools/hardware_tests/test_tool_do0.py`
-* **Classification:** `LEGACY / UNSAFE` / `OBSOLETE`
+* **Classification:** `DIRECT HARDWARE ACTUATION` / `LEGACY / UNSAFE` / `OBSOLETE`
 * **Identified Mechanisms:**
-  * Auto-enables robot via `RobotEnable(1)`.
-  * Assumes a single-acting gripper model: sets `SetToolDO(0, 1, 0)` for 3.0 s (close) and assumes setting `SetToolDO(0, 0, 0)` opens it.
+  * Connects directly via raw RPC (`robot.RPC('192.168.58.2')`); does **NOT** invoke `RobotEnable(1)`.
+  * Bypasses `TwoOutputGripperDriver` and loops 5 times pulsing Tool DO0 for 3.0 s (`SetToolDO(0, 1, 0)`), sleeping 2.0 s, then setting `SetToolDO(0, 0, 0)`.
+  * Assumes a single-acting gripper model where setting `SetToolDO(0, 0, 0)` opens the gripper.
 * **Failure Modes & Risks:**
-  1. *Wiring Model Incompatibility:* The actual physical gripper is a 2-output driver (`DO0 = CLOSE`, `DO1 = OPEN`). Setting `DO0 = 0` merely de-energizes the close relay; it does *not* open the gripper. The script fails to function as intended.
-  2. *Motor Stall on DO0:* 3.0 s close pulse causes mechanical stress.
+  1. *Wiring Model Incompatibility:* The actual physical gripper is a 2-output driver (`DO0 = CLOSE`, `DO1 = OPEN`). Setting `DO0 = 0` merely de-energizes the close channel; it does *not* open the gripper. The script fails to function as intended.
+  2. *Motor Stall on DO0:* 3.0 s close pulse causes mechanical stress and motor stall.
 * **Disposition:** **OBSOLETE & RETIRED**. Single-channel polarity assumption is physically false.
 
 ---
@@ -155,7 +156,7 @@ Each script is assigned one of the following canonical classifications:
 
 | Anti-Pattern | Scripts Exhibiting Pattern | Risk Level | Architectural Replacement |
 | :--- | :--- | :--- | :--- |
-| **Autonomous `RobotEnable(1)`** | `run_gripper_test`, `test_tool_do0`, `test_goto_xe_den`, `test_move_to_pos` | HIGH | Explicit operator gate; connect is strictly separated from enable. |
+| **Autonomous `RobotEnable(1)`** | `test_move_to_pos` (direct); `test_corners`, `test_4_rooks`, `test_goto_xe_den`, `test_calculate_cell_size` (indirect via `FR5Robot.connect()`) *(Note: `run_gripper_test` and `test_tool_do0` do NOT invoke `RobotEnable`)* | HIGH | Explicit operator gate; connect is strictly separated from enable (`connect()` is read-only). |
 | **OpenCV 2D Perspective Matrix** | `test_4_rooks`, `test_corners`, `test_move_to_pos` | HIGH | 3D $SE(3)$ Kabsch-Umeyama rigid registration via `BoardPoseProvider`. |
 | **Image Matrix Applied to Robot** | `test_move_to_pos` | CRITICAL | Robot and Vision coordinate systems strictly decoupled via contracts. |
 | **Continuous 3.0s DO Pulses** | `run_gripper_test`, `test_gripper_diagnose`, `test_tool_do0` | HIGH | `TwoOutputGripperDriver` with 0.10s–0.30s pulse ladder and hard clamps. |
@@ -167,7 +168,7 @@ Each script is assigned one of the following canonical classifications:
 
 ## 5. Recommended Commissioning Tooling & Sequence
 
-To commission the physical robot safely, the legacy scripts in `tools/hardware_tests/` must **not** be used as-is. Instead, commissioning must follow the formal Phase 4 Runbook (`docs/PHASE4_PHYSICAL_VALIDATION_RUNBOOK.md`) utilizing the unified architecture.
+To commission the physical robot safely, the legacy scripts in `tools/hardware_tests/` must **not** be used as-is. Instead, commissioning must follow the formal Phase 4 Runbook (`docs/PHASE4_PHYSICAL_VALIDATION_RUNBOOK.md`) utilizing the unified Phase 3B architecture.
 
 ```mermaid
 flowchart TD
@@ -182,7 +183,7 @@ flowchart TD
 ```
 
 ### Approved Tooling Path:
-1. **Controller Inspection:** Read-only scripts or teaching pendant to confirm joint states, software limits, and R1–R4 coordinates in `user=0`.
+1. **Controller Inspection:** Read-only scripts or teaching pendant to confirm joint states, software limits, and R1–R4 coordinates in `user=0`. Initial connection is strictly read-only and does not energize servo drives.
 2. **Gripper Validation:** Dedicated test harness utilizing `TwoOutputGripperDriver` starting at 0.10 s pulse duration.
 3. **BoardPose Validation:** Offline verification script passing recorded R1–R4 points into `BoardPoseProvider.from_teaching_points()` to evaluate residual and tilt metrics prior to any arm motion.
-4. **Motion Validation:** `PhysicalFR3Backend` executing through `MotionCoordinator` with manual confirmation before each trajectory phase.
+4. **Motion Validation:** `PieceMoveIntent` / `CaptureIntent` $\to$ `MotionResolver` $\to$ `MotionPlan` $\to$ `MotionExecutor` $\to$ `PhysicalFR3Backend` with manual confirmation before each trajectory phase. *(Note: Legacy `MotionCoordinator` is deprecated and retained strictly for backwards compatibility; the authoritative Phase 3B pipeline is `MotionResolver` and `MotionExecutor`).*
