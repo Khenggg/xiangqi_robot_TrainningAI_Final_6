@@ -49,10 +49,16 @@ class HardwareManagerIntegrationTests(unittest.TestCase):
         hw._init_robot()
 
         self.assertIsNotNone(hw.backend)
+        self.assertIsNotNone(hw.motion_resolver)
+        self.assertIsNotNone(hw.motion_executor)
         self.assertIsNotNone(hw.motion_coordinator)
         self.assertTrue(hw.is_robot_ready)
 
-        # Test move piece execution via coordinator
+        # Test structured execute_piece_move execution
+        res = hw.execute_piece_move(s_col=0, s_row=0, d_col=0, d_row=1, is_capture=False)
+        self.assertTrue(res.success)
+
+        # Test move piece execution via wrapper
         ok = hw.move_piece(s_col=0, s_row=0, d_col=0, d_row=1, is_capture=False)
         self.assertTrue(ok)
 
@@ -73,8 +79,13 @@ class HardwareManagerIntegrationTests(unittest.TestCase):
 
         self.assertIsInstance(hw.backend, PhysicalFR3Backend)
         self.assertIsNotNone(hw.gripper_driver)
+        self.assertIsNotNone(hw.motion_resolver)
+        self.assertIsNotNone(hw.motion_executor)
         self.assertIsNotNone(hw.motion_coordinator)
         self.assertTrue(hw.is_robot_ready)
+
+        res = hw.execute_piece_move(s_col=1, s_row=2, d_col=1, d_row=3, is_capture=False)
+        self.assertTrue(res.success)
 
         ok = hw.move_piece(s_col=1, s_row=2, d_col=1, d_row=3, is_capture=False)
         self.assertTrue(ok)

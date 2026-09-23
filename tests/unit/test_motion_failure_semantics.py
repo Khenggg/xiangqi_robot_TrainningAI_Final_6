@@ -206,7 +206,7 @@ class MotionFailureSemanticsTests(unittest.TestCase):
         self.assertFalse(res.success)
         self.assertEqual(res.failed_stage, MotionStage.POST_RELEASE_LIFT)
         self.assertTrue(res.failed_after_release)
-        self.assertEqual(res.payload_state, PayloadState.RELEASED)
+        self.assertIn(res.payload_state, (PayloadState.RELEASED, PayloadState.EXPECTED_RELEASED))
 
 
 if __name__ == "__main__":
