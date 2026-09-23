@@ -36,6 +36,15 @@ class GameState:
         self.ai_result: Any = None
         self.ai_thinking: bool = False
         self.ai_think_start: float = 0.0
+        # AI may start only after a locally committed human move.  The main
+        # loop consumes each generation once, so repeated camera samples or a
+        # duplicate commit cannot create a second robot job.
+        self.human_commit_generation: int = 0
+        self.ai_started_for_human_commit_generation: int = 0
+        self.game_epoch: int = 0
+        self.ai_epoch: int = 0
+        self.ai_job_token = None
+        self.ai_results: Dict[Any, Any] = {}
         
         # Rollback State
         self._pre_space_state: Optional[Dict[str, Any]] = None
@@ -77,6 +86,8 @@ class GameState:
             
             self.api_client.end_match(winner=winner, reason=reason)
         
+        self.game_epoch += 1
+        self.ai_epoch += 1
         self.current_fen = INITIAL_FEN
         self.board, self.turn = fen_to_board_array(self.current_fen)
         self.game_over = False
@@ -95,6 +106,10 @@ class GameState:
         self.ai_result = None
         self.ai_thinking = False
         self.ai_think_start = 0.0
+        self.ai_job_token = None
+        self.ai_results = {}
+        self.human_commit_generation = 0
+        self.ai_started_for_human_commit_generation = 0
         self.manual_override_active = False
         self.physical_sync_fault = False
         self.pending_ai_move = None
@@ -121,6 +136,8 @@ class GameState:
     def handle_game_over(self, the_winner):
         self.winner = the_winner
         self.game_over = True
+        self.ai_epoch += 1
+        self.ai_job_token = None
 
     def save_rollback_state(self, baseline_occ=None, baseline_time=None):
         self._pre_space_state = {
@@ -145,6 +162,13 @@ class GameState:
             return
 
         print("[ROLLBACK] ↩️ Khôi phục trạng thái trước SPACE...")
+        self.game_epoch += 1
+        self.ai_epoch += 1
+        self.ai_job_token = None
+        self.ai_results = {}
+        self.ai_thread = None
+        self.ai_result = None
+        self.ai_thinking = False
         s = self._pre_space_state
         self.board = [row[:] for row in s["board"]]
         self.turn = s["turn"]
@@ -209,6 +233,7 @@ class GameState:
         self.last_move = (src, dst)
         
         self.turn = "b"  # Chuyển lượt
+        self.human_commit_generation += 1
         self.move_number += 1
         self.update_fen_from_board()
         print(f"[FEN] {self.current_fen}")

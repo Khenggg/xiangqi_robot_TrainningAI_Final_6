@@ -150,16 +150,21 @@ try:
                 and not state.physical_sync_fault):
             
             # --- Khởi động Thread suy nghĩ ---
-            if not state.ai_thinking and state.ai_thread is None:
+            if (not state.ai_thinking and state.ai_thread is None
+                    and state.human_commit_generation
+                    > state.ai_started_for_human_commit_generation):
                 board_snapshot = [row[:] for row in state.board]
+                state.ai_started_for_human_commit_generation = state.human_commit_generation
+                ai_job_token = (state.game_epoch, state.ai_epoch, state.human_commit_generation)
+                state.ai_job_token = ai_job_token
                 state.ai_thinking = True
                 state.ai_think_start = time.time()
                 
-                def _ai_worker():
+                def _ai_worker(job_token):
                     # Đã loại bỏ truyền difficulty, AI Controller sẽ tự handle sức mạnh cố định
-                    state.ai_result = hw.ai_ctrl.pick_move(board_snapshot, color="b")
+                    state.ai_results[job_token] = hw.ai_ctrl.pick_move(board_snapshot, color="b")
                     
-                state.ai_thread = threading.Thread(target=_ai_worker, daemon=True)
+                state.ai_thread = threading.Thread(target=_ai_worker, args=(ai_job_token,), daemon=True)
                 state.ai_thread.start()
                 print("[AI] 🧵 Thinking thread started...")
 
@@ -168,8 +173,13 @@ try:
                 if not state.ai_thread.is_alive():
                     state.ai_thinking = False
                     state.ai_thread = None
-                    best = state.ai_result
+                    completed_token = state.ai_job_token
+                    best = state.ai_results.pop(completed_token, None)
                     state.ai_result = None
+                    result_is_current = completed_token == (state.game_epoch, state.ai_epoch, state.human_commit_generation)
+                    if not result_is_current:
+                        print("[AI] Discarded stale worker result.")
+                        best = None
                     
                     # Chống Loop
                     if best:
@@ -268,7 +278,7 @@ try:
                                     hw.clear_yolo_baseline()
                                     state.set_status(f"🤖 AI: ({s[0]},{s[1]})→({d[0]},{d[1]}) | Di quân rồi SPACE", color=(0, 80, 160), duration=30.0)
                                 print("[GAME] Your turn...")
-                    else:
+                    elif result_is_current:
                         print("[AI] No moves available -> AI Lost")
                         state.handle_game_over("r")
                         state.api_client.end_match(winner="RED", reason="CHECKMATE")
