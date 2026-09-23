@@ -99,7 +99,8 @@ class MotionFailureSemanticsTests(unittest.TestCase):
             MotionStep(6, MotionStage.TRANSIT, MotionType.CARTESIAN_LINEAR, waypoint=transit_dst),
             MotionStep(7, MotionStage.PLACE_LAND, MotionType.CARTESIAN_LINEAR, waypoint=land_dst),
             MotionStep(8, MotionStage.RELEASE, MotionType.GRIPPER, gripper_command=GripperCommand.OPEN),
-            MotionStep(9, MotionStage.POST_RELEASE_LIFT, MotionType.CARTESIAN_LINEAR, waypoint=lift_dst),
+            MotionStep(9, MotionStage.SETTLE, MotionType.WAIT, wait_duration_s=0.1, expected_payload_state=PayloadState.RELEASED),
+            MotionStep(10, MotionStage.POST_RELEASE_LIFT, MotionType.CARTESIAN_LINEAR, waypoint=lift_dst),
         )
         return MotionPlan(task_id="move-fault-test", plan_type="MOVE", steps=steps)
 
@@ -152,7 +153,7 @@ class MotionFailureSemanticsTests(unittest.TestCase):
         Verify failure during TRANSIT:
         - Piece was already grasped at step 3.
         - Failure occurs during transit (call index 3: 0=app, 1=land, 2=lift, 3=transit).
-        - failed_while_carrying == True, payload_state == ATTACHED.
+        - failed_while_carrying == True, payload_state reflects EXPECTED_ATTACHED or ATTACHED.
         """
         self.backend._fail_cartesian_at_index = 3  # TRANSIT call
         plan = self._build_test_move_plan()
@@ -164,7 +165,16 @@ class MotionFailureSemanticsTests(unittest.TestCase):
         self.assertTrue(res.failed_while_carrying)
         self.assertFalse(res.failed_before_grasp)
         self.assertFalse(res.failed_after_release)
-        self.assertEqual(res.payload_state, PayloadState.ATTACHED)
+        # Without external verifier, payload state remains EXPECTED_ATTACHED
+        self.assertEqual(res.payload_state, PayloadState.EXPECTED_ATTACHED)
+
+        # With external verifier, payload state advances to ATTACHED
+        executor_with_ver = MotionExecutor(backend=self.backend, payload_verifier=lambda st: True)
+        self.backend._cartesian_call_count = 0
+        res_ver = executor_with_ver.execute_plan(plan)
+        self.assertFalse(res_ver.success)
+        self.assertTrue(res_ver.failed_while_carrying)
+        self.assertEqual(res_ver.payload_state, PayloadState.ATTACHED)
 
     def test_release_failure_does_not_claim_released(self):
         """

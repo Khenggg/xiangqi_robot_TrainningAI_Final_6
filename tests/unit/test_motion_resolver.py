@@ -132,7 +132,9 @@ class MotionResolverTests(unittest.TestCase):
     def test_generic_resolve_dispatch(self):
         """Verify resolver.resolve() automatically routes all intent subclasses."""
         move = PieceMoveIntent(src_row=0.0, src_col=0.0, dst_row=1.0, dst_col=0.0)
-        capture = CaptureIntent(src_row=0.0, src_col=0.0, dst_row=1.0, dst_col=0.0)
+        capture = CaptureIntent(
+            src_row=0.0, src_col=0.0, dst_row=1.0, dst_col=0.0, bin_cell=(0.0, -1.0)
+        )
         pick = BoardPickIntent(row=2.0, col=2.0)
         place = BoardPlaceIntent(row=3.0, col=3.0)
 
@@ -140,6 +142,23 @@ class MotionResolverTests(unittest.TestCase):
         self.assertEqual(self.resolver.resolve(capture).plan_type, "CAPTURE")
         self.assertEqual(self.resolver.resolve(pick).plan_type, "PICK")
         self.assertEqual(self.resolver.resolve(place).plan_type, "PLACE")
+
+    def test_capture_intent_missing_bin_rejected(self):
+        """Verify CaptureIntent raises ValueError if neither bin_cell nor bin_pose_mm_deg is given."""
+        with self.assertRaises(ValueError):
+            CaptureIntent(src_row=0.0, src_col=0.0, dst_row=1.0, dst_col=0.0)
+
+    def test_semantic_coordinates_out_of_bounds_rejected(self):
+        """Verify task intents reject out-of-bounds coordinates beyond allowable continuous tolerance."""
+        with self.assertRaises(ValueError):
+            BoardPickIntent(row=15.0, col=0.0)
+        with self.assertRaises(ValueError):
+            PieceMoveIntent(src_row=0.0, src_col=0.0, dst_row=10.5, dst_col=0.0)
+
+    def test_board_pose_provider_required(self):
+        """Verify MotionResolver raises ValueError if board_pose_provider is None."""
+        with self.assertRaises(ValueError):
+            MotionResolver(board_pose_provider=None)  # type: ignore
 
 
 if __name__ == "__main__":

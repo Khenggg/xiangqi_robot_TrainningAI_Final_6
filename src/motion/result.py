@@ -201,7 +201,11 @@ class MotionExecutionResult:
         """
         if self.success:
             return False
-        if self.payload_state in (PayloadState.ATTACHED, PayloadState.EXPECTED_RELEASED):
+        if self.payload_state in (
+            PayloadState.ATTACHED,
+            PayloadState.EXPECTED_ATTACHED,
+            PayloadState.EXPECTED_RELEASED,
+        ):
             return True
         carrying_stages = {
             MotionStage.LIFT,

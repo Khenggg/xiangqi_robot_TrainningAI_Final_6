@@ -39,12 +39,14 @@ class MotionResolver:
 
     def __init__(
         self,
-        board_pose_provider: Optional[BoardPoseProvider] = None,
+        board_pose_provider: BoardPoseProvider,
         motion_profile: Optional[MotionProfile] = None,
         tool_rotation_deg: Sequence[float] = (180.0, 0.0, 90.0),
         default_speed_factor: float = 1.0,
     ):
-        self.board_pose_provider = board_pose_provider or FixedBoardPoseProvider()
+        if board_pose_provider is None:
+            raise ValueError("board_pose_provider must be explicitly provided to MotionResolver")
+        self.board_pose_provider = board_pose_provider
         self.motion_profile = motion_profile or MotionProfile()
         self.tool_rotation_deg = list(tool_rotation_deg)
         self.default_speed_factor = float(default_speed_factor)
@@ -231,10 +233,14 @@ class MotionResolver:
             bin_place = list(intent.bin_pose_mm_deg)
             bin_app = list(bin_place)
             bin_app[2] += prof.safe_clearance_above_board_mm
-        else:
-            bin_r, bin_c = intent.bin_cell if intent.bin_cell is not None else (-1.0, -1.0)
+        elif intent.bin_cell is not None:
+            bin_r, bin_c = intent.bin_cell
             bin_app = self._cell_to_pose_mm_deg(state, bin_r, bin_c, clearance_m, rot)
             bin_place = self._cell_to_pose_mm_deg(state, bin_r, bin_c, place_z_m, rot)
+        else:
+            raise ValueError(
+                "Capture requires explicit bin_pose_mm_deg or bin_cell; none provided"
+            )
 
         # Poses for attacking piece at source
         a_app = self._cell_to_pose_mm_deg(state, intent.src_row, intent.src_col, clearance_m, rot)

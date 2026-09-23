@@ -15,6 +15,15 @@ from src.motion.result import PayloadState
 from src.motion.stages import MotionStage
 
 
+def _validate_board_coord(row: float, col: float, name: str = "cell", tol: float = 0.5) -> None:
+    """Validate continuous board coordinates within 0..9 rows and 0..8 cols with continuous tolerance."""
+    if not (-tol <= row <= 9.0 + tol and -tol <= col <= 8.0 + tol):
+        raise ValueError(
+            f"Semantic board coordinates {name}=({row:.3f}, {col:.3f}) out of bounds "
+            f"[0..9, 0..8] with tolerance {tol:.2f}"
+        )
+
+
 # ==============================================================================
 # Layer 1: Semantic Task Intents (Operate on Row, Col — NEVER Robot XYZ)
 # ==============================================================================
@@ -33,6 +42,7 @@ class BoardPickIntent:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
+        _validate_board_coord(self.row, self.col, "pick")
         meta_dict = dict(self.metadata) if self.metadata else {}
         object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
 
@@ -47,6 +57,7 @@ class BoardPlaceIntent:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
+        _validate_board_coord(self.row, self.col, "place")
         meta_dict = dict(self.metadata) if self.metadata else {}
         object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
 
@@ -64,6 +75,8 @@ class PieceMoveIntent:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
+        _validate_board_coord(self.src_row, self.src_col, "src")
+        _validate_board_coord(self.dst_row, self.dst_col, "dst")
         meta_dict = dict(self.metadata) if self.metadata else {}
         object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
 
@@ -74,18 +87,26 @@ class CaptureIntent:
     Semantic intent to execute a capture move:
     1. Remove opponent piece at (dst_row, dst_col) to capture bin.
     2. Move attacking piece from (src_row, src_col) to (dst_row, dst_col).
+
+    Requires explicit bin target: either bin_pose_mm_deg or bin_cell must be provided.
     """
     src_row: float
     src_col: float
     dst_row: float
     dst_col: float
-    bin_cell: Optional[Tuple[float, float]] = (-1.0, -1.0)
+    bin_cell: Optional[Tuple[float, float]] = None
     bin_pose_mm_deg: Optional[Tuple[float, float, float, float, float, float]] = None
     attacker_piece_id: Optional[str] = None
     captured_piece_id: Optional[str] = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
+        _validate_board_coord(self.src_row, self.src_col, "src")
+        _validate_board_coord(self.dst_row, self.dst_col, "dst")
+        if self.bin_cell is None and self.bin_pose_mm_deg is None:
+            raise ValueError(
+                "CaptureIntent requires explicit bin_cell or bin_pose_mm_deg; cannot be empty"
+            )
         meta_dict = dict(self.metadata) if self.metadata else {}
         object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
 

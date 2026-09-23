@@ -117,12 +117,24 @@ class MotionExecutorTests(unittest.TestCase):
         self.assertEqual(res.last_completed_stage, MotionStage.LIFT)
         self.assertIsNone(res.failed_stage)
         self.assertEqual(res.failure_category, MotionFailureCategory.NONE)
-        self.assertEqual(res.payload_state, PayloadState.ATTACHED)
+        # Without external payload_verifier, state remains EXPECTED_ATTACHED
+        self.assertEqual(res.payload_state, PayloadState.EXPECTED_ATTACHED)
 
         # Verify dispatched backend calls
         self.assertEqual(len(self.backend.move_cartesian_calls), 3)  # approach, land, lift
         self.assertEqual(len(self.backend.set_gripper_calls), 1)     # close
         self.assertEqual(self.backend.set_gripper_calls[0], True)
+
+        # With payload_verifier confirming attachment, state advances to ATTACHED
+        executor_with_ver = MotionExecutor(
+            backend=self.backend,
+            board_pose_provider=self.provider,
+            sleep_fn=self.sleep_mock,
+            payload_verifier=lambda st: True,
+        )
+        res_ver = executor_with_ver.execute_plan(plan)
+        self.assertTrue(res_ver.success)
+        self.assertEqual(res_ver.payload_state, PayloadState.ATTACHED)
 
     def test_backend_not_ready_sends_zero_commands(self):
         """Verify unready backend aborts immediately with BACKEND_NOT_READY and zero commands sent."""
@@ -143,6 +155,15 @@ class MotionExecutorTests(unittest.TestCase):
 
         self.assertFalse(res_err.success)
         self.assertEqual(res_err.failure_category, MotionFailureCategory.BACKEND_NOT_READY)
+        self.assertEqual(len(self.backend.move_cartesian_calls), 0)
+        self.assertEqual(len(self.backend.set_gripper_calls), 0)
+
+        # Case C: In MOVING state
+        self.backend._motion_state = "MOVING"
+        res_mov = self.executor.execute_plan(plan)
+
+        self.assertFalse(res_mov.success)
+        self.assertEqual(res_mov.failure_category, MotionFailureCategory.BACKEND_NOT_READY)
         self.assertEqual(len(self.backend.move_cartesian_calls), 0)
         self.assertEqual(len(self.backend.set_gripper_calls), 0)
 
@@ -186,6 +207,31 @@ class MotionExecutorTests(unittest.TestCase):
 
         self.assertTrue(res.success)
         self.sleep_mock.assert_called_once_with(0.75)
+
+    def test_backend_exception_handling_fails_gracefully(self):
+        """Verify backend methods raising exceptions are caught and return structured failure results."""
+        self.backend.move_cartesian = MagicMock(side_effect=RuntimeError("RPC socket crash"))
+        plan = self._create_sample_pick_plan()
+        res = self.executor.execute_plan(plan)
+
+        self.assertFalse(res.success)
+        self.assertEqual(res.failure_category, MotionFailureCategory.MOTION_COMMAND_FAILED)
+        self.assertIn("RPC socket crash", res.message)
+
+    def test_public_last_error_precedence(self):
+        """Verify snapshot.last_error is prioritized over private _last_error."""
+        import dataclasses
+        self.backend.move_cartesian = MagicMock(return_value=False)
+        self.backend._last_error = "private error"
+        snap = self.backend.get_state_snapshot()
+        # Mock get_state_snapshot to return last_error="public error"
+        new_snap = dataclasses.replace(snap, last_error="public error")
+        self.backend.get_state_snapshot = MagicMock(return_value=new_snap)
+
+        plan = self._create_sample_pick_plan()
+        res = self.executor.execute_plan(plan)
+        self.assertFalse(res.success)
+        self.assertIn("public error", res.message)
 
 
 if __name__ == "__main__":
