@@ -565,6 +565,8 @@ const state = {
   boardHeightOffsetMm: 0.0,
 };
 window.__state = state;
+window.__scene = scene;
+window.THREE = THREE;
 
 async function switchRobotProfile(profileId) {
   const profile = getRobotProfile(profileId);
@@ -1830,57 +1832,61 @@ function handleBackendError(errMsg) {
 function goToCell(row, col) {
   state.selectedCell = { row, col };
 
+  if (!physicalGeometryRef) {
+    handleBackendError("Board physical geometry is unavailable. Cannot calculate cell coordinates.");
+    return;
+  }
+
+  const pt = boardPointToXYZ(row, col, physicalGeometryRef);
+
+  // Map Three.js world frame to robot base frame:
+  // X_robot = -Z_world, Y_robot = -X_world, Z_robot = +Y_world
+  const robX = -pt.z;
+  const robY = -pt.x;
+  const robZ = pt.y;
+  const cell = { row, col, x_m: robX, y_m: robY, z_m: robZ };
+
   // Update 3D ring marker & coordinates
   const ring = getOrCreateTargetRing();
-  if (physicalGeometryRef) {
-    const pt = boardPointToXYZ(row, col, physicalGeometryRef);
-    ring.position.set(pt.x, pt.y + 0.001, pt.z);
-    ring.material.color.setHex(0x58a6ff);
+  ring.position.set(pt.x, pt.y + 0.001, pt.z);
+  ring.material.color.setHex(0x58a6ff);
 
-    // Map Three.js world frame to robot base frame:
-    // X_robot = -Z_world, Y_robot = -X_world, Z_robot = +Y_world
-    const robX = -pt.z;
-    const robY = -pt.x;
-    const robZ = pt.y;
-    const cell = { row, col, x_m: robX, y_m: robY, z_m: robZ };
+  const worldX_mm = (pt.x * 1000).toFixed(1);
+  const worldY_mm = (pt.y * 1000).toFixed(1);
+  const worldZ_mm = (pt.z * 1000).toFixed(1);
 
-    const worldX_mm = (pt.x * 1000).toFixed(1);
-    const worldY_mm = (pt.y * 1000).toFixed(1);
-    const worldZ_mm = (pt.z * 1000).toFixed(1);
+  const robX_mm = (robX * 1000).toFixed(1);
+  const robY_mm = (robY * 1000).toFixed(1);
+  const robZ_mm = (robZ * 1000).toFixed(1);
 
-    const robX_mm = (robX * 1000).toFixed(1);
-    const robY_mm = (robY * 1000).toFixed(1);
-    const robZ_mm = (robZ * 1000).toFixed(1);
-
-    const coordReadoutEl = document.getElementById("coordReadout");
-    if (coordReadoutEl) {
-      coordReadoutEl.textContent = `X: ${worldX_mm}mm | Y: ${worldY_mm}mm | Z: ${worldZ_mm}mm`;
-    }
-    const diagWorldCoord = document.getElementById("diagWorldCoord");
-    if (diagWorldCoord) {
-      diagWorldCoord.textContent = `X: ${worldX_mm}mm, Y: ${worldY_mm}mm, Z: ${worldZ_mm}mm`;
-    }
-    const diagRobotCoord = document.getElementById("diagRobotCoord");
-    if (diagRobotCoord) {
-      diagRobotCoord.textContent = `X: ${robX_mm}mm, Y: ${robY_mm}mm, Z: ${robZ_mm}mm`;
-    }
-
-    // Dynamic dimension line from origin to cell
-    if (activeDimensionTape) {
-      scene.remove(activeDimensionTape);
-      activeDimensionTape = null;
-    }
-    const distMm = (Math.hypot(pt.x, pt.z) * 1000).toFixed(0);
-    activeDimensionTape = createDimensionTape(
-      new THREE.Vector3(0, 0.002, 0),
-      new THREE.Vector3(pt.x, 0.002, pt.z),
-      `R = ${distMm}mm (Ô row=${row}, col=${col})`
-    );
-    if (coordinateRulerGroup) {
-      activeDimensionTape.visible = coordinateRulerGroup.visible;
-    }
-    scene.add(activeDimensionTape);
+  const coordReadoutEl = document.getElementById("coordReadout");
+  if (coordReadoutEl) {
+    coordReadoutEl.textContent = `X: ${worldX_mm}mm | Y: ${worldY_mm}mm | Z: ${worldZ_mm}mm`;
   }
+  const diagWorldCoord = document.getElementById("diagWorldCoord");
+  if (diagWorldCoord) {
+    diagWorldCoord.textContent = `X: ${worldX_mm}mm, Y: ${worldY_mm}mm, Z: ${worldZ_mm}mm`;
+  }
+  const diagRobotCoord = document.getElementById("diagRobotCoord");
+  if (diagRobotCoord) {
+    diagRobotCoord.textContent = `X: ${robX_mm}mm, Y: ${robY_mm}mm, Z: ${robZ_mm}mm`;
+  }
+
+  // Dynamic dimension line from origin to cell
+  if (activeDimensionTape) {
+    scene.remove(activeDimensionTape);
+    activeDimensionTape = null;
+  }
+  const distMm = (Math.hypot(pt.x, pt.z) * 1000).toFixed(0);
+  activeDimensionTape = createDimensionTape(
+    new THREE.Vector3(0, 0.002, 0),
+    new THREE.Vector3(pt.x, 0.002, pt.z),
+    `R = ${distMm}mm (Ô row=${row}, col=${col})`
+  );
+  if (coordinateRulerGroup) {
+    activeDimensionTape.visible = coordinateRulerGroup.visible;
+  }
+  scene.add(activeDimensionTape);
 
   // Update inputs
   const rowSelect = document.getElementById("cellRowSelect");
@@ -1893,35 +1899,29 @@ function goToCell(row, col) {
 
   state.targetDestinationCell = cell;
 
+  if (!hasRobotCommandAuthority()) {
+    handleBackendError("Connect to a collision-validated backend pose before requesting cell motion.");
+    return;
+  }
+
   // Dispatch authoritative trajectory command to backend via WebSocket
-  if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
-    const srcRow = state.currentCell ? state.currentCell.row : 4;
-    const srcCol = state.currentCell ? state.currentCell.col : 4;
-    const cmd = {
-      command: "EXECUTE_3STAGE",
-      src: [srcRow, srcCol],
-      dst: [row, col],
-      placement_version: state.placementVersion || 1,
-      grasp_piece: false,
-    };
-    state.liveSocket.send(JSON.stringify(cmd));
-    const badge = document.getElementById("diagStatusBadge");
-    if (badge) {
-      badge.className = "badge-warn";
-      badge.textContent = "GỬI LỆNH TỚI BACKEND...";
-    }
-  } else {
-    const badge = document.getElementById("diagStatusBadge");
-    if (badge) {
-      badge.className = "badge-warn";
-      badge.textContent = "CHƯA KẾT NỐI WEBSOCKET";
-    }
-    const expl = document.getElementById("diagExplanation");
-    if (expl) {
-      expl.innerHTML = `<span style="color:#d29922">⚠️ <strong>Chưa kết nối Backend:</strong> Bấm nút <em>Connect live</em> để kết nối với WebSocket runtime (Single Motion Authority).</span>`;
-    }
+  const srcRow = state.currentCell ? state.currentCell.row : 4;
+  const srcCol = state.currentCell ? state.currentCell.col : 4;
+  const cmd = {
+    command: "EXECUTE_3STAGE",
+    src: [srcRow, srcCol],
+    dst: [row, col],
+    placement_version: state.placementVersion || 1,
+    grasp_piece: false,
+  };
+  state.liveSocket.send(JSON.stringify(cmd));
+  const badge = document.getElementById("diagStatusBadge");
+  if (badge) {
+    badge.className = "badge-warn";
+    badge.textContent = "GỬI LỆNH TỚI BACKEND...";
   }
 }
+window.goToCell = goToCell;
 
 // ---------------------------------------------------------------------------
 // 6) VÒNG LẶP RENDER

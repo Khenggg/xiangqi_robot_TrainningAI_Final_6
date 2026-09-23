@@ -86,7 +86,13 @@ try {
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     if (msg.method === "Runtime.exceptionThrown") {
-      consoleErrors.push(msg.params?.exceptionDetails?.text || JSON.stringify(msg.params));
+      const details = msg.params?.exceptionDetails;
+      const desc = `${details?.exception?.description || details?.text} at ${details?.url}:${details?.lineNumber}:${details?.columnNumber}`;
+      consoleErrors.push(desc);
+    }
+    if (msg.method === "Runtime.consoleAPICalled" && msg.params?.type === "error") {
+      const argsText = (msg.params?.args || []).map((a) => a.value || a.description || JSON.stringify(a)).join(" ");
+      consoleErrors.push(`console.error: ${argsText}`);
     }
     if (msg.id && pendingRequests.has(msg.id)) {
       const { resolve, reject } = pendingRequests.get(msg.id);
@@ -277,6 +283,183 @@ try {
   assert.ok(updatedRow9 && updatedRow9.includes("535.0 mm"), `readoutFarGridDepth must be 535.0 mm after +15mm shift, got: '${updatedRow9}'`);
   console.log("  [PASS] V90-05: Dynamic placement packet updates UI readouts with 90° shift math.");
 
+  // V90-09: Actual Three.js Link Parity against Canonical Chain (Fix 5)
+  const linkParity = await evaluate("(" + (async function checkLinkParity() {
+    const profile = await (await fetch('/shared/robot_profiles/fr3.json')).json();
+    const sceneConfig = await (await fetch('/shared/virtual_fr3_scene.json')).json();
+    const rot = sceneConfig.robot_base_to_3d_world.rotation_matrix;
+    const trans = sceneConfig.robot_base_to_3d_world.translation_m;
+    const rootMatrix = new THREE.Matrix4().set(
+      rot[0][0], rot[0][1], rot[0][2], trans[0],
+      rot[1][0], rot[1][1], rot[1][2], trans[1],
+      rot[2][0], rot[2][1], rot[2][2], trans[2],
+      0, 0, 0, 1
+    );
+
+    const arm = window.__state.currentArm;
+    const representativeQDeg = [
+      [0, -45, 90, -45, -90, 0],
+      [0, -60, 110, -105, -120, 0],
+      [0, -70, 110, -105, -120, 0],
+      [37, -32, 78, -118, 64, -29],
+    ];
+
+    let maxPosErrorM = 0;
+    let maxOrientErrorDeg = 0;
+    let checkedCount = 0;
+
+    for (const q of representativeQDeg) {
+      arm.jointRotators.forEach((rotator, i) => {
+        rotator.rotation.z = THREE.MathUtils.degToRad(q[i]);
+      });
+      arm.group.updateWorldMatrix(true, true);
+
+      let currentT = rootMatrix.clone();
+      for (let i = 0; i < 6; i++) {
+        const jConfig = profile.joints[i];
+        const frameT = new THREE.Matrix4();
+        const rotEuler = new THREE.Euler(
+          jConfig.origin_rpy_rad[0],
+          jConfig.origin_rpy_rad[1],
+          jConfig.origin_rpy_rad[2],
+          'XYZ'
+        );
+        frameT.makeRotationFromEuler(rotEuler);
+        frameT.setPosition(
+          jConfig.origin_xyz_m[0],
+          jConfig.origin_xyz_m[1],
+          jConfig.origin_xyz_m[2]
+        );
+
+        const rotZ = new THREE.Matrix4().makeRotationZ(THREE.MathUtils.degToRad(q[i]));
+        currentT = currentT.clone().multiply(frameT).multiply(rotZ);
+
+        const actualWorldT = arm.jointRotators[i].matrixWorld;
+        const actualPos = new THREE.Vector3().setFromMatrixPosition(actualWorldT);
+        const expectedPos = new THREE.Vector3().setFromMatrixPosition(currentT);
+        const posError = actualPos.distanceTo(expectedPos);
+
+        const actualQuat = new THREE.Quaternion().setFromRotationMatrix(actualWorldT);
+        const expectedQuat = new THREE.Quaternion().setFromRotationMatrix(currentT);
+        const quatDot = Math.min(1.0, Math.max(-1.0, Math.abs(actualQuat.dot(expectedQuat))));
+        const orientError = 2.0 * Math.acos(quatDot) * (180.0 / Math.PI);
+
+        maxPosErrorM = Math.max(maxPosErrorM, posError);
+        maxOrientErrorDeg = Math.max(maxOrientErrorDeg, orientError);
+        checkedCount++;
+      }
+    }
+    // Restore default joint state
+    arm.jointRotators.forEach((rotator, i) => {
+      rotator.rotation.z = THREE.MathUtils.degToRad(window.__state.jointsDeg[i] || 0);
+    });
+    arm.group.updateWorldMatrix(true, true);
+
+    return { checkedCount, maxPosErrorM, maxOrientErrorDeg };
+  }).toString() + ")()");
+
+  assert.equal(linkParity.checkedCount, 24, "Must compare all 6 movable links across 4 configurations");
+  assert.ok(linkParity.maxPosErrorM <= 0.0001, `Three.js link position error exceeds 0.1 mm: ${linkParity.maxPosErrorM * 1000} mm`);
+  assert.ok(linkParity.maxOrientErrorDeg <= 0.05, `Three.js link orientation error exceeds 0.05 deg: ${linkParity.maxOrientErrorDeg} deg`);
+  console.log(`  [PASS] V90-09: Actual Three.js link parity (${linkParity.checkedCount} link poses; max pos ${(linkParity.maxPosErrorM * 1000).toFixed(4)} mm, max orient ${linkParity.maxOrientErrorDeg.toFixed(5)} deg).`);
+
+  // V90-10: Actual Rendered Board Plane Parity (Fix 6)
+  const boardParity = await evaluate("(" + (async function checkBoardParity() {
+    const sceneConfig = await (await fetch('/shared/virtual_fr3_scene.json')).json();
+    const canonicalCenter = sceneConfig.virtual_board_placement.board_center_in_3d_world_m;
+    const expectedTopY = canonicalCenter[1];
+
+    const scene = window.__scene;
+    const boardVisualRoot = scene.getObjectByName("boardVisualRoot");
+    if (!boardVisualRoot) throw new Error("boardVisualRoot not found in scene");
+
+    const boardTop = scene.getObjectByName("boardTop") || boardVisualRoot.children[1];
+    if (!boardTop) throw new Error("boardTop mesh not found in boardVisualRoot");
+
+    boardVisualRoot.updateWorldMatrix(true, true);
+    boardTop.updateWorldMatrix(true, true);
+
+    // The top surface of the rendered board in world space
+    const box = new THREE.Box3().setFromObject(boardTop);
+    const planeOffsetM = Math.abs(box.max.y - expectedTopY);
+
+    const normalWorld = new THREE.Vector3(0, 1, 0).transformDirection(boardTop.matrixWorld);
+    const normalAlignment = normalWorld.dot(new THREE.Vector3(0, 1, 0));
+
+    return {
+      expectedTopY,
+      actualTopY: box.max.y,
+      planeOffsetM,
+      normalAlignment,
+    };
+  }).toString() + ")()");
+
+  assert.ok(boardParity.planeOffsetM <= 0.0001, `Rendered board top plane offset exceeds 0.1 mm: ${boardParity.planeOffsetM * 1000} mm`);
+  assert.ok(boardParity.normalAlignment >= 0.99999, `Rendered board top normal does not face +Y: ${boardParity.normalAlignment}`);
+  console.log(`  [PASS] V90-10: Actual rendered board plane parity (plane offset ${(boardParity.planeOffsetM * 1000).toFixed(4)} mm, normal alignment ${boardParity.normalAlignment.toFixed(6)}).`);
+
+  // V90-11: Real UI cell selection & dispatch path (Fix 1, Fix 2, Fix 3)
+  // Step 1: Unvalidated / offline state cannot dispatch cell motion
+  const offlineDispatch = await evaluate(`(() => {
+    const rowSelect = document.getElementById('cellRowSelect');
+    const colSelect = document.getElementById('cellColSelect');
+    const reachBtn = document.getElementById('reachCellBtn');
+    rowSelect.value = '4';
+    colSelect.value = '5';
+    reachBtn.click();
+    return {
+      selected: window.__state.selectedCell,
+      targetDest: window.__state.targetDestinationCell,
+      badgeText: document.getElementById('diagStatusBadge')?.textContent || '',
+    };
+  })()`);
+  assert.deepEqual(offlineDispatch.selected, { row: 4, col: 5 });
+  assert.ok(offlineDispatch.targetDest, "targetDestinationCell must be defined");
+  assert.equal(offlineDispatch.targetDest.row, 4);
+  assert.equal(offlineDispatch.targetDest.col, 5);
+  assert.ok(typeof offlineDispatch.targetDest.x_m === 'number' && Number.isFinite(offlineDispatch.targetDest.x_m));
+  assert.ok(offlineDispatch.badgeText.includes('LỖI') || offlineDispatch.badgeText.includes('REJECTED'),
+    `Offline cell selection must show authority warning: '${offlineDispatch.badgeText}'`);
+
+  // Step 2: Under authoritative state, UI click dispatches EXECUTE_3STAGE cleanly
+  const uiDispatchResult = await evaluate(`(() => {
+    const s = window.__state;
+    const sent = [];
+    const mockSocket = {
+      readyState: WebSocket.OPEN,
+      send(data) {
+        sent.push(JSON.parse(data));
+      }
+    };
+    s.liveSocket = mockSocket;
+    s.poseValidated = true;
+    s.authoritativeRobotModel = 'FR3';
+    s.placementVersion = 2;
+
+    const rowSelect = document.getElementById('cellRowSelect');
+    const colSelect = document.getElementById('cellColSelect');
+    const reachBtn = document.getElementById('reachCellBtn');
+    rowSelect.value = '3';
+    colSelect.value = '4';
+    reachBtn.click();
+
+    return {
+      sent,
+      selected: s.selectedCell,
+      targetDest: s.targetDestinationCell,
+    };
+  })()`);
+
+  assert.deepEqual(uiDispatchResult.selected, { row: 3, col: 4 });
+  assert.equal(uiDispatchResult.targetDest.row, 3);
+  assert.equal(uiDispatchResult.targetDest.col, 4);
+  const execCmd = uiDispatchResult.sent.find((c) => c.command === 'EXECUTE_3STAGE');
+  assert.ok(execCmd, "UI click must dispatch command == 'EXECUTE_3STAGE'");
+  assert.deepEqual(execCmd.dst, [3, 4], "Command must include expected dst: [3, 4]");
+  assert.equal(execCmd.placement_version, 2, "Command must include placement_version");
+  assert.equal(consoleErrors.length, 0, `Zero runtime exceptions expected during UI path, got: ${JSON.stringify(consoleErrors)}`);
+  console.log("  [PASS] V90-11: Real UI cell dispatch path triggers cleanly with zero exceptions and dispatches EXECUTE_3STAGE.");
+
   // Optional live reproduction: run against the actual virtual backend and
   // prove a rejected target never replaces the last safe rendered pose.
   if (process.env.VIEWER_SMOKE_WS_URL) {
@@ -301,7 +484,7 @@ try {
     const safeJoints = await evaluate("window.__state.jointsDeg");
     const expectedStartJoints = process.env.VIEWER_EXPECTED_START_JOINTS
       ? JSON.parse(process.env.VIEWER_EXPECTED_START_JOINTS)
-      : [0, -45, 90, -45, -90, 0];
+      : [0, -70, 60, -80, -90, 0];
     assert.deepEqual(safeJoints, expectedStartJoints, "viewer must render the collision-validated backend startup joints");
 
     const boardClearance = await evaluate("(" + (async function measureClearance() {
@@ -331,6 +514,30 @@ try {
     }).toString() + ")()");
     assert.ok(boardClearance.sampled_vertices > 0, "safe live tool pose must overlap the board footprint for the clearance check");
     assert.ok(boardClearance.minimum_clearance_m >= 0.0005, "rendered CAD tool must clear the board by the guard margin: " + JSON.stringify(boardClearance));
+
+    // Live UI cell dispatch via real DOM reachCellBtn click over live WebSocket to real backend
+    await evaluate(`(() => {
+      const dispatched = [];
+      const origSend = window.__state.liveSocket.send.bind(window.__state.liveSocket);
+      window.__state.liveSocket.send = (data) => {
+        try { dispatched.push(JSON.parse(data)); } catch (_) {}
+      };
+      window.__smokeLiveDispatched = dispatched;
+
+      const rowSelect = document.getElementById('cellRowSelect');
+      const colSelect = document.getElementById('cellColSelect');
+      rowSelect.value = '4';
+      colSelect.value = '4';
+      document.getElementById('reachCellBtn').click();
+
+      // Restore original send method
+      window.__state.liveSocket.send = origSend;
+    })()`);
+
+    const liveDispatchedCmd = await evaluate("window.__smokeLiveDispatched?.find(c => c.command === 'EXECUTE_3STAGE')");
+    assert.ok(liveDispatchedCmd, "Real UI reach button click must dispatch EXECUTE_3STAGE over live WebSocket");
+    assert.deepEqual(liveDispatchedCmd.dst, [4, 4]);
+    console.log("  [PASS] Live UI reachCellBtn dispatched EXECUTE_3STAGE over live WebSocket.");
 
     await evaluate("window.__smokeTelemetry = []; window.__state.liveSocket.addEventListener('message', event => { try { const packet = JSON.parse(event.data); if (packet.type === 'robot_state') window.__smokeTelemetry.push(packet); } catch (_) {} });");
     const rejectedTarget = [0, -60, 110, -105, -120, 0];

@@ -366,6 +366,8 @@ export function buildBoardGrid(geometry = null) {
     new THREE.BoxGeometry(meshWidth, boardThickness, meshDepth),
     boardMaterial
   );
+  boardTop.name = "boardTop";
+  boardTop.userData = { isBoardTop: true };
   boardTop.position.set(0, -boardThickness / 2, 0);
   boardTop.receiveShadow = true;
   group.add(boardTop);
