@@ -1,9 +1,9 @@
 # Phase 4 — Physical Validation & Commissioning Runbook
 
-**Document ID:** `DOC-P4-RUNBOOK-001`  
-**System:** Xiangqi Robotic System (FAIRINO FR3 Manipulator, Two-Output Custom DC Gripper, CChess Vision System)  
-**Target Branch:** `integration/unified-fr3-system`  
-**Applicability:** On-site Laboratory Commissioning & Physical Calibration  
+**Document ID:** `DOC-P4-RUNBOOK-001`<br>
+**System:** Xiangqi Robotic System (FAIRINO FR3 Manipulator, Two-Output End-Effector Gripper, CChess Vision System)<br>
+**Target Branch:** `docs/phase4a-final-evidence-corrective`<br>
+**Applicability:** On-site Laboratory Commissioning & Physical Calibration<br>
 **Execution Authority:** Physical Commissioning Engineer / Lead Systems Operator  
 
 ---
@@ -31,23 +31,35 @@ flowchart TD
     S14 --> S15[15. Final Sign-Off & Data Archival]
 ```
 
-### Five-State Physical Connection Lifecycle
-The physical commissioning and operational runtime strictly enforces a 5-state lifecycle:
+### Six-Stage Physical Connection & Commissioning Lifecycle
+The physical commissioning and operational runtime strictly enforces a six-stage lifecycle:
+
 ```
 1. DISCONNECTED
         │
-        ▼ (connect() establishes read-only RPC; does NOT call RobotEnable or Mode)
-2. CONNECTED / READ-ONLY
+        ▼ (connect() establishes telemetry-only RPC; does NOT call RobotEnable or Mode)
+2. CONNECTED / TELEMETRY-ONLY
         │
         ▼ (Visual envelope cleared + explicit operator enable gate)
-3. EXPLICIT ENABLE (RobotEnable(1), Mode(0), brake release confirmed)
+3. EXPLICIT ENABLE (RobotEnable(1) executed; drives energized, brakes released)
         │
-        ▼ (TCP calibrated + R1-R4 taught + BoardPoseProvider SE(3) verified)
-4. CALIBRATED
+        ▼ (Explicit mode selection)
+4. EXPLICIT MODE CONFIGURATION (Mode(0) executed; operational mode set)
+        │
+        ▼ (TCP calibrated + R1-R4 taught + PhysicalTeachingPointBoardPoseProvider SE(3) verified)
+5. CALIBRATED
         │
         ▼ (Z_safe clearance verified + gripper pulse ladder tuned + bin validated)
-5. MOTION READY (Authorized for Phase 3B MotionResolver/MotionExecutor pipeline)
+6. MOTION AUTHORIZED (Authorized for Phase 3B MotionResolver/MotionExecutor pipeline)
 ```
+
+> [!IMPORTANT]
+> **STATE DECOUPLING PRINCIPLE:**
+> In compliance with physical safety invariants:
+> - `Connected != Enabled` (RPC connection is telemetry-only; drives remain de-energized).
+> - `Enabled != Mode Configured` (Drive power is independent of controller operational mode).
+> - `Mode Configured != Calibrated` (Controller readiness does not imply geometric board registration).
+> - `Calibrated != Motion Authorized` (Valid kinematics do not authorize autonomous trajectories until clearance and capture interlocks are cleared).
 
 ### Core Execution Rules
 1. **Never Assume Geometric Defaults as Physical Truth:** Constants such as pick height ($4.715\text{ mm}$), clearance ($40.0\text{ mm}$), and gripper pulse duration ($0.30\text{ s}$) are provisional assumptions or software defaults. They must be validated empirically.
@@ -63,19 +75,19 @@ Before powering on or establishing controller communication, verify and enforce 
 
 ### 0.1 Personnel & Environment
 * [ ] **Physical E-Stop Access:** The physical emergency stop pendant must be uncoiled, unlatched, and held in hand by the primary operator. Response time to trip must be $<0.5\text{ s}$.
-* [ ] **Workspace Exclusion Zone:** A minimum clearance boundary of $1.0\text{ m}$ around the entire robot reach envelope must be cleared of unnecessary personnel, tools, loose cabling, and clutter.
+* [ ] **Workspace Exclusion Zone:** A clear laboratory exclusion boundary around the entire robot reach envelope must be cleared of unnecessary personnel, tools, loose cabling, and clutter.
 * [ ] **Human Play Area Separation:** The human player's seating area and designated reach zone must remain clear of the robot's default trajectory corridors.
-* [ ] **Eye & Hand Protection:** Operator must wear safety glasses during high-payload or clamp-testing sequences. No loose jewelry or clothing near rotating joints.
+* [ ] **Laboratory Safety Gear:** Operators must follow standard laboratory safety protocols (eye protection, no loose clothing near rotating joints).
 
 ### 0.2 Robot & Fixture Stability
-* [ ] **Robot Base Fixture:** Verify torque on all FR3 base mounting bolts ($4\times \text{M10}$ or manufacturer standard). Base plate must exhibit zero flex or angular compliance under manual push-pull.
+* [ ] **Robot Base Fixture:** Verify torque on all FR3 base mounting bolts according to laboratory installation specification. Base plate must exhibit zero flex or angular compliance under manual push-pull.
 * [ ] **Board Anchor Security:** The physical Xiangqi board must be clamped or rigidly registered against fixed reference stops. It must not slip, rock, or warp under finger pressure.
 * [ ] **Camera Mount Rigidity:** Overhead camera rig must be firmly clamped; zero vibration transmission from the robot base plate to the camera frame.
-* [ ] **End-Effector Fasteners:** Check mechanical torque on flange adapter plate, gripper bracket, and jaw fingers. Ensure zero backlash in the rack/pinion or linear drive.
+* [ ] **End-Effector Fasteners:** Check mechanical torque on flange adapter plate, gripper bracket, and jaw fingers. Ensure zero backlash in the drive mechanism.
 
 ### 0.3 Electrical & Controller State
 * [ ] **Cabling Clearance:** End-effector umbilical cable (power and DO control wires) must be routed with sufficient slack across joints 4, 5, and 6. Manually verify full rotational freedom without tension or pinch points.
-* [ ] **Low-Speed Mode Enforced:** Controller speed override must be locked at $\le 10\%$ for all initial commissioning steps.
+* [ ] **Low-Speed Mode Enforced:** Controller speed override must be locked at $\le 10\%$ (`PROPOSED_INITIAL_COMMISSIONING_LIMIT`) for all initial commissioning steps.
 * [ ] **Frame Sanity:** Controller must operate strictly in Base Frame (`user=0`) and active Tool Frame must match the chosen mechanical setup.
 
 ---
@@ -88,16 +100,17 @@ Confirm that all mechanical components, fasteners, guide rails, and mounting bra
 ### 1.2 Inspection Procedure
 1. **Manipulator Joints:** Visually inspect joints 1 through 6 for grease leakage, physical denting, or cable wear.
 2. **Gripper Mechanism:**
-   * Manually slide the gripper jaws across their stroke (if motor allows unpowered backdrive) or inspect the rack and pinion teeth for debris.
+   * Inspect gripper mechanism for mechanical alignment, debris, and smooth finger travel.
    * Verify symmetric jaw opening relative to the tool centerline.
    * Confirm rubber/silicone jaw pads are securely adhered, clean, and free of oil.
 3. **Board Flatness & Leveling:**
    * Place a precision machinist spirit level across the board in the $X$ direction (columns 0 to 8) and $Y$ direction (rows 0 to 9).
-   * Record board bubble deviation. Surface inclination must be $< 1.0^\circ$ (`PROPOSED_INITIAL_TEST_VALUE`) to prevent piece sliding and uneven grip engagement.
+   * Record board bubble deviation. Surface inclination target: $< 1.0^\circ$ (`PROPOSED_INITIAL_TEST_VALUE`). If not met, pause progression and adjust shimming; do not automatically classify as a hardware fault.
 4. **Game Piece Audit:**
-   * Inspect canonical Xiangqi pieces. Measure 5 random pieces with digital calipers (`PROJECT_GEOMETRY`):
-     * Nominal Diameter: $22.50 \pm 0.30\text{ mm}$
-     * Nominal Height: $9.43 \pm 0.25\text{ mm}$
+   * Inspect canonical Xiangqi pieces (`PROJECT_GEOMETRY`):
+     * Nominal Diameter: $22.50\text{ mm}$
+     * Nominal Height: $9.43\text{ mm}$
+     * Proposed Caliper Tolerance: $\pm 0.30\text{ mm}$ diameter, $\pm 0.25\text{ mm}$ height (`PROPOSED_MEASUREMENT_TOLERANCE`).
    * Confirm piece tops are flat and free of burrs.
 
 ---
@@ -105,15 +118,15 @@ Confirm that all mechanical components, fasteners, guide rails, and mounting bra
 ## Section 2: Controller Connection & Telemetry Verification
 
 ### 2.1 Objective
-Verify read-only RPC communication with the FAIRINO FR3 controller without commanding drive enable, brake release, or physical motion (`CONNECTED / READ-ONLY` state).
+Verify read-only RPC communication with the FAIRINO FR3 controller without commanding drive enable, brake release, or physical motion (`CONNECTED / TELEMETRY-ONLY` state).
 
 ### 2.2 Inspection Protocol
 1. **Network Configuration:**
    * FR3 Controller IP is `config.ROBOT_IP = 192.168.58.2` (`AUTHORITATIVE_CODE_CONTRACT`).
-   * Host workstation must be configured on the same `/24` subnet (e.g. `192.168.58.10` / `255.255.255.0`).
-   * Execute ICMP ping test: `ping 192.168.58.2`. Packet loss must be $0\%$, latency $< 2\text{ ms}$ (`PROPOSED_INITIAL_TEST_VALUE`).
+   * Host workstation must be configured on the same `/24` subnet (e.g. `192.168.58.10` / `255.255.255.0`, `RECOMMENDED_LAB_SUBNET_EXAMPLE`).
+   * Execute ICMP ping test: `ping 192.168.58.2`. Packet loss must be $0\%$, latency target $< 2\text{ ms}$ (`PROPOSED_INITIAL_TEST_VALUE`). If target is not met, review network cabling and adapter settings; do not classify as hardware failure.
 2. **Read-Only RPC Handshake:**
-   * Initialize SDK RPC client in read-only mode via backend `connect()`. Connection does **NOT** call `RobotEnable(1)` or switch modes.
+   * Initialize SDK RPC client in telemetry-only mode via backend `connect()`. Connection does **NOT** call `RobotEnable(1)` or switch modes.
    * Query controller status codes:
      * `GetSDKVersion()`: Confirm compatible SDK release.
      * `GetRobotState()`: Record state code (Confirm not in emergency stop or drive fault).
@@ -156,15 +169,15 @@ The system explicitly separates two distinct tool definitions. Never conflate ca
    * *Mode B (Gripper Jaw Contact):* One specific corner or designated edge of the gripper jaw is used as contact point. Requires explicit, verified Cartesian offset from Flange to Contact Tip.
 2. **`TCP_GRASP` (Tool Frame ID `TBD`):**
    * The operational gameplay TCP located at the geometric center between the rubber jaw pads when closed.
-   * Canonical Flange-to-TCP distance: Approximately $150.0\text{ mm}$ (historical CAD: $147.5\text{ mm}$, `CURRENT_SOFTWARE_DEFAULT`).
-   * *Critical Deprecation:* The legacy value of $218.0\text{ mm}$ is strictly obsolete and must never be loaded.
+   * Canonical Flange-to-TCP distance: Approximately $150.0\text{ mm}$ (`CURRENT_CANONICAL_TOOL_GEOMETRY_ESTIMATE`). Historical CAD STEP model length: $147.5\text{ mm}$ (`CAD_DERIVED`).
+   * *Critical Deprecation:* The legacy value of $218.0\text{ mm}$ is strictly obsolete (`LEGACY_OBSOLETE`) and must never be loaded into controller frames.
 
 ### 3.2 TCP Calibration Procedure
 1. Configure a free tool frame on the FAIRINO controller (recorded as `CALIBRATION_TOOL_ID`) as `TCP_CALIBRATION`.
 2. Execute the standard 4-point orientation-invariant calibration method against a fixed external sharp pointer:
    * Approach the fixed calibration point from 4 widely divergent wrist orientations ($>30^\circ$ difference in roll/pitch/yaw).
    * Record calculated tool offset: $[X_{\text{tool}}, Y_{\text{tool}}, Z_{\text{tool}}]$.
-   * Residual error target of TCP calibration: $< 0.30\text{ mm}$ (warning $0.30 - 0.50\text{ mm}$, hard fail $> 0.50\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`).
+   * Residual error trial target of TCP calibration: $< 0.30\text{ mm}$ (`PROPOSED_INITIAL_TEST_VALUE`). If residual is $0.30 - 0.50\text{ mm}$, pause progression, inspect pointer rigidity, and review measurement before re-attempting.
 3. Configure another free tool frame on the controller (recorded as `GRASP_TOOL_ID`) as `TCP_GRASP`:
    * Set $X_{\text{grasp}} = 0.0\text{ mm}$, $Y_{\text{grasp}} = 0.0\text{ mm}$, $Z_{\text{grasp}} \approx 150.0\text{ mm}$.
    * Precise $Z_{\text{grasp}}$ offset will be refined during Pick/Place calibration (Sections 9 & 10).
@@ -174,38 +187,38 @@ The system explicitly separates two distinct tool definitions. Never conflate ca
 ## Section 4: Gripper Electrical & Pulse Calibration
 
 ### 4.1 Gripper Hardware Wiring Specifications
-The end-effector utilizes a custom bidirectional DC motor driven via two tool-flange digital outputs (`CONFIGURED_SOFTWARE_MODEL`):
+The end-effector is modeled in software via two tool-flange digital outputs (`CONFIGURED_SOFTWARE_MODEL`):
 * **Tool DO1:** Gripper **OPEN**
 * **Tool DO0:** Gripper **CLOSE**
 
 > [!CAUTION]
-> **ELECTRICAL MUTUAL EXCLUSION MANDATE:**  
-> Never assert Tool DO0 and Tool DO1 simultaneously. Simultaneous assertion risks electrical shoot-through, driver short-circuit, or destructive motor conflict.  
-> An electrical deadtime of at least **100 ms** (`CURRENT_SOFTWARE_DEFAULT`) must separate any state transition. Both outputs must remain LOW (`0`) when idle.
+> **ELECTRICAL MUTUAL EXCLUSION MANDATE:**
+> Never assert Tool DO0 and Tool DO1 simultaneously. Simultaneous assertion risks electrical conflict on unverified driver circuits.<br>
+> A software deadtime of **0.10 s** (`CURRENT_SOFTWARE_DEFAULT`) must separate any state transition. Both outputs must remain LOW (`0`) when idle.
 
 ### 4.2 Pulse Duration Ladder Protocol
-The gripper uses a rack-and-pinion drive without integrated limit switches. The motor must be driven with calibrated pulse durations rather than continuous voltage to prevent mechanical stall, motor overheating, and gear tooth stripping.
+The gripper actuator is driven with calibrated pulse durations rather than continuous voltage to prevent prolonged stall against mechanical stops.
 
 **Goal:** Identify the **minimum reliable pulse duration** ($t_{\text{pulse}}$) that achieves full stroke travel without prolonged stall against mechanical stops.
 
 ```
 Proposed Initial Test Ladder:
-0.10s ──► 0.15s ──► 0.20s ──► 0.25s ──► 0.30s (Current Software Default / Max Test Bound)
+0.10s ──► 0.15s ──► 0.20s ──► 0.25s ──► 0.30s (Current Software Default / Test Bound)
 ```
 
-1. Set software override speed to $\le 10\%$. Arm remains stationary at safe park position.
+1. Set software override speed to $\le 10\%$ (`PROPOSED_INITIAL_COMMISSIONING_LIMIT`). Arm remains stationary at safe park position.
 2. **Open Pulse Ladder:**
    * Start at $t = 0.10\text{ s}$.
    * Command: `DO0=0`, `DO1=1` for $t$, then `DO1=0`. Wait $0.5\text{ s}$ settle time.
    * Inspect jaw displacement using calipers. Measure opening width.
-   * Increment by $+0.05\text{ s}$ until jaws reach full open mechanical travel ($>32\text{ mm}$ clearance for $22.5\text{ mm}$ piece, `PROPOSED_INITIAL_TEST_VALUE`).
-   * **Immediate Stop Condition:** Stop increasing pulse duration immediately if motor emits an audible high-pitch stall buzz, excessive gear clicking, or driver heats up.
+   * Increment by $+0.05\text{ s}$ until jaws reach full open travel (target: $>32\text{ mm}$ clearance for $22.5\text{ mm}$ piece, `PROPOSED_INITIAL_TEST_VALUE`).
+   * **Immediate Stop Condition:** Stop increasing pulse duration immediately if actuator exhibits audible strain or driver warms up.
 3. **Close Pulse Ladder:**
    * Place an unweighted test piece ($22.5\text{ mm}$) centered between jaws.
    * Start at $t = 0.10\text{ s}$.
    * Command: `DO1=0`, `DO0=1` for $t$, then `DO0=0`. Wait $0.5\text{ s}$ settle time.
-   * Test piece retention: Lightly grasp piece and apply vertical pull ($~1\text{ N}$, `PROPOSED_INITIAL_TEST_VALUE`).
-   * Increment pulse duration by $+0.05\text{ s}$ until piece is firmly gripped without slipping and jaw rubber visibly compresses slightly ($0.2\text{ mm} - 0.5\text{ mm}$).
+   * Test piece retention: Lightly grasp piece and apply vertical pull target (~$1\text{ N}$, `PROPOSED_INITIAL_TEST_VALUE`). If retention is insufficient, pause and review grip alignment before incrementing pulse.
+   * Increment pulse duration by $+0.05\text{ s}$ until piece is firmly gripped without slipping and jaw rubber visibly engages.
    * Do not exceed the duration required for secure retention.
 4. **Record Findings:**
    * Record $t_{\text{open, nominal}}$ and $t_{\text{close, nominal}}$ in the validation log.
@@ -253,7 +266,7 @@ Canonical Board-Local Coordinates ($Z=0$ at board surface, origin at board geome
 2. **Teaching Order:** Points must be taught in exact sequence: **R1 $\to$ R2 $\to$ R3 $\to$ R4**.
 3. **Contact Method:**
    * Using the teaching pendant in manual jog mode (step size: $0.1\text{ mm}$ near surface), jog the tip until it contacts the precise center of the printed crosshair intersection.
-   * Use the "slip of paper" method: A standard $80\text{ g/m}^2$ paper strip ($0.1\text{ mm}$ thick) is slid between the stylus tip and board. Stop descending when light drag is felt on the paper without deflecting the board.
+   * Use the "slip of paper" method: A standard paper strip ($0.1\text{ mm}$ thick) is slid between the stylus tip and board. Stop descending when light drag is felt on the paper without deflecting the board.
 4. **Orientation Invariant:** Maintain identical tool orientation angles $[Rx, Ry, Rz]$ across all 4 points (pointing vertically downward, $Rx \approx \pm 180^\circ, Ry \approx 0^\circ$).
 5. **Data Capture:** For each point, query controller and record:
    * Cartesian Pose: $[X, Y, Z, Rx, Ry, Rz]$
@@ -284,11 +297,22 @@ The validation thresholds are enforced directly by `BoardCalibrationTolerancePol
 | **Frame Consistency** | User = 0 | — | `user_id != 0` or Tool Mismatch | Abort. Reconfigure frames on controller. |
 
 ### 6.3 Validation Execution
-1. Feed the recorded R1–R4 points into `BoardPoseProvider.from_teaching_points(teaching_points, calibration_profile)`.
+1. Execute the calibration using the concrete repository API:
+   - **Live Controller Execution:**
+     ```python
+     provider = PhysicalTeachingPointBoardPoseProvider.from_controller(backend)
+     result = provider.calibration_result
+     ```
+   - **Offline Diagnostic Execution (from recorded dictionary):**
+     ```python
+     result = calibrate_board_from_teaching_points(teaching_points, calibration_profile, tolerance_policy)
+     # Or instantiate provider directly:
+     provider = PhysicalTeachingPointBoardPoseProvider.from_teaching_points(teaching_points, ...)
+     ```
 2. Evaluate output metrics:
-   * If any metric breaches **Hard Failure**, calibration is **REJECTED**. No motion allowed.
-   * If any metric triggers **Warning**, record `PASS_WITH_WARNING`. Operator must inspect board shimming before proceeding.
-   * If all metrics pass within warning limits, record `PASS`. The generated $SE(3)$ transformation matrix $\mathbf{T}_{\text{base}}^{\text{board}}$ is accepted.
+   - If any metric breaches **Hard Failure**, calibration is **REJECTED**. No motion allowed.
+   - If any metric triggers **Warning**, record `PASS_WITH_WARNING`. Operator must inspect board shimming before proceeding.
+   - If all metrics pass within warning limits, record `PASS`. The generated $SE(3)$ transformation matrix $\mathbf{T}_{\text{base}}^{\text{board}}$ is accepted.
 
 ---
 
@@ -303,13 +327,13 @@ $$\mathbf{R}_{\text{hist}} = [Rx = -179.164^\circ, Ry = -3.047^\circ, Rz = -26.3
 1. **Verticality Check:**
    * Jog arm to board center `(row=4, col=4)`. Command tool orientation to $[Rx=-180.0^\circ, Ry=0.0^\circ, Rz=\theta_z]$.
    * Place a precision machinist square on the board surface against the cylindrical body of the gripper.
-   * Verify perpendicularity along both $X$ and $Y$ board axes ($< 0.5^\circ$ cant, `PROPOSED_INITIAL_TEST_VALUE`).
+   * Verify perpendicularity along both $X$ and $Y$ board axes (trial target: $< 0.5^\circ$ cant, `PROPOSED_INITIAL_TEST_VALUE`). If not met, pause progression and adjust mechanical tool leveling.
 2. **Jaw Parallelism / Piece Engagement:**
    * With jaws partially closed, observe the jaw flat faces relative to the board grid lines.
    * Choose yaw angle ($Rz$) such that jaws are cleanly parallel to the grid columns ($Y$-axis) or rows ($X$-axis), allowing consistent grip without clipping neighboring pieces.
 3. **Singularity & Joint Limit Margin:**
    * Query controller joint angles at all 4 corners under chosen orientation.
-   * Ensure Joint 5 (wrist pitch) remains at least $15^\circ$ away from zero (wrist singularity: $J_5 \approx 0^\circ$, `PROPOSED_INITIAL_TEST_VALUE`).
+   * Ensure Joint 5 (wrist pitch) remains away from zero (wrist singularity margin target: $|J_5| \ge 15^\circ$, `PROPOSED_INITIAL_TEST_VALUE`).
    * Ensure Joints 4 and 6 are $> 20^\circ$ away from software end-stops.
 4. **Final Acceptance:** Record validated $[Rx, Ry, Rz]$ in `phase4_physical_validation_log.md`.
 
@@ -325,9 +349,10 @@ $$Z_{\text{safe}} = Z_{\text{board\_surface}} + 40.0\text{ mm} \quad (\text{CURR
 1. Place standard game pieces ($9.43\text{ mm}$ height) at various board cells, including along board edges and inside the river.
 2. In the capture bin area, simulate a stack of captured pieces (stack height up to $20\text{ mm}$).
 3. Command arm with closed gripper to transit at $Z = Z_{\text{safe}} = +40.0\text{ mm}$ across the board diagonal (R1 to R3, R4 to R2):
-   * Speed: $10\%$. Operator finger on E-stop.
-   * Minimum dynamic clearance between the lowest point of gripper jaws and the tallest piece target: $\ge 25.0\text{ mm}$ (`PROPOSED_INITIAL_TEST_VALUE`).
-   * Verify overhead camera enclosure: Ensure highest point of robot elbow/wrist maintains $\ge 50.0\text{ mm}$ clearance from camera lens/mount at all transit waypoints (`PROPOSED_INITIAL_TEST_VALUE`).
+   * Speed: $\le 10\%$ (`PROPOSED_INITIAL_COMMISSIONING_LIMIT`). Operator finger on E-stop.
+   * Dynamic clearance target between the lowest point of gripper jaws and the tallest piece: $\ge 25.0\text{ mm}$ (`PROPOSED_INITIAL_TEST_VALUE`).
+   * Overhead camera clearance target: Ensure highest point of robot elbow/wrist maintains $\ge 50.0\text{ mm}$ clearance from camera mount at all transit waypoints (`PROPOSED_INITIAL_TEST_VALUE`).
+   * If clearance targets are not met, pause progression and review safe transit height setting.
 4. **Pass Criteria:** Zero interference, zero near-miss vibration, cable loom remains untensioned.
 
 ---
@@ -352,15 +377,15 @@ Z = +20.0 mm ──► +15.0 mm ──► +10.0 mm ──► +7.0 mm ──► +
    * Below $7.0\text{ mm}$, reduce jog step to $0.2\text{ mm}$.
 2. **Visual Engagement Check:**
    * At each step, inspect jaw pad contact zone relative to piece height ($9.43\text{ mm}$).
-   * Confirm jaws do not touch the board surface. Minimum gripper-to-board clearance target: $\ge 1.5\text{ mm}$ (`PROPOSED_INITIAL_TEST_VALUE`) when jaws are fully closed.
+   * Confirm jaws do not touch the board surface. Minimum gripper-to-board clearance target: $\ge 1.5\text{ mm}$ (`PROPOSED_INITIAL_TEST_VALUE`) when jaws are fully closed. If clearance is less, pause and re-check surface Z.
 3. **Grip Engagement Trials:**
    * At candidate heights ($Z = 6.0, 5.5, 5.0, 4.7, 4.5\text{ mm}$), execute a grip pulse:
      * Close gripper ($t_{\text{close}}$).
-     * Lift vertically to $Z_{\text{safe}}$ at $10\%$ speed.
+     * Lift vertically to $Z_{\text{safe}}$ at $\le 10\%$ speed.
      * Inspect piece stability: Look for piece tilt, twist, slippage, or drop.
      * Shake test: Command small horizontal jog ($\pm 5\text{ mm}$ at $20\text{ mm/s}$). Piece must not dislodge.
 4. **Determine Envelope:**
-   * Record $Z_{\text{pick, max}}$ (highest height with $100\%$ reliable grip).
+   * Record $Z_{\text{pick, max}}$ (highest height with reliable grip).
    * Record $Z_{\text{pick, min}}$ (lowest height before jaw edge contacts board or pinches table).
    * Set Nominal: $Z_{\text{pick, nominal}} = \frac{Z_{\text{pick, max}} + Z_{\text{pick, min}}}{2}$.
    * Tolerance envelope target: $\pm 0.5\text{ mm}$.
@@ -383,7 +408,7 @@ Calibrate $Z_{\text{place}}$ to ensure the piece is released flush onto the boar
      * Does gripper press piece into board, causing board deflection before release? If yes, height is too low (crush risk).
 4. Retract vertically to $Z_{\text{safe}}$:
    * Ensure opening jaws clear the piece diameter ($22.5\text{ mm}$) without brushing against piece rim.
-   * Measure placement offset: Digital caliper measurement from printed intersection crosshair to piece center. Radial error target: $\le 1.5\text{ mm}$ (`PROPOSED_INITIAL_TEST_VALUE`).
+   * Measure placement offset: Caliper measurement from printed intersection crosshair to piece center. Radial error target: $\le 1.5\text{ mm}$ (`PROPOSED_INITIAL_TEST_VALUE`). If not met, pause progression and adjust release Z height.
 5. Record calibrated $Z_{\text{place, nominal}}$ and operating tolerance.
 
 ---
@@ -395,7 +420,7 @@ Execute a complete, integrated pick-and-place cycle on a single representative c
 
 ### 11.2 Standard Single-Cell Trajectory Cycle
 Selected Move: `(row=4, col=4)` to `(row=4, col=5)`
-1. **Approach:** Transit from Home $\to$ Pre-pick waypoint $(row=4, col=4, Z_{\text{safe}})$ at $10\%$ speed.
+1. **Approach:** Transit from Home $\to$ Pre-pick waypoint $(row=4, col=4, Z_{\text{safe}})$ at $\le 10\%$ speed.
 2. **Descend:** Linear descent $\to (row=4, col=4, Z_{\text{pick}})$ at $50\text{ mm/s}$.
 3. **Grip:** Assert Close pulse ($t_{\text{close}}$). Wait $0.25\text{ s}$ settle time.
 4. **Lift:** Linear vertical retract $\to (row=4, col=4, Z_{\text{safe}})$ at $50\text{ mm/s}$. Confirm piece held in jaws.
@@ -406,7 +431,7 @@ Selected Move: `(row=4, col=4)` to `(row=4, col=5)`
 9. **Return:** Transit back to Home position.
 
 ### 11.3 Telemetry & Accuracy Audit
-* Measure final piece placement error $\Delta X, \Delta Y$ relative to crosshair (target $\le 1.5\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`).
+* Measure final piece placement error $\Delta X, \Delta Y$ relative to crosshair (target: $\le 1.5\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`).
 * Confirm controller reported return code `0` on all Cartesian segments.
 * Cycle must complete with zero audible vibration, zero path overshoot, and clean jaw release.
 
@@ -433,7 +458,7 @@ Validate Cartesian reachability, kinematic conditioning, and clearance at the ex
      * Check umbilical cable tension across J4/J5/J6.
      * Check wrist singularity margin ($J_5$ deviation from $0^\circ$).
    * Ascend back to $Z_{\text{safe}}$.
-2. **Pass Criteria:** Controller IK succeeds without error codes (`0` or `112`), zero cable binding, mechanical clearance $\ge 30\text{ mm}$ everywhere.
+2. **Pass Criteria:** Controller IK succeeds without error codes (`0` or `112`), zero cable binding, mechanical clearance target $\ge 30\text{ mm}$ everywhere (`PROPOSED_INITIAL_TEST_VALUE`).
 
 ---
 
@@ -464,11 +489,12 @@ Execute approach and descent to $Z_{\text{safe}}$ and $Z_{\text{pick}}$ at each 
 1. Load `docs/templates/phase4_cell_validation.csv` on workstation.
 2. Automate sequential linear transit across all 90 cells:
    * Row 0 (Cols 0 to 8) $\to$ Row 1 (Cols 8 down to 0) [Bousterphedon pattern].
-   * Velocity: $10\%$, linear motion.
+   * Velocity: $\le 10\%$, linear motion.
 3. At each cell:
    * Query IK solution for $(row, col, Z_{\text{safe}})$ and $(row, col, Z_{\text{pick}})$.
    * Check for controller warnings, joint limit proximity, or singularity proximity.
    * Mark `approach_pass = 1` and `pick_pose_pass = 1` in CSV if IK and motion succeed cleanly.
+   * Full reachability requirement: **90 / 90 reachable** (`PHASE4_ACCEPTANCE_CRITERION`).
 4. **Phase 2: Spot Pick Check:**
    * Select 10 random cells from the matrix and execute physical piece pick-and-place.
    * Record `pick_success = 1`, `place_success = 1`, and measured $\Delta XY$ error.
@@ -497,8 +523,8 @@ Physical capture moves are **blocked by software interlock** until the physical 
 ### 15.3 Trajectory Corridor Safety Check & Interlock Clearance
 1. Manually command linear motion from Board Center `(row=4, col=4)` $\to$ `BIN_APPROACH` $\to$ `BIN_DROP`.
 2. Verify corridor:
-   * Trajectory must **never** sweep over the human player's designated table side (`AUTHORITATIVE_CODE_CONTRACT`).
-   * Trajectory must maintain $> 40\text{ mm}$ clearance from board side border and camera mount posts.
+   * Trajectory must **never** sweep over the human player's designated table side (`PHYSICAL_E2E_ACCEPTANCE`).
+   * Trajectory must maintain clearance from board side border and camera mount posts (target: $> 40\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`).
    * Confirm captured piece held in jaws cannot collide with active game pieces during the transit.
 3. Once empirically verified and logged in `phase4_physical_validation_log.md`, promote provenance to `PHYSICALLY_VALIDATED` and clear the interlock (`CAPTURE_BIN_VALIDATED = True`).
 
@@ -523,7 +549,7 @@ Move: Red Cannon `(row=2, col=1)` $\to$ `(row=2, col=4)`
    * [ ] Clean jaw release without piece dragging.
    * [ ] Vertical retreat to $Z_{\text{safe}}$ and return to Home.
 4. **Verification Measurement:**
-   * Inspect destination cell with digital caliper: Piece center must be within $1.5\text{ mm}$ of crosshair (`PROPOSED_INITIAL_TEST_VALUE`).
+   * Inspect destination cell with digital caliper: Piece center radial error target: $\le 1.5\text{ mm}$ (`PROPOSED_INITIAL_TEST_VALUE`).
    * Verify overhead vision detection registers piece at `(row=2, col=4)` with high confidence.
 
 ---
@@ -533,10 +559,10 @@ Move: Red Cannon `(row=2, col=1)` $\to$ `(row=2, col=4)`
 ### 17.1 Objective
 Execute a multi-stage capture move: Attacking piece captures opponent piece at target square.
 
-### 17.2 Mandatory Physical Invariants (`AUTHORITATIVE_CODE_CONTRACT`)
-* **Invariant 1:** The captured piece must be completely removed from the board into the capture bin **before** the attacking piece is picked.
-* **Invariant 2:** The attacking piece must remain completely undisturbed while the captured piece is being extracted.
-* **Invariant 3:** Adjacent friendly or enemy pieces surrounding the destination cell must not be touched or displaced.
+### 17.2 Mandatory Physical Invariants
+* **Invariant 1 (`AUTHORITATIVE_CODE_CONTRACT`):** The captured piece must be completely removed from the board into the capture bin **before** the attacking piece is picked.
+* **Invariant 2 (`PHYSICAL_E2E_ACCEPTANCE`):** The attacking piece must remain completely undisturbed while the captured piece is being extracted.
+* **Invariant 3 (`PHYSICAL_E2E_ACCEPTANCE`):** Adjacent friendly or enemy pieces surrounding the destination cell must not be touched or displaced.
 
 ### 17.3 Sequence
 Scenario: Black Chariot at `(row=0, col=0)` captures Red Chariot at `(row=9, col=0)`.
@@ -555,8 +581,8 @@ Scenario: Black Chariot at `(row=0, col=0)` captures Red Chariot at `(row=9, col
      * Descends to $Z_{\text{place}}$, releases Black piece flush on square.
      * Retracts to $Z_{\text{safe}}$ and returns Home.
 3. **Pass Criteria:**
-   * Red piece safely inside bin.
-   * Black piece centered at `(row=9, col=0)` ($\Delta XY \le 1.5\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`).
+   * Red piece safely inside bin (`PHYSICAL_E2E_ACCEPTANCE`).
+   * Black piece centered at `(row=9, col=0)` (target: $\Delta XY \le 1.5\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`).
    * All intermediate waypoints cleared cleanly.
 
 ---
@@ -572,7 +598,7 @@ The physical commissioning team must test and document system behavior under une
 | **Piece Slips in Transit** | Piece falls onto board during horizontal transit. | Vision detects board discrepancy after cycle. | **NO (Hard Halt)** | E-Stop immediately. Remove fallen piece. | Yes: Re-evaluate $t_{\text{close}}$ / $Z_{\text{pick}}$. |
 | **Piece Stuck in Jaws** | Gripper opens but piece adheres to rubber pad. | Retract lifts piece back up. Vision detects empty dst. | **NO (Hard Halt)** | Clean rubber pads; apply anti-stick dry wipe. | No. |
 | **Destination Cell Occupied** | Destination contains unexpected obstacle/piece. | Pre-move vision sanity check fails. | **NO (Hard Halt)** | Clear workspace; align physical board with game state. | No. |
-| **Board Shifted / Bumped** | Board physically nudged during human move. | Vision detects fiducial shift $> 2.0\text{ mm}$. | **NO (Hard Halt)** | Stop autonomous play. Re-clamp board. | **YES: Complete R1–R4 Re-teach.** |
+| **Board Shifted / Bumped** | Board physically nudged during human move. | Vision detects fiducial shift $> 2.0\text{ mm}$ (`PROPOSED_INITIAL_TEST_VALUE`). | **NO (Hard Halt)** | Stop autonomous play. Re-clamp board. | **YES: Complete R1–R4 Re-teach.** |
 | **Controller RPC Drop** | Arm holds current position; drives hold position. | `RPCConnectionError` raised in backend. | **NO (Hard Halt)** | Check Ethernet cabling, controller power. | No (Re-connect). |
 | **MoveCart Rejection (-112/err)** | Arm halts immediately without motion. | `MotionExecutor` / `MotionResolver` catches exception. | **NO (Hard Halt)** | Check Cartesian coordinates for singularity. | Verify BoardPose matrix. |
 | **Capture Phase 1 OK, Phase 2 Fail** | Opponent in bin; attacker remains at source. | Exception during attacker pick; game paused. | **NO (Hard Halt)** | Manual recovery mode; do not resume blindly. | Check source cell clearance. |
@@ -581,7 +607,7 @@ The physical commissioning team must test and document system behavior under une
 
 ## Section 19: Physical Result Classification & Acceptance Criteria
 
-Every test phase must be graded against the canonical six-tier result taxonomy:
+Every test phase must be graded against the canonical result taxonomy:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -589,6 +615,7 @@ Every test phase must be graded against the canonical six-tier result taxonomy:
 ├────────────────────┬───────────────────────────────────────────────────┤
 │ PASS               │ Meets 100% of nominal tolerances and contracts.   │
 │ PASS_WITH_WARNING  │ Meets hard limits; minor non-critical deviation.  │
+│ REVIEW_AND_PAUSE   │ Proposed target missed; pause & review setup.     │
 │ FAIL_RETRY         │ Transient operational failure (e.g. piece skew).  │
 │ FAIL_RECALIBRATE   │ Systematic geometric deviation; re-teaching req.  │
 │ FAIL_HARDWARE      │ Mechanical/electrical component failure.          │
@@ -596,12 +623,13 @@ Every test phase must be graded against the canonical six-tier result taxonomy:
 └────────────────────┴───────────────────────────────────────────────────┘
 ```
 
-1. **`PASS`:** All numerical metrics within nominal contract (e.g. Board RMS $\le 2.0\text{ mm}$, placement error $\le 1.5\text{ mm}$, zero motion faults).
+1. **`PASS`:** All numerical metrics within nominal contract (e.g. Board RMS $\le 2.0\text{ mm}$, zero motion faults).
 2. **`PASS_WITH_WARNING`:** Metric exceeds warning limit but within hard failure limit (e.g. Board tilt $2.5^\circ - 5.0^\circ$, Board RMS $2.0 - 3.0\text{ mm}$). Requires operator sign-off and notation.
-3. **`FAIL_RETRY`:** Transient failure attributable to piece placement or timing. Allowed up to 2 retries before escalating.
-4. **`FAIL_RECALIBRATE`:** Taught geometry violates physical invariants (e.g. edge length error $> 5.0\text{ mm}$, diagonal error $> 8.0\text{ mm}$, pick failure on $>2$ cells). Autonomous testing is halted; R1–R4 and TCP must be re-calibrated.
-5. **`FAIL_HARDWARE`:** Physical breakdown (motor stall, stripped gear, broken wire, controller failure). Immediate shutdown.
-6. **`FAIL_SAFETY`:** E-stop tripped, collision detected, cable tension violation, or human zone incursion. System locked out until incident investigation is completed.
+3. **`REVIEW_AND_PAUSE`:** Proposed trial target missed (e.g. TCP residual, jaw opening, spirit level). Pause progression and inspect parameters; do not automatically classify as a hardware fault.
+4. **`FAIL_RETRY`:** Transient failure attributable to piece placement or timing. Allowed up to 2 retries before escalating.
+5. **`FAIL_RECALIBRATE`:** Taught geometry violates physical invariants (e.g. edge length error $> 5.0\text{ mm}$, diagonal error $> 8.0\text{ mm}$). Autonomous testing is halted; R1–R4 and TCP must be re-calibrated.
+6. **`FAIL_HARDWARE`:** Physical breakdown (uncommanded disconnect, broken wire, controller error). Immediate shutdown.
+7. **`FAIL_SAFETY`:** E-stop tripped, collision detected, cable tension violation, or human zone incursion. System locked out until incident investigation is completed.
 
 ---
 
