@@ -105,6 +105,20 @@ BOARD_STABILITY_MIN_SAMPLES = 3
 BOARD_STABILITY_SAMPLE_INTERVAL_SECONDS = 0.10
 
 # --- THÔNG SỐ AI ---
+# --- UNIFIED PLAYER-TURN STATE MACHINE ---
+# SHADOW is safe until a real detector can continuously see hands *and* other
+# stationary obstructions over the board.  UNIFIED refuses to auto-commit
+# without that producer; LEGACY preserves the old polling/SPACE flow.
+PLAYER_TURN_MODE = "SHADOW"  # "LEGACY" | "SHADOW" | "UNIFIED"
+PLAYER_TURN_CLEAR_SECONDS = 0.8
+PLAYER_TURN_CLEAR_SAMPLES = 3
+PLAYER_TURN_INTERACTION_SETTLE_SECONDS = 1.2
+PLAYER_TURN_IDLE_SETTLE_SECONDS = 3.0
+PLAYER_TURN_IDLE_SETTLE_SAMPLES = 5
+# Hardware integration must override this to AVAILABLE only after it can see a
+# stationary hand, sleeve, and non-hand object on the board continuously.
+PLAYER_TURN_INTERACTION_CAPABILITY = "UNAVAILABLE"
+
 AI_THINK_TIME = 10  # Time per move in seconds — AI gets 10s after subtracting TIME_BUFFER (0.5)
 AI_DEPTH = 30          # Độ sâu mặc định (sẽ bị ghi đè bởi logic tự động)
 

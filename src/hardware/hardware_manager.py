@@ -516,6 +516,19 @@ class HardwareManager:
         if self.yolo_detector:
             self.yolo_detector._baseline_occ = None
 
+    def interaction_capability(self):
+        """Expose an explicit safety capability; never infer it from motion."""
+        return getattr(self.config, "PLAYER_TURN_INTERACTION_CAPABILITY", "UNAVAILABLE")
+
+    def is_board_occluded(self):
+        """Optional integration point for a real hand/tool obstruction producer.
+
+        The current camera stack has no such producer, so the safe answer is
+        False only because UNIFIED is separately blocked by capability.
+        """
+        provider = getattr(self, "occlusion_provider", None)
+        return bool(provider()) if callable(provider) else False
+
     def restore_yolo_baseline(self, occ, baseline_time):
         if self.yolo_detector and occ is not None:
             self.yolo_detector._baseline_occ = [row[:] for row in occ]
