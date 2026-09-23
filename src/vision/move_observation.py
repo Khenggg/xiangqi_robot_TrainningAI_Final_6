@@ -26,10 +26,19 @@ class MoveObservation:
     confidence: float = 1.0
     is_ambiguous: bool = False
     error: Optional[str] = None
+    status: Optional[str] = None
+
+    @property
+    def is_valid(self) -> bool:
+        """Alias for success to support semantic validity checks."""
+        return self.success
 
     def as_tuple(self) -> Tuple[Optional[Tuple[int, int]], Optional[Tuple[int, int]], Optional[str]]:
         """Compatibility helper for legacy (src, dst, piece) tuple unpacking."""
         return self.src, self.dst, self.piece
+
+
+MIN_CHANGED_CELL_CONFIDENCE = 0.5
 
 
 def derive_move_observation(
@@ -38,6 +47,7 @@ def derive_move_observation(
     player_color: str = "r",
     min_confidence: float = 0.5,
     confidence_grid: Optional[List[List[float]]] = None,
+    min_changed_cell_confidence: Optional[float] = None,
 ) -> MoveObservation:
     """
     Derive semantic MoveObservation by comparing before and after board state grids (10x9).
@@ -136,22 +146,40 @@ def derive_move_observation(
     src = (src_c, src_r)
     dst = (dst_c, dst_r)
 
-    # 4. Validate piece identity consistency
+    # 4. Validate changed-cell confidence specifically
+    req_changed_conf = min_changed_cell_confidence if min_changed_cell_confidence is not None else min_confidence
+    if confidence_grid is not None:
+        src_c_conf = float(confidence_grid[src_r][src_c])
+        dst_c_conf = float(confidence_grid[dst_r][dst_c])
+        if src_c_conf < req_changed_conf or dst_c_conf < req_changed_conf:
+            min_c = min(src_c_conf, dst_c_conf)
+            return MoveObservation(
+                success=False,
+                src=src,
+                dst=dst,
+                piece=p_src,
+                confidence=min_c,
+                status="LOW_CHANGED_CELL_CONFIDENCE",
+                error=f"Low changed-cell confidence: src={src_c_conf:.2f}, dst={dst_c_conf:.2f} (threshold {req_changed_conf:.2f})",
+            )
+
+    # 5. Validate piece identity consistency
     # Note: On noisy classification, p_dst might occasionally differ slightly from p_src,
     # but the canonical moved piece is the one from the authoritative before_board (p_src).
     piece = p_src
 
-    # 5. Rule validation
+    # 6. Rule validation
     if not xiangqi.is_valid_move(src, dst, before_board, player_color):
         return MoveObservation(
             success=False,
             src=src,
             dst=dst,
             piece=piece,
+            status="ILLEGAL_MOVE",
             error=f"Illegal move {piece} {src}->{dst} according to Xiangqi rules",
         )
 
-    # 6. Check capture
+    # 7. Check capture
     orig_dest_piece = before_board[dst_r][dst_c]
     is_capture = (orig_dest_piece != ".")
     captured_piece = orig_dest_piece if is_capture else None
@@ -164,4 +192,5 @@ def derive_move_observation(
         is_capture=is_capture,
         captured_piece=captured_piece,
         confidence=avg_conf,
+        status="VALID_MOVE",
     )

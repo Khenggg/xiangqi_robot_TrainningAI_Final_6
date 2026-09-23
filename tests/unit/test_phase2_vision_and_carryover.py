@@ -748,6 +748,99 @@ class TestProductionSpaceKeyFlow(unittest.TestCase):
         self.assertEqual(self.state.board[7][1], "r_C")
         self.assertEqual(self.state.board[6][0], "r_P")
 
+    def test_absdiff_threshold_and_margin_fail_closed(self):
+        """Verify _resolve_capture_ambiguity fails closed if score < min_score or margin < min_margin."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            M_path = os.path.join(tmp_dir, "perspective.npy")
+            M = np.eye(3, dtype=np.float32)
+            np.save(M_path, M)
+
+            detector = SnapshotDetector(
+                perspective_path=M_path,
+                class_id_map={},
+                min_absdiff_score=500.0,
+                min_absdiff_margin=200.0,
+            )
+            # Create synthetic frames: T1 blank, T2 blank
+            t1_frame = np.zeros((400, 400, 3), dtype=np.uint8)
+            detector._baseline_frame = t1_frame
+
+            # Mock _get_pixel_box_from_grid to return valid boxes
+            detector._get_pixel_box_from_grid = lambda c, r, inv_M, sh: (c * 20, r * 20, c * 20 + 10, r * 20 + 10)
+
+            # Case 1: T2 has very tiny noise -> score = 100 (< 500)
+            t2_frame_low = np.zeros((400, 400, 3), dtype=np.uint8)
+            t2_frame_low[0:10, 0:10] = 1  # 100 pixels * 1 = 100
+            res = detector._resolve_capture_ambiguity([(0, 0), (1, 1)], t2_frame_low)
+            self.assertIsNone(res)
+            self.assertTrue(detector.last_detection_ambiguous)
+
+            # Case 2: T2 has two candidates with high scores but narrow margin: 1000 vs 900 (diff=100 < 200)
+            t2_frame_narrow = np.zeros((400, 400, 3), dtype=np.uint8)
+            t2_frame_narrow[0:10, 0:10] = 10  # 100 * 10 = 1000
+            t2_frame_narrow[20:30, 20:30] = 9  # 100 * 9 = 900
+            res = detector._resolve_capture_ambiguity([(0, 0), (1, 1)], t2_frame_narrow)
+            self.assertIsNone(res)
+            self.assertTrue(detector.last_detection_ambiguous)
+
+            # Case 3: Clear winner with score >= 500 and margin >= 200: 1000 vs 600 (diff=400 >= 200)
+            t2_frame_clear = np.zeros((400, 400, 3), dtype=np.uint8)
+            t2_frame_clear[0:10, 0:10] = 10   # 1000
+            t2_frame_clear[20:30, 20:30] = 6   # 600
+            res = detector._resolve_capture_ambiguity([(0, 0), (1, 1)], t2_frame_clear)
+            self.assertEqual(res, (0, 0))
+
+    def test_cchess_recovery_multiple_candidates_fails_closed(self):
+        """Verify CChess recovery from 0 disappeared fails closed if multiple valid move pairs exist."""
+        import tempfile
+        from src.core import xiangqi
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            M_path = os.path.join(tmp_dir, "perspective.npy")
+            np.save(M_path, np.eye(3, dtype=np.float32))
+
+            detector = SnapshotDetector(perspective_path=M_path, class_id_map={})
+            board = [row[:] for row in xiangqi.initial_board]
+
+            t1_occ = [[False for _ in range(9)] for _ in range(10)]
+            t2_occ = [[False for _ in range(9)] for _ in range(10)]
+
+            # Both red pawns disappear in rec_board and both move forward to row 5
+            rec_board = [row[:] for row in board]
+            rec_board[6][0] = "."
+            rec_board[5][0] = "r_P"
+            rec_board[6][2] = "."
+            rec_board[5][2] = "r_P"
+
+            cchess_result = {"success": True, "board": rec_board}
+            src, dst, piece = detector._compare_snapshots(
+                t1_occ, t2_occ, board, frame=None, cchess_result=cchess_result
+            )
+            self.assertIsNone(src)
+            self.assertIsNone(dst)
+            self.assertIsNone(piece)
+            self.assertTrue(detector.last_detection_ambiguous)
+
+    def test_derive_move_observation_low_changed_cell_confidence_rejected(self):
+        """Verify derive_move_observation fails when src or dst cell confidence is below threshold."""
+        from src.core import xiangqi
+        before = [row[:] for row in xiangqi.initial_board]
+        after = [row[:] for row in before]
+        after[6][0] = "."
+        after[5][0] = "r_P"
+
+        # Overall average confidence is high (90 cells, almost all 0.95), but dst cell is low (0.3)
+        conf_grid = [[0.95 for _ in range(9)] for _ in range(10)]
+        conf_grid[5][0] = 0.30  # dst cell has low confidence
+
+        obs = derive_move_observation(
+            before, after, player_color="r", min_confidence=0.5, confidence_grid=conf_grid
+        )
+        self.assertFalse(obs.success)
+        self.assertFalse(obs.is_valid)
+        self.assertEqual(obs.status, "LOW_CHANGED_CELL_CONFIDENCE")
+        self.assertIn("Low changed-cell confidence", obs.error)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,7 +30,19 @@ class SnapshotDetector:
        Frame + detections được truyền vào từ CameraMonitor.
     """
 
-    def __init__(self, perspective_path, class_id_map, num_cols=9, num_rows=10, max_dist_threshold=0.32):
+    MIN_ABSDIFF_SCORE = 500.0
+    MIN_ABSDIFF_MARGIN = 200.0
+
+    def __init__(
+        self,
+        perspective_path,
+        class_id_map,
+        num_cols=9,
+        num_rows=10,
+        max_dist_threshold=0.32,
+        min_absdiff_score=500.0,
+        min_absdiff_margin=200.0,
+    ):
         """
         Args:
             perspective_path: đường dẫn file perspective.npy
@@ -38,12 +50,16 @@ class SnapshotDetector:
             num_cols:         số cột bàn cờ (9)
             num_rows:         số hàng bàn cờ (10)
             max_dist_threshold: dung sai khoảng cách tối đa tới giao điểm ô cờ (default: 0.32)
+            min_absdiff_score: ngưỡng absdiff tối thiểu để xem là có thay đổi (default: 500.0)
+            min_absdiff_margin: chênh lệch điểm tối thiểu giữa candidate hạng 1 và 2 (default: 200.0)
         """
         self.perspective_path = str(perspective_path)
         self.class_id_map = class_id_map
         self.num_cols = num_cols
         self.num_rows = num_rows
         self.max_dist_threshold = max_dist_threshold
+        self.min_absdiff_score = float(min_absdiff_score)
+        self.min_absdiff_margin = float(min_absdiff_margin)
 
         # T1 baseline
         self._baseline_occ = None    # occupancy grid: True/False
@@ -314,6 +330,7 @@ class SnapshotDetector:
         """
         if self._baseline_frame is None:
             print("[SNAPSHOT] ⚠️ resolve_capture_ambiguity: không có baseline_frame!")
+            self.last_detection_ambiguous = True
             return None
         if curr_frame is None or len(candidates) == 0:
             return None
@@ -321,6 +338,7 @@ class SnapshotDetector:
         # Load perspective matrix để tính inverse
         if not os.path.exists(self.perspective_path):
             print("[SNAPSHOT] ⚠️ resolve_capture_ambiguity: không có perspective.npy!")
+            self.last_detection_ambiguous = True
             return None
 
         try:
@@ -328,10 +346,10 @@ class SnapshotDetector:
             inv_M = np.linalg.inv(M)
         except Exception as e:
             print(f"[SNAPSHOT] ⚠️ resolve_capture_ambiguity: lỗi load/invert M: {e}")
+            self.last_detection_ambiguous = True
             return None
 
-        best_candidate = None
-        best_score = -1
+        scored_candidates = []
         score_log = []
 
         for (col, row) in candidates:
@@ -354,19 +372,39 @@ class SnapshotDetector:
             curr_gray = cv2.cvtColor(curr_crop, cv2.COLOR_BGR2GRAY)
 
             diff = cv2.absdiff(prev_gray, curr_gray)
-            score = int(np.sum(diff))
+            score = float(np.sum(diff))
 
-            score_log.append(f"  ({col},{row}): score={score}")
-
-            if score > best_score:
-                best_score = score
-                best_candidate = (col, row)
+            score_log.append(f"  ({col},{row}): score={score:.1f}")
+            scored_candidates.append(((col, row), score))
 
         print("[SNAPSHOT] 🔬 Blind Capture Resolution scores:")
         for s in score_log:
             print(s)
-        print(f"[SNAPSHOT] ✅ Best candidate: {best_candidate} (score={best_score})")
 
+        if not scored_candidates:
+            self.last_detection_ambiguous = True
+            return None
+
+        # Sắp xếp điểm giảm dần
+        scored_candidates.sort(key=lambda item: item[1], reverse=True)
+        best_candidate, best_score = scored_candidates[0]
+
+        # Kiểm tra ngưỡng điểm tối thiểu (absolute threshold)
+        if best_score < self.min_absdiff_score:
+            print(f"[SNAPSHOT] ❌ Pixel absdiff score {best_score:.1f} < threshold {self.min_absdiff_score:.1f}. Failing closed.")
+            self.last_detection_ambiguous = True
+            return None
+
+        # Kiểm tra khoảng cách điểm với candidate thứ 2 (separation margin)
+        if len(scored_candidates) > 1:
+            second_score = scored_candidates[1][1]
+            margin = best_score - second_score
+            if margin < self.min_absdiff_margin:
+                print(f"[SNAPSHOT] ❌ Pixel absdiff margin {margin:.1f} < threshold {self.min_absdiff_margin:.1f} (1st={best_score:.1f}, 2nd={second_score:.1f}). Failing closed.")
+                self.last_detection_ambiguous = True
+                return None
+
+        print(f"[SNAPSHOT] ✅ Best candidate: {best_candidate} (score={best_score:.1f})")
         return best_candidate
 
     # -------------------------------------------------------------------------
@@ -435,11 +473,19 @@ class SnapshotDetector:
                                 c_src.append(((c, r), orig_p))
                             elif rec_p.startswith("r") and orig_p != rec_p:
                                 c_dst.append(((c, r), rec_p))
+                    valid_recovery = []
                     for (s_c, s_r), p_src in c_src:
                         for (d_c, d_r), p_dst in c_dst:
                             if p_src == p_dst and xiangqi.is_valid_move((s_c, s_r), (d_c, d_r), board, "r"):
-                                print(f"[SNAPSHOT] ✅ Fallback (CChess ONNX Recovery from 0 disappeared): {p_src} ({s_c},{s_r})→({d_c},{d_r})")
-                                return (s_c, s_r), (d_c, d_r), p_src
+                                valid_recovery.append(((s_c, s_r), (d_c, d_r), p_src))
+                    if len(valid_recovery) == 1:
+                        (s_c, s_r), (d_c, d_r), p_src = valid_recovery[0]
+                        print(f"[SNAPSHOT] ✅ Fallback (CChess ONNX Recovery from 0 disappeared): {p_src} ({s_c},{s_r})→({d_c},{d_r})")
+                        return (s_c, s_r), (d_c, d_r), p_src
+                    elif len(valid_recovery) > 1:
+                        print(f"[SNAPSHOT] ❌ Fallback (CChess ONNX Recovery from 0 disappeared): Ambiguous ({len(valid_recovery)} candidates). Failing closed.")
+                        self.last_detection_ambiguous = True
+                        return None, None, None
             print("[SNAPSHOT] ❌ Không có quân đỏ nào biến mất.")
             return None, None, None
 
@@ -539,6 +585,10 @@ class SnapshotDetector:
                 if xiangqi and xiangqi.is_valid_move(src, dst, board, "r"):
                     print(f"[SNAPSHOT] ✅ Fallback (ăn quân, cả 2 biến mất): {piece} {src}→{dst}")
                     return src, dst, piece
+            elif len(black_disappeared) > 1:
+                print(f"[SNAPSHOT] ❌ Fallback: Multiple black disappeared ({len(black_disappeared)}). Failing closed.")
+                self.last_detection_ambiguous = True
+                return None, None, None
 
             # Dùng pixel absdiff để tìm ô quân đen có thay đổi nhiều nhất
             black_candidates = [
@@ -569,11 +619,19 @@ class SnapshotDetector:
                         elif rec_p.startswith("r") and orig_p != rec_p:
                             candidates_dst.append(((c, r), rec_p))
 
+                recovery_moves = []
                 for (s_c, s_r), p_src in candidates_src:
                     for (d_c, d_r), p_dst in candidates_dst:
                         if p_src == p_dst and xiangqi.is_valid_move((s_c, s_r), (d_c, d_r), board, "r"):
-                            print(f"[SNAPSHOT] ✅ Fallback (CChess ONNX Recovery): {p_src} ({s_c},{s_r})→({d_c},{d_r})")
-                            return (s_c, s_r), (d_c, d_r), p_src
+                            recovery_moves.append(((s_c, s_r), (d_c, d_r), p_src))
+                if len(recovery_moves) == 1:
+                    (s_c, s_r), (d_c, d_r), p_src = recovery_moves[0]
+                    print(f"[SNAPSHOT] ✅ Fallback (CChess ONNX Recovery): {p_src} ({s_c},{s_r})→({d_c},{d_r})")
+                    return (s_c, s_r), (d_c, d_r), p_src
+                elif len(recovery_moves) > 1:
+                    print(f"[SNAPSHOT] ❌ Fallback (CChess ONNX Recovery): Ambiguous ({len(recovery_moves)} candidates). Failing closed.")
+                    self.last_detection_ambiguous = True
+                    return None, None, None
 
         print("[SNAPSHOT] ❌ Không tìm được nước đi hợp lệ.")
         return None, None, None
