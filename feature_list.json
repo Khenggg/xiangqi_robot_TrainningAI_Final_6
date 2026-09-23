@@ -25,5 +25,115 @@
     "status": "not_started",
     "evidence": "",
     "notes": ""
+  },
+  {
+    "id": "touch-without-move",
+    "title": "Touch the board without ending the turn",
+    "user_visible_behavior": "so that harmless interaction does not trigger the AI",
+    "verification_command": "Accepted when hand/object entry and exit with a final board equivalent to the committed board produces no move and returns to PLAYER_IDLE.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "move-and-return-origin",
+    "title": "Return a moved piece to its original square",
+    "user_visible_behavior": "so that changing my mind does not end the turn",
+    "verification_command": "Accepted when all intermediate observations remain transient and the restored final board produces no commit.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "hold-red-piece-while-thinking",
+    "title": "Hold a Red piece outside the board while thinking",
+    "user_visible_behavior": "so that a lifted piece is not treated as captured, lost, or moved",
+    "verification_command": "Accepted when disappearance during occlusion never mutates the committed board and never starts the AI turn.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "restore-held-piece",
+    "title": "Restore a held piece to its original square",
+    "user_visible_behavior": "so that I can continue the same turn",
+    "verification_command": "Accepted when a clear settled board equal to the committed board returns to PLAYER_IDLE without a commit.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "place-held-piece-legally",
+    "title": "Complete a legal move after holding a piece",
+    "user_visible_behavior": "so that the turn ends only after the board is clear and stable",
+    "verification_command": "Accepted when exactly one legal Red successor remains stable for the configured window and commits exactly once.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "block-confirmation-while-occluded",
+    "title": "Block confirmation while the board is obstructed",
+    "user_visible_behavior": "so that the AI never starts while a hand, tool, sleeve, or object remains over the board",
+    "verification_command": "Accepted when interaction, occlusion, motion, or insufficient visibility has priority over candidate stability and blocks confirmation.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "no-interaction-legal-move",
+    "title": "Detect a legal move without a hand event",
+    "user_visible_behavior": "so that tools or missed hand detections can still complete the turn",
+    "verification_command": "Accepted when a unique legal successor is committed after the longer no-interaction stability window.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "recover-invalid-or-incomplete-board",
+    "title": "Keep the player turn on invalid or incomplete boards",
+    "user_visible_behavior": "so that missing pieces, illegal layouts, and ambiguity never start the AI",
+    "verification_command": "Accepted when incomplete, illegal, missing-piece, and ambiguous observations never commit and enter a recoverable waiting state.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "single-human-move-commit-owner",
+    "title": "Commit each physical move at most once",
+    "user_visible_behavior": "so that hand, stability, SPACE, and mouse evidence cannot double-commit",
+    "verification_command": "Accepted when all evidence feeds one arbiter and stale, duplicate, or consumed turn/baseline tokens are rejected.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P2"
+  },
+  {
+    "id": "player-turn-transition-diagnostics",
+    "title": "Diagnose player-turn state transitions",
+    "user_visible_behavior": "so that camera and physical-board failures can be tuned and reproduced",
+    "verification_command": "Accepted when logs expose state, event, candidate, confidence, tokens, timers, and rejection or recovery reason.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P2"
+  },
+  {
+    "id": "manual-validation-and-recovery",
+    "title": "Retain manual SPACE and supervised correction",
+    "user_visible_behavior": "so that the operator can recover safely when automatic vision is uncertain",
+    "verification_command": "Accepted when manual confirmation uses the same validation and atomic commit gate and recovery never silently advances the turn.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P3"
   }
 ]

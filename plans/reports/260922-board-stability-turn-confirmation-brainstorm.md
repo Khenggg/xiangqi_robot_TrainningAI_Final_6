@@ -1,24 +1,29 @@
-# Brainstorm: Board-stability player-turn confirmation
+# Brainstorm: Unified player-turn completion detection
 
-**Date:** 2026-09-22
+**Date:** 2026-09-22, updated 2026-09-23
 
 ## Ideas Explored
 
-- Hand-aware confirmation: waits for a detected hand to enter and leave the board. It does not work when a player moves pieces with another object.
-- Object-specific detection: train or configure a detector for each possible moving object. It adds operational and dataset overhead.
-- Board-stability confirmation: observe a changed board state, then accept it only after it remains stable. This is independent of the object used to move a piece.
+- Hand-exit confirmation: useful as a completion gate, but unreliable as the sole trigger and blind to tools or missed detections.
+- Board-stability confirmation: supports any interaction method, but a stable missing/illegal/occluded board must not be mistaken for a completed move.
+- Held-piece state: models a Red piece temporarily removed while the player thinks, without mutating the logical board.
+- Unified arbiter: combines lifecycle, interaction/occlusion, visibility, stability, and legal-successor evidence; only the arbiter can request a commit.
+- Legal-successor matching: preserves the committed board and compares settled observations against the baseline and all legal Red successor boards instead of reconstructing every intermediate gesture.
 
 ## User's Direction
 
-Use board stability rather than hand detection. The desired response time after the object leaves the board is 1.0–1.5 seconds.
+Use a hybrid solution. Hand/object presence is a blocking/completion signal, while a clear and stable legal final board is authoritative. A lifted piece held outside the board remains transient for any duration. Returning it to its origin does not end the turn; placing it at a legal new destination does, but only after the board is unobstructed and settled.
 
-## Open Questions
+## Resolved Questions
 
-- [NEEDS CLARIFICATION] Exact sampling rule within the 1.0–1.5 second window (for example: three identical valid observations over 1.2 seconds).
-- [NEEDS CLARIFICATION] Whether automatic confirmation should remain enabled for every physical game or be selectable in the UI.
+- Automatic confirmation must also support moves for which no hand interaction was detected.
+- Timeout never ends the turn while a piece is held or missing.
+- Both prior flows must be merged behind a single conflict-resolution and commit owner.
+- Manual SPACE remains a fallback but must reuse the same validation/commit gate.
 
 ## Risks
 
-- Camera flicker or intermittent piece detections can make a moved board appear unstable.
-- A stable but incorrectly recognized layout must never bypass Xiangqi legality validation.
-- Capture moves can retain destination occupancy and require CChess identity or visual-difference evidence.
+- Hand false negatives can incorrectly report a clear board; visibility coverage and motion must also gate confirmation.
+- CChess identity and YOLO occupancy can disagree; normalization and explicit ambiguity are required.
+- Concurrent legacy paths currently call `process_human_move` directly, creating double-commit and stale-baseline risks.
+- A missing piece after the board clears can deadlock without an explicit correction state and operator feedback.
