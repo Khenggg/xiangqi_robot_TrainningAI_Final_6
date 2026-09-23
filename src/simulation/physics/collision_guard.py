@@ -175,25 +175,32 @@ class FR3CollisionGuard:
                     ),
                 )
 
-        # 3. Check Gripper proxies <-> board
+        # 3. Check Gripper proxies & tool_bridge <-> board
         # Gripper fingertips intentionally hover close to board (e.g. 1.0mm-1.5mm) during grasp.
         # Enforces gb_margin to guarantee positive clearance without board penetration.
-        for proxy_id in self.world.gripper.proxy_body_ids:
+        tool_bodies = getattr(self.world.gripper, "collision_tool_body_ids", self.world.gripper.proxy_body_ids)
+        for proxy_id in tool_bodies:
             pts = p.getClosestPoints(proxy_id, board_id, distance=gb_margin, physicsClientId=client)
             for pt in pts:
                 dist = float(pt[8])
                 if dist < gb_margin:
                     penetration = max(0.0, -dist)
+                    is_bridge = (
+                        hasattr(self.world.gripper, "tool_bridge_body_id")
+                        and proxy_id == self.world.gripper.tool_bridge_body_id
+                    )
+                    c_body = "tool_bridge" if is_bridge else "gripper"
+                    desc = "Tool bridge" if is_bridge else "Gripper proxy"
                     return CollisionResult(
                         safe=False,
-                        colliding_body="gripper",
+                        colliding_body=c_body,
                         robot_link=5,
                         obstacle="board",
                         distance_m=dist,
                         penetration_m=penetration,
                         q_failed=[round(float(q), 4) for q in joints_rad],
                         failure_reason=(
-                            f"Gripper proxy colliding with board (distance {dist*1000:.2f}mm < margin {gb_margin*1000:.2f}mm)"
+                            f"{desc} colliding with board (distance {dist*1000:.2f}mm < margin {gb_margin*1000:.2f}mm)"
                         ),
                     )
 
@@ -229,7 +236,7 @@ class FR3CollisionGuard:
         for pid, piece in self.world.pieces.items():
             if piece.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
                 continue
-            is_target_piece = (pid == allowed_grasp_piece_id) or (pid == attached_id) or (piece.attached_to_gripper)
+            is_target_piece = (pid == allowed_grasp_piece_id) or (allowed_grasp_piece_id == "*") or (pid == attached_id) or (piece.attached_to_gripper)
             if is_target_piece:
                 # If piece is already attached, it moves with gripper end-effector assembly.
                 # Palm penetration check strictly guards against crushing an unattached piece during grasp descent.
@@ -256,14 +263,19 @@ class FR3CollisionGuard:
                                 ),
                             )
             else:
-                for proxy_id in self.world.gripper.proxy_body_ids:
+                for proxy_id in tool_bodies:
                     pts = p.getClosestPoints(proxy_id, piece.body_id, distance=margin, physicsClientId=client)
                     for pt in pts:
                         dist = float(pt[8])
                         if dist < margin:
+                            is_bridge = (
+                                hasattr(self.world.gripper, "tool_bridge_body_id")
+                                and proxy_id == self.world.gripper.tool_bridge_body_id
+                            )
+                            c_body = "tool_bridge" if is_bridge else "gripper"
                             return CollisionResult(
                                 safe=False,
-                                colliding_body="gripper",
+                                colliding_body=c_body,
                                 robot_link=5,
                                 obstacle=f"piece:{pid}",
                                 distance_m=dist,

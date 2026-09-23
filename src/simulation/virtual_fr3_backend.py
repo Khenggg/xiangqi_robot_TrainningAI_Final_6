@@ -47,6 +47,20 @@ class PlannedTrajectory:
     min_manipulability: Optional[float] = None
 
 
+@dataclass(frozen=True)
+class VirtualBackendStateSnapshot:
+    """Immutable snapshot of authoritative virtual FR3 backend state."""
+    joints_deg: List[float]
+    joints_rad: List[float]
+    tcp_pose_mm_deg: List[float]
+    flange_pose_mm_deg: List[float]
+    motion_state: str
+    connected: bool
+    gripper_closed: bool
+    attached_piece_id: Optional[str]
+    last_error: Optional[str]
+
+
 DEFAULT_HOME_JOINTS_DEG = [0.0, -45.0, 90.0, -45.0, -90.0, 0.0]
 SERVICE_SAFE_JOINTS_DEG = [0.0, -70.0, 60.0, -80.0, -90.0, 0.0]
 
@@ -205,6 +219,21 @@ class VirtualFR3Backend(RobotBackend):
             self._motion_state = "IDLE"
             self._last_error = None
             self._sync_telemetry()
+
+    def get_state_snapshot(self) -> VirtualBackendStateSnapshot:
+        """Return an immutable snapshot of current authoritative backend state."""
+        with self._state_lock:
+            return VirtualBackendStateSnapshot(
+                joints_deg=list(self._current_joints_deg),
+                joints_rad=[float(v) for v in self._current_joints_rad],
+                tcp_pose_mm_deg=list(self._tcp_pose_mm_deg),
+                flange_pose_mm_deg=list(self._flange_pose_mm_deg),
+                motion_state=str(self._motion_state),
+                connected=bool(self._connected),
+                gripper_closed=bool(self._gripper_closed),
+                attached_piece_id=self._attached_piece_id,
+                last_error=self._last_error,
+            )
 
     def _compute_flange_pose_mm_deg(self, joints_rad: np.ndarray) -> List[float]:
         pose = self.kinematics.forward_kinematics(joints_rad)

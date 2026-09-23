@@ -806,7 +806,21 @@ function updateSingleJoint(index, val) {
     state.currentCell = null;
     updateStepperUI(null, []);
     if (jointsReadoutEl) {
-      jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ") + " (PREVIEW)";
+      jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ") + " (UNVALIDATED PREVIEW)";
+    }
+    const badge = document.getElementById("trajectoryBadge");
+    if (badge) {
+      badge.className = "badge-warn";
+      badge.textContent = "⚠️ UNSAFE VISUAL PREVIEW (COLLISION NOT VALIDATED)";
+    }
+    const clearanceVal = document.getElementById("analysisClearanceVal");
+    if (clearanceVal) {
+      clearanceVal.textContent = "⚠️ Khớp chỉnh thủ công offline — Chưa kiểm tra va chạm qua backend";
+      clearanceVal.style.color = "#d29922";
+    }
+    const expl = document.getElementById("trajectoryExplanation");
+    if (expl) {
+      expl.innerHTML = "⚠️ <strong>Chế độ xem trước thủ công (Offline):</strong> Góc khớp đang được chỉnh cục bộ trên trình duyệt. <strong>COLLISION NOT VALIDATED</strong>. Chưa được xác thực an toàn qua backend PyBullet.";
     }
     if (state.currentArm) {
       applyJointsDeg(state.currentArm, state.jointsDeg);
@@ -1722,7 +1736,7 @@ function handleBackendTrajectoryStage(stage, payload) {
     updateStepperUI(null, ["stepLift", "stepTransit", "stepLand"]);
     if (badge) {
       badge.className = "badge-safe";
-      badge.textContent = "✅ TRAJECTORY COMPLETE (COLLISION-FREE)";
+      badge.textContent = "✅ TRAJECTORY ACCEPTED BY BACKEND COLLISION VALIDATION";
     }
     if (state.targetDestinationCell) {
       state.currentCell = state.targetDestinationCell;
@@ -1736,11 +1750,16 @@ function handleBackendTrajectoryStage(stage, payload) {
       tiltVal.style.color = "#3fb950";
     }
     if (clearanceVal) {
-      clearanceVal.textContent = `✅ Đầu ngàm kẹp cách mặt bàn +4.715 mm (Tâm quân cờ, COLLISION-FREE)`;
+      if (payload && payload.collision_evidence && payload.collision_evidence.distance_m !== undefined) {
+        const clr_mm = (payload.collision_evidence.distance_m * 1000).toFixed(2);
+        clearanceVal.textContent = `✅ Khoảng cách an toàn tối thiểu: ${clr_mm} mm (Backend verified)`;
+      } else {
+        clearanceVal.textContent = `✅ Quỹ đạo được chấp thuận bởi backend collision validation`;
+      }
       clearanceVal.style.color = "#3fb950";
     }
     if (expl) {
-      expl.innerHTML = `✅ <strong>Đã hoàn thành quỹ đạo 3 giai đoạn:</strong> Robot đã thực thi Lift (+70mm) ➔ Transit ➔ Land bởi backend runtime có thẩm quyền. Trạng thái: <strong>COLLISION-FREE</strong>.`;
+      expl.innerHTML = `✅ <strong>Đã hoàn thành quỹ đạo 3 giai đoạn:</strong> Robot đã thực thi Lift ➔ Transit ➔ Land bởi backend runtime có thẩm quyền. Trạng thái: <strong>TRAJECTORY ACCEPTED BY BACKEND COLLISION VALIDATION</strong>.`;
     }
   } else if (stage === "RECOVERY_LIFT") {
     updateStepperUI(null, []);

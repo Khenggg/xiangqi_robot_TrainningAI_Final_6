@@ -186,14 +186,17 @@ class VirtualPhysicalWorld:
 
             self._physics_lock = threading.RLock()
 
-            # Gripper proxy and PyBullet collision bodies
-            self.gripper = VirtualGripper(profile_path=self.gripper_profile_path)
-            self._spawn_gripper_proxies()
-
             # Resolve canonical tool offset
             tool_cfg = self.scene_cfg.get("tool_transform", {})
             can_tcp = list(get_canonical_tool_geometry().canonical_tcp_offset_m)
             self._tool_offset = np.array(tool_cfg.get("flange_to_tcp_xyz_m", can_tcp), dtype=float)
+
+            # Gripper proxy and PyBullet collision bodies
+            self.gripper = VirtualGripper(
+                profile_path=self.gripper_profile_path,
+                flange_to_tcp_xyz_m=self._tool_offset,
+            )
+            self._spawn_gripper_proxies()
 
             # Full articulated FR3 robot for collision queries
             self.robot_body_id = -1
@@ -457,8 +460,9 @@ class VirtualPhysicalWorld:
                             min_dist = d
                             closest_name = f"robot_link_{link_idx}"
 
-            # Check gripper proxies
-            for proxy_id in self.gripper.proxy_body_ids:
+            # Check gripper proxies and conservative tool bridge
+            tool_bodies = getattr(self.gripper, "collision_tool_body_ids", self.gripper.proxy_body_ids)
+            for proxy_id in tool_bodies:
                 contacts = p.getClosestPoints(
                     self.board_body_id,
                     proxy_id,
@@ -469,7 +473,11 @@ class VirtualPhysicalWorld:
                     d = float(pt[8])
                     if d < min_dist:
                         min_dist = d
-                        closest_name = f"gripper_proxy_{proxy_id}"
+                        is_bridge = (
+                            hasattr(self.gripper, "tool_bridge_body_id")
+                            and proxy_id == self.gripper.tool_bridge_body_id
+                        )
+                        closest_name = "tool_bridge" if is_bridge else f"gripper_proxy_{proxy_id}"
 
             return min_dist, closest_name
 
@@ -951,6 +959,8 @@ class VirtualPhysicalWorld:
             self.gripper.left_jaw_body_id: "left_jaw",
             self.gripper.right_jaw_body_id: "right_jaw",
         }
+        if hasattr(self.gripper, "tool_bridge_body_id") and self.gripper.tool_bridge_body_id >= 0:
+            body_names[self.gripper.tool_bridge_body_id] = "tool_bridge"
         for gb, name in body_names.items():
             if gb < 0:
                 continue

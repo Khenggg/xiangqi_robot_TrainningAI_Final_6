@@ -26,9 +26,13 @@ class VirtualGripper:
     Operates natively in robot_base frame.
     """
 
+    # Simulation-only conservative collision envelope marker
+    SIMULATION_CONSERVATIVE_COLLISION_ENVELOPE = True
+
     def __init__(
         self,
         profile_path: Optional[Union[str, Path]] = None,
+        flange_to_tcp_xyz_m: Optional[Sequence[float]] = None,
     ):
         if profile_path is None:
             profile_path = Path(__file__).resolve().parent.parent.parent.parent / "shared" / "virtual_gripper_profile.json"
@@ -62,8 +66,31 @@ class VirtualGripper:
         jaw = self.profile["jaw"]
         self.jaw_dimensions_m = np.array(jaw["dimensions_m"], dtype=float)
 
+        # Simulation-only conservative tool collision envelope geometry
+        # Uses existing simulation flange-to-TCP offset: t = flange_to_tcp_xyz_m
+        self.flange_to_tcp_xyz_m = np.array(
+            flange_to_tcp_xyz_m if flange_to_tcp_xyz_m is not None else [0.0, 0.0, 0.150],
+            dtype=float,
+        )
+        t = self.flange_to_tcp_xyz_m
+        L = float(np.linalg.norm(t))
+        self.tool_bridge_length_m = L
+        if L > 1e-6:
+            self.tool_bridge_axis_tcp = -(t / L)
+        else:
+            self.tool_bridge_axis_tcp = np.array([0.0, 0.0, -1.0], dtype=float)
+        self.tool_bridge_center_local = self.tool_bridge_axis_tcp * (L / 2.0)
+
+        # Conservative transverse dimensions derived from proxy dimensions + margin
+        collision_margin = 0.002  # 2.0 mm conservative safety margin
+        half_x = max(float(self.palm_dimensions_m[0]) / 2.0, float(self.jaw_dimensions_m[0]) / 2.0) + collision_margin
+        half_y = max(float(self.palm_dimensions_m[1]) / 2.0, float(self.jaw_dimensions_m[1]) / 2.0) + collision_margin
+        half_z = L / 2.0
+        self.tool_bridge_half_extents_m = np.array([half_x, half_y, half_z], dtype=float)
+
         # PyBullet body IDs (managed by VirtualPhysicalWorld)
         self.client_id: int = -1
+        self.tool_bridge_body_id: int = -1
         self.palm_body_id: int = -1
         self.left_jaw_body_id: int = -1
         self.right_jaw_body_id: int = -1
@@ -96,15 +123,37 @@ class VirtualGripper:
         return self.attached_piece.piece_id if self.attached_piece is not None else None
 
     @property
+    def collision_tool_body_ids(self) -> List[int]:
+        """Simulation collision tool body IDs including conservative tool bridge."""
+        return [b for b in (self.tool_bridge_body_id, self.palm_body_id, self.left_jaw_body_id, self.right_jaw_body_id) if b >= 0]
+
+    @property
     def proxy_body_ids(self) -> List[int]:
+        """Kinematic finger and palm proxy body IDs (backwards-compatible)."""
         return [b for b in (self.palm_body_id, self.left_jaw_body_id, self.right_jaw_body_id) if b >= 0]
 
     def spawn_proxies(self, client_id: int) -> None:
         """
-        Spawn kinematic PyBullet collision proxy bodies for palm, left jaw, and right jaw
-        using dimensions strictly loaded from shared/virtual_gripper_profile.json.
+        Spawn kinematic PyBullet collision proxy bodies for conservative tool bridge,
+        palm, left jaw, and right jaw using dimensions strictly loaded from
+        shared/virtual_gripper_profile.json and tool_transform.
         """
         self.client_id = client_id
+
+        # Conservative simulation-only tool collision envelope (tool_bridge)
+        bridge_half = self.tool_bridge_half_extents_m.tolist()
+        col_bridge = p.createCollisionShape(
+            p.GEOM_BOX,
+            halfExtents=bridge_half,
+            physicsClientId=client_id,
+        )
+        self.tool_bridge_body_id = p.createMultiBody(
+            baseMass=0.0,
+            baseCollisionShapeIndex=col_bridge,
+            basePosition=[0.0, 0.0, -10.0],
+            physicsClientId=client_id,
+        )
+
         palm_half = (self.palm_dimensions_m / 2.0).tolist()
         jaw_half = (self.jaw_dimensions_m / 2.0).tolist()
 
@@ -142,12 +191,13 @@ class VirtualGripper:
     def remove_proxies(self) -> None:
         """Safely remove proxy bodies from PyBullet."""
         if self.client_id >= 0:
-            for b in (self.palm_body_id, self.left_jaw_body_id, self.right_jaw_body_id):
+            for b in (self.tool_bridge_body_id, self.palm_body_id, self.left_jaw_body_id, self.right_jaw_body_id):
                 if b >= 0:
                     try:
                         p.removeBody(b, physicsClientId=self.client_id)
                     except Exception:
                         pass
+        self.tool_bridge_body_id = -1
         self.palm_body_id = -1
         self.left_jaw_body_id = -1
         self.right_jaw_body_id = -1
@@ -173,6 +223,17 @@ class VirtualGripper:
         jaw_dz = float(self.jaw_dimensions_m[2])
         w = float(jaw_width) if jaw_width is not None else float(self.jaw_width_m)
         half_w = w / 2.0
+
+        # Conservative simulation tool collision envelope (tool_bridge)
+        # Spans continuously from TCP region back toward J6 flange
+        if self.tool_bridge_body_id >= 0:
+            p_bridge = p_tcp + R_tcp @ self.tool_bridge_center_local
+            p.resetBasePositionAndOrientation(
+                self.tool_bridge_body_id,
+                p_bridge.tolist(),
+                list(q_tcp),
+                physicsClientId=self.client_id,
+            )
 
         # TCP is at the midpoint of the finger tips at Z=0.
         # Jaws extend backwards (towards flange) along -Z from Z=0 to -jaw_dz.
@@ -366,7 +427,7 @@ class VirtualGripper:
 
         # Disable collision between attached piece and gripper collision proxies
         if self.client_id >= 0:
-            for gb in self.proxy_body_ids:
+            for gb in self.collision_tool_body_ids:
                 p.setCollisionFilterPair(
                     piece.body_id,
                     gb,
@@ -394,7 +455,7 @@ class VirtualGripper:
 
         # Re-enable collision between piece and gripper collision proxies
         if self.client_id >= 0:
-            for gb in self.proxy_body_ids:
+            for gb in self.collision_tool_body_ids:
                 p.setCollisionFilterPair(
                     piece.body_id,
                     gb,
