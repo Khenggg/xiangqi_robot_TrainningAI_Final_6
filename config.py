@@ -34,10 +34,17 @@ PLAYABLE_LENGTH_MM = _geo.board.playable_grid_length_mm # Chiều dài vùng ch�
 BOARD_MARGIN_X_MM = _geo.board.margin_horizontal_mm     # Lề trái/phải: 23.5 mm
 BOARD_MARGIN_Y_MM = _geo.board.margin_vertical_mm       # Lề trên/dưới: 25.0 mm
 
-# Tọa độ bãi chứa quân bị ăn (X, Y, Z) [LEGACY ISOLATED TARGET]
-CAPTURE_BIN_X = -226.123
-CAPTURE_BIN_Y = 225.024
-CAPTURE_BIN_Z = 291.68  # [QUAN TRỌNG] Độ cao khi thả quân vào thùng
+# --- CAPTURE BIN PHYSICAL PROVENANCE & POSE ---
+# Physical capture bin pose [X, Y, Z (mm), Rx, Ry, Rz (deg)].
+# Gated by CAPTURE_BIN_VALIDATED: must remain False until Phase 4 physical validation.
+CAPTURE_BIN_POSE_MM_DEG = [-226.123, 225.024, 291.68, -179.164, -3.047, -26.304]
+CAPTURE_BIN_PROVENANCE = "LEGACY_UNVERIFIED"
+CAPTURE_BIN_VALIDATED = False
+
+# Legacy aliases for backward compatibility
+CAPTURE_BIN_X = CAPTURE_BIN_POSE_MM_DEG[0]
+CAPTURE_BIN_Y = CAPTURE_BIN_POSE_MM_DEG[1]
+CAPTURE_BIN_Z = CAPTURE_BIN_POSE_MM_DEG[2]
 
 # Độ cao an toàn (mm) - [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
 # Unified Motion Coordinator sử dụng độ cao tương đối so với mặt bàn (PICK_TCP_HEIGHT_MM, SAFE_CLEARANCE_Z_MM)
@@ -71,9 +78,17 @@ ROTATION = [-179.164, -3.047, -26.304]
 PICK_TOOL_ROTATION = list(ROTATION)
 PLACE_TOOL_ROTATION = list(ROTATION)
 
+# --- ROBOT BACKEND EXECUTION SELECTION ---
+# Explicit backend selection: "PHYSICAL" or "VIRTUAL".
+# Rejects any unlisted backend type to prevent accidental execution fallbacks.
+ROBOT_BACKEND = _os.environ.get("ROBOT_BACKEND", "PHYSICAL").upper()
+if ROBOT_BACKEND not in ("PHYSICAL", "VIRTUAL"):
+    raise ValueError(f"Invalid ROBOT_BACKEND='{ROBOT_BACKEND}'. Must be 'PHYSICAL' or 'VIRTUAL'.")
+
 # Kết nối Robot
 ROBOT_IP = "192.168.58.2"
-DRY_RUN = False # Đổi thành True nếu muốn test code mà không cần bật Robot
+# DRY_RUN prevents real hardware actuation (mock/dry-run backend), NEVER bypasses motion architecture.
+DRY_RUN = _os.environ.get("DRY_RUN", "False").lower() in ("true", "1", "yes")
 
 # --- PHYSICAL BOARD CALIBRATION CONFIGURATION ---
 # Chế độ hiệu chuẩn bàn cờ thực tế từ điểm dạy R1-R4:

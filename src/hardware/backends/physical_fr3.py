@@ -56,6 +56,8 @@ class PhysicalFR3Backend(RobotBackend):
 
         self._rpc: Optional[Any] = None
         self._connected: bool = False
+        self._enabled: bool = False
+        self._operational_mode: Optional[int] = None
         self._motion_state: str = "DISCONNECTED"
         self._last_error: Optional[str] = None
         self._gripper_closed: bool = False
@@ -107,11 +109,108 @@ class PhysicalFR3Backend(RobotBackend):
             logger.error(f"[PhysicalFR3Backend] SetToolDO({do_id}, {status_int}) exception: {exc}")
             raise
 
+    @property
+    def is_enabled(self) -> bool:
+        """Return True if robot motors are explicitly enabled and active."""
+        if self.dry_run:
+            return bool(self._enabled)
+        if not self._connected or self._rpc is None:
+            return False
+        return bool(self._enabled)
+
+    def enable_robot(self) -> bool:
+        """
+        Explicitly energize/enable physical robot servos.
+
+        Must NOT be called automatically upon connection. Requires explicit operator
+        or production execution workflow authorization.
+        """
+        if self.dry_run:
+            logger.info("[PhysicalFR3Backend] DRY_RUN: enable_robot() -> True")
+            self._enabled = True
+            return True
+
+        if not self._connected or self._rpc is None:
+            err = "Cannot enable robot: backend is not connected"
+            logger.error(f"[PhysicalFR3Backend] {err}")
+            self._last_error = err
+            return False
+
+        try:
+            logger.info(f"[PhysicalFR3Backend] Sending RobotEnable(1) to FR3 at {self.ip}...")
+            err = self._rpc.RobotEnable(1)
+            if err == 0:
+                self._enabled = True
+                logger.info("[PhysicalFR3Backend] Robot servos enabled successfully.")
+                return True
+            else:
+                err_msg = f"RobotEnable(1) failed with return code {err}"
+                logger.error(f"[PhysicalFR3Backend] {err_msg}")
+                self._last_error = err_msg
+                self._enabled = False
+                return False
+        except Exception as exc:
+            self._last_error = str(exc)
+            self._enabled = False
+            logger.error(f"[PhysicalFR3Backend] RobotEnable(1) exception: {exc}")
+            return False
+
+    def disable_robot(self) -> bool:
+        """Explicitly de-energize physical robot servos."""
+        if self.dry_run:
+            logger.info("[PhysicalFR3Backend] DRY_RUN: disable_robot() -> True")
+            self._enabled = False
+            return True
+
+        if not self._connected or self._rpc is None:
+            self._enabled = False
+            return True
+
+        try:
+            logger.info(f"[PhysicalFR3Backend] Sending RobotEnable(0) to FR3 at {self.ip}...")
+            err = self._rpc.RobotEnable(0)
+            self._enabled = False
+            return err == 0
+        except Exception as exc:
+            self._last_error = str(exc)
+            self._enabled = False
+            logger.error(f"[PhysicalFR3Backend] RobotEnable(0) exception: {exc}")
+            return False
+
+    def set_operational_mode(self, mode: int = 0) -> bool:
+        """Explicitly set controller operational mode (e.g. Mode 0 for program/automatic)."""
+        if self.dry_run:
+            self._operational_mode = mode
+            return True
+
+        if not self._connected or self._rpc is None:
+            return False
+
+        try:
+            err = self._rpc.Mode(int(mode))
+            if err == 0:
+                self._operational_mode = mode
+                return True
+            logger.warning(f"[PhysicalFR3Backend] Mode({mode}) returned code {err}")
+            return False
+        except Exception as exc:
+            self._last_error = str(exc)
+            logger.error(f"[PhysicalFR3Backend] Mode({mode}) exception: {exc}")
+            return False
+
     def connect(self) -> bool:
-        """Connect to the physical robot controller or initialize dry-run mock."""
+        """
+        Connect to the physical robot controller or initialize dry-run mock.
+
+        CRITICAL SAFETY INVARIANT:
+        connect() is strictly READ-ONLY. It opens the RPC interface and queries telemetry,
+        but NEVER energizes robot servos (no RobotEnable(1)) or modifies controller mode
+        (no Mode(0)). Motors remain unpowered until explicit enable_robot() is called.
+        """
         if self.dry_run:
             logger.info("[PhysicalFR3Backend] DRY_RUN mode enabled — skipping physical connection.")
             self._connected = True
+            self._enabled = False
             self._motion_state = "IDLE"
             if self.gripper_driver is None:
                 from src.hardware.gripper.two_output import TwoOutputGripperDriver
@@ -126,33 +225,25 @@ class PhysicalFR3Backend(RobotBackend):
             logger.error(f"[PhysicalFR3Backend] {err}")
             self._last_error = err
             self._connected = False
+            self._enabled = False
             self._motion_state = "ERROR"
             return False
 
         try:
-            logger.info(f"[PhysicalFR3Backend] Connecting to FAIRINO FR3 at {self.ip}...")
+            logger.info(f"[PhysicalFR3Backend] Connecting to FAIRINO FR3 at {self.ip} (READ-ONLY)...")
             self._rpc = robot_sdk_core.RPC(self.ip)
             time.sleep(1.0)
-            
+
             # Check SDK connection status
             sdk_state = getattr(self._rpc, "SDK_state", False)
             if not sdk_state:
                 raise RuntimeError(f"FAIRINO RPC failed to connect to {self.ip} (SDK_state=False)")
 
-            # Enable robot
-            err = self._rpc.RobotEnable(1)
-            if err != 0:
-                logger.warning(f"[PhysicalFR3Backend] RobotEnable(1) returned code {err}")
-
-            # Set mode 0 (manual/program auto mode)
-            err = self._rpc.Mode(0)
-            if err != 0:
-                logger.warning(f"[PhysicalFR3Backend] Mode(0) returned code {err}")
-
             self._connected = True
+            self._enabled = False
             self._motion_state = "IDLE"
             self._last_error = None
-            logger.info(f"[PhysicalFR3Backend] Successfully connected to FR3 at {self.ip}")
+            logger.info(f"[PhysicalFR3Backend] Successfully connected to FR3 at {self.ip} (servos unpowered)")
             self._sync_hardware_state()
 
             # Ensure gripper driver is bound to Tool DO and in safe idle (both outputs LOW)
@@ -173,13 +264,20 @@ class PhysicalFR3Backend(RobotBackend):
         except Exception as exc:
             self._last_error = str(exc)
             self._connected = False
+            self._enabled = False
             self._motion_state = "ERROR"
             logger.error(f"[PhysicalFR3Backend] Connection error: {exc}")
             return False
 
     def disconnect(self) -> bool:
-        """Disconnect and release the RPC handle."""
+        """Disconnect and release the RPC handle, ensuring servos are disabled."""
+        if self._enabled:
+            try:
+                self.disable_robot()
+            except Exception:
+                pass
         self._connected = False
+        self._enabled = False
         self._motion_state = "DISCONNECTED"
         if self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
             try:
