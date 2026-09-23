@@ -67,6 +67,7 @@ class PhysicalFR3Backend(RobotBackend):
         # TCP Z = 200.0 mm -> Flange Z = TCP Z + 150.0 = 350.0 mm for initial mock.
         self._current_flange_pose_mm_deg: List[float] = [-360.0, 0.0, 350.0, 180.0, 0.0, 90.0]
         self._flange_authoritative: bool = False
+        self._flange_pose_source: str = "MOCK" if self.dry_run else "UNAVAILABLE"
 
         # Standard FAIRINO SDK teaching point format (20 elements, tool 0, user 0)
         self._dry_run_teaching_points: dict = {
@@ -202,8 +203,11 @@ class PhysicalFR3Backend(RobotBackend):
     def _sync_hardware_state(self) -> None:
         """Query actual hardware joint positions, TCP pose, and flange pose."""
         if not self._connected or self.dry_run or self._rpc is None:
+            if self.dry_run:
+                self._flange_pose_source = "MOCK"
             return
 
+        tcp_valid = False
         try:
             # Query actual joints
             if hasattr(self._rpc, "GetActualJointPosDegree"):
@@ -216,15 +220,33 @@ class PhysicalFR3Backend(RobotBackend):
                 err, pose = self._rpc.GetActualTCPPose(flag=1)
                 if err == 0 and len(pose) >= 6:
                     self._current_tcp_pose_mm_deg = [float(v) for v in pose[:6]]
+                    tcp_valid = True
 
             # Query actual Tool Flange Pose from controller if supported
+            flange_queried = False
             if hasattr(self._rpc, "GetActualToolFlangePose"):
                 err, fpose = self._rpc.GetActualToolFlangePose(flag=1)
                 if err == 0 and len(fpose) >= 6:
                     self._current_flange_pose_mm_deg = [float(v) for v in fpose[:6]]
                     self._flange_authoritative = True
+                    self._flange_pose_source = "CONTROLLER"
+                    flange_queried = True
+
+            if not flange_queried:
+                self._flange_authoritative = False
+                if tcp_valid:
+                    # Derived from known tool transform (canonical tool offset = 150mm)
+                    # When end-effector points down (Rx=180), Flange Z is TCP Z + 150mm in base frame.
+                    derived_flange = list(self._current_tcp_pose_mm_deg)
+                    derived_flange[2] += 150.0
+                    self._current_flange_pose_mm_deg = derived_flange
+                    self._flange_pose_source = "DERIVED"
+                else:
+                    self._flange_pose_source = "UNAVAILABLE"
         except Exception as exc:
             logger.debug(f"[PhysicalFR3Backend] Hardware state sync failed: {exc}")
+            self._flange_authoritative = False
+            self._flange_pose_source = "UNAVAILABLE"
 
     def get_state_snapshot(self) -> RobotStateSnapshot:
         """Return immutable, thread-safe snapshot of current authoritative state."""
@@ -238,6 +260,7 @@ class PhysicalFR3Backend(RobotBackend):
             tcp_pose_mm_deg=list(self._current_tcp_pose_mm_deg),
             gripper_closed=self._gripper_closed,
             timestamp=time.time(),
+            flange_pose_source=self._flange_pose_source,
             last_error=self._last_error,
         )
 
@@ -349,7 +372,6 @@ class PhysicalFR3Backend(RobotBackend):
         mutual exclusion, deadtime, calibrated pulse duration, and safe idle.
         Raw uncontrolled SetToolDO fallback is strictly forbidden.
         """
-        self._gripper_closed = bool(closed)
         if self.gripper_driver is None:
             from src.hardware.gripper.two_output import TwoOutputGripperDriver
             self.gripper_driver = TwoOutputGripperDriver(
@@ -359,9 +381,16 @@ class PhysicalFR3Backend(RobotBackend):
 
         try:
             if closed:
-                return bool(self.gripper_driver.close())
+                ok = bool(self.gripper_driver.close())
             else:
-                return bool(self.gripper_driver.open())
+                ok = bool(self.gripper_driver.open())
+
+            if ok:
+                self._gripper_closed = bool(closed)
+                return True
+            else:
+                # Command failed; preserve previous known state
+                return False
         except Exception as exc:
             self._last_error = str(exc)
             logger.error(f"[PhysicalFR3Backend] set_gripper error: {exc}")
