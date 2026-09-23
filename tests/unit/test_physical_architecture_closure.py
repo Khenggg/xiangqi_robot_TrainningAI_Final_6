@@ -167,6 +167,7 @@ class TestMoveCartReturnCodesAndSafety(unittest.TestCase):
 
         backend._rpc = mock_rpc
         backend._connected = True
+        backend._enabled = True
 
         ok = backend.move_cartesian([100.0, 200.0, 300.0, 180.0, 0.0, 90.0])
         self.assertFalse(ok)
@@ -187,6 +188,7 @@ class TestMoveCartReturnCodesAndSafety(unittest.TestCase):
 
         backend._rpc = mock_rpc
         backend._connected = True
+        backend._enabled = True
 
         coordinator = MotionCoordinator(
             backend=backend,

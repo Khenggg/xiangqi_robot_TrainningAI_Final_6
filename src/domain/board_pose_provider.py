@@ -863,6 +863,11 @@ class PhysicalTeachingPointBoardPoseProvider(BoardPoseProvider):
             raise RuntimeError(f"[PhysicalBoardPoseProvider] Cannot get BoardPlacementState: {err}")
         return self._calibration_result.state
 
+    def set_board_placement_state(self, state: BoardPlacementState) -> None:
+        """Allow runtime updates or recalibration to the authoritative board placement state."""
+        from dataclasses import replace
+        self._calibration_result = replace(self._calibration_result, state=state)
+
     @classmethod
     def from_teaching_points(
         cls,

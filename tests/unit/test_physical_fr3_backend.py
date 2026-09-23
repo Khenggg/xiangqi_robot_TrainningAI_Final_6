@@ -86,6 +86,7 @@ class PhysicalFR3BackendTests(unittest.TestCase):
 
         backend._rpc = mock_rpc
         backend._connected = True
+        backend._enabled = True
         backend._motion_state = "IDLE"
 
         # MoveJ invokes mock RPC
@@ -104,6 +105,87 @@ class PhysicalFR3BackendTests(unittest.TestCase):
         # Stop calls StopMotion
         backend.stop()
         mock_rpc.StopMotion.assert_called_once()
+
+    def test_direct_backend_motion_rejected_when_connected_but_disabled(self):
+        """P1-1: Live backend must reject move_joint and move_cartesian when enabled=False."""
+        backend = PhysicalFR3Backend(ip="192.168.58.2", dry_run=False)
+        mock_rpc = MagicMock()
+        mock_rpc.SDK_state = True
+        backend._rpc = mock_rpc
+        backend._connected = True
+        backend._enabled = False
+
+        # Attempt move_joint while connected-but-disabled
+        ok_j = backend.move_joint([0.0, -45.0, 90.0, -135.0, -90.0, 0.0])
+        self.assertFalse(ok_j)
+        self.assertIn("not enabled", backend._last_error)
+        mock_rpc.MoveJ.assert_not_called()
+
+        # Attempt move_cartesian while connected-but-disabled
+        ok_c = backend.move_cartesian([-300.0, 0.0, 200.0, 180.0, 0.0, 90.0])
+        self.assertFalse(ok_c)
+        self.assertIn("not enabled", backend._last_error)
+        mock_rpc.MoveCart.assert_not_called()
+
+    def test_read_only_connect_issues_zero_tool_do_and_no_motion(self):
+        """P0-2: Live physical connect must be strictly read-only."""
+        from unittest.mock import patch
+        backend = PhysicalFR3Backend(ip="192.168.58.2", dry_run=False)
+        mock_rpc = MagicMock()
+        mock_rpc.SDK_state = True
+        mock_rpc.GetActualJointPosDegree.return_value = (0, [0.0]*6)
+        mock_rpc.GetActualTCPPose.return_value = (0, [0.0]*6)
+        mock_rpc.GetActualToolFlangePose.return_value = (0, [0.0]*6)
+
+        with patch("src.hardware.backends.physical_fr3.robot_sdk_core") as mock_core, \
+             patch("time.sleep"):
+            mock_core.RPC.return_value = mock_rpc
+            ok = backend.connect()
+            self.assertTrue(ok)
+
+            # RPC constructed and telemetry queries allowed
+            mock_core.RPC.assert_called_once_with("192.168.58.2")
+            mock_rpc.GetActualJointPosDegree.assert_called()
+            mock_rpc.GetActualTCPPose.assert_called()
+
+            # Zero commands allowed during read-only connect
+            mock_rpc.RobotEnable.assert_not_called()
+            mock_rpc.Mode.assert_not_called()
+            mock_rpc.MoveJ.assert_not_called()
+            mock_rpc.MoveCart.assert_not_called()
+            mock_rpc.SetToolDO.assert_not_called()
+
+    def test_controller_motion_state_authority_synchronization(self):
+        """P1-3: FAIRINO SDK controller queries synchronize RobotStateSnapshot.motion_state."""
+        backend = PhysicalFR3Backend(ip="192.168.58.2", dry_run=False)
+        mock_rpc = MagicMock()
+        mock_rpc.SDK_state = True
+        mock_rpc.GetActualJointPosDegree.return_value = (0, [0.0]*6)
+        mock_rpc.GetActualTCPPose.return_value = (0, [0.0]*6)
+        mock_rpc.GetActualToolFlangePose.return_value = (0, [0.0]*6)
+        backend._rpc = mock_rpc
+        backend._connected = True
+        backend._enabled = True
+
+        # 1. E-Stop Active -> motion_state must become ERROR
+        mock_rpc.GetRobotEmergencyStopState.return_value = (0, 1)
+        mock_rpc.GetRobotMotionDone.return_value = (0, 1)
+        snap = backend.get_state_snapshot()
+        self.assertEqual(snap.motion_state, "ERROR")
+        self.assertIn("E-Stop", snap.last_error)
+
+        # 2. Normal (No E-stop), Motion in progress (motion_done=0) -> MOVING
+        mock_rpc.GetRobotEmergencyStopState.return_value = (0, 0)
+        mock_rpc.GetRobotErrorCode.return_value = (0, [0, 0])
+        mock_rpc.GetRobotMotionDone.return_value = (0, 0)
+        backend._last_error = None
+        snap = backend.get_state_snapshot()
+        self.assertEqual(snap.motion_state, "MOVING")
+
+        # 3. Motion completed (motion_done=1) -> IDLE
+        mock_rpc.GetRobotMotionDone.return_value = (0, 1)
+        snap = backend.get_state_snapshot()
+        self.assertEqual(snap.motion_state, "IDLE")
 
 
 if __name__ == "__main__":
