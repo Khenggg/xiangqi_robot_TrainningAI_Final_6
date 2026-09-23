@@ -11,21 +11,30 @@
 
 ## 1. Hardware & System Configuration
 
+### 1.0 Commissioning Lifecycle Stage Tracking
+> **Decoupling Principle:** `Connected != Enabled != Mode Configured != Calibrated != Motion Authorized`.
+* [ ] **Stage 1: DISCONNECTED** (Physical e-stop verified, workspace clear)
+* [ ] **Stage 2: CONNECTED / TELEMETRY-ONLY** (`backend.connect()` called; arm de-energized, read-only telemetry confirmed)
+* [ ] **Stage 3: EXPLICIT ENABLE** (`RobotEnable(1)` issued with operator holding physical e-stop)
+* [ ] **Stage 4: EXPLICIT MODE CONFIGURATION** (`Mode(0)` manual mode configured; no trajectory execution permitted)
+* [ ] **Stage 5: CALIBRATED** (TCP calibrated, R1–R4 taught, BoardPose within contracts, bin registered)
+* [ ] **Stage 6: MOTION AUTHORIZED** (Speed limited to $\le 10\%$, path clearances verified, operator holds e-stop)
+
 ### 1.1 Robot Manipulator Information
 * **Manufacturer & Model:** FAIRINO FR3
 * **Controller Serial Number:** `[Enter S/N]`
 * **Controller Firmware Version:** `[e.g. v3.7.2]`
 * **Manipulator Arm Serial Number:** `[Enter S/N]`
-* **Controller IP Address:** `192.168.58.2` (`config.ROBOT_IP`)
-* **Host Workstation IP Address:** `192.168.58.10` (or valid IP on `192.168.58.0/24`)
-* **Active Speed Override During Test:** `[e.g. 10% / 25%]`
+* **Controller IP Address:** `192.168.58.2` (`config.ROBOT_IP`, `AUTHORITATIVE_CODE_CONTRACT`)
+* **Host Workstation IP Address:** `192.168.58.10` (or valid IP on `192.168.58.0/24`, `RECOMMENDED_LAB_SUBNET_EXAMPLE`)
+* **Active Speed Override During Test:** `[e.g. 10%]` (Target: $\le 10\%$, `PROPOSED_INITIAL_COMMISSIONING_LIMIT`; production default `MOVE_SPEED = 50`)
 
 ### 1.2 Gripper Mechanism Information
-* **Gripper Mechanism:** Custom Bidirectional DC Motor / Rack-and-Pinion
-* **Driver Interface:** Two-Output Flange DO Interface (`TwoOutputGripperDriver`)
-* **Open Control Channel:** Tool DO1 (Active HIGH pulse, `CONFIGURED_SOFTWARE_MODEL`)
-* **Close Control Channel:** Tool DO0 (Active HIGH pulse, `CONFIGURED_SOFTWARE_MODEL`)
-* **Jaw Opening Stroke:** `[Measured stroke, mm]` (Target: $\ge 32\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`)
+* **Gripper Mechanism:** Bidirectional DC Motor Gripper (`TwoOutputGripperDriver`)
+* **Driver Interface:** Two-Output Flange DO Interface
+* **Open Control Channel:** Tool DO1 (Active HIGH pulse, `CONFIGURED_SOFTWARE_MODEL`, unverified until physical test)
+* **Close Control Channel:** Tool DO0 (Active HIGH pulse, `CONFIGURED_SOFTWARE_MODEL`, unverified until physical test)
+* **Jaw Opening Stroke:** `[Measured stroke, mm]` (Target: $\ge 32\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`; if $< 32\text{ mm}$, pause and inspect mechanical binding)
 * **Jaw Pad Material:** `[Silicone / Neoprene Rubber]`
 
 ### 1.3 Tool Center Point (TCP) Configuration
@@ -33,18 +42,18 @@
   * Calibration Mode: `[Mode A: Calibrated Pointer Tip / Mode B: Jaw Corner Contact]`
   * Assigned Tool Frame ID on Controller: `[______]`
   * Offset from Flange: $X = \text{______}\text{ mm}$, $Y = \text{______}\text{ mm}$, $Z = \text{______}\text{ mm}$
-  * Calibration Residual: `[______ mm]` (Target: $< 0.30\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`)
+  * Calibration Residual: `[______ mm]` (Target: $< 0.30\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`; pause and re-point if exceeded)
 * **`TCP_GRASP` (Tool Frame ID `TBD`):**
   * Description: Geometric center between closed rubber jaw pads
   * Assigned Tool Frame ID on Controller: `[______]`
-  * Offset from Flange: $X = 0.00\text{ mm}$, $Y = 0.00\text{ mm}$, $Z = \text{______}\text{ mm}$ (Nominal CAD: $\approx 150.0\text{ mm}$, `CURRENT_SOFTWARE_DEFAULT`)
-  * Legacy 218mm Check: Confirmed NOT active `[YES / NO]`
+  * Offset from Flange: $X = 0.00\text{ mm}$, $Y = 0.00\text{ mm}$, $Z = \text{______}\text{ mm}$ (CAD length: $147.5\text{ mm}$, `CAD_DERIVED`; canonical grasp TCP estimate: $\approx 150.0\text{ mm}$, `CURRENT_CANONICAL_TOOL_GEOMETRY_ESTIMATE`)
+  * Legacy 218mm Check: Confirmed NOT active (`LEGACY_OBSOLETE`): `[YES / NO]`
 
 ### 1.4 Board & Fixture Information
 * **Board Identifier / Type:** `[e.g. Standard Wood Xiangqi Board #1]`
 * **Physical Outer Dimensions:** Measured: `______ mm` × `______ mm`
 * **Grid Crosshair Spacing:** Measured: `______ mm` pitch (Canonical: $40.0\text{ mm}$, `PROJECT_GEOMETRY`)
-* **Board Spirit Level Deviation:** $X\text{-axis} = \text{______}^\circ$, $Y\text{-axis} = \text{______}^\circ$ (Requirement: $< 1.0^\circ$, `PROPOSED_INITIAL_TEST_VALUE`)
+* **Board Spirit Level Deviation:** $X\text{-axis} = \text{______}^\circ$, $Y\text{-axis} = \text{______}^\circ$ (Target: $< 1.0^\circ$, `PROPOSED_INITIAL_TEST_VALUE`; shim fixture if exceeded)
 * **Clamping / Fixture Method:** `[Corner Toggle Clamps / Vacuum / Magnetic / Stop Blocks]`
 
 ---
@@ -71,8 +80,8 @@
 
 ## 3. BoardPose Reconstruction & Geometric Fit Metrics
 
-> Computed via `BoardPoseProvider.from_teaching_points()` using recorded R1–R4 coordinates.<br>
-> Thresholds are authoritative code contracts (`AUTHORITATIVE_CODE_CONTRACT`).
+> Computed via `PhysicalTeachingPointBoardPoseProvider.from_controller()` (live controller points) or `PhysicalTeachingPointBoardPoseProvider.from_teaching_points()` / `calibrate_board_from_teaching_points()` (offline verification) using recorded R1–R4 coordinates.<br>
+> Geometric fit thresholds are authoritative code contracts (`AUTHORITATIVE_CODE_CONTRACT`).
 
 | Geometric Metric | Canonical Contract | Warning Threshold | Hard Fail Threshold | Measured Value | Metric Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -105,9 +114,9 @@
 | **0.15 s** | `______ mm` | `[______]` | `[NO / YES]` | |
 | **0.20 s** | `______ mm` | `[______]` | `[NO / YES]` | |
 | **0.25 s** | `______ mm` | `[______]` | `[NO / YES]` | |
-| **0.30 s** | `______ mm` | `[______]` | `[NO / YES]` | *Current software default bound* |
+| **0.30 s** | `______ mm` | `[______]` | `[NO / YES]` | Current software default bound (test ladder ceiling, not proven motor stall threshold) |
 
-* **Selected Nominal Open Pulse:** `______ s` (Target: Minimum duration achieving $>32\text{ mm}$ opening)
+* **Selected Nominal Open Pulse:** `______ s` (Target: Minimum duration achieving $>32\text{ mm}$ opening, `PROPOSED_INITIAL_TEST_VALUE`; pause and review if $<32\text{ mm}$)
 
 ### 4.2 Closing Pulse Trials (DO0 = HIGH) with $22.5\text{ mm}$ Piece
 | Pulse Duration (s) | Grip Security (1N pull test) | Piece Tilt / Deformation | Motor Stall Buzz? | Observations / Notes |
@@ -116,10 +125,10 @@
 | **0.15 s** | `[______]` | `[______]` | `[NO / YES]` | |
 | **0.20 s** | `[______]` | `[______]` | `[NO / YES]` | |
 | **0.25 s** | `[______]` | `[______]` | `[NO / YES]` | |
-| **0.30 s** | `[______]` | `[______]` | `[NO / YES]` | *Current software default bound* |
+| **0.30 s** | `[______]` | `[______]` | `[NO / YES]` | Current software default bound (test ladder ceiling, not proven motor stall threshold) |
 
 * **Selected Nominal Close Pulse:** `______ s`
-* **Configured Deadtime:** `0.10 s` (`CURRENT_SOFTWARE_DEFAULT`, hardware interlock confirmed: `[YES / NO]`)
+* **Configured Deadtime:** `0.10 s` (`CURRENT_SOFTWARE_DEFAULT`, standard software default, interlock confirmed: `[YES / NO]`)
 * **Configured Settle Time:** `0.25 s`
 
 ---
@@ -127,10 +136,10 @@
 ## 5. Tool Orientation & Clearance Trials
 
 ### 5.1 Tool Verticality & Yaw Alignment
-* **Machinist Square Perpendicularity:** $X\text{-axis error} = \text{______}^\circ$, $Y\text{-axis error} = \text{______}^\circ$ (Target: $< 0.5^\circ$, `PROPOSED_INITIAL_TEST_VALUE`)
+* **Machinist Square Perpendicularity:** $X\text{-axis error} = \text{______}^\circ$, $Y\text{-axis error} = \text{______}^\circ$ (Target: $< 0.5^\circ$, `PROPOSED_INITIAL_TEST_VALUE`; pause and review if exceeded)
 * **Chosen Tool Orientation Vector:** $Rx = \text{______}^\circ$, $Ry = \text{______}^\circ$, $Rz = \text{______}^\circ$
 * **Historical Orientation Comparison:** Deviation from historical $[-179.164, -3.047, -26.304] = \text{______}^\circ$ (`HISTORICAL_MEASUREMENT`)
-* **Joint 5 Singularity Margin:** $J_5$ angle at board center = $\text{______}^\circ$ (Target: $|J_5| \ge 15.0^\circ$, `PROPOSED_INITIAL_TEST_VALUE`)
+* **Joint 5 Singularity Margin:** $J_5$ angle at board center = $\text{______}^\circ$ (Target: $|J_5| \ge 15.0^\circ$, `PROPOSED_INITIAL_TEST_VALUE`; pause and review posture if $|J_5| < 15^\circ$)
 
 ### 5.2 Transit Clearance ($Z_{\text{safe}}$)
 * **Nominal Clearance Above Board:** `40.0 mm` (`CURRENT_SOFTWARE_DEFAULT`)
@@ -144,7 +153,7 @@
 ## 6. Pick & Place Height Empirical Trials
 
 ### 6.1 Pick Height ($Z_{\text{pick}}$) Trials at Cell (row=4, col=4)
-> Baseline starting point: $H_{\text{piece}} / 2 = 4.715\text{ mm}$ (`PROVISIONAL_SIMULATION / GEOMETRIC STARTING VALUE`).<br>
+> Baseline starting point: $H_{\text{piece}} / 2 = 4.715\text{ mm}$ (`PROVISIONAL_SIMULATION`). Piece dimensions $D=22.5\text{ mm}, H=9.43\text{ mm}$ (`PROJECT_GEOMETRY`), proposed tolerances $\pm 0.30\text{ mm}$ / $\pm 0.25\text{ mm}$ (`PROPOSED_MEASUREMENT_TOLERANCE`).<br>
 > All empirical observations below must be measured during live testing.
 
 | Candidate $Z_{\text{pick}}$ (mm) | Jaw-to-Board Clearance (mm) | Piece Contact Band | Grip Security (1N pull) | Observations / Notes |
@@ -187,7 +196,7 @@
   * `BIN_RETREAT`: $X = \text{______}$, $Y = \text{______}$, $Z = \text{______}$ mm
 * **Trajectory Safety Verifications:**
   * Trajectory clears board border by $> 40\text{ mm}$: `[PASS / FAIL]`
-  * Trajectory completely avoids human player seating zone: `[PASS / FAIL]` (`AUTHORITATIVE_CODE_CONTRACT`)
+  * Trajectory completely avoids human player seating zone: `[PASS / FAIL]` (`AUTHORITATIVE_CODE_CONTRACT / PHYSICAL_E2E_ACCEPTANCE`)
   * Captured piece does not strike bin rim on descent: `[PASS / FAIL]`
 * **Interlock Clearance:** Post-validation `CAPTURE_BIN_VALIDATED = True` approved: `[YES / NO]`
 
@@ -209,7 +218,7 @@
 | **Right Edge** | (4, 8) | `[0 / Error]` | $J_5 = \text{______}^\circ$ | `[Normal / Tight]` | `[YES / NO]` |
 
 ### 8.2 90-Cell Reachability Summary (See Attached CSV for Detail)
-* Total Cells Evaluated: `90 / 90`
+* Total Cells Evaluated: `90 / 90` (`PHASE4_ACCEPTANCE_CRITERION`)
 * Approach Waypoint Reachable ($Z_{\text{safe}}$): `[____ / 90]`
 * Pick Waypoint Reachable ($Z_{\text{pick}}$): `[____ / 90]`
 * Kinematic Singularities Encountered: `[0 / Details]`
@@ -224,17 +233,17 @@
 * Controller Move Return Code: `0` (Confirmed: `[YES / NO]`)
 * Piece Pick Execution: `[CLEAN / SLIPPED / RETRIED]`
 * Transit Smoothness: `[SMOOTH / VIBRATION OBSERVED]`
-* Placement Accuracy Measured: $\Delta X = \text{______}\text{ mm}$, $\Delta Y = \text{______}\text{ mm}$, Radial Error = $\text{______}\text{ mm}$ (Target: $\le 1.5\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`)
-* Vision System Board State Agreement: `[CONFIRMED / DISCREPANCY]`
+* Placement Accuracy Measured: $\Delta X = \text{______}\text{ mm}$, $\Delta Y = \text{______}\text{ mm}$, Radial Error = $\text{______}\text{ mm}$ (Target: $\le 1.5\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`; pause and inspect fixture if exceeded)
+* Vision System Board State Agreement: `[CONFIRMED / DISCREPANCY]` (`PHYSICAL_E2E_ACCEPTANCE`)
 * Step Status: `[PASS / FAIL]`
 
 ### 9.2 Capture Move Test (Black Chariot (row=0, col=0) captures (row=9, col=0))
-* Opponent Red Piece Extracted First: `[YES / NO - CRITICAL INVARIANT]` (`AUTHORITATIVE_CODE_CONTRACT`)
-* Attacking Black Piece Undisturbed During Extraction: `[YES / NO]` (`AUTHORITATIVE_CODE_CONTRACT`)
-* Red Piece Successfully Dropped in Bin: `[YES / NO]`
-* Black Piece Picked and Moved to (row=9, col=0): `[YES / NO]`
-* Final Black Piece Placement Radial Error: `______ mm` (Target: $\le 1.5\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`)
-* Adjacent Squares Undisturbed: `[CONFIRMED / DISPLACED]` (`AUTHORITATIVE_CODE_CONTRACT`)
+* Opponent Red Piece Extracted First: `[YES / NO - CRITICAL INVARIANT]` (`AUTHORITATIVE_CODE_CONTRACT / PHYSICAL_E2E_ACCEPTANCE`)
+* Attacking Black Piece Undisturbed During Extraction: `[YES / NO]` (`AUTHORITATIVE_CODE_CONTRACT / PHYSICAL_E2E_ACCEPTANCE`)
+* Red Piece Successfully Dropped in Bin: `[YES / NO]` (`PHYSICAL_E2E_ACCEPTANCE`)
+* Black Piece Picked and Moved to (row=9, col=0): `[YES / NO]` (`PHYSICAL_E2E_ACCEPTANCE`)
+* Final Black Piece Placement Radial Error: `______ mm` (Target: $\le 1.5\text{ mm}$, `PROPOSED_INITIAL_TEST_VALUE`; pause and inspect fixture if exceeded)
+* Adjacent Squares Undisturbed: `[CONFIRMED / DISPLACED]` (`AUTHORITATIVE_CODE_CONTRACT / PHYSICAL_E2E_ACCEPTANCE`)
 * Step Status: `[PASS / FAIL]`
 
 ---
@@ -253,21 +262,21 @@
 
 > **DO NOT MERGE INTO PRODUCTION CONFIG UNTIL SIGNED OFF BELOW.**
 
-| Configuration Key | Provisional Baseline | Calibrated Value | Unit | Provenance Class | Engineering Provenance Summary |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `PICK_TCP_HEIGHT_MM` | `4.715` | `______` | mm | `PHYSICALLY_VALIDATED` | Calibrated contact ladder, Station 1 |
-| `PLACE_TCP_HEIGHT_MM`| `4.715` | `______` | mm | `PHYSICALLY_VALIDATED` | Calibrated flush release, Station 1 |
-| `SAFE_CLEARANCE_Z_MM`| `40.0` | `______` | mm | `PHYSICALLY_VALIDATED` | Safe transit plane above board surface |
-| `TOOL_ROTATION_RX` | `-179.164` | `______` | deg | `PHYSICALLY_VALIDATED` | Square-aligned perpendicularity |
-| `TOOL_ROTATION_RY` | `-3.047` | `______` | deg | `PHYSICALLY_VALIDATED` | Square-aligned perpendicularity |
-| `TOOL_ROTATION_RZ` | `-26.304` | `______` | deg | `PHYSICALLY_VALIDATED` | Grid-parallel jaw alignment |
-| `GRIPPER_OPEN_PULSE` | `0.30` | `______` | s | `PHYSICALLY_VALIDATED` | Minimum reliable stroke duration |
-| `GRIPPER_CLOSE_PULSE`| `0.30` | `______` | s | `PHYSICALLY_VALIDATED` | Minimum reliable grip duration |
-| `CAPTURE_BIN_DROP_X` | `[Legacy]` | `______` | mm | `PHYSICALLY_VALIDATED` | Registered bin position (user=0) |
-| `CAPTURE_BIN_DROP_Y` | `[Legacy]` | `______` | mm | `PHYSICALLY_VALIDATED` | Registered bin position (user=0) |
-| `CAPTURE_BIN_DROP_Z` | `[Legacy]` | `______` | mm | `PHYSICALLY_VALIDATED` | Registered bin position (user=0) |
-| `CALIBRATION_TOOL_ID`| `[TBD]` | `______` | — | `PHYSICALLY_VALIDATED` | Controller tool frame for pointer stylus |
-| `GRASP_TOOL_ID` | `[TBD]` | `______` | — | `PHYSICALLY_VALIDATED` | Controller tool frame for gripper jaws |
+| Configuration Key | Baseline Value | Baseline Provenance Class | Calibrated Value | Unit | Post-Validation Class | Engineering Provenance Summary |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `PICK_TCP_HEIGHT_MM` | `4.715` | `PROVISIONAL_SIMULATION` | `______` | mm | `PHYSICALLY_VALIDATED` | Calibrated contact ladder, Station 1 |
+| `PLACE_TCP_HEIGHT_MM`| `4.715` | `PROVISIONAL_SIMULATION` | `______` | mm | `PHYSICALLY_VALIDATED` | Calibrated flush release, Station 1 |
+| `SAFE_CLEARANCE_Z_MM`| `40.0` | `CURRENT_SOFTWARE_DEFAULT` | `______` | mm | `PHYSICALLY_VALIDATED` | Safe transit plane above board surface |
+| `TOOL_ROTATION_RX` | `-179.164` | `HISTORICAL_MEASUREMENT` | `______` | deg | `PHYSICALLY_VALIDATED` | Square-aligned perpendicularity |
+| `TOOL_ROTATION_RY` | `-3.047` | `HISTORICAL_MEASUREMENT` | `______` | deg | `PHYSICALLY_VALIDATED` | Square-aligned perpendicularity |
+| `TOOL_ROTATION_RZ` | `-26.304` | `HISTORICAL_MEASUREMENT` | `______` | deg | `PHYSICALLY_VALIDATED` | Grid-parallel jaw alignment |
+| `GRIPPER_OPEN_PULSE` | `0.30` | `CURRENT_SOFTWARE_DEFAULT` | `______` | s | `PHYSICALLY_VALIDATED` | Minimum reliable stroke duration |
+| `GRIPPER_CLOSE_PULSE`| `0.30` | `CURRENT_SOFTWARE_DEFAULT` | `______` | s | `PHYSICALLY_VALIDATED` | Minimum reliable grip duration |
+| `CAPTURE_BIN_DROP_X` | `[Legacy]` | `LEGACY_UNVERIFIED` | `______` | mm | `PHYSICALLY_VALIDATED` | Registered bin position (user=0) |
+| `CAPTURE_BIN_DROP_Y` | `[Legacy]` | `LEGACY_UNVERIFIED` | `______` | mm | `PHYSICALLY_VALIDATED` | Registered bin position (user=0) |
+| `CAPTURE_BIN_DROP_Z` | `[Legacy]` | `LEGACY_UNVERIFIED` | `______` | mm | `PHYSICALLY_VALIDATED` | Registered bin position (user=0) |
+| `CALIBRATION_TOOL_ID`| `[TBD]` | `TBD_PHYSICAL_VALIDATION` | `______` | — | `PHYSICALLY_VALIDATED` | Controller tool frame for pointer stylus |
+| `GRASP_TOOL_ID` | `[TBD]` | `TBD_PHYSICAL_VALIDATION` | `______` | — | `PHYSICALLY_VALIDATED` | Controller tool frame for gripper jaws |
 
 ---
 
