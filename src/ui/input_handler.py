@@ -2,6 +2,9 @@ import time
 from src.core import xiangqi  # type: ignore
 from src.ui.board_renderer import BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT, NUM_COLS, NUM_ROWS  # type: ignore
 from src.vision.board_stability_monitor import BoardStabilityMonitor
+from src.vision.player_turn_arbiter import PlayerTurnArbiter
+from src.vision.player_turn_types import BoardObservation, CommitRequest, InteractionCapability, PlayerTurnMode, Visibility
+from src.core.human_move_commit_coordinator import HumanMoveCommitCoordinator
 
 class InputHandler:
     """Manages Pygame Key/Mouse events and bridges them to GameState and HardwareManager."""
@@ -16,6 +19,64 @@ class InputHandler:
         )
         self._observed_baseline_time = None
         self._last_stability_poll_at = 0.0
+        configured_mode = getattr(stability_config, "PLAYER_TURN_MODE", "LEGACY")
+        try:
+            self._player_turn_mode = PlayerTurnMode(configured_mode.upper())
+        except (AttributeError, ValueError):
+            self._player_turn_mode = PlayerTurnMode.LEGACY
+        self._player_turn_arbiter = PlayerTurnArbiter(
+            clear_seconds=getattr(stability_config, "PLAYER_TURN_CLEAR_SECONDS", 0.8),
+            clear_samples=getattr(stability_config, "PLAYER_TURN_CLEAR_SAMPLES", 3),
+            interaction_settle_seconds=getattr(stability_config, "PLAYER_TURN_INTERACTION_SETTLE_SECONDS", 1.2),
+            idle_settle_seconds=getattr(stability_config, "PLAYER_TURN_IDLE_SETTLE_SECONDS", 3.0),
+            idle_samples=getattr(stability_config, "PLAYER_TURN_IDLE_SETTLE_SAMPLES", 5),
+        )
+        self._human_commit_coordinator = HumanMoveCommitCoordinator(game_state)
+        self._unified_active = False
+        self._observed_game_epoch = getattr(game_state, "game_epoch", 0)
+
+    def _interaction_capability(self):
+        """Hardware must explicitly provide obstruction evidence for UNIFIED."""
+        capability = getattr(self.hw, "interaction_capability", None)
+        if callable(capability):
+            capability = capability()
+        if isinstance(capability, InteractionCapability):
+            return capability
+        try:
+            return InteractionCapability(str(capability).upper())
+        except ValueError:
+            return InteractionCapability.UNAVAILABLE
+
+    def _commit_human_move(self, src, dst, piece, source="LEGACY"):
+        request = type("Request", (), {"turn_token": (getattr(self.state, "game_epoch", 0),
+                                                        getattr(self.state, "human_commit_generation", 0),
+                                                        self._player_turn_arbiter.turn_token),
+                                         "move": (src, dst), "source": source})()
+        return self._human_commit_coordinator.try_commit(request, piece) == "ACCEPTED"
+
+    def _maybe_activate_unified_turn(self):
+        current_epoch = getattr(self.state, "game_epoch", 0)
+        if current_epoch != self._observed_game_epoch:
+            self._player_turn_arbiter.deactivate()
+            self._unified_active = False
+            self._observed_game_epoch = current_epoch
+        if self._player_turn_mode == PlayerTurnMode.LEGACY:
+            return False
+        capability = self._interaction_capability()
+        if (self.state.turn != "r" or self.state.game_over
+                or not self.hw.yolo_detector or not self.hw.yolo_detector.has_baseline()):
+            self._player_turn_arbiter.deactivate()
+            self._unified_active = False
+            return False
+        if not self._unified_active:
+            # SHADOW must remain observable with partial hardware, but it has
+            # zero commit authority.  UNIFIED keeps the stricter capability.
+            activation_capability = (InteractionCapability.AVAILABLE
+                                     if self._player_turn_mode == PlayerTurnMode.SHADOW
+                                     else capability)
+            self._player_turn_arbiter.activate(self.state.board, activation_capability)
+            self._unified_active = self._player_turn_arbiter.state.name != "INACTIVE"
+        return self._unified_active
 
     def handle_mouse_down(self, mx, my):
         # Surrender Button
@@ -32,6 +93,9 @@ class InputHandler:
 
         # Manual Override (Mouse Drag)
         if (self.state.allow_mouse_move or self.state.manual_override_active) and self.state.turn == "r" and not self.state.game_over:
+            if self._player_turn_mode == PlayerTurnMode.UNIFIED:
+                self.state.set_status("⚠️ UNIFIED: cần xác nhận bàn cờ vật lý trước.", color=(180, 100, 0))
+                return
             c, r = BoardRenderer.pixel_to_grid(mx, my)
             if 0 <= c < NUM_COLS and 0 <= r < NUM_ROWS:
                 clicked_piece = self.state.board[r][c]
@@ -51,12 +115,12 @@ class InputHandler:
                         if detector and detector.has_baseline():
                             occ = [row[:] for row in detector._baseline_occ]
                             self.state.save_rollback_state(occ, detector._baseline_time)
-                        self.state.process_human_move(src, dst, p_name)
+                        committed = self._commit_human_move(src, dst, p_name, source="MOUSE")
                         self.state.selected_pos = None
-                        self.state.manual_override_active = False
+                        self.state.manual_override_active = not committed
                         
                         # Retake T1 baseline after manual override
-                        if self.hw.cam_monitor:
+                        if committed and self.hw.cam_monitor:
                             print("[UI] 📸 Đang chụp lại T1 baseline sau khi Override...")
                             self.state.set_status("📸 Cập nhật Mắt Camera...", color=(0, 100, 180), duration=2.0)
                             self.hw.capture_baseline_if_needed(force_delay=1.0)
@@ -122,6 +186,9 @@ class InputHandler:
         self.state.set_status("❌ Bàn thật không khớp trước/sau nước đi. Chỉnh tay rồi nhấn V.", color=(180, 0, 0), duration=15.0)
 
     def _handle_space_key(self, auto_retry=False):
+        if self._player_turn_mode == PlayerTurnMode.UNIFIED:
+            self.state.set_status("⚠️ UNIFIED: SPACE chỉ yêu cầu poll state-machine.", color=(180, 100, 0))
+            return False
         print("\n[SPACE] 🎯 Người chơi bấm SPACE — đang chụp T2 snapshot...")
         self.state.set_status("📸  Đang phân tích YOLO...", color=(0, 100, 180), duration=3.0)
         
@@ -199,9 +266,10 @@ class InputHandler:
 
         # Commit move (state đã được save ở trên rồi)
         self._last_move_confirmation_failure = None
-        self.state.process_human_move(src, dst, piece)
-        self.state.manual_override_active = False
-        return True
+        committed = self._commit_human_move(src, dst, piece, source="SPACE")
+        if committed:
+            self.state.manual_override_active = False
+        return committed
 
     def try_auto_confirm_move(self, retries=10, retry_seconds=0.2):
         """Reuse the existing rule-validated snapshot flow after hand exit."""
@@ -276,6 +344,36 @@ class InputHandler:
             except Exception as exc:
                 print(f"[STABILITY] CChess recognition error: {exc}")
 
+        # UNIFIED only consumes a fully recognized layout.  A missing red
+        # piece while being held is deliberately incomplete, never a move.
+        if self._player_turn_mode != PlayerTurnMode.LEGACY:
+            active = self._maybe_activate_unified_turn()
+            layout = cchess_result.get("board") if cchess_result and cchess_result.get("success") else None
+            interaction = getattr(self.hw, "is_board_occluded", None)
+            interaction = bool(interaction()) if callable(interaction) else False
+            visibility = Visibility.CLEAR if layout is not None and not interaction else Visibility.INSUFFICIENT
+            request = self._player_turn_arbiter.ingest(BoardObservation(
+                observed_at=now, layout=layout, visibility=visibility,
+                hand_or_object_present=interaction,
+            )) if active else None
+            if request is not None and self._player_turn_mode == PlayerTurnMode.UNIFIED:
+                src, dst = request.move
+                piece = self.state.board[src[1]][src[0]]
+                scoped_request = CommitRequest(
+                    (getattr(self.state, "game_epoch", 0),
+                     getattr(self.state, "human_commit_generation", 0),
+                     request.turn_token),
+                    request.move,
+                )
+                committed = self._human_commit_coordinator.try_commit(scoped_request, piece) == "ACCEPTED"
+                if committed:
+                    self._player_turn_arbiter.deactivate()
+                return committed
+            # SHADOW deliberately leaves legacy authoritative while recording
+            # the same decisions in the arbiter state.
+            if self._player_turn_mode == PlayerTurnMode.UNIFIED:
+                return False
+
         src, dst, piece = self.hw.yolo_detector.detect_move(
             frame, detections, self.state.board, cchess_result=cchess_result
         )
@@ -312,6 +410,6 @@ class InputHandler:
             f"elapsed={self._board_stability_monitor.elapsed_seconds():.2f}s"
         )
         self._last_move_confirmation_failure = None
-        self.state.process_human_move(src, dst, piece)
+        committed = self._commit_human_move(src, dst, piece, source="AUTO")
         self._board_stability_monitor.reset()
-        return True
+        return committed
