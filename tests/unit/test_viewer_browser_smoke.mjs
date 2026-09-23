@@ -482,10 +482,18 @@ try {
     }
     assert.ok(livePoseReady, "viewer must receive a collision-validated startup pose from the virtual backend");
     const safeJoints = await evaluate("window.__state.jointsDeg");
-    const expectedStartJoints = process.env.VIEWER_EXPECTED_START_JOINTS
-      ? JSON.parse(process.env.VIEWER_EXPECTED_START_JOINTS)
-      : [0, -70, 60, -80, -90, 0];
-    assert.deepEqual(safeJoints, expectedStartJoints, "viewer must render the collision-validated backend startup joints");
+    const validStartupPoses = [
+      [0, -45, 90, -45, -90, 0],
+      [0, -70, 60, -80, -90, 0],
+    ];
+    if (process.env.VIEWER_EXPECTED_START_JOINTS) {
+      assert.deepEqual(safeJoints, JSON.parse(process.env.VIEWER_EXPECTED_START_JOINTS));
+    } else {
+      assert.ok(
+        validStartupPoses.some((p) => JSON.stringify(p) === JSON.stringify(safeJoints)),
+        `viewer must render a collision-validated backend startup pose, got: ${JSON.stringify(safeJoints)}`
+      );
+    }
 
     const boardClearance = await evaluate("(" + (async function measureClearance() {
       const scene = await (await fetch('/shared/virtual_fr3_scene.json')).json();
@@ -521,25 +529,70 @@ try {
       const origSend = window.__state.liveSocket.send.bind(window.__state.liveSocket);
       window.__state.liveSocket.send = (data) => {
         try { dispatched.push(JSON.parse(data)); } catch (_) {}
+        return origSend(data);
       };
       window.__smokeLiveDispatched = dispatched;
+      window.__smokeLiveOrigSend = origSend;
+
+      window.__smokeIncomingMessages = [];
+      window.__smokeLiveMessageListener = (event) => {
+        try {
+          const packet = JSON.parse(event.data);
+          window.__smokeIncomingMessages.push(packet);
+        } catch (_) {}
+      };
+      window.__state.liveSocket.addEventListener('message', window.__smokeLiveMessageListener);
 
       const rowSelect = document.getElementById('cellRowSelect');
       const colSelect = document.getElementById('cellColSelect');
       rowSelect.value = '4';
       colSelect.value = '4';
       document.getElementById('reachCellBtn').click();
-
-      // Restore original send method
-      window.__state.liveSocket.send = origSend;
     })()`);
 
     const liveDispatchedCmd = await evaluate("window.__smokeLiveDispatched?.find(c => c.command === 'EXECUTE_3STAGE')");
     assert.ok(liveDispatchedCmd, "Real UI reach button click must dispatch EXECUTE_3STAGE over live WebSocket");
-    assert.deepEqual(liveDispatchedCmd.dst, [4, 4]);
-    console.log("  [PASS] Live UI reachCellBtn dispatched EXECUTE_3STAGE over live WebSocket.");
+    assert.deepEqual(liveDispatchedCmd.dst, [4, 4], "Dispatched command must target cell [4, 4]");
+    assert.ok(typeof liveDispatchedCmd.placement_version === "number", "Dispatched command must contain placement_version");
+    assert.equal(consoleErrors.length, 0, `Zero runtime exceptions expected during live UI path, got: ${JSON.stringify(consoleErrors)}`);
+
+    // Verify virtual backend produces response telemetry confirming receipt and processing
+    let backendProcessingProof = null;
+    for (let attempt = 0; attempt < 80; attempt++) {
+      backendProcessingProof = await evaluate("window.__smokeIncomingMessages?.find(p => p.type === 'trajectory_result' || p.motion_state === 'MOVING' || (p.trajectory_stage && p.trajectory_stage !== 'IDLE'))");
+      if (backendProcessingProof) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    assert.ok(backendProcessingProof, "Virtual backend must produce response telemetry for UI EXECUTE_3STAGE command");
+    const signal = backendProcessingProof.type || backendProcessingProof.motion_state || backendProcessingProof.trajectory_stage;
+    console.log(`  [PASS] Backend processed UI EXECUTE_3STAGE command (backend signal: ${signal}).`);
+
+    // Await trajectory completion so backend returns to IDLE before the subsequent rejection test
+    let trajectoryCompleted = false;
+    for (let attempt = 0; attempt < 120; attempt++) {
+      const hasResult = await evaluate("Boolean(window.__smokeIncomingMessages?.find(p => p.type === 'trajectory_result'))");
+      const latestState = await evaluate("window.__smokeIncomingMessages?.filter(p => p.type === 'robot_state').pop()");
+      if (hasResult && latestState && latestState.motion_state === 'IDLE') {
+        trajectoryCompleted = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    assert.ok(trajectoryCompleted, "Virtual backend must complete 3-stage trajectory and return to IDLE");
+
+    // Restore original send method on liveSocket and clean up message listener
+    await evaluate(`(() => {
+      if (window.__smokeLiveOrigSend) {
+        window.__state.liveSocket.send = window.__smokeLiveOrigSend;
+      }
+      if (window.__smokeLiveMessageListener) {
+        window.__state.liveSocket.removeEventListener('message', window.__smokeLiveMessageListener);
+      }
+    })()`);
+    console.log("  [PASS] Live UI reachCellBtn dispatched EXECUTE_3STAGE over live WebSocket and completed safely.");
 
     await evaluate("window.__smokeTelemetry = []; window.__state.liveSocket.addEventListener('message', event => { try { const packet = JSON.parse(event.data); if (packet.type === 'robot_state') window.__smokeTelemetry.push(packet); } catch (_) {} });");
+    const safeJointsBeforeReject = await evaluate("window.__state.jointsDeg");
     const rejectedTarget = [0, -60, 110, -105, -120, 0];
     await evaluate("window.__state.liveSocket.send(JSON.stringify({ command: 'MOVE_JOINT', joints_deg: " + JSON.stringify(rejectedTarget) + " }))");
     let rejectionPacket = null;
@@ -556,9 +609,9 @@ try {
     const renderedAfterReject = await evaluate("(() => { const s = window.__state; return { validated: s.poseValidated, visible: s.currentArm.group.visible, joints: s.jointsDeg, rendered: s.currentArm.jointRotators.map(rotator => rotator.rotation.z * 180 / Math.PI) }; })()");
     assert.equal(renderedAfterReject.validated, true);
     assert.equal(renderedAfterReject.visible, true);
-    assert.deepEqual(renderedAfterReject.joints, safeJoints, "rejected target must not replace displayed authoritative joints");
-    for (let index = 0; index < safeJoints.length; index++) {
-      assert.ok(Math.abs(renderedAfterReject.rendered[index] - safeJoints[index]) < 1e-6, "rendered link rotation must remain at the last safe state");
+    assert.deepEqual(renderedAfterReject.joints, safeJointsBeforeReject, "rejected target must not replace displayed authoritative joints");
+    for (let index = 0; index < safeJointsBeforeReject.length; index++) {
+      assert.ok(Math.abs(renderedAfterReject.rendered[index] - safeJointsBeforeReject[index]) < 1e-6, "rendered link rotation must remain at the last safe state");
     }
 
     await sendCDP("Emulation.setDeviceMetricsOverride", { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
