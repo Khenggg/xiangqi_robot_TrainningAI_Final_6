@@ -7,9 +7,10 @@ Implements a two-layer motion architecture:
 """
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from src.motion.contracts import GripperCommand, MotionType, MotionWaypoint
+from src.motion.contracts import GripperCommand, JointWaypoint, MotionType, MotionWaypoint
 from src.motion.result import PayloadState
 from src.motion.stages import MotionStage
 
@@ -31,6 +32,10 @@ class BoardPickIntent:
     piece_id: Optional[str] = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        meta_dict = dict(self.metadata) if self.metadata else {}
+        object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
+
 
 @dataclass(frozen=True)
 class BoardPlaceIntent:
@@ -40,6 +45,10 @@ class BoardPlaceIntent:
     row: float
     col: float
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        meta_dict = dict(self.metadata) if self.metadata else {}
+        object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
 
 
 @dataclass(frozen=True)
@@ -53,6 +62,10 @@ class PieceMoveIntent:
     dst_col: float
     piece_id: Optional[str] = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        meta_dict = dict(self.metadata) if self.metadata else {}
+        object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
 
 
 @dataclass(frozen=True)
@@ -72,6 +85,10 @@ class CaptureIntent:
     captured_piece_id: Optional[str] = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        meta_dict = dict(self.metadata) if self.metadata else {}
+        object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
+
 
 # ==============================================================================
 # Layer 2: Resolved Motion Steps & Motion Plan
@@ -82,12 +99,14 @@ class MotionStep:
     """
     A single discrete action within an executable MotionPlan.
     
-    May represent a Cartesian move, gripper action, wait/dwell, or verification check.
+    May represent a Cartesian move, joint move, gripper action, wait/dwell,
+    or verification check.
     """
     step_id: int
     stage: MotionStage
     motion_type: MotionType
     waypoint: Optional[MotionWaypoint] = None
+    joint_waypoint: Optional[JointWaypoint] = None
     gripper_command: Optional[GripperCommand] = None
     wait_duration_s: Optional[float] = None
     expected_payload_state: Optional[PayloadState] = None
@@ -95,15 +114,38 @@ class MotionStep:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        if self.motion_type in (MotionType.CARTESIAN_LINEAR, MotionType.CARTESIAN_POINT, MotionType.JOINT):
+        # Enforce strict, unambiguous target correspondence
+        if self.motion_type in (MotionType.CARTESIAN_LINEAR, MotionType.CARTESIAN_POINT):
             if self.waypoint is None:
-                raise ValueError(f"MotionStep of type {self.motion_type} requires a valid waypoint")
+                raise ValueError(f"MotionStep of Cartesian type {self.motion_type} requires a valid Cartesian waypoint")
+            if self.joint_waypoint is not None:
+                raise ValueError("MotionStep of Cartesian type cannot accept a joint_waypoint")
+        elif self.motion_type == MotionType.JOINT:
+            if self.joint_waypoint is None:
+                raise ValueError("MotionStep of type JOINT requires an explicit joint_waypoint")
+            if self.waypoint is not None:
+                raise ValueError("MotionStep of type JOINT cannot accept a Cartesian waypoint (ambiguous target)")
+            if len(self.joint_waypoint.joints_deg) != 6:
+                raise ValueError(f"MotionStep of type JOINT requires 6 joint angles, got {len(self.joint_waypoint.joints_deg)}")
         elif self.motion_type == MotionType.GRIPPER:
             if self.gripper_command is None:
                 raise ValueError("MotionStep of type GRIPPER requires a gripper_command")
+            if self.waypoint is not None or self.joint_waypoint is not None:
+                raise ValueError("MotionStep of type GRIPPER cannot accept movement waypoints")
         elif self.motion_type == MotionType.WAIT:
             if self.wait_duration_s is None or self.wait_duration_s < 0.0:
                 raise ValueError("MotionStep of type WAIT requires a non-negative wait_duration_s")
+            if self.waypoint is not None or self.joint_waypoint is not None:
+                raise ValueError("MotionStep of type WAIT cannot accept movement waypoints")
+
+        # Freeze metadata
+        meta_dict = dict(self.metadata) if self.metadata else {}
+        object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
+
+    @property
+    def target(self) -> Optional[Any]:
+        """Convenience property returning the active target waypoint (Cartesian or Joint)."""
+        return self.waypoint if self.waypoint is not None else self.joint_waypoint
 
 
 @dataclass(frozen=True)
@@ -129,6 +171,9 @@ class MotionPlan:
         # Ensure steps is an immutable tuple
         if not isinstance(self.steps, tuple):
             object.__setattr__(self, "steps", tuple(self.steps))
+        # Freeze metadata
+        meta_dict = dict(self.metadata) if self.metadata else {}
+        object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
 
     @property
     def total_steps(self) -> int:
@@ -156,3 +201,7 @@ class MotionPlan:
         if self.placement_version is None:
             return True
         return self.placement_version == current_version
+
+
+# Canonical alias for resolved motion plans
+ResolvedMotionPlan = MotionPlan

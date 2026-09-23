@@ -7,7 +7,8 @@ error recovery in both physical and virtual robot execution pipelines.
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Dict, Optional
+from types import MappingProxyType
+from typing import Any, Dict, Mapping, Optional
 
 from src.motion.stages import MotionStage
 
@@ -53,6 +54,9 @@ class MotionFailureCategory(Enum):
     BACKEND_NOT_READY = auto()
     """Robot controller or simulation backend is uninitialized, disconnected, or busy."""
 
+    INVALID_PLAN = auto()
+    """Plan is empty, contains malformed waypoints, or violates structural validation."""
+
     TARGET_INVALID = auto()
     """Target coordinates, cell indices, or pose parameters are out of bounds."""
 
@@ -74,6 +78,9 @@ class MotionFailureCategory(Enum):
     PAYLOAD_NOT_CONFIRMED = auto()
     """Grasp verification predicate failed (expected piece was not acquired)."""
 
+    PAYLOAD_STATE_UNCERTAIN = auto()
+    """Piece attachment status is ambiguous following unexpected fault in flight."""
+
     RELEASE_FAILED = auto()
     """Release verification predicate failed (piece remained stuck to gripper)."""
 
@@ -85,6 +92,10 @@ class MotionFailureCategory(Enum):
 
     ABORTED = auto()
     """Operation was explicitly aborted by user, emergency stop, or safety guard."""
+
+
+# Canonical alias
+MotionFailureCategory.STALE_PLACEMENT = MotionFailureCategory.STALE_PLACEMENT_VERSION  # type: ignore[attr-defined]
 
 
 @dataclass
@@ -103,7 +114,11 @@ class MotionExecutionResult:
     error_code: Optional[str] = None
     backend_code: Optional[int] = None
     message: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        meta_dict = dict(self.metadata) if self.metadata else {}
+        self.metadata = MappingProxyType(meta_dict)
 
     @classmethod
     def ok(
@@ -111,7 +126,7 @@ class MotionExecutionResult:
         last_stage: MotionStage = MotionStage.COMPLETE,
         payload_state: PayloadState = PayloadState.NONE,
         message: str = "Execution succeeded",
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
     ) -> "MotionExecutionResult":
         """Convenience factory for successful execution."""
         return cls(
@@ -136,7 +151,7 @@ class MotionExecutionResult:
         recoverable: bool = True,
         error_code: Optional[str] = None,
         backend_code: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
     ) -> "MotionExecutionResult":
         """Convenience factory for failed execution."""
         return cls(

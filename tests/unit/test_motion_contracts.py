@@ -6,6 +6,7 @@ payload semantics, plan builders, and two-layer task intents without requiring
 FAIRINO SDK, PyBullet, Camera, or real physical robot hardware.
 """
 
+import math
 from typing import List, Tuple
 import unittest
 
@@ -30,6 +31,8 @@ from src.motion import (
     build_pick_plan,
     build_place_plan,
     build_service_retreat_plan,
+    CartesianWaypoint,
+    JointWaypoint,
 )
 
 
@@ -116,6 +119,102 @@ class MotionContractsTests(unittest.TestCase):
         # Invalid pose sequence length
         with self.assertRaises(ValueError):
             MotionWaypoint.from_pose_sequence([0.0, 0.0, 0.0], stage=MotionStage.LAND)
+
+    def test_metadata_immutability_and_defensive_copy(self):
+        """Verify mutating caller metadata dictionary does not affect stored contract state."""
+        meta = {"original_key": "original_val", "nested": {"counter": 1}}
+        wp = MotionWaypoint(
+            position_mm=(0.0, 0.0, 0.0),
+            orientation_deg=(180.0, 0.0, 90.0),
+            stage=MotionStage.APPROACH,
+            metadata=meta,
+        )
+
+        # Mutate original caller dictionary
+        meta["original_key"] = "mutated_val"
+        meta["new_key"] = 999
+
+        # Stored metadata must remain unchanged
+        self.assertEqual(wp.metadata["original_key"], "original_val")
+        self.assertNotIn("new_key", wp.metadata)
+
+        # Attempting to mutate stored mappingproxy directly must raise TypeError
+        with self.assertRaises(TypeError):
+            wp.metadata["original_key"] = "hacked"  # type: ignore
+
+    def test_joint_waypoint_contract(self):
+        """Verify JointWaypoint validates exactly 6 joints and provides radiant conversion."""
+        jw = JointWaypoint(
+            joints_deg=(0.0, -20.0, 100.0, -80.0, -90.0, 15.0),
+            stage=MotionStage.SERVICE_RETREAT,
+            speed_factor=1.5,
+            label="Service safe joint pose",
+        )
+        self.assertEqual(len(jw.joints_deg), 6)
+        self.assertEqual(jw.joints_deg[0], 0.0)
+        self.assertEqual(jw.motion_type, MotionType.JOINT)
+        self.assertAlmostEqual(jw.joints_rad[4], -math.pi / 2.0, places=5)
+
+        # Reject invalid joint count
+        with self.assertRaises(ValueError):
+            JointWaypoint(joints_deg=(0.0, 0.0, 0.0), stage=MotionStage.SERVICE_RETREAT)  # type: ignore
+
+        # Reject Cartesian waypoint with JOINT type
+        with self.assertRaises(ValueError):
+            MotionWaypoint(
+                position_mm=(0.0, 0.0, 0.0),
+                orientation_deg=(0.0, 0.0, 0.0),
+                stage=MotionStage.LAND,
+                motion_type=MotionType.JOINT,
+            )
+
+    def test_motion_step_target_type_mutual_exclusion(self):
+        """Verify MotionStep enforces unambiguous target types (Cartesian vs Joint)."""
+        cart_wp = MotionWaypoint(
+            position_mm=(0.0, 0.0, 0.0),
+            orientation_deg=(180.0, 0.0, 90.0),
+            stage=MotionStage.APPROACH,
+        )
+        joint_wp = JointWaypoint(
+            joints_deg=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            stage=MotionStage.SERVICE_RETREAT,
+        )
+
+        # Valid Cartesian step
+        s_cart = MotionStep(
+            step_id=1,
+            stage=MotionStage.APPROACH,
+            motion_type=MotionType.CARTESIAN_LINEAR,
+            waypoint=cart_wp,
+        )
+        self.assertIsNotNone(s_cart.target)
+
+        # Valid Joint step
+        s_joint = MotionStep(
+            step_id=2,
+            stage=MotionStage.SERVICE_RETREAT,
+            motion_type=MotionType.JOINT,
+            joint_waypoint=joint_wp,
+        )
+        self.assertIsNotNone(s_joint.target)
+
+        # Invalid: JOINT type with Cartesian waypoint
+        with self.assertRaises(ValueError):
+            MotionStep(
+                step_id=3,
+                stage=MotionStage.SERVICE_RETREAT,
+                motion_type=MotionType.JOINT,
+                waypoint=cart_wp,
+            )
+
+        # Invalid: CARTESIAN type with Joint waypoint
+        with self.assertRaises(ValueError):
+            MotionStep(
+                step_id=4,
+                stage=MotionStage.APPROACH,
+                motion_type=MotionType.CARTESIAN_LINEAR,
+                joint_waypoint=joint_wp,
+            )
 
     def test_gripper_command_semantics(self):
         """Verify GripperCommand expresses OPEN, CLOSE, SAFE_IDLE without hardware pin coupling."""

@@ -4,11 +4,13 @@ Motion layer package for high-level robot choreography and movement coordination
 Architecture:
     Intent (Semantic row, col)
         ↓
-    MotionPlan (Waypoint sequence, placement version, payload state)
+    MotionResolver (BoardPose transformation, MotionProfile)
+        ↓
+    ResolvedMotionPlan (Waypoint sequence, placement version, payload state)
         ↓
     MotionStage[] (Standardized lifecycle vocabulary)
         ↓
-    MotionExecutor (Phase 3B integration)
+    MotionExecutor (Dispatch & error recovery)
         ↓
     RobotBackend (VirtualFR3Backend vs PhysicalFR3Backend)
 """
@@ -19,6 +21,8 @@ from src.motion.contracts import (
     MotionType,
     GripperCommand,
     MotionWaypoint,
+    CartesianWaypoint,
+    JointWaypoint,
 )
 from src.motion.result import (
     PayloadState,
@@ -28,6 +32,7 @@ from src.motion.result import (
 from src.motion.plan import (
     MotionStep,
     MotionPlan,
+    ResolvedMotionPlan,
     BoardPickIntent,
     BoardPlaceIntent,
     PieceMoveIntent,
@@ -40,6 +45,8 @@ from src.motion.builder import (
     build_capture_plan,
     build_service_retreat_plan,
 )
+from src.motion.resolver import MotionResolver
+from src.motion.executor import MotionExecutor
 
 __all__ = [
     # Legacy / Existing Coordination (Unchanged)
@@ -51,6 +58,8 @@ __all__ = [
     "MotionType",
     "GripperCommand",
     "MotionWaypoint",
+    "CartesianWaypoint",
+    "JointWaypoint",
     # Result & Payload Semantics
     "PayloadState",
     "MotionFailureCategory",
@@ -58,6 +67,7 @@ __all__ = [
     # Plan & Task Intents
     "MotionStep",
     "MotionPlan",
+    "ResolvedMotionPlan",
     "BoardPickIntent",
     "BoardPlaceIntent",
     "PieceMoveIntent",
@@ -68,4 +78,7 @@ __all__ = [
     "build_move_plan",
     "build_capture_plan",
     "build_service_retreat_plan",
+    # Shared Resolver & Executor (Phase 3B)
+    "MotionResolver",
+    "MotionExecutor",
 ]

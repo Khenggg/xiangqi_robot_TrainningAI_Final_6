@@ -1,12 +1,14 @@
 """
 Motion Contracts for Xiangqi Robot motion planning and execution.
 
-Defines immutable Cartesian waypoints, motion types, and gripper commands
+Defines immutable Cartesian and Joint waypoints, motion types, and gripper commands
 decoupled from specific robot backend implementations (FAIRINO vs PyBullet).
 """
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
+import math
+from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from src.motion.stages import MotionStage
@@ -29,7 +31,7 @@ class MotionType(Enum):
     """Direct joint-space motion interpolation."""
 
     GRIPPER = auto()
-    """End-effector actuation without arm arm movement."""
+    """End-effector actuation without arm movement."""
 
     WAIT = auto()
     """Temporal dwell (e.g., settling after piece placement)."""
@@ -80,6 +82,13 @@ class MotionWaypoint:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
+        # Disallow ambiguous Cartesian waypoint with JOINT motion type
+        if self.motion_type == MotionType.JOINT:
+            raise ValueError(
+                "MotionWaypoint represents Cartesian targets (X, Y, Z, Rx, Ry, Rz) and cannot "
+                "use MotionType.JOINT. Use JointWaypoint for explicit joint-space targets."
+            )
+
         # Validate coordinate dimensionality
         if len(self.position_mm) != 3:
             raise ValueError(f"position_mm must be a 3-tuple (X, Y, Z), got {self.position_mm}")
@@ -99,9 +108,9 @@ class MotionWaypoint:
             "orientation_deg",
             tuple(float(v) for v in self.orientation_deg),
         )
-        # Freeze metadata to prevent external mutation
-        if not isinstance(self.metadata, dict):
-            object.__setattr__(self, "metadata", dict(self.metadata))
+        # Deep defensive copy and freeze metadata with MappingProxyType
+        meta_dict = dict(self.metadata) if self.metadata else {}
+        object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
 
     @property
     def pose_mm_deg(self) -> Tuple[float, float, float, float, float, float]:
@@ -136,6 +145,85 @@ class MotionWaypoint:
             motion_type=motion_type,
             speed_factor=speed_factor,
             tolerance_mm=tolerance_mm,
+            label=label,
+            metadata=metadata or {},
+        )
+
+
+# Canonical alias for Cartesian waypoints
+CartesianWaypoint = MotionWaypoint
+
+
+@dataclass(frozen=True)
+class JointWaypoint:
+    """
+    Immutable value object representing an explicit 6-DOF joint-space waypoint.
+    
+    Attributes:
+        joints_deg: 6 joint angles (J1..J6) in degrees.
+        stage: The functional lifecycle stage associated with this waypoint.
+        motion_type: Desired motion interpolation type (default JOINT).
+        speed_factor: Relative execution speed factor (1.0 = nominal, > 0.0).
+        tolerance_deg: Optional joint arrival tolerance in degrees.
+        label: Human-readable diagnostic description of this waypoint.
+        metadata: Read-only mapping of auxiliary domain context.
+    """
+    joints_deg: Tuple[float, float, float, float, float, float]
+    stage: MotionStage
+    motion_type: MotionType = MotionType.JOINT
+    speed_factor: float = 1.0
+    tolerance_deg: Optional[float] = None
+    label: str = ""
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        # Validate motion type
+        if self.motion_type != MotionType.JOINT:
+            raise ValueError(
+                f"JointWaypoint must use MotionType.JOINT, got {self.motion_type}"
+            )
+
+        # Validate joint count (FR3 has exactly 6 joints)
+        if len(self.joints_deg) != 6:
+            raise ValueError(
+                f"JointWaypoint requires exactly 6 joint values (J1..J6), got {len(self.joints_deg)}: {self.joints_deg}"
+            )
+        if self.speed_factor <= 0.0:
+            raise ValueError(f"speed_factor must be positive, got {self.speed_factor}")
+
+        # Ensure elements are floats
+        object.__setattr__(
+            self,
+            "joints_deg",
+            tuple(float(v) for v in self.joints_deg),
+        )
+        # Deep defensive copy and freeze metadata with MappingProxyType
+        meta_dict = dict(self.metadata) if self.metadata else {}
+        object.__setattr__(self, "metadata", MappingProxyType(meta_dict))
+
+    @property
+    def joints_rad(self) -> Tuple[float, float, float, float, float, float]:
+        """Return 6 joint angles converted to radians."""
+        return tuple(math.radians(v) for v in self.joints_deg)
+
+    @classmethod
+    def from_sequence(
+        cls,
+        joints_6d: Sequence[float],
+        stage: MotionStage,
+        speed_factor: float = 1.0,
+        tolerance_deg: Optional[float] = None,
+        label: str = "",
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> "JointWaypoint":
+        """Convenience constructor from a 6-element joint sequence in degrees."""
+        if len(joints_6d) != 6:
+            raise ValueError(f"joints_6d must contain exactly 6 elements, got {len(joints_6d)}")
+        return cls(
+            joints_deg=tuple(float(v) for v in joints_6d),  # type: ignore
+            stage=stage,
+            speed_factor=speed_factor,
+            tolerance_deg=tolerance_deg,
             label=label,
             metadata=metadata or {},
         )
