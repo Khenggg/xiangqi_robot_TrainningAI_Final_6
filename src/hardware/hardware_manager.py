@@ -66,6 +66,7 @@ class HardwareManager:
         self.hand_model = None
         self.turn_completion_monitor = None
         self._last_hand_check = 0.0
+        self.cchess_recognizer = None
         self.perspective_path = Path(project_dir) / "perspective.npy"
         
         self.class_id_to_name = {
@@ -333,6 +334,19 @@ class HardwareManager:
         self.ai_ctrl = AIController(local_engine, cloud_engine, self.config)
 
     def _init_camera(self):
+        # Initialize CChessRecognizer if ONNX models exist
+        try:
+            from src.vision.cchess_recognizer import CChessRecognizer
+            pose_onnx = Path(self.project_dir) / getattr(self.config, "CCHESS_POSE_MODEL_PATH", "models/cchess/pose_4_v6.onnx")
+            layout_onnx = Path(self.project_dir) / getattr(self.config, "CCHESS_LAYOUT_MODEL_PATH", "models/cchess/layout_nano_v3.onnx")
+            if pose_onnx.exists() and layout_onnx.exists():
+                self.cchess_recognizer = CChessRecognizer(pose_onnx, layout_onnx)
+                print("[INIT] [CChess] ✅ CChessRecognizer loaded successfully (pose + layout ONNX).")
+            else:
+                print(f"[INIT] [CChess] ⚠️ ONNX models not found ({pose_onnx}, {layout_onnx}).")
+        except Exception as e:
+            print(f"[INIT] [CChess] ⚠️ Could not initialize CChessRecognizer: {e}")
+
         if self.dry_run:
             return
 
@@ -363,14 +377,12 @@ class HardwareManager:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-        # Calibrate Vision
+        # Calibrate Vision (RTMPose ONNX Auto-Calibration + Manual Fallback)
         print("\n" + "=" * 60)
         print("  📐  CAMERA CALIBRATION — BẮT BUỘC KHI KHỞI ĐỘNG")
         print("=" * 60)
-        if os.path.exists(str(self.perspective_path)):
-            print(f"⚠️  Đã có file cũ: {self.perspective_path}")
-            print("   Bấm 'S' để dùng lại hoặc calibrate lại bằng cách click 4 góc.")
-        calibrate_perspective_camera(self.cap, str(self.perspective_path))
+        from src.vision.auto_calibrate import run_calibration_flow
+        run_calibration_flow(self.cap, str(self.perspective_path), cchess_recognizer=self.cchess_recognizer)
         
         if not os.path.exists(str(self.perspective_path)):
             print("❌ Chưa có perspective.npy! Không thể detect nước đi.")
@@ -596,3 +608,23 @@ class HardwareManager:
         if self.yolo_detector and occ is not None:
             self.yolo_detector._baseline_occ = [row[:] for row in occ]
             self.yolo_detector._baseline_time = baseline_time
+
+    def recognize_board_state(self, frame=None):
+        """Nhận diện toàn bộ bàn cờ (10x9) bằng CChessRecognizer ONNX models.
+        
+        Args:
+            frame: OpenCV BGR frame. Nếu None, sẽ lấy từ CameraMonitor.
+            
+        Returns:
+            dict kết quả từ CChessRecognizer.full_recognize() hoặc None nếu không khả dụng.
+        """
+        if self.cchess_recognizer is None:
+            return None
+
+        if frame is None and self.cam_monitor is not None:
+            frame, _ = self.cam_monitor.get_latest_frame_and_detections()
+
+        if frame is None:
+            return None
+
+        return self.cchess_recognizer.full_recognize(frame)
