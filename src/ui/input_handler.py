@@ -119,6 +119,8 @@ class InputHandler:
             print(f"  - Khớp Joints (deg): {[round(q, 2) for q in snap.joints_deg]}")
             print(f"  - TCP Pose (mm, deg): {[round(p, 2) for p in snap.tcp_pose_mm_deg]}")
             print(f"  - Flange Pose (mm, deg): {[round(p, 2) for p in snap.flange_pose_mm_deg]}")
+            flange_src = getattr(snap, "flange_pose_source", "UNAVAILABLE")
+            print(f"    Source: {flange_src}")
             print(f"  - Kẹp Closed: {snap.gripper_closed}")
             print(f"  - Motion Authorized: {getattr(self.hw, 'physical_motion_authorized', False)}")
             print(f"  - Robot Ready: {self.hw.is_robot_ready}")
@@ -179,7 +181,15 @@ class InputHandler:
 
         # Perform Detection
         print("[SPACE] 🔍 Chạy YOLO Detector...")
-        src, dst, piece = self.hw.yolo_detector.detect_move(frame, detections, self.state.board)
+        cchess_result = None
+        if hasattr(self.hw, "recognize_board_state"):
+            try:
+                cchess_result = self.hw.recognize_board_state(frame)
+            except Exception as e:
+                print(f"[SPACE] ⚠️ CChess recognizer error: {e}")
+        src, dst, piece = self.hw.yolo_detector.detect_move(
+            frame, detections, self.state.board, cchess_result=cchess_result
+        )
         
         if src:
             print(f"[YOLO] 👉 Nhận diện đi từ Cột {src[0]} Hàng {src[1]} đến Cột {dst[0]} Hàng {dst[1]}")

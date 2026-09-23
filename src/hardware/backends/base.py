@@ -24,6 +24,7 @@ class RobotStateSnapshot:
     tcp_pose_mm_deg: List[float]        # [X, Y, Z (mm), Rx, Ry, Rz (deg)]
     gripper_closed: bool
     timestamp: float                    # Unix timestamp
+    flange_pose_source: str = "UNAVAILABLE" # "CONTROLLER", "DERIVED", "MOCK", "UNAVAILABLE"
     last_error: Optional[str] = None
     trajectory_stage: Optional[str] = None  # "PREPOSITION", "LIFT", "TRANSIT", "LAND", "COMPLETE", etc.
     placement_version: int = 1
