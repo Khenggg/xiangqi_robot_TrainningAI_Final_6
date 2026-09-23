@@ -1,0 +1,4 @@
+# Development and testing dependencies for Xiangqi Robot
+-r requirements.txt
+pytest>=7.0.0
+pytest-xdist>=3.0.0

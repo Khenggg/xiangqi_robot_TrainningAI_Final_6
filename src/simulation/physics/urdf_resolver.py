@@ -24,6 +24,12 @@ def get_simulation_ready_fr3_urdf(
         raise FileNotFoundError(f"Source FR3 URDF not found: {src_path}")
 
     mesh_dir = (repo_root / "robot-3d-viewer" / "assets" / "fr3_v6").resolve().as_posix()
+
+    # Avoid concurrent disk write race condition under xdist if already generated and up-to-date
+    if out_path.is_file() and out_path.stat().st_size > 0:
+        if out_path.stat().st_mtime >= src_path.stat().st_mtime:
+            return out_path
+
     content = src_path.read_text(encoding="utf-8")
 
     # Replace package:// path with resolved absolute posix path
@@ -32,5 +38,11 @@ def get_simulation_ready_fr3_urdf(
         f"{mesh_dir}/",
     )
 
-    out_path.write_text(resolved_content, encoding="utf-8")
+    # Write atomically via temp file to avoid concurrent read/write locks
+    temp_out = out_path.with_suffix(".tmp")
+    temp_out.write_text(resolved_content, encoding="utf-8")
+    try:
+        temp_out.replace(out_path)
+    except OSError:
+        pass
     return out_path
