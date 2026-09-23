@@ -7,6 +7,7 @@
 """
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -83,6 +84,282 @@ PROJECT_TO_SHORT["."] = "."
 PROJECT_TO_SHORT["x"] = "x"
 
 
+def validate_board_sanity(board: List[List[str]]) -> Tuple[bool, Optional[str]]:
+    """Kiểm tra tính hợp lệ cơ bản của bàn cờ tướng (Sanity check).
+    
+    Phát hiện các trạng thái bất thường / lỗi nhận diện như:
+      - Thiếu hoặc thừa Tướng (Red King 'r_K', Black King 'b_K')
+      - Tướng nằm ngoài Cung (Palace)
+      - Số lượng quân vượt quá giới hạn luật cờ (tối đa 16 quân mỗi bên)
+    """
+    if not board or len(board) != 10 or any(len(r) != 9 for r in board):
+        return False, "Kích thước ma trận bàn cờ không hợp lệ (phải là 10 hàng x 9 cột)"
+
+    r_kings = []
+    b_kings = []
+    red_count = 0
+    black_count = 0
+
+    for r in range(10):
+        for c in range(9):
+            p = board[r][c]
+            if p == "r_K":
+                r_kings.append((c, r))
+                red_count += 1
+            elif p == "b_K":
+                b_kings.append((c, r))
+                black_count += 1
+            elif p.startswith("r"):
+                red_count += 1
+            elif p.startswith("b"):
+                black_count += 1
+
+    if len(r_kings) != 1:
+        return False, f"Bàn cờ không hợp lệ: Yêu cầu đúng 1 Tướng Đỏ (r_K), phát hiện {len(r_kings)}"
+    if len(b_kings) != 1:
+        return False, f"Bàn cờ không hợp lệ: Yêu cầu đúng 1 Tướng Đen (b_K), phát hiện {len(b_kings)}"
+
+    # Cung Tướng Đỏ: cột 3..5, hàng 7..9
+    rk_c, rk_r = r_kings[0]
+    if not (3 <= rk_c <= 5 and 7 <= rk_r <= 9):
+        return False, f"Tướng Đỏ ở vị trí ({rk_c}, {rk_r}) ngoài Cung (cột 3-5, hàng 7-9)"
+
+    # Cung Tướng Đen: cột 3..5, hàng 0..2
+    bk_c, bk_r = b_kings[0]
+    if not (3 <= bk_c <= 5 and 0 <= bk_r <= 2):
+        return False, f"Tướng Đen ở vị trí ({bk_c}, {bk_r}) ngoài Cung (cột 3-5, hàng 0-2)"
+
+    if red_count > 16:
+        return False, f"Số lượng quân Đỏ vượt quá giới hạn ({red_count} > 16)"
+    if black_count > 16:
+        return False, f"Số lượng quân Đen vượt quá giới hạn ({black_count} > 16)"
+
+    return True, None
+
+
+@dataclass
+class RecognitionQuality:
+    """Detailed quality assessment of a CChess recognition output."""
+    is_valid: bool
+    corner_quality_ok: bool = True
+    geometry_quality_ok: bool = True
+    layout_quality_ok: bool = True
+    board_sanity_ok: bool = True
+    min_kpt_score: float = 0.0
+    mean_kpt_score: float = 0.0
+    mean_layout_conf: float = 0.0
+    mean_piece_conf: float = 0.0
+    error: Optional[str] = None
+
+
+def check_recognition_quality(
+    result: Dict,
+    img_shape: Optional[Tuple[int, int]] = None,
+    min_kpt_conf: float = 0.08,
+    mean_kpt_conf: float = 0.15,
+    min_layout_conf: float = 0.25,
+    min_piece_conf: float = 0.35,
+) -> RecognitionQuality:
+    """Kiểm tra toàn diện chất lượng nhận diện:
+    1. Điểm tin cậy (confidence) của 4 góc bàn cờ (SimCC)
+    2. Tính hợp lệ hình học (quadrilateral geometry, bounds, lồi, thứ tự góc)
+    3. Điểm tin cậy layout classification (toàn bàn cờ & các ô có quân)
+    4. Kiểm tra tính hợp lệ cờ tướng (Sanity check: Tướng, Cung, số lượng quân)
+    """
+    if not result or not result.get("success"):
+        return RecognitionQuality(
+            is_valid=False,
+            error=result.get("error") if result else "Kết quả nhận diện trống hoặc báo lỗi",
+        )
+
+    # 1. Kiểm tra 4 góc keypoint scores
+    kpts = result.get("keypoints") if result.get("keypoints") is not None else result.get("corners")
+    kpt_scores = result.get("keypoint_scores") if result.get("keypoint_scores") is not None else result.get("corner_scores")
+    if kpts is None or kpt_scores is None or len(kpts) != 4 or len(kpt_scores) != 4:
+        return RecognitionQuality(
+            is_valid=False,
+            corner_quality_ok=False,
+            error="Không đủ 4 keypoints góc bàn cờ",
+        )
+
+    min_kpt = float(np.min(kpt_scores))
+    mean_kpt = float(np.mean(kpt_scores))
+    if min_kpt < min_kpt_conf or mean_kpt < mean_kpt_conf:
+        return RecognitionQuality(
+            is_valid=False,
+            corner_quality_ok=False,
+            min_kpt_score=min_kpt,
+            mean_kpt_score=mean_kpt,
+            error=(
+                f"Độ tin cậy góc bàn cờ quá thấp (min={min_kpt:.3f} < {min_kpt_conf}, "
+                f"mean={mean_kpt:.3f} < {mean_kpt_conf})"
+            ),
+        )
+
+    # 2. Kiểm tra hình học góc bàn cờ (Geometry Sanity)
+    # CChess keypoint order: [0]=A0, [1]=A8, [2]=J0, [3]=J8
+    # Clockwise contour order: P0=A0, P1=A8, P2=J8, P3=J0
+    P0 = np.array(kpts[0], dtype=np.float32)
+    P1 = np.array(kpts[1], dtype=np.float32)
+    P2 = np.array(kpts[3], dtype=np.float32)
+    P3 = np.array(kpts[2], dtype=np.float32)
+
+    if img_shape is not None:
+        img_h, img_w = img_shape[:2]
+        for i, pt in enumerate([P0, P1, P2, P3]):
+            x, y = float(pt[0]), float(pt[1])
+            if x < -0.05 * img_w or x > 1.05 * img_w or y < -0.05 * img_h or y > 1.05 * img_h:
+                return RecognitionQuality(
+                    is_valid=False,
+                    geometry_quality_ok=False,
+                    min_kpt_score=min_kpt,
+                    mean_kpt_score=mean_kpt,
+                    error=f"Góc P{i} nằm ngoài biên ảnh ({x:.1f}, {y:.1f})",
+                )
+        # Minimum span check
+        min_w = img_w * 0.10
+        min_h = img_h * 0.10
+        if np.linalg.norm(P1 - P0) < min_w or np.linalg.norm(P2 - P3) < min_w:
+            return RecognitionQuality(
+                is_valid=False,
+                geometry_quality_ok=False,
+                min_kpt_score=min_kpt,
+                mean_kpt_score=mean_kpt,
+                error="Chiều rộng bàn cờ quá nhỏ so với khung hình",
+            )
+        if np.linalg.norm(P3 - P0) < min_h or np.linalg.norm(P2 - P1) < min_h:
+            return RecognitionQuality(
+                is_valid=False,
+                geometry_quality_ok=False,
+                min_kpt_score=min_kpt,
+                mean_kpt_score=mean_kpt,
+                error="Chiều cao bàn cờ quá nhỏ so với khung hình",
+            )
+
+    # Convex quadrilateral check (tích có hướng các cạnh liên tiếp phải cùng dấu)
+    poly = [P0, P1, P2, P3]
+    cross_signs = []
+    for i in range(4):
+        v1 = poly[(i + 1) % 4] - poly[i]
+        v2 = poly[(i + 2) % 4] - poly[(i + 1) % 4]
+        cross = v1[0] * v2[1] - v1[1] * v2[0]
+        cross_signs.append(cross)
+
+    all_pos = all(c > 0 for c in cross_signs)
+    all_neg = all(c < 0 for c in cross_signs)
+    if not (all_pos or all_neg):
+        return RecognitionQuality(
+            is_valid=False,
+            geometry_quality_ok=False,
+            min_kpt_score=min_kpt,
+            mean_kpt_score=mean_kpt,
+            error="4 góc không tạo thành tứ giác lồi hợp lệ (bị xoắn hoặc tự cắt)",
+        )
+
+    # Area ratio check (tỷ lệ diện tích tứ giác so với bounding rect)
+    quad_pts = np.array([P0, P1, P2, P3], dtype=np.float32)
+    quad_area = cv2.contourArea(quad_pts)
+    _, _, bw, bh = cv2.boundingRect(quad_pts)
+    bbox_area = max(bw * bh, 1.0)
+    area_ratio = quad_area / bbox_area
+    if area_ratio < 0.35:
+        return RecognitionQuality(
+            is_valid=False,
+            geometry_quality_ok=False,
+            min_kpt_score=min_kpt,
+            mean_kpt_score=mean_kpt,
+            error=f"Tứ giác góc bàn cờ bị biến dạng quá mức (area_ratio={area_ratio:.2f} < 0.35)",
+        )
+
+    # 3. Kiểm tra độ tin cậy layout
+    confs = result.get("confidence")
+    board = result.get("board")
+    mean_layout_conf = 1.0
+    mean_piece_conf = 1.0
+
+    if confs is not None:
+        if len(confs) != 10 or any(len(r) != 9 for r in confs):
+            return RecognitionQuality(
+                is_valid=False,
+                layout_quality_ok=False,
+                error="Ma trận độ tin cậy layout không hợp lệ",
+            )
+
+        flat_confs = [c for r in confs for c in r]
+        mean_layout_conf = float(np.mean(flat_confs)) if flat_confs else 0.0
+
+        piece_confs = []
+        if board and len(board) == 10:
+            for r in range(10):
+                for c in range(9):
+                    if board[r][c] not in (".", "x", ""):
+                        piece_confs.append(confs[r][c])
+        mean_piece_conf = float(np.mean(piece_confs)) if piece_confs else mean_layout_conf
+
+        if piece_confs and mean_piece_conf < min_piece_conf:
+            return RecognitionQuality(
+                is_valid=False,
+                layout_quality_ok=False,
+                min_kpt_score=min_kpt,
+                mean_kpt_score=mean_kpt,
+                mean_layout_conf=mean_layout_conf,
+                mean_piece_conf=mean_piece_conf,
+                error=f"Độ tin cậy phân loại quân cờ quá thấp (mean={mean_piece_conf:.3f} < {min_piece_conf})",
+            )
+        if mean_layout_conf < min_layout_conf:
+            return RecognitionQuality(
+                is_valid=False,
+                layout_quality_ok=False,
+                min_kpt_score=min_kpt,
+                mean_kpt_score=mean_kpt,
+                mean_layout_conf=mean_layout_conf,
+                mean_piece_conf=mean_piece_conf,
+                error=f"Độ tin cậy phân loại toàn bàn cờ quá thấp (mean={mean_layout_conf:.3f} < {min_layout_conf})",
+            )
+
+    # 4. Kiểm tra tính hợp lệ bàn cờ (Board Sanity)
+    if board is not None:
+        is_sane, sanity_err = validate_board_sanity(board)
+        if not is_sane:
+            return RecognitionQuality(
+                is_valid=False,
+                board_sanity_ok=False,
+                min_kpt_score=min_kpt,
+                mean_kpt_score=mean_kpt,
+                mean_layout_conf=mean_layout_conf,
+                mean_piece_conf=mean_piece_conf,
+                error=sanity_err,
+            )
+
+    return RecognitionQuality(
+        is_valid=True,
+        min_kpt_score=min_kpt,
+        mean_kpt_score=mean_kpt,
+        mean_layout_conf=mean_layout_conf,
+        mean_piece_conf=mean_piece_conf,
+    )
+
+
+def validate_recognition_result(
+    result: Dict,
+    img_shape: Optional[Tuple[int, int]] = None,
+    min_kpt_conf: float = 0.08,
+    mean_kpt_conf: float = 0.15,
+    min_layout_conf: float = 0.25,
+    min_piece_conf: float = 0.35,
+) -> Tuple[bool, Optional[str]]:
+    """Quality gate wrapper returning (is_valid, error_message)."""
+    quality = check_recognition_quality(
+        result,
+        img_shape=img_shape,
+        min_kpt_conf=min_kpt_conf,
+        mean_kpt_conf=mean_kpt_conf,
+        min_layout_conf=min_layout_conf,
+        min_piece_conf=min_piece_conf,
+    )
+    return quality.is_valid, quality.error
+
+
 class CChessRecognizer:
     """Hệ thống nhận diện bàn cờ và phân loại 90 vị trí quân cờ tướng bằng ONNX."""
 
@@ -91,15 +368,27 @@ class CChessRecognizer:
         pose_model_path: Union[str, Path],
         layout_model_path: Union[str, Path],
         use_gpu: bool = False,
+        min_kpt_conf: float = 0.08,
+        mean_kpt_conf: float = 0.15,
+        min_layout_conf: float = 0.25,
+        min_piece_conf: float = 0.35,
     ):
         """
         Args:
             pose_model_path: Đường dẫn model RTMPose 4 keypoints (.onnx)
             layout_model_path: Đường dẫn model Layout classifier (.onnx)
             use_gpu: Cho phép sử dụng CUDA Execution Provider nếu có
+            min_kpt_conf: Ngưỡng score tối thiểu cho từng keypoint SimCC (default: 0.08)
+            mean_kpt_conf: Ngưỡng trung bình keypoint score SimCC (default: 0.15)
+            min_layout_conf: Ngưỡng confidence trung bình layout (default: 0.25)
+            min_piece_conf: Ngưỡng confidence trung bình cho các ô có quân (default: 0.35)
         """
         self.pose_model_path = str(pose_model_path)
         self.layout_model_path = str(layout_model_path)
+        self.min_kpt_conf = float(min_kpt_conf)
+        self.mean_kpt_conf = float(mean_kpt_conf)
+        self.min_layout_conf = float(min_layout_conf)
+        self.min_piece_conf = float(min_piece_conf)
 
         providers = ["CPUExecutionProvider"]
         if use_gpu and "CUDAExecutionProvider" in ort.get_available_providers():
@@ -310,13 +599,32 @@ class CChessRecognizer:
     # 4. FULL PIPELINE & UTILITIES
     # -------------------------------------------------------------------------
 
+    def check_recognition_quality(
+        self, result: Dict, img_shape: Optional[Tuple[int, int]] = None
+    ) -> RecognitionQuality:
+        return check_recognition_quality(
+            result,
+            img_shape=img_shape,
+            min_kpt_conf=self.min_kpt_conf,
+            mean_kpt_conf=self.mean_kpt_conf,
+            min_layout_conf=self.min_layout_conf,
+            min_piece_conf=self.min_piece_conf,
+        )
+
+    def validate_recognition_result(
+        self, result: Dict, img_shape: Optional[Tuple[int, int]] = None
+    ) -> Tuple[bool, Optional[str]]:
+        quality = self.check_recognition_quality(result, img_shape=img_shape)
+        return quality.is_valid, quality.error
+
     def full_recognize(self, frame_bgr: np.ndarray) -> Dict:
         """Thực hiện toàn bộ quy trình:
-        frame camera -> tìm 4 góc -> nắn bàn cờ -> nhận diện 90 ô cờ.
+        frame camera -> tìm 4 góc -> nắn bàn cờ -> nhận diện 90 ô cờ -> quality gate.
 
         Returns:
             Dict chứa:
                 'success': bool
+                'quality_ok': bool
                 'keypoints': np.ndarray (4, 2)
                 'keypoint_scores': np.ndarray (4,)
                 'warped_image': np.ndarray (500, 450, 3)
@@ -326,12 +634,14 @@ class CChessRecognizer:
                 'error': Optional[str]
         """
         try:
+            h, w = frame_bgr.shape[:2]
             kpts, kpt_scores = self.detect_board_corners(frame_bgr)
             warped_bgr, _ = self.extract_rectified_board(frame_bgr, kpts)
             board_proj, board_short, confs = self.recognize_layout(warped_bgr)
 
-            return {
+            result = {
                 "success": True,
+                "quality_ok": True,
                 "keypoints": kpts,
                 "keypoint_scores": kpt_scores,
                 "warped_image": warped_bgr,
@@ -340,9 +650,19 @@ class CChessRecognizer:
                 "confidence": confs,
                 "error": None,
             }
+
+            quality = self.check_recognition_quality(result, img_shape=(h, w))
+            if not quality.is_valid:
+                result["success"] = False
+                result["quality_ok"] = False
+                result["error"] = f"Quality gate rejected: {quality.error}"
+                print(f"[CChessRecognizer] ⚠️ {result['error']}")
+
+            return result
         except Exception as e:
             return {
                 "success": False,
+                "quality_ok": False,
                 "keypoints": None,
                 "keypoint_scores": None,
                 "warped_image": None,

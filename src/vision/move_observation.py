@@ -61,7 +61,13 @@ def derive_move_observation(
     if any(len(row) != 9 for row in before_board) or any(len(row) != 9 for row in after_board):
         return MoveObservation(success=False, error="Invalid board width (expected 9 cols)")
 
-    # 1. Check confidence if provided
+    # 1. Check board sanity (valid king count/palace and piece counts)
+    from src.vision.cchess_recognizer import validate_board_sanity
+    is_sane, sanity_err = validate_board_sanity(after_board)
+    if not is_sane:
+        return MoveObservation(success=False, error=f"Malformed board observation: {sanity_err}")
+
+    # 2. Check confidence if provided
     avg_conf = 1.0
     if confidence_grid is not None:
         confs = [c for row in confidence_grid for c in row]

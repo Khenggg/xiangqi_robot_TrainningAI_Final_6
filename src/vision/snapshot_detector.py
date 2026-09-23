@@ -8,6 +8,8 @@ import numpy as np
 import os
 import time
 
+from src.vision.move_observation import MoveObservation
+
 
 class SnapshotDetector:
     """
@@ -47,6 +49,7 @@ class SnapshotDetector:
         self._baseline_occ = None    # occupancy grid: True/False
         self._baseline_frame = None  # actual camera frame tại T1 (cho absdiff)
         self._baseline_time = None
+        self.last_detection_ambiguous = False
 
     # -------------------------------------------------------------------------
     # PUBLIC API
@@ -89,6 +92,7 @@ class SnapshotDetector:
             (src, dst, piece_name) nếu phát hiện nước đi hợp lệ
             (None, None, None) nếu không phát hiện được
         """
+        self.last_detection_ambiguous = False
         if self._baseline_occ is None:
             print("[SNAPSHOT] ⚠️ Chưa có T1 baseline! Gọi capture_baseline() trước.")
             return None, None, None
@@ -106,6 +110,60 @@ class SnapshotDetector:
 
         # So sánh T1 vs T2 (dùng occupancy + memory board + CChess ONNX hỗ trợ)
         return self._compare_snapshots(self._baseline_occ, t2_occ, board, frame, cchess_result=cchess_result)
+
+    def detect_move_observation(self, frame, detections, board, cchess_result=None, t2_occ=None):
+        """Phát hiện nước đi trả về MoveObservation có cấu trúc.
+        
+        Args:
+            frame: OpenCV frame (BGR)
+            detections: list of detections
+            board: current memory board
+            cchess_result: optional CChess result
+            t2_occ: optional precomputed occupancy grid
+            
+        Returns:
+            MoveObservation
+        """
+        self.last_detection_ambiguous = False
+        if self._baseline_occ is None:
+            return MoveObservation(success=False, error="Chưa có T1 baseline! Gọi capture_baseline() trước.")
+
+        if frame is None:
+            return MoveObservation(success=False, error="Không có frame cho T2!")
+
+        if t2_occ is None:
+            t2_occ = self._build_occupancy(detections)
+
+        src, dst, piece = self._compare_snapshots(
+            self._baseline_occ, t2_occ, board, frame, cchess_result=cchess_result
+        )
+
+        if src is not None and dst is not None:
+            dst_c, dst_r = dst
+            orig_dest = board[dst_r][dst_c]
+            is_capture = (orig_dest != ".")
+            captured_piece = orig_dest if is_capture else None
+            return MoveObservation(
+                success=True,
+                src=src,
+                dst=dst,
+                piece=piece,
+                is_capture=is_capture,
+                captured_piece=captured_piece,
+                confidence=1.0,
+            )
+
+        if self.last_detection_ambiguous:
+            return MoveObservation(
+                success=False,
+                is_ambiguous=True,
+                error="Mơ hồ: Có nhiều ứng viên nước đi hợp lệ nhưng không thể phân định duy nhất.",
+            )
+
+        return MoveObservation(
+            success=False,
+            error="Không phát hiện được nước đi hợp lệ từ thay đổi bàn cờ.",
+        )
 
     def has_baseline(self):
         """Kiểm tra đã có T1 baseline chưa."""
@@ -340,6 +398,7 @@ class SnapshotDetector:
 
         disappeared = []  # Ô T1 có quân → T2 trống
         appeared = []     # Ô T1 trống → T2 có quân
+        self.last_detection_ambiguous = False
 
         for r in range(self.num_rows):
             for c in range(self.num_cols):
@@ -456,15 +515,16 @@ class SnapshotDetector:
             best_dst = self._resolve_capture_ambiguity(dst_candidates, frame) if frame is not None else None
             if best_dst is not None:
                 matched = [(s, d, p, mt) for s, d, p, mt in valid_moves if d == best_dst]
-                if matched:
+                if len(matched) == 1:
                     src, dst, piece, move_type = matched[0]
                     print(f"[SNAPSHOT] ✅ Detected ({move_type}, pixel absdiff of {len(valid_moves)}): {piece} {src}→{dst}")
                     return src, dst, piece
-            # Fallback về Manhattan nếu pixel absdiff thất bại
-            best = min(valid_moves, key=lambda m: abs(m[0][0]-m[1][0]) + abs(m[0][1]-m[1][1]))
-            src, dst, piece, move_type = best
-            print(f"[SNAPSHOT] ✅ Detected ({move_type}, Manhattan fallback of {len(valid_moves)}): {piece} {src}→{dst}")
-            return src, dst, piece
+
+            # P0: REMOVE MANHATTAN GUESSING
+            # If multiple legal candidates cannot be uniquely resolved, FAIL CLOSED.
+            print(f"[SNAPSHOT] ❌ Ambiguous: {len(valid_moves)} valid moves remain unresolved. Failing closed.")
+            self.last_detection_ambiguous = True
+            return None, None, None
 
         # === FALLBACK 1: Không có valid move qua occupancy grid ===
         # Dùng pixel absdiff để phát hiện capture (khi YOLO miss hoàn toàn dst)
@@ -518,20 +578,4 @@ class SnapshotDetector:
         print("[SNAPSHOT] ❌ Không tìm được nước đi hợp lệ.")
         return None, None, None
 
-    def detect_move_observation(self, frame, detections, board, cchess_result=None):
-        """Wrapper method that returns a structured MoveObservation."""
-        from src.vision.move_observation import MoveObservation
-        src, dst, piece = self.detect_move(frame, detections, board, cchess_result=cchess_result)
-        if src is None or dst is None:
-            return MoveObservation(success=False, error="No valid move detected by snapshot detector")
-        dest_piece = board[dst[1]][dst[0]]
-        is_capture = (dest_piece != ".")
-        return MoveObservation(
-            success=True,
-            src=src,
-            dst=dst,
-            piece=piece,
-            is_capture=is_capture,
-            captured_piece=dest_piece if is_capture else None,
-        )
 

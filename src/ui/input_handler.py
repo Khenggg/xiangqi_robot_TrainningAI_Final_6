@@ -1,6 +1,7 @@
 import time
 from src.core import xiangqi  # type: ignore
 from src.ui.board_renderer import BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT, NUM_COLS, NUM_ROWS  # type: ignore
+from src.vision.move_observation import MoveObservation, derive_move_observation
 
 class InputHandler:
     """Manages Pygame Key/Mouse events and bridges them to GameState and HardwareManager."""
@@ -157,16 +158,25 @@ class InputHandler:
 
     def _handle_space_key(self, auto_retry=False) -> bool:
         print("\n[SPACE] 🎯 Người chơi bấm SPACE — đang chụp T2 snapshot...")
-        self.state.set_status("📸  Đang phân tích YOLO...", color=(0, 100, 180), duration=3.0)
-        
-        if not self.hw.yolo_detector or not self.hw.cam_monitor:
-            self.state.set_status("❌  Hệ thống nhận diện chưa khởi tạo!", color=(180, 0, 0))
+        self.state.set_status("📸 Đang phân tích bàn cờ...", color=(0, 100, 180), duration=3.0)
+
+        if self.state.turn != "r" or self.state.game_over:
+            print("[SPACE] ⚠️ Chưa đến lượt Đỏ hoặc ván đấu đã kết thúc.")
             return False
-            
+
+        if not self.hw.cam_monitor:
+            self.state.set_status("❌ Hệ thống Camera chưa khởi tạo!", color=(180, 0, 0))
+            return False
+
         frame, detections = self.hw.cam_monitor.get_fresh_snapshot()
-        
-        # Validate Baseline
-        if not self.hw.yolo_detector.has_baseline():
+        if frame is None:
+            print("[SPACE] ❌ Không lấy được camera frame!")
+            if not auto_retry:
+                self.state.set_status("❌ Không lấy được hình ảnh từ Camera!", color=(180, 0, 0))
+            return False
+
+        # Validate / Capture YOLO baseline if detector is active
+        if self.hw.yolo_detector and not self.hw.yolo_detector.has_baseline():
             print("[SPACE] ⚠️ Chưa có T1 baseline — chụp ngay...")
             if self.hw.yolo_detector.capture_baseline(frame, detections):
                 self.state.set_status("📸 Đã làm mới Trạng thái bàn cờ hiện tại", color=(0, 100, 180), duration=5.0)
@@ -175,45 +185,103 @@ class InputHandler:
             return False
 
         # SAVE ROLLBACK STATE TRƯỚC KHI DETECT (để có thể rollback khi lỗi)
-        occ = [row[:] for row in self.hw.yolo_detector._baseline_occ]
-        b_time = self.hw.yolo_detector._baseline_time
-        self.state.save_rollback_state(occ, b_time)
+        if self.hw.yolo_detector and self.hw.yolo_detector.has_baseline():
+            occ = [row[:] for row in self.hw.yolo_detector._baseline_occ]
+            b_time = self.hw.yolo_detector._baseline_time
+            self.state.save_rollback_state(occ, b_time)
 
-        # Perform Detection
-        print("[SPACE] 🔍 Chạy YOLO Detector...")
+        obs = None
         cchess_result = None
-        if hasattr(self.hw, "recognize_board_state"):
+
+        # ---------------------------------------------------------------------
+        # 1. PRIMARY: CChess full-board recognition + quality gate + MoveObservation
+        # ---------------------------------------------------------------------
+        if hasattr(self.hw, "recognize_board_state") and self.hw.cchess_recognizer is not None:
             try:
+                print("[SPACE] 🔍 Chạy CChess Full-Board Recognizer (Primary)...")
                 cchess_result = self.hw.recognize_board_state(frame)
+                if cchess_result and cchess_result.get("success") and cchess_result.get("quality_ok", True):
+                    rec_board = cchess_result.get("board")
+                    confs = cchess_result.get("confidence")
+                    obs = derive_move_observation(
+                        before_board=self.state.board,
+                        after_board=rec_board,
+                        player_color="r",
+                        confidence_grid=confs,
+                    )
+                    print(f"[SPACE] 🎯 CChess observation: success={obs.success}, move={obs.src}→{obs.dst}, error={obs.error}")
+                else:
+                    q_err = cchess_result.get("error") if cchess_result else "CChess result empty"
+                    print(f"[SPACE] ⚠️ CChess quality gate không đạt: {q_err}")
             except Exception as e:
                 print(f"[SPACE] ⚠️ CChess recognizer error: {e}")
-        src, dst, piece = self.hw.yolo_detector.detect_move(
-            frame, detections, self.state.board, cchess_result=cchess_result
-        )
-        
-        if src:
-            print(f"[YOLO] 👉 Nhận diện đi từ Cột {src[0]} Hàng {src[1]} đến Cột {dst[0]} Hàng {dst[1]}")
-            
-        # Verify result
-        if src is None:
-            print("[SPACE] ❌ YOLO KHÔNG thấy nước đi hợp lệ!")
-            if not auto_retry:
-                self.state.set_status("❌  Không thấy nước đi! Di quân trên màn hình.", color=(180, 0, 0), duration=5.0)
-                self.state.manual_override_active = True
-                self.hw.clear_yolo_baseline()
+
+        # ---------------------------------------------------------------------
+        # 2. SENSOR FUSION & FALLBACK: YOLO Occupancy detector
+        # ---------------------------------------------------------------------
+        if self.hw.yolo_detector and self.hw.yolo_detector.has_baseline():
+            yolo_obs = self.hw.yolo_detector.detect_move_observation(
+                frame, detections, self.state.board, cchess_result=cchess_result
+            )
+            if obs is not None and obs.success:
+                # Primary CChess succeeded; use YOLO as secondary verification if YOLO also detected a move
+                if yolo_obs.success:
+                    if (yolo_obs.src, yolo_obs.dst) != (obs.src, obs.dst):
+                        print(f"[SPACE] ⚠️ Xung đột cảm biến: CChess={obs.src}→{obs.dst} vs YOLO={yolo_obs.src}→{yolo_obs.dst}. Fail closed.")
+                        obs = MoveObservation(
+                            success=False,
+                            is_ambiguous=True,
+                            error=f"Xung đột cảm biến: CChess ({obs.src}→{obs.dst}) != YOLO ({yolo_obs.src}→{yolo_obs.dst})",
+                        )
+                    else:
+                        print(f"[SPACE] ✅ Cảm biến đồng thuận: CChess và YOLO đều xác nhận {obs.src}→{obs.dst}")
+            elif obs is None or (not obs.success and not obs.is_ambiguous):
+                # CChess was unavailable or could not detect a change, fallback to YOLO
+                print("[SPACE] 🔄 Thử YOLO Snapshot Detector (Fallback)...")
+                obs = yolo_obs
+
+        if obs is None:
+            obs = MoveObservation(success=False, error="Không có hệ thống nhận diện khả dụng")
+
+        # ---------------------------------------------------------------------
+        # 3. VERIFY & COMMIT STRUCTURED OBSERVATION
+        # ---------------------------------------------------------------------
+        if not obs.success:
+            if obs.is_ambiguous:
+                print(f"[SPACE] ⚠️ Nước đi mơ hồ / không thể xác định duy nhất: {obs.error}")
+                if not auto_retry:
+                    self.state.set_status(f"⚠️ Nước đi mơ hồ: {obs.error}", color=(180, 100, 0), duration=10.0)
+                    self.state.manual_override_active = True
+                    self.hw.clear_yolo_baseline()
+            else:
+                print(f"[SPACE] ❌ Nhận diện thất bại: {obs.error}")
+                if not auto_retry:
+                    self.state.set_status(f"❌ {obs.error or 'Không thấy nước đi hợp lệ!'}", color=(180, 0, 0), duration=5.0)
+                    if obs.dst:
+                        self.state.set_invalid_flash(obs.dst[0], obs.dst[1])
+                    self.state.manual_override_active = True
+                    self.hw.clear_yolo_baseline()
             return False
-            
-        if not xiangqi.is_valid_move(src, dst, self.state.board, "r"):
-            print(f"[SPACE] ❌ YOLO báo nước đi không hợp lệ: {src}->{dst}")
+
+        # Additional Xiangqi rule verification on logical board
+        if not xiangqi.is_valid_move(obs.src, obs.dst, self.state.board, "r"):
+            print(f"[SPACE] ❌ Nước đi vi phạm luật cờ: {obs.piece} {obs.src}->{obs.dst}")
             if not auto_retry:
-                self.state.set_status("⚠️  Lỗi nhận diện / Đi sai luật! Dùng chuột kéo thả.", color=(180, 100, 0), duration=60.0)
-                self.state.set_invalid_flash(dst[0], dst[1])
+                self.state.set_status("⚠️ Lỗi nhận diện / Đi sai luật! Dùng chuột kéo thả.", color=(180, 100, 0), duration=60.0)
+                self.state.set_invalid_flash(obs.dst[0], obs.dst[1])
                 self.state.manual_override_active = True
                 self.hw.clear_yolo_baseline()
             return False
 
-        # Commit move (state đã được save ở trên rồi)
-        self.state.process_human_move(src, dst, piece)
+        # Commit move
+        move_type_str = "Ăn quân" if obs.is_capture else "Di chuyển"
+        cap_str = f" (ăn {obs.captured_piece})" if obs.is_capture and obs.captured_piece else ""
+        print(f"[SPACE] ✅ Xác nhận nước đi ({move_type_str}{cap_str}): {obs.piece} {obs.src}→{obs.dst} (conf={obs.confidence:.2f})")
+        self.state.process_human_move(obs.src, obs.dst, obs.piece)
+
+        # Cập nhật baseline YOLO với frame mới sau khi đi nước hợp lệ
+        if self.hw.yolo_detector:
+            self.hw.yolo_detector.capture_baseline(frame, detections)
         return True
 
     def try_auto_confirm_move(self, retries=10, retry_seconds=0.2) -> bool:

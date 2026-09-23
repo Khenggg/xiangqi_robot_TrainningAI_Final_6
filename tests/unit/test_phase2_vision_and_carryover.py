@@ -13,6 +13,7 @@ Covers:
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
@@ -25,6 +26,14 @@ from src.core import xiangqi
 from src.vision.move_observation import MoveObservation, derive_move_observation
 from src.vision.snapshot_detector import SnapshotDetector
 from src.vision.visual_pick_estimator import VisualPickEstimator, GridTarget
+from src.vision.cchess_recognizer import (
+    validate_board_sanity,
+    check_recognition_quality,
+    validate_recognition_result,
+    RecognitionQuality,
+)
+from src.hardware.hardware_manager import HardwareManager
+from src.ui.input_handler import InputHandler
 from src.domain.geometry import (
     CANONICAL_CELL_SPACING_MM,
     CANONICAL_GRID_WIDTH_MM,
@@ -108,7 +117,7 @@ class TestFlangePoseProvenance(unittest.TestCase):
         self.assertEqual(snap.flange_pose_source, "CONTROLLER")
         self.assertTrue(backend._flange_authoritative)
 
-    def test_controller_failure_fallback_derived(self):
+    def test_controller_failure_fallback_unavailable(self):
         mock_robot = MagicMock()
         mock_robot.GetActualJointPosDegree.return_value = (0, [0.0] * 6)
         mock_robot.GetActualTCPPose.return_value = (0, [0.4, 0.0, 0.2, 180.0, 0.0, 0.0])
@@ -119,7 +128,7 @@ class TestFlangePoseProvenance(unittest.TestCase):
         backend._rpc = mock_robot
 
         snap = backend.get_state_snapshot()
-        self.assertEqual(snap.flange_pose_source, "DERIVED")
+        self.assertEqual(snap.flange_pose_source, "UNAVAILABLE")
         self.assertFalse(backend._flange_authoritative)
 
     def test_unavailable_when_no_data(self):
@@ -368,6 +377,376 @@ class TestCoordinateBoundariesAndCanonicalGeometry(unittest.TestCase):
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+
+class MockCamConfig:
+    DRY_RUN = False
+    ROBOT_BACKEND = "VIRTUAL"
+    VIDEO_SOURCE = 0
+    VISUAL_PICK_ENABLED = False
+    ROBOT_IP = "192.168.58.2"
+    BOARD_CALIBRATION_MODE = "SIMULATION"
+
+
+class TestAmbiguityAndManhattanRemoval(unittest.TestCase):
+    """P0: Removal of Manhattan ambiguity guessing and strict fail-closed."""
+
+    def setUp(self):
+        self.detector = SnapshotDetector(perspective_path="nonexistent.npy", class_id_map={})
+        self.board = [
+            ["b_R", "b_N", "b_E", "b_A", "b_K", "b_A", "b_E", "b_N", "b_R"],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            [".", "b_C", ".", ".", ".", ".", ".", "b_C", "."],
+            ["b_P", ".", "b_P", ".", "b_P", ".", "b_P", ".", "b_P"],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            ["r_P", ".", "r_P", ".", "r_P", ".", "r_P", ".", "r_P"],
+            [".", "r_C", ".", ".", ".", ".", ".", "r_C", "."],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            ["r_R", "r_N", "r_E", "r_A", "r_K", "r_A", "r_E", "r_N", "r_R"],
+        ]
+        self.t1_occ = [[cell != "." for cell in row] for row in self.board]
+
+    def test_unresolved_multiple_candidates_fail_closed_not_manhattan_guessed(self):
+        """
+        Two legal candidates: red cannon at (1, 7) could move to (1, 6) or (1, 5).
+        Both are legal cannon moves on an empty column.
+        Distance to (1, 6) is 1; distance to (1, 5) is 2.
+        Under previous Manhattan fallback, (1, 6) was silently chosen.
+        Now it MUST fail closed: return (None, None, None) and set last_detection_ambiguous = True.
+        """
+        t1_occ = [row[:] for row in self.t1_occ]
+        t2_occ = [row[:] for row in self.t1_occ]
+        # (1, 7) disappeared
+        t2_occ[7][1] = False
+        # (1, 6) and (1, 5) appeared
+        t2_occ[6][1] = True
+        t2_occ[5][1] = True
+
+        src, dst, piece = self.detector._compare_snapshots(
+            t1_occ=t1_occ,
+            t2_occ=t2_occ,
+            board=self.board,
+            frame=None,
+            cchess_result=None,
+        )
+        self.assertIsNone(src)
+        self.assertIsNone(dst)
+        self.assertIsNone(piece)
+        self.assertTrue(self.detector.last_detection_ambiguous)
+
+    def test_detect_move_observation_returns_ambiguous_on_unresolved_candidates(self):
+        """detect_move_observation must return MoveObservation(success=False, is_ambiguous=True)."""
+        t1_occ = [row[:] for row in self.t1_occ]
+        t2_occ = [row[:] for row in self.t1_occ]
+        t2_occ[7][1] = False
+        t2_occ[6][1] = True
+        t2_occ[5][1] = True
+
+        self.detector._baseline_occ = t1_occ
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        detections = []
+
+        obs = self.detector.detect_move_observation(
+            frame=frame,
+            detections=detections,
+            board=self.board,
+            t2_occ=t2_occ,
+            cchess_result=None,
+        )
+        self.assertFalse(obs.success)
+        self.assertTrue(obs.is_ambiguous)
+        self.assertIn("Mơ hồ", obs.error)
+
+
+class TestCChessQualityGate(unittest.TestCase):
+    """Requirement 6: CChess full-board quality gate and board sanity checks."""
+
+    def setUp(self):
+        self.standard_board = [
+            ["b_R", "b_N", "b_E", "b_A", "b_K", "b_A", "b_E", "b_N", "b_R"],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            [".", "b_C", ".", ".", ".", ".", ".", "b_C", "."],
+            ["b_P", ".", "b_P", ".", "b_P", ".", "b_P", ".", "b_P"],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            ["r_P", ".", "r_P", ".", "r_P", ".", "r_P", ".", "r_P"],
+            [".", "r_C", ".", ".", ".", ".", ".", "r_C", "."],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            ["r_R", "r_N", "r_E", "r_A", "r_K", "r_A", "r_E", "r_N", "r_R"],
+        ]
+
+    def test_validate_board_sanity_valid_board(self):
+        is_sane, _ = validate_board_sanity(self.standard_board)
+        self.assertTrue(is_sane)
+
+    def test_validate_board_sanity_missing_king(self):
+        bad_board = [row[:] for row in self.standard_board]
+        bad_board[9][4] = "."  # Remove red king
+        is_sane, _ = validate_board_sanity(bad_board)
+        self.assertFalse(is_sane)
+
+        bad_board2 = [row[:] for row in self.standard_board]
+        bad_board2[0][4] = "."  # Remove black king
+        is_sane2, _ = validate_board_sanity(bad_board2)
+        self.assertFalse(is_sane2)
+
+    def test_validate_board_sanity_king_outside_palace(self):
+        # Red king in row 5 (outside rows 7-9)
+        bad_board = [row[:] for row in self.standard_board]
+        bad_board[9][4] = "."
+        bad_board[5][4] = "r_K"
+        is_sane, _ = validate_board_sanity(bad_board)
+        self.assertFalse(is_sane)
+
+        # Black king in col 1 (outside cols 3-5)
+        bad_board2 = [row[:] for row in self.standard_board]
+        bad_board2[0][4] = "."
+        bad_board2[0][1] = "b_K"
+        is_sane2, _ = validate_board_sanity(bad_board2)
+        self.assertFalse(is_sane2)
+
+    def test_validate_board_sanity_excessive_pieces(self):
+        bad_board = [row[:] for row in self.standard_board]
+        bad_board[4][4] = "r_P"  # 17th red piece
+        is_sane, _ = validate_board_sanity(bad_board)
+        self.assertFalse(is_sane)
+
+    def test_check_recognition_quality_corners_and_sanity(self):
+        # CChess ordering: A0 (top-left), A8 (top-right), J0 (bottom-left), J8 (bottom-right)
+        corners = np.array([[50.0, 50.0], [550.0, 50.0], [50.0, 550.0], [550.0, 550.0]], dtype=np.float32)
+        corner_scores = np.array([0.25, 0.30, 0.28, 0.22], dtype=np.float32)
+        result = {
+            "success": True,
+            "corners": corners,
+            "corner_scores": corner_scores,
+            "board": self.standard_board,
+        }
+        quality = check_recognition_quality(result, img_shape=(600, 600))
+        self.assertTrue(quality.is_valid)
+
+        # Low SimCC corner score
+        result_low_conf = dict(result)
+        result_low_conf["corner_scores"] = np.array([0.02, 0.05, 0.04, 0.03], dtype=np.float32)
+        q_low = check_recognition_quality(result_low_conf, img_shape=(600, 600))
+        self.assertFalse(q_low.is_valid)
+        self.assertIn("góc bàn cờ quá thấp", q_low.error)
+
+        # Self-intersecting / bowtie corners
+        result_inverted = dict(result)
+        result_inverted["corners"] = np.array([[50.0, 50.0], [550.0, 550.0], [50.0, 550.0], [550.0, 50.0]], dtype=np.float32)
+        q_inv = check_recognition_quality(result_inverted, img_shape=(600, 600))
+        self.assertFalse(q_inv.is_valid)
+        self.assertIn("tứ giác lồi", q_inv.error)
+
+        # Malformed board rejected
+        result_bad_board = dict(result)
+        bad_b = [row[:] for row in self.standard_board]
+        bad_b[9][4] = "."
+        result_bad_board["board"] = bad_b
+        q_board = check_recognition_quality(result_bad_board, img_shape=(600, 600))
+        self.assertFalse(q_board.is_valid)
+        self.assertIn("Tướng Đỏ", q_board.error)
+
+
+class TestMoveObservationAndCChessAuthority(unittest.TestCase):
+    """Requirements 4 & 5: CChess authoritative MoveObservation derivation & validation."""
+
+    def setUp(self):
+        self.before_board = [
+            ["b_R", "b_N", "b_E", "b_A", "b_K", "b_A", "b_E", "b_N", "b_R"],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            [".", "b_C", ".", ".", ".", ".", ".", "b_C", "."],
+            ["b_P", ".", "b_P", ".", "b_P", ".", "b_P", ".", "b_P"],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            ["r_P", ".", "r_P", ".", "r_P", ".", "r_P", ".", "r_P"],
+            [".", "r_C", ".", ".", ".", ".", ".", "r_C", "."],
+            [".", ".", ".", ".", ".", ".", ".", ".", "."],
+            ["r_R", "r_N", "r_E", "r_A", "r_K", "r_A", "r_E", "r_N", "r_R"],
+        ]
+
+    def test_derive_move_observation_normal_move(self):
+        after_board = [row[:] for row in self.before_board]
+        after_board[7][1] = "."
+        after_board[7][4] = "r_C"  # Cannon (1, 7) -> (4, 7)
+
+        obs = derive_move_observation(self.before_board, after_board, player_color="r")
+        self.assertTrue(obs.success)
+        self.assertEqual(obs.src, (1, 7))
+        self.assertEqual(obs.dst, (4, 7))
+        self.assertEqual(obs.piece, "r_C")
+        self.assertFalse(obs.is_capture)
+        self.assertIsNone(obs.captured_piece)
+
+    def test_derive_move_observation_capture(self):
+        # Place red pawn at (1, 5) so exactly one screen piece exists between (1, 7) and (1, 2)
+        before_board = [row[:] for row in self.before_board]
+        before_board[6][2] = "."
+        before_board[5][1] = "r_P"
+
+        after_board = [row[:] for row in before_board]
+        after_board[7][1] = "."
+        after_board[2][1] = "r_C"  # Cannon at (1, 7) captures black cannon at (1, 2)
+
+        obs = derive_move_observation(before_board, after_board, player_color="r")
+        self.assertTrue(obs.success)
+        self.assertEqual(obs.src, (1, 7))
+        self.assertEqual(obs.dst, (1, 2))
+        self.assertEqual(obs.piece, "r_C")
+        self.assertTrue(obs.is_capture)
+        self.assertEqual(obs.captured_piece, "b_C")
+
+    def test_derive_move_observation_illegal_move_rejected(self):
+        after_board = [row[:] for row in self.before_board]
+        # Red elephant crosses river (illegal in Xiangqi)
+        after_board[9][2] = "."
+        after_board[4][2] = "r_E"
+
+        obs = derive_move_observation(self.before_board, after_board, player_color="r")
+        self.assertFalse(obs.success)
+        self.assertFalse(obs.is_ambiguous)
+        self.assertIn("Illegal move", obs.error)
+
+    def test_derive_move_observation_multiple_changes_ambiguous(self):
+        after_board = [row[:] for row in self.before_board]
+        after_board[7][1] = "."
+        after_board[7][4] = "r_C"
+        after_board[6][0] = "."
+        after_board[5][0] = "r_P"
+
+        obs = derive_move_observation(self.before_board, after_board, player_color="r")
+        self.assertFalse(obs.success)
+        self.assertTrue(obs.is_ambiguous)
+        self.assertIn("Multiple", obs.error)
+
+    def test_derive_move_observation_malformed_board_rejected(self):
+        after_board = [row[:] for row in self.before_board]
+        after_board[9][4] = "."  # King missing
+
+        obs = derive_move_observation(self.before_board, after_board, player_color="r")
+        self.assertFalse(obs.success)
+        self.assertIn("Malformed board", obs.error)
+
+
+class TestCameraCalibrationFailClosed(unittest.TestCase):
+    """Requirement 7: Auto-calibration must fail closed and never silently reuse stale matrix."""
+
+    @patch("cv2.VideoCapture")
+    @patch("src.vision.auto_calibrate.run_calibration_flow")
+    def test_calibration_cancelled_fails_closed(self, mock_calib_flow, mock_vid_cap):
+        mock_cap_instance = MagicMock()
+        mock_cap_instance.isOpened.return_value = True
+        mock_vid_cap.return_value = mock_cap_instance
+
+        # User cancels calibration -> run_calibration_flow returns None
+        mock_calib_flow.return_value = None
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg = MockCamConfig()
+            hw = HardwareManager(config=cfg, project_dir=tmp_dir)
+
+            stale_perspective = Path(tmp_dir) / "perspective.npy"
+            np.save(stale_perspective, np.eye(3, dtype=np.float32))
+
+            with self.assertRaises(SystemExit) as cm:
+                hw._init_camera()
+            self.assertEqual(cm.exception.code, 1)
+            self.assertFalse(hw.camera_ready)
+            self.assertIsNone(hw.cap)
+
+    @patch("cv2.VideoCapture")
+    @patch("src.vision.auto_calibrate.run_calibration_flow")
+    def test_calibration_success_authorizes_startup(self, mock_calib_flow, mock_vid_cap):
+        mock_cap_instance = MagicMock()
+        mock_cap_instance.isOpened.return_value = True
+        mock_vid_cap.return_value = mock_cap_instance
+
+        valid_matrix = np.eye(3, dtype=np.float32)
+        mock_calib_flow.return_value = valid_matrix
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg = MockCamConfig()
+            hw = HardwareManager(config=cfg, project_dir=tmp_dir)
+            hw.model = None
+
+            perspective = Path(tmp_dir) / "perspective.npy"
+            np.save(perspective, valid_matrix)
+
+            hw._init_camera()
+            self.assertTrue(hw.camera_ready)
+            self.assertIsNotNone(hw.cap)
+
+
+class TestProductionSpaceKeyFlow(unittest.TestCase):
+    """Requirements 4, 5, 10, 11: Production SPACE path with authoritative MoveObservation and fail-safe fusion."""
+
+    def setUp(self):
+        self.state = GameState()
+        self.hw = MagicMock()
+        self.input_handler = InputHandler(self.state, self.hw)
+
+        self.mock_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        self.hw.cam_monitor.get_fresh_snapshot.return_value = (self.mock_frame, [])
+        self.hw.yolo_detector.has_baseline.return_value = True
+
+    def test_space_key_commits_valid_cchess_observation(self):
+        rec_board = [row[:] for row in self.state.board]
+        rec_board[7][1] = "."
+        rec_board[7][4] = "r_C"  # Cannon (1, 7) -> (4, 7)
+
+        self.hw.recognize_board_state.return_value = {
+            "success": True,
+            "quality_ok": True,
+            "board": rec_board,
+            "confidence": np.ones((10, 9), dtype=np.float32),
+        }
+        self.hw.yolo_detector.detect_move_observation.return_value = MoveObservation(
+            success=True, src=(1, 7), dst=(4, 7), piece="r_C"
+        )
+
+        ok = self.input_handler._handle_space_key()
+        self.assertTrue(ok)
+        self.assertEqual(self.state.board[7][4], "r_C")
+        self.assertEqual(self.state.board[7][1], ".")
+
+    def test_space_key_rejects_ambiguous_cchess_observation(self):
+        rec_board = [row[:] for row in self.state.board]
+        rec_board[7][1] = "."
+        rec_board[7][4] = "r_C"
+        rec_board[6][0] = "."
+        rec_board[5][0] = "r_P"
+
+        self.hw.recognize_board_state.return_value = {
+            "success": True,
+            "quality_ok": True,
+            "board": rec_board,
+        }
+
+        ok = self.input_handler._handle_space_key()
+        self.assertFalse(ok)
+        self.assertTrue(self.state.manual_override_active)
+        self.assertEqual(self.state.board[7][1], "r_C")
+
+    def test_space_key_rejects_sensor_disagreement(self):
+        rec_board = [row[:] for row in self.state.board]
+        rec_board[7][1] = "."
+        rec_board[7][4] = "r_C"
+
+        self.hw.recognize_board_state.return_value = {
+            "success": True,
+            "quality_ok": True,
+            "board": rec_board,
+        }
+        self.hw.yolo_detector.detect_move_observation.return_value = MoveObservation(
+            success=True, src=(0, 6), dst=(0, 5), piece="r_P"
+        )
+
+        ok = self.input_handler._handle_space_key()
+        self.assertFalse(ok)
+        self.assertTrue(self.state.manual_override_active)
+        self.assertEqual(self.state.board[7][1], "r_C")
+        self.assertEqual(self.state.board[6][0], "r_P")
 
 
 if __name__ == "__main__":

@@ -68,6 +68,7 @@ class HardwareManager:
         self._last_hand_check = 0.0
         self.cchess_recognizer = None
         self.perspective_path = Path(project_dir) / "perspective.npy"
+        self.camera_ready = False
         
         self.class_id_to_name = {
             0: "b_A", 1: "b_C", 2: "b_R", 3: "b_E", 4: "b_K", 5: "b_N", 6: "b_P",
@@ -382,11 +383,23 @@ class HardwareManager:
         print("  📐  CAMERA CALIBRATION — BẮT BUỘC KHI KHỞI ĐỘNG")
         print("=" * 60)
         from src.vision.auto_calibrate import run_calibration_flow
-        run_calibration_flow(self.cap, str(self.perspective_path), cchess_recognizer=self.cchess_recognizer)
+        calib_matrix = run_calibration_flow(
+            self.cap, str(self.perspective_path), cchess_recognizer=self.cchess_recognizer
+        )
         
-        if not os.path.exists(str(self.perspective_path)):
-            print("❌ Chưa có perspective.npy! Không thể detect nước đi.")
-            sys.exit()
+        if calib_matrix is None:
+            print("\n" + "=" * 60)
+            print("❌ [CRITICAL] Camera calibration thất bại hoặc bị hủy!")
+            print("   Không thể tái sử dụng perspective matrix cũ một cách ngầm định.")
+            print("   Hệ thống Vision không thể khởi động an toàn. Thao tác bị dừng.")
+            print("=" * 60 + "\n")
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+            self.camera_ready = False
+            sys.exit(1)
+
+        self.camera_ready = True
 
         # Start Monitor
         if self.model is not None:

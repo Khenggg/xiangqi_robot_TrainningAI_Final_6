@@ -234,15 +234,7 @@ class PhysicalFR3Backend(RobotBackend):
 
             if not flange_queried:
                 self._flange_authoritative = False
-                if tcp_valid:
-                    # Derived from known tool transform (canonical tool offset = 150mm)
-                    # When end-effector points down (Rx=180), Flange Z is TCP Z + 150mm in base frame.
-                    derived_flange = list(self._current_tcp_pose_mm_deg)
-                    derived_flange[2] += 150.0
-                    self._current_flange_pose_mm_deg = derived_flange
-                    self._flange_pose_source = "DERIVED"
-                else:
-                    self._flange_pose_source = "UNAVAILABLE"
+                self._flange_pose_source = "UNAVAILABLE"
         except Exception as exc:
             logger.debug(f"[PhysicalFR3Backend] Hardware state sync failed: {exc}")
             self._flange_authoritative = False
