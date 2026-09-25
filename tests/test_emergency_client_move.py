@@ -8,6 +8,99 @@ from src.ui.input_handler import InputHandler
 
 
 class EmergencyClientMoveTests(unittest.TestCase):
+    def test_resume_scan_only_unpauses_after_a_new_baseline_is_captured(self):
+        class State:
+            allow_mouse_move = False
+            game_over = False
+            turn = "r"
+            manual_override_active = True
+
+            def __init__(self):
+                self.statuses = []
+
+            def set_status(self, message, **kwargs):
+                self.statuses.append(message)
+
+        class Hardware:
+            yolo_detector = object()
+            cam_monitor = object()
+
+            def __init__(self, result):
+                self.result = result
+                self.calls = 0
+
+            def capture_baseline_if_needed(self, force_delay=0.0):
+                self.calls += 1
+                self.force_delay = force_delay
+                return self.result
+
+        state = State()
+        hardware = Hardware(True)
+        handler = InputHandler(state, hardware)
+        self.assertTrue(handler.resume_automatic_scanning())
+        self.assertFalse(state.manual_override_active)
+        self.assertEqual(1, hardware.calls)
+        self.assertEqual(0.0, hardware.force_delay)
+
+        state.manual_override_active = True
+        failed_hardware = Hardware(False)
+        failed_handler = InputHandler(state, failed_hardware)
+        self.assertFalse(failed_handler.resume_automatic_scanning())
+        self.assertTrue(state.manual_override_active)
+
+    def test_resume_scan_refuses_to_baseline_a_board_that_still_differs_from_fen(self):
+        class State:
+            allow_mouse_move = False
+            game_over = False
+            turn = "r"
+            manual_override_active = True
+            board = xiangqi.get_board()
+
+            def set_status(self, *args, **kwargs):
+                pass
+
+        class Hardware:
+            yolo_detector = object()
+            cam_monitor = object()
+
+            def verify_physical_board(self, board):
+                return False
+
+            def capture_baseline_if_needed(self, force_delay=0.0):
+                raise AssertionError("must not replace baseline for mismatched FEN")
+
+        state = State()
+        hardware = Hardware()
+        hardware.board_reconciler = object()
+        self.assertFalse(InputHandler(state, hardware).resume_automatic_scanning())
+        self.assertTrue(state.manual_override_active)
+
+    def test_resume_scan_uses_legacy_baseline_when_reconciler_is_unavailable(self):
+        class State:
+            allow_mouse_move = False
+            game_over = False
+            turn = "r"
+            manual_override_active = True
+            board = xiangqi.get_board()
+
+            def set_status(self, *args, **kwargs):
+                pass
+
+        class Hardware:
+            yolo_detector = object()
+            cam_monitor = object()
+            board_reconciler = None
+
+            def verify_physical_board(self, board):
+                return False
+
+            def capture_baseline_if_needed(self, force_delay=0.0):
+                return True
+
+        state = State()
+        self.assertTrue(InputHandler(state, Hardware()).resume_automatic_scanning())
+        self.assertFalse(state.manual_override_active)
+
     def test_m_key_enables_client_move_and_pauses_board_auto_confirm(self):
         class State:
             allow_mouse_move = False

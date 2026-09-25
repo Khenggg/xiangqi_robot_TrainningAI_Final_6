@@ -1,4 +1,5 @@
 import sys
+import time
 import requests
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
@@ -47,7 +48,7 @@ class TuongKyDaiSuClient:
             print(f"[-] [API] Ngoại lệ khi tạo trận: {e}")
             return None
 
-    def send_move_update_board(self, fen):
+    def send_move_update_board(self, fen, attempts=3):
         """Gửi trạng thái bàn cờ (FEN) mới nhất mỗi khi CÓ MỘT NƯỚC ĐI ĐÃ HOÀN THÀNH."""
         if not self.token:
             return None
@@ -60,20 +61,31 @@ class TuongKyDaiSuClient:
             "fen": fen
         }
         
-        try:
-            response = requests.post(url, headers=self.headers_simulation, json=payload, timeout=5)
-            data = response.json()
-            
-            if response.status_code == 200 and data.get("success"):
-                move_info = data["data"].get("move")
-                print(f"[+] [API] Đã đồng bộ FEN thành công. Phe tiếp theo: {data['data'].get('currentTurn')}")
-                return move_info
-            else:
-                print(f"[-] [API] Lỗi gửi FEN: {data}")
-                return None
-        except Exception as e:
-            print(f"[-] [API] Ngoại lệ khi gửi FEN: {e}")
-            return None
+        # Captures are committed locally before this call.  Retry transient
+        # network/server failures so one dropped response cannot leave the
+        # spectator client on the pre-capture FEN.
+        for attempt in range(1, max(1, int(attempts)) + 1):
+            try:
+                response = requests.post(url, headers=self.headers_simulation, json=payload, timeout=5)
+                try:
+                    data = response.json()
+                except ValueError:
+                    data = {"raw_response": response.text}
+                if response.status_code == 200 and data.get("success"):
+                    move_info = data["data"].get("move")
+                    print(f"[+] [API] Đã đồng bộ FEN thành công. Phe tiếp theo: {data['data'].get('currentTurn')}")
+                    return move_info
+                print(f"[-] [API] Lỗi gửi FEN (lần {attempt}): {data}")
+                # Invalid FEN/authentication/state-conflict responses cannot
+                # be repaired by replaying the same request.
+                if response.status_code not in (408, 425, 429) and not 500 <= response.status_code < 600:
+                    return None
+            except requests.RequestException as exc:
+                print(f"[-] [API] Không gửi được FEN (lần {attempt}): {exc}")
+            if attempt < max(1, int(attempts)):
+                time.sleep(0.25 * attempt)
+        print("[-] [API] Đồng bộ FEN thất bại sau các lần thử lại.")
+        return None
 
     def end_match(self, winner="DRAW", reason="OTHER"):
         """Kết thúc trận đấu."""
