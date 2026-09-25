@@ -1,6 +1,7 @@
 import time
 from src.core import xiangqi  # type: ignore
-from src.ui.board_renderer import BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT, NUM_COLS, NUM_ROWS  # type: ignore
+from src.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT,
+                                   BTN_RESUME_SCAN_RECT, NUM_COLS, NUM_ROWS)  # type: ignore
 from src.vision.board_stability_monitor import BoardStabilityMonitor
 from src.vision.player_turn_arbiter import PlayerTurnArbiter
 from src.vision.player_turn_types import BoardObservation, CommitRequest, InteractionCapability, PlayerTurnMode, Visibility
@@ -79,6 +80,11 @@ class InputHandler:
         return self._unified_active
 
     def handle_mouse_down(self, mx, my):
+        if (BTN_RESUME_SCAN_RECT.collidepoint(mx, my)
+                and self.state.manual_override_active and not self.state.game_over):
+            self.resume_automatic_scanning()
+            return
+
         # Surrender Button
         if BTN_SURRENDER_RECT.collidepoint(mx, my) and not self.state.game_over:
             print("[GAME] YOU SURRENDER!")
@@ -129,6 +135,54 @@ class InputHandler:
                         self.state.set_status("❌  Invalid move!", color=(180, 0, 0))
                         self.state.set_invalid_flash(dst[0], dst[1])
                         self.state.selected_pos = None
+
+    def resume_automatic_scanning(self):
+        """Install a fresh physical baseline, then re-enable automatic polling.
+
+        The old baseline belongs to the board state before the unresolved
+        observation, so retaining it would immediately report the same fault.
+        A failed snapshot leaves scanning paused rather than accepting a blind
+        recovery.
+        """
+        detector = getattr(self.hw, "yolo_detector", None)
+        camera = getattr(self.hw, "cam_monitor", None)
+        if detector is None or camera is None:
+            self.state.set_status("❌ Không thể tiếp tục quét: camera chưa sẵn sàng.", color=(180, 0, 0), duration=8.0)
+            return False
+
+        # Do not turn an already divergent physical position into the new
+        # reference image.  Hardware without an identity verifier keeps the
+        # legacy supervised-baseline fallback, but a verifier is authoritative
+        # whenever it is available.
+        verifier = getattr(self.hw, "verify_physical_board", None)
+        reconciliation_available = bool(
+            getattr(self.hw, "board_reconciler", None) and camera
+        )
+        if reconciliation_available and callable(verifier):
+            try:
+                board_matches = verifier(self.state.board)
+            except Exception as exc:
+                print(f"[RESUME SCAN] Physical-board verification error: {exc}")
+                board_matches = False
+            if not board_matches:
+                self.state.set_status(
+                    "❌ Bàn thật chưa khớp FEN. Chỉnh lại bàn rồi bấm tiếp tục quét.",
+                    color=(180, 0, 0), duration=10.0,
+                )
+                return False
+
+        self.state.set_status("📸 Đang lấy baseline mới để tiếp tục quét...", color=(0, 100, 180), duration=4.0)
+        self._board_stability_monitor.reset()
+        self._observed_baseline_time = None
+        captured = bool(self.hw.capture_baseline_if_needed(force_delay=0.0))
+        if not captured:
+            self.state.set_status("❌ Không lấy được baseline; quét vẫn đang tạm dừng.", color=(180, 0, 0), duration=8.0)
+            return False
+
+        self.state.manual_override_active = False
+        self._last_move_confirmation_failure = None
+        self.state.set_status("✅ Đã tiếp tục tự động quét FEN.", color=(0, 120, 0), duration=6.0)
+        return True
 
     def handle_keyboard(self, key):
         import pygame  # type: ignore

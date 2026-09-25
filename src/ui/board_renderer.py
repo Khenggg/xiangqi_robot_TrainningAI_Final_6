@@ -25,6 +25,7 @@ BTN_COLOR = (200, 50, 50)
 BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT - 60, 120, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(SCREEN_WIDTH / 2 + 30, SCREEN_HEIGHT - 60, 120, 40)
+BTN_RESUME_SCAN_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 78, SCREEN_HEIGHT - 108, 156, 36)
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 330, 330, 68)
 HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 142, 22, 120, 38)
 SETTINGS_BACK_RECT = pygame.Rect(28, 22, 112, 38)
@@ -84,6 +85,13 @@ class BoardRenderer:
             pygame.draw.rect(self.screen, BTN_NEW_GAME_COLOR, BTN_NEW_GAME_RECT, border_radius=8)
             txt_new = self.ui_font.render("NEW GAME", True, (255, 255, 255))
             self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
+
+            # A failed FEN comparison intentionally pauses automatic scanning.
+            # Keep recovery explicit, but make it possible without a keyboard.
+            if game_state.get("manual_override_active") and not game_state.get("allow_mouse"):
+                pygame.draw.rect(self.screen, (46, 125, 92), BTN_RESUME_SCAN_RECT, border_radius=8)
+                resume = self.ui_font.render("RESUME SCAN", True, (255, 255, 255))
+                self.screen.blit(resume, resume.get_rect(center=BTN_RESUME_SCAN_RECT.center))
 
             # Mode indicator
             mode_str = "MOUSE (DRY RUN)" if game_state.get("allow_mouse") else "CAMERA AI"

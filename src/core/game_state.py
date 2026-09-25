@@ -70,6 +70,7 @@ class GameState:
             "status_message": self.status_message,
             "status_color": self.status_color,
             "status_expiry": self.status_expiry,
+            "manual_override_active": self.manual_override_active,
         }
 
     def reset_game(self, hw_manager=None):
