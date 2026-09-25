@@ -26,6 +26,7 @@ BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT - 60, 120, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(SCREEN_WIDTH / 2 + 30, SCREEN_HEIGHT - 60, 120, 40)
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 330, 330, 68)
+HOME_ROBOT_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 414, 330, 68)
 HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 142, 22, 120, 38)
 SETTINGS_BACK_RECT = pygame.Rect(28, 22, 112, 38)
 DEBUG_STATUS_RECT = pygame.Rect(492, 190, 180, 48)
@@ -192,6 +193,13 @@ class BoardRenderer:
         detail = self.ui_font.render("Choose the robot difficulty next", True, (255, 224, 205))
         self.screen.blit(detail, detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery + 22)))
 
+        pygame.draw.rect(self.screen, (103, 61, 152), HOME_ROBOT_VS_ROBOT_RECT, border_radius=12)
+        pygame.draw.rect(self.screen, (239, 218, 177), HOME_ROBOT_VS_ROBOT_RECT, 2, border_radius=12)
+        robot_match = self.ui_font.render("ROBOT VS ROBOT", True, (255, 255, 255))
+        self.screen.blit(robot_match, robot_match.get_rect(center=(SCREEN_WIDTH // 2, HOME_ROBOT_VS_ROBOT_RECT.centery - 8)))
+        self_play_detail = self.ui_font.render("Physical calibration self-play", True, (238, 220, 250))
+        self.screen.blit(self_play_detail, self_play_detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_ROBOT_VS_ROBOT_RECT.centery + 16)))
+
         hint = self.ui_font.render("Click VS ROBOT or press Enter", True, (190, 181, 166))
         self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 465)))
 
@@ -201,7 +209,32 @@ class BoardRenderer:
             return "vs_robot"
         if HOME_SETTINGS_RECT.collidepoint(px, py):
             return "settings"
+        if HOME_ROBOT_VS_ROBOT_RECT.collidepoint(px, py):
+            return "robot_vs_robot"
         return None
+
+    def draw_self_play_controls(self, controller):
+        """Overlay controls for the autonomous physical match."""
+        if not controller.active and controller.status.value not in {"faulted", "ended"}:
+            return
+        end_rect = pygame.Rect(SCREEN_WIDTH - 145, SCREEN_HEIGHT - 58, 125, 40)
+        pygame.draw.rect(self.screen, (180, 50, 50), end_rect, border_radius=8)
+        end = self.ui_font.render("END MATCH", True, (255, 255, 255))
+        self.screen.blit(end, end.get_rect(center=end_rect.center))
+        if controller.accepts_next:
+            next_rect = pygame.Rect(20, SCREEN_HEIGHT - 58, 125, 40)
+            pygame.draw.rect(self.screen, (50, 150, 200), next_rect, border_radius=8)
+            nxt = self.ui_font.render("NEXT MOVE", True, (255, 255, 255))
+            self.screen.blit(nxt, nxt.get_rect(center=next_rect.center))
+        if controller.status.value == "ready":
+            toggle_rect = pygame.Rect(SCREEN_WIDTH // 2 - 90, SCREEN_HEIGHT - 58, 180, 40)
+            pygame.draw.rect(self.screen, (103, 61, 152), toggle_rect, border_radius=8)
+            target = "CONTINUOUS" if controller.run_mode == "step" else "STEP MODE"
+            toggle = self.ui_font.render(target, True, (255, 255, 255))
+            self.screen.blit(toggle, toggle.get_rect(center=toggle_rect.center))
+        mode = self.ui_font.render(f"SELF-PLAY: {controller.status.value.upper()} | {controller.run_mode.upper()}", True, (30, 30, 100))
+        self.screen.blit(mode, (12, 34))
+        return end_rect
 
     def draw_settings_menu(self, debug_enabled):
         """Draw the pre-game settings restored from the previous menu flow."""

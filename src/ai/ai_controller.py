@@ -24,7 +24,7 @@ class AIController:
         self.config = config
         self.policy_engine = policy_engine
 
-    def pick_move(self, board_snapshot, color="b"):
+    def pick_move(self, board_snapshot, color="b", difficulty=None):
         """Gọi Moonfish để lấy nước đi tốt nhất.
 
         Hàm này chạy BLOCKING — phải gọi trong thread riêng.
@@ -37,7 +37,7 @@ class AIController:
             (src, dst) tuple nếu tìm được nước đi
             None nếu thất bại hoặc engine chưa khởi động
         """
-        difficulty = getattr(self.config, "AI_DIFFICULTY", "hard")
+        difficulty = difficulty or getattr(self.config, "AI_DIFFICULTY", "hard")
         profiles = getattr(self.config, "AI_DIFFICULTY_PROFILES", {})
         profile = profiles.get(difficulty)
 

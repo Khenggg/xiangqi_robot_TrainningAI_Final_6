@@ -30,6 +30,7 @@ from src.core.game_state import GameState  # type: ignore
 from src.hardware.hardware_manager import HardwareManager  # type: ignore
 from src.ui.input_handler import InputHandler  # type: ignore
 from src.ui.debug_dashboard import DebugDashboard  # type: ignore
+from src.core.self_play_controller import SelfPlayController  # type: ignore
 
 # ==========================================
 # 0. CHẾ ĐỘ & DỌN DẸP TIẾN TRÌNH CŨ
@@ -73,6 +74,10 @@ home_screen_active = True
 settings_menu_active = False
 difficulty_menu_message = ""
 debug_dashboard = None
+self_play_controller = None
+self_play_setup_stage = None
+self_play_red_difficulty = None
+self_play_black_difficulty = None
 
 
 def set_debug_dashboard(enabled):
@@ -134,6 +139,8 @@ try:
             renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
             if state.game_over:
                 renderer.draw_game_over(state.winner)
+            if self_play_controller is not None:
+                renderer.draw_self_play_controls(self_play_controller)
         if difficulty_menu_active:
             renderer.draw_difficulty_menu(hw.difficulty_availability(), difficulty_menu_message)
 
@@ -158,6 +165,12 @@ try:
                 elif event.type == pygame.MOUSEBUTTONDOWN and renderer.home_action_from_pixel(event.pos[0], event.pos[1]) == "settings":
                     home_screen_active = False
                     settings_menu_active = True
+                elif event.type == pygame.MOUSEBUTTONDOWN and renderer.home_action_from_pixel(event.pos[0], event.pos[1]) == "robot_vs_robot":
+                    hw = HardwareManager(config, _BASE_DIR).initialize_all()
+                    input_mgr = InputHandler(state, hw)
+                    home_screen_active = False
+                    difficulty_menu_active = True
+                    self_play_setup_stage = "red"
             elif settings_menu_active:
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     settings_menu_active = False
@@ -170,41 +183,88 @@ try:
                     elif action == "toggle_debug_dashboard":
                         set_debug_dashboard(not getattr(config, "DEBUG_DASHBOARD", False))
             elif difficulty_menu_active:
+                if (self_play_setup_stage == "mode" and event.type == pygame.KEYDOWN
+                        and event.key in (pygame.K_c, pygame.K_s)):
+                    self_play_controller = SelfPlayController(state, hw)
+                    run_mode = "continuous" if event.key == pygame.K_c else "step"
+                    if self_play_controller.start(self_play_red_difficulty, self_play_black_difficulty, run_mode):
+                        difficulty_menu_active = False
+                        self_play_setup_stage = None
+                    else:
+                        difficulty_menu_message = "Self-play requires connected robot and verified board"
+                    continue
                 choice = None
                 if event.type == pygame.KEYDOWN:
                     choice = {pygame.K_1: "easy", pygame.K_2: "medium", pygame.K_3: "hard", pygame.K_4: "impossible"}.get(event.key)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     choice = renderer.difficulty_from_pixel(event.pos[0], event.pos[1])
                 if choice:
-                    ok, reason = hw.select_difficulty(choice)
+                    if self_play_setup_stage:
+                        ok, reason = hw.difficulty_availability().get(choice, False), f"{choice.title()} selected"
+                    else:
+                        ok, reason = hw.select_difficulty(choice)
                     if ok:
-                        difficulty_menu_active = False
-                        difficulty_menu_message = ""
-                        state.set_status(reason, color=(0, 110, 70), duration=6.0)
-                        _start_selected_game()
+                        if self_play_setup_stage == "red":
+                            self_play_red_difficulty = choice
+                            self_play_setup_stage = "black"
+                            difficulty_menu_message = "Select BLACK difficulty (1-4)"
+                        elif self_play_setup_stage == "black":
+                            self_play_black_difficulty = choice
+                            self_play_setup_stage = "mode"
+                            difficulty_menu_message = "Press C for Continuous or S for Step mode"
+                        else:
+                            difficulty_menu_active = False
+                            difficulty_menu_message = ""
+                            state.set_status(reason, color=(0, 110, 70), duration=6.0)
+                            _start_selected_game()
                     else:
                         difficulty_menu_message = reason
             elif event.type == pygame.KEYDOWN:
-                input_mgr.handle_keyboard(event.key)
+                if self_play_controller is not None and self_play_controller.human_input_disabled:
+                    if event.key == pygame.K_n:
+                        self_play_controller.request_next_move()
+                    elif event.key == pygame.K_e:
+                        self_play_controller.end_match()
+                    elif event.key == pygame.K_c:
+                        self_play_controller.set_run_mode("continuous")
+                    elif event.key == pygame.K_s:
+                        self_play_controller.set_run_mode("step")
+                else:
+                    input_mgr.handle_keyboard(event.key)
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
+                if self_play_controller is not None and self_play_controller.human_input_disabled:
+                    if event.pos[0] < 155 and event.pos[1] > SCREEN_HEIGHT - 70:
+                        self_play_controller.request_next_move()
+                    elif (SCREEN_WIDTH // 2 - 100 < event.pos[0] < SCREEN_WIDTH // 2 + 100
+                          and event.pos[1] > SCREEN_HEIGHT - 70):
+                        self_play_controller.set_run_mode(
+                            "continuous" if self_play_controller.run_mode == "step" else "step"
+                        )
+                    elif event.pos[0] > SCREEN_WIDTH - 160 and event.pos[1] > SCREEN_HEIGHT - 70:
+                        self_play_controller.end_match()
+                else:
+                    input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
 
         # 2c. Camera Feed update
         if hw is not None and hw.cam_monitor is not None:
             key = hw.cam_monitor.update_display()
             if key == ord("q"): running = False
 
+        if self_play_controller is not None:
+            self_play_controller.tick()
+
         # Inspect the board itself rather than the object moving a piece.
         # SPACE remains the safe manual fallback when camera confidence is poor.
         if (getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False)
                 and input_mgr is not None and not home_screen_active and not settings_menu_active
-                and not difficulty_menu_active and state.turn == "r" and not state.game_over):
+                and not difficulty_menu_active and (self_play_controller is None or not self_play_controller.human_input_disabled)
+                and state.turn == "r" and not state.game_over):
             input_mgr.poll_board_stability()
 
         # 2d. Xử lý AI Turn (Non-blocking)
         if (hw is not None and input_mgr is not None and not home_screen_active and not settings_menu_active
                 and not difficulty_menu_active and state.turn == "b" and not state.game_over
-                and not state.physical_sync_fault):
+                and not state.physical_sync_fault and (self_play_controller is None or not self_play_controller.active)):
             
             # --- Khởi động Thread suy nghĩ ---
             if (not state.ai_thinking and state.ai_thread is None
@@ -284,13 +344,20 @@ try:
                                         def verify_capture_cleared():
                                             return not is_cap or hw.is_cell_visually_clear(d)
 
-                                        hw.robot.move_piece(
+                                        motion_result = hw.robot.move_piece(
                                             s[0], s[1], d[0], d[1], is_cap,
                                             moving_visual_target=pick_targets.get("moving"),
                                             captured_visual_target=pick_targets.get("captured"),
                                             refresh_moving_visual_target=refresh_moving_target,
                                             verify_capture_cleared=verify_capture_cleared,
                                         )
+                                        if hasattr(motion_result, "success") and not motion_result.success:
+                                            robot_success = False
+                                            state.physical_sync_fault = True
+                                            state.set_status(
+                                                f"Robot motion failed at {motion_result.stage.value}; FEN was not updated.",
+                                                color=(180, 0, 0), duration=20.0,
+                                            )
                                         # Confirm the observed source->destination geometry. CChess
                                         # identity/FEN is deliberately not a robot-motion gate.
                                         if getattr(config, "VISUAL_PICK_ENABLED", False):

@@ -135,5 +135,55 @@
     "evidence": "",
     "notes": "",
     "priority": "P3"
+  },
+  {
+    "id": "self-play-motion-safety",
+    "title": "Truthful physical motion result and capture gate",
+    "user_visible_behavior": "so that a failed robot move cannot advance the self-play board state",
+    "verification_command": "Accepted when only an explicit successful motion result and required pre/capture/post board reconciliation can authorize a commit.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "self-play-independent-profiles",
+    "title": "Independent Red and Black difficulty profiles",
+    "user_visible_behavior": "so that each robot side can use its selected available strength without restarting the engine",
+    "verification_command": "Accepted when Red and Black calls use their selected profiles without mutating the global AI difficulty.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "physical-robot-self-play-controller",
+    "title": "Safe physical Robot-vs-Robot controller",
+    "user_visible_behavior": "so that continuous and step-by-step matches serialize physical turns and fault safely",
+    "verification_command": "Accepted when ten alternating turns have no overlap and either motion or verification failure creates zero commit for that move.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "self-play-operator-controls",
+    "title": "Robot-vs-Robot setup and safe ending controls",
+    "user_visible_behavior": "so that an operator can select both profiles, cadence, next move, or end the match safely",
+    "verification_command": "Accepted when End prevents any later dispatch and waits for in-flight motion and safe-home before cleanup or navigation.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
+  },
+  {
+    "id": "self-play-hardware-readiness",
+    "title": "Self-play verification and supervised arm readiness",
+    "user_visible_behavior": "so that a real-arm run begins only after automated and step-mode safety gates pass",
+    "verification_command": "Accepted when the full test suite passes and the supervised preflight, non-capture, capture, and End checks are recorded.",
+    "status": "not_started",
+    "evidence": "",
+    "notes": "",
+    "priority": "P1"
   }
 ]

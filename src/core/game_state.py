@@ -192,10 +192,15 @@ class GameState:
 
     def set_pending_ai_move(self, move, expected_board, captured_piece):
         """Remember the only state transition a fault-recovery may commit."""
+        self.set_pending_physical_move(move, expected_board, captured_piece, "b")
+
+    def set_pending_physical_move(self, move, expected_board, captured_piece, moving_color):
+        """Remember a verified physical move without committing it yet."""
         self.pending_ai_move = {
             "move": move,
             "expected_board": [row[:] for row in expected_board],
             "captured_piece": captured_piece,
+            "moving_color": moving_color,
         }
 
     def clear_pending_ai_move(self):
@@ -204,17 +209,26 @@ class GameState:
 
     def commit_pending_ai_move(self):
         """Atomically commit a camera-verified physical AI move to the FEN board."""
+        return self.commit_pending_physical_move()
+
+    def commit_pending_physical_move(self):
+        """Atomically commit a camera-verified robot move for either color."""
         if self.pending_ai_move is None:
             return False
         pending = self.pending_ai_move
         src, dst = pending["move"]
         captured_piece = pending["captured_piece"]
-        self.move_history.append({"turn": "b", "src": src, "dst": dst})
+        moving_color = pending.get("moving_color", "b")
+        if self.turn != moving_color:
+            return False
+        self.move_history.append({"turn": moving_color, "src": src, "dst": dst})
         if captured_piece != ".":
-            self.r_captured.append(captured_piece)
+            (self.b_captured if moving_color == "r" else self.r_captured).append(captured_piece)
         self.board = [row[:] for row in pending["expected_board"]]
         self.last_move = pending["move"]
-        self.turn = "r"
+        self.turn = "b" if moving_color == "r" else "r"
+        if moving_color == "b":
+            self.move_number += 1
         self.update_fen_from_board()
         self.pending_ai_move = None
         self.physical_sync_fault = False

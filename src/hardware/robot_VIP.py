@@ -9,6 +9,8 @@ import os
 import json
 import threading
 import math
+from dataclasses import dataclass
+from enum import Enum
 import numpy as np
 import cv2
 
@@ -27,6 +29,26 @@ except ImportError:
 
 class GripperCommandError(RuntimeError):
     """The gripper output state is unsafe or could not be commanded."""
+
+
+class MotionStage(str, Enum):
+    PREFLIGHT = "preflight"
+    PICK_CAPTURED = "pick_captured"
+    CAPTURE_BIN = "capture_bin"
+    CAPTURE_RECONCILE = "capture_reconcile"
+    PICK_MOVING = "pick_moving"
+    PLACE = "place"
+    HOME = "home"
+    COMPLETED = "completed"
+
+
+@dataclass(frozen=True)
+class MotionResult:
+    """The only composite-motion outcome that can authorize a board commit."""
+
+    success: bool
+    stage: MotionStage
+    error: str | None = None
 
 
 class FR5Robot:
@@ -635,70 +657,58 @@ class FR5Robot:
     def move_piece(self, s_col, s_row, d_col, d_row, is_capture,
                    moving_visual_target=None, captured_visual_target=None,
                    refresh_moving_visual_target=None, verify_capture_cleared=None):
-        """Quy trình di chuyển hoàn chỉnh, bao gồm xử lý ăn quân.
-        
-        Args:
-            s_col, s_row: ô nguồn
-            d_col, d_row: ô đích
-            is_capture:   True nếu ăn quân đối phương
-            moving_visual_target: GridTarget camera cho quân đang di chuyển, hoặc None
-            captured_visual_target: GridTarget camera cho quân bị ăn, hoặc None
-            refresh_moving_visual_target: callback chụp lại bàn thật ngay trước
-                khi gắp quân di chuyển. Trả về GridTarget hoặc None để hủy an toàn.
-        """
+        """Move one piece and return an explicit, fail-closed motion outcome."""
         print(f"[ROBOT] ♟️ Di chuyển: ({s_col},{s_row}) → ({d_col},{d_row})"
               + (" [ĂN QUÂN]" if is_capture else ""))
         print(f"[ROBOT] 🔍 DEBUG: s_col={s_col}, s_row={s_row}, d_col={d_col}, d_row={d_row}")
 
+        stage = MotionStage.PREFLIGHT
         if not self.connected and not self.dry:
             try:
                 self.connect()
             except Exception as e:
                 print(f"[ROBOT] ❌ Không thể kết nối, hủy nước đi: {e}")
-                return
+                return MotionResult(False, stage, str(e))
+        if not self.connected and not self.dry:
+            return MotionResult(False, stage, "Robot is not connected")
 
-        # Tính khoảng cách di chuyển để quyết định có cần nâng cao hơn không
-        distance = abs(d_col - s_col) + abs(d_row - s_row)
-        use_extra_safe = distance >= 4  # Nếu di chuyển >= 4 ô, dùng độ cao an toàn
+        try:
+            distance = abs(d_col - s_col) + abs(d_row - s_row)
+            use_extra_safe = distance >= 4
+            if is_capture:
+                stage = MotionStage.PICK_CAPTURED
+                print(f"[ROBOT] 🎯 Gắp quân địch tại đích ({d_col},{d_row})")
+                self.pick_at(d_col, d_row, visual_target=captured_visual_target)
+                self.move_to_extra_safe(d_col, d_row, visual_target=captured_visual_target)
+                stage = MotionStage.CAPTURE_BIN
+                self.place_in_capture_bin(current_z=config.SAFE_Z)
+                stage = MotionStage.CAPTURE_RECONCILE
+                if verify_capture_cleared is not None and not verify_capture_cleared():
+                    # Preserve the legacy caller's explicit recovery signal; the
+                    # composite catch below still turns other motion failures
+                    # into typed outcomes for new controller callers.
+                    raise RuntimeError("Capture square is not visually clear after removal")
 
-        # 1. Nếu ăn quân: gắp quân địch → thả vào bãi thải
-        if is_capture:
-            print(f"[ROBOT] 🎯 Gắp quân địch tại đích ({d_col},{d_row})")
-            self.pick_at(d_col, d_row, visual_target=captured_visual_target)
-            
-            # Nâng lên độ cao an toàn (SAFE_Z)
-            print(f"[ROBOT] ⬆️ Nâng lên SAFE_Z={config.SAFE_Z}mm")
-            self.move_to_extra_safe(d_col, d_row, visual_target=captured_visual_target)
-            
-            # Bay thẳng đến bãi thải ở độ cao SAFE_Z (giữ nguyên Z)
-            self.place_in_capture_bin(current_z=config.SAFE_Z)
-            if verify_capture_cleared is not None and not verify_capture_cleared():
-                raise RuntimeError("Capture square is not visually clear after removal")
+            if refresh_moving_visual_target is not None:
+                moving_visual_target = refresh_moving_visual_target()
+                if moving_visual_target is None:
+                    print("[ROBOT] Visual correction unavailable after refresh; picking logical cell centre.")
 
-        # A capture changes the physical board.  Do not reuse a target measured
-        # before that operation for the next pick; ask vision for a fresh pose.
-        if refresh_moving_visual_target is not None:
-            moving_visual_target = refresh_moving_visual_target()
-            if moving_visual_target is None:
-                print("[ROBOT] Visual correction unavailable after refresh; picking logical cell centre.")
-
-        # 2. Gắp quân mình ở nguồn
-        print(f"[ROBOT] 🤏 Gắp quân mình tại nguồn ({s_col},{s_row})")
-        self.pick_at(s_col, s_row, visual_target=moving_visual_target)
-        
-        # Nâng lên độ cao an toàn nếu di chuyển xa
-        if use_extra_safe:
-            print(f"[ROBOT] 🛡️ Di chuyển xa ({distance} ô), sử dụng độ cao an toàn")
-            self.move_to_extra_safe(s_col, s_row, visual_target=moving_visual_target)
-
-        # 3. Đặt quân mình vào đích
-        print(f"[ROBOT] 📍 Đặt quân mình tại đích ({d_col},{d_row})")
-        self.place_at(d_col, d_row)
-
-        # 4. Về vị trí chờ
-        self.go_to_home_chess()
-
-        print("[ROBOT] ✅ Hoàn tất di chuyển.")
+            stage = MotionStage.PICK_MOVING
+            self.pick_at(s_col, s_row, visual_target=moving_visual_target)
+            if use_extra_safe:
+                self.move_to_extra_safe(s_col, s_row, visual_target=moving_visual_target)
+            stage = MotionStage.PLACE
+            self.place_at(d_col, d_row)
+            stage = MotionStage.HOME
+            self.go_to_home_chess()
+            print("[ROBOT] ✅ Hoàn tất di chuyển.")
+            return MotionResult(True, MotionStage.COMPLETED)
+        except Exception as exc:
+            print(f"[ROBOT] ❌ Motion failed at {stage.value}: {exc}")
+            if stage is MotionStage.CAPTURE_RECONCILE:
+                raise
+            return MotionResult(False, stage, str(exc))
 
     # -------------------------------------------------------------------------
     # TIỆN ÍCH
