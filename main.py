@@ -30,7 +30,7 @@ from src.core.game_state import GameState  # type: ignore
 from src.hardware.hardware_manager import HardwareManager  # type: ignore
 from src.ui.input_handler import InputHandler  # type: ignore
 from src.ui.debug_dashboard import DebugDashboard  # type: ignore
-from src.core.self_play_controller import SelfPlayController  # type: ignore
+from src.core.self_play_controller import SelfPlayController, SelfPlayStatus  # type: ignore
 
 # ==========================================
 # 0. CHẾ ĐỘ & DỌN DẸP TIẾN TRÌNH CŨ
@@ -60,7 +60,7 @@ _kill_zombie_processes()
 pygame.init()
 pygame.font.init()
 
-from src.ui.board_renderer import BoardRenderer, SCREEN_WIDTH, SCREEN_HEIGHT  # type: ignore
+from src.ui.board_renderer import BoardRenderer, BTN_NEW_GAME_RECT, SCREEN_WIDTH, SCREEN_HEIGHT  # type: ignore
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption(f"Xiangqi Robot VIP - { _mode_label }")
 renderer = BoardRenderer(screen)
@@ -96,8 +96,16 @@ def set_debug_dashboard(enabled):
 def _start_selected_game():
     assert hw is not None
     hw.capture_baseline_if_needed(force_delay=1.0)
+    # A self-play match can end on a non-initial physical position.  Do not
+    # let VS ROBOT dispatch against the freshly reset virtual opening until
+    # the camera confirms the operator restored the real board as well.
+    if state.physical_sync_fault:
+        if not hw.verify_physical_board(state.board):
+            return False, "Arrange the standard opening position, then retry."
+        state.physical_sync_fault = False
     if not config.DRY_RUN:
         state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
+    return True, ""
 
 def _cleanup_all():
     print("\n[CLEANUP] Đang dọn dẹp hệ thống...")
@@ -191,7 +199,7 @@ try:
                         difficulty_menu_active = False
                         self_play_setup_stage = None
                     else:
-                        difficulty_menu_message = "Self-play requires connected robot and verified board"
+                        difficulty_menu_message = state.status_message
                     continue
                 choice = None
                 if event.type == pygame.KEYDOWN:
@@ -213,10 +221,13 @@ try:
                             self_play_setup_stage = "mode"
                             difficulty_menu_message = "Press C for Continuous or S for Step mode"
                         else:
-                            difficulty_menu_active = False
-                            difficulty_menu_message = ""
-                            state.set_status(reason, color=(0, 110, 70), duration=6.0)
-                            _start_selected_game()
+                            started, start_message = _start_selected_game()
+                            if started:
+                                difficulty_menu_active = False
+                                difficulty_menu_message = ""
+                                state.set_status(reason, color=(0, 110, 70), duration=6.0)
+                            else:
+                                difficulty_menu_message = start_message
                     else:
                         difficulty_menu_message = reason
             elif event.type == pygame.KEYDOWN:
@@ -232,6 +243,23 @@ try:
                 else:
                     input_mgr.handle_keyboard(event.key)
             elif event.type == pygame.MOUSEBUTTONDOWN:
+                # An ended autonomous session owns the board controls, but the
+                # standard New Game button must remain an exit route.  Return
+                # to the launcher rather than silently switching to human-vs-AI.
+                if (self_play_controller is not None
+                        and self_play_controller.status in {SelfPlayStatus.ENDED, SelfPlayStatus.FINISHED}
+                        and BTN_NEW_GAME_RECT.collidepoint(event.pos)):
+                    state.reset_game(create_api_match=False)
+                    state.physical_sync_fault = True
+                    state.set_status("Restore the opening layout before starting the new match.", color=(180, 100, 0), duration=10.0)
+                    self_play_controller = None
+                    self_play_setup_stage = None
+                    self_play_red_difficulty = None
+                    self_play_black_difficulty = None
+                    difficulty_menu_active = False
+                    difficulty_menu_message = ""
+                    home_screen_active = True
+                    continue
                 if self_play_controller is not None and self_play_controller.human_input_disabled:
                     if event.pos[0] < 155 and event.pos[1] > SCREEN_HEIGHT - 70:
                         self_play_controller.request_next_move()

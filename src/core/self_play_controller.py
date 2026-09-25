@@ -46,18 +46,20 @@ class SelfPlayController:
 
     def start(self, red_difficulty, black_difficulty, run_mode):
         robot = getattr(self.hw, "robot", None)
-        if (getattr(self.hw, "dry_run", False) or robot is None or not robot.connected
-                or run_mode not in {"step", "continuous"}
-                or not self.hw.difficulty_availability().get(red_difficulty)
-                or not self.hw.difficulty_availability().get(black_difficulty)
-                or not self.hw.verify_physical_board(self.state.board)):
-            self.status = SelfPlayStatus.FAULTED
-            self.state.physical_sync_fault = True
-            return False
+        if getattr(self.hw, "dry_run", False) or robot is None or not robot.connected:
+            return self._start_fault("Self-play requires a connected physical robot.")
+        if run_mode not in {"step", "continuous"}:
+            return self._start_fault("Choose Step or Continuous mode.")
+        if not self.hw.difficulty_availability().get(red_difficulty) or not self.hw.difficulty_availability().get(black_difficulty):
+            return self._start_fault("Both selected engine difficulties must be ready.")
+        # Give the camera a fresh baseline before requiring its strict board/FEN check.
+        self.hw.capture_baseline_if_needed(force_delay=1.0)
+        if not self.hw.verify_physical_board(self.state.board):
+            return self._start_fault("Camera board check failed. Arrange all pieces, then recalibrate/retry self-play.")
+        self.state.physical_sync_fault = False
         self.red_difficulty, self.black_difficulty, self.run_mode = red_difficulty, black_difficulty, run_mode
         self.status = SelfPlayStatus.READY
         self._epoch += 1
-        self.hw.capture_baseline_if_needed(force_delay=1.0)
         return True
 
     def set_run_mode(self, run_mode):
@@ -150,12 +152,21 @@ class SelfPlayController:
                 self.status = SelfPlayStatus.READY
 
     def end_match(self):
+        if self.status in {SelfPlayStatus.ENDED, SelfPlayStatus.FINISHED}:
+            return False
         self._epoch += 1
         if self._thread is not None and self._thread.is_alive():
             self.status = SelfPlayStatus.ENDING
             return
         self.hw.robot.go_to_home_chess()
         self.status = SelfPlayStatus.ENDED
+        return True
+
+    def _start_fault(self, message):
+        self.status = SelfPlayStatus.FAULTED
+        self.state.physical_sync_fault = True
+        self.state.set_status(message, color=(180, 0, 0), duration=30.0)
+        return False
 
     def _fault(self, message):
         self.state.physical_sync_fault = True

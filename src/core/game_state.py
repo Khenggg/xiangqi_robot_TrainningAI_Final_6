@@ -72,7 +72,7 @@ class GameState:
             "status_expiry": self.status_expiry,
         }
 
-    def reset_game(self, hw_manager=None):
+    def reset_game(self, hw_manager=None, create_api_match=True):
         # [API] Đóng room cũ trước khi tạo game mới
         if self.api_client.room_id:
             print("[GAME] 🔚 Đóng room cũ trước khi tạo game mới...")
@@ -120,8 +120,9 @@ class GameState:
         if hw_manager:
             hw_manager.capture_baseline_if_needed(force_delay=1)
         
-        # [API] Tạo room mới (nếu không ở chế độ DRY_RUN)
-        if not config.DRY_RUN:
+        # The launcher uses a local reset while the operator chooses a mode;
+        # create the API room only when a game is actually being started.
+        if create_api_match and not config.DRY_RUN:
             self.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
 
     def set_status(self, msg, color=(200, 0, 0), duration=2.5):

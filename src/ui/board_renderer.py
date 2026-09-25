@@ -201,7 +201,7 @@ class BoardRenderer:
         self.screen.blit(self_play_detail, self_play_detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_ROBOT_VS_ROBOT_RECT.centery + 16)))
 
         hint = self.ui_font.render("Click VS ROBOT or press Enter", True, (190, 181, 166))
-        self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 465)))
+        self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 525)))
 
     @staticmethod
     def home_action_from_pixel(px, py):
