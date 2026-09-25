@@ -54,6 +54,26 @@ class FR5Robot:
         # Kích thước ô cờ (mm), mặc định theo config, tự động cập nhật khi load teaching points
         self.auto_cell_sizes = {"x": config.CELL_SIZE_X, "y": config.CELL_SIZE_Y}
 
+        # Read-only state consumed by the optional debug dashboard. This does
+        # not affect motion; it records the command immediately before sending it.
+        self._planned_command_lock = threading.Lock()
+        self._planned_command = None
+
+    def _set_planned_command(self, command, pose, label):
+        with self._planned_command_lock:
+            self._planned_command = {
+                "command": command,
+                "pose": [float(value) for value in pose[:6]],
+                "label": label,
+            }
+
+    def get_planned_command(self):
+        """Return a copy safe for the dashboard's publishing thread."""
+        with self._planned_command_lock:
+            if self._planned_command is None:
+                return None
+            return dict(self._planned_command, pose=list(self._planned_command["pose"]))
+
     # -------------------------------------------------------------------------
     # SET MA TRẬN TỪ NGOÀI
     # -------------------------------------------------------------------------
@@ -321,9 +341,11 @@ class FR5Robot:
     # DI CHUYỂN ROBOT
     # -------------------------------------------------------------------------
 
-    def move_safe_pose(self, pose, speed=None, col=None, row=None):
+    def move_safe_pose(self, pose, speed=None, col=None, row=None, label=None):
         """Di chuyển an toàn đến pose. Luôn dùng MoveCart để đảm bảo đường thẳng."""
         vel = speed or self.default_vel
+        location = f"grid ({col}, {row})" if col is not None and row is not None else "waypoint"
+        self._set_planned_command("MoveCart", pose, label or f"Approach {location}")
         if self.dry:
             print(f"[ROBOT] DRY MoveCart → {[round(v,1) for v in pose]} vel={vel}")
             time.sleep(0.2)
@@ -339,9 +361,10 @@ class FR5Robot:
             raise Exception(f"Robot MoveCart error code: {err}")
         return err
 
-    def movej_joint(self, joint_pos, desc_pos, speed=None):
+    def movej_joint(self, joint_pos, desc_pos, speed=None, label=None):
         """Di chuyển trực tiếp bằng góc joint (MoveJ) nếu đã biết."""
         vel = speed or self.default_vel
+        self._set_planned_command("MoveJ", desc_pos, label or "Joint waypoint")
         if self.dry:
             print(f"[ROBOT] DRY MoveJ_Joint → vel={vel}")
             time.sleep(0.2)
@@ -356,9 +379,10 @@ class FR5Robot:
             raise Exception(f"Robot movej_joint error code: {err}")
         return err
 
-    def movel_pose(self, pose, speed=None):
+    def movel_pose(self, pose, speed=None, label=None):
         """Di chuyển thẳng đứng (MoveCart) đến pose."""
         vel = speed or self.default_vel
+        self._set_planned_command("MoveCart", pose, label or "Vertical movement")
         if self.dry:
             print(f"[ROBOT] DRY MoveL → {[round(v,1) for v in pose]} vel={vel}")
             time.sleep(0.2)

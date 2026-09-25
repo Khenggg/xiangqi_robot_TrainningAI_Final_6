@@ -26,6 +26,9 @@ BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT - 60, 120, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(SCREEN_WIDTH / 2 + 30, SCREEN_HEIGHT - 60, 120, 40)
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 330, 330, 68)
+HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 142, 22, 120, 38)
+SETTINGS_BACK_RECT = pygame.Rect(28, 22, 112, 38)
+DEBUG_STATUS_RECT = pygame.Rect(492, 190, 180, 48)
 DIFFICULTY_OPTIONS = (
     ("easy", "1 · EASY", pygame.Rect(105, 330, 275, 64), (62, 129, 91)),
     ("medium", "2 · MEDIUM", pygame.Rect(420, 330, 275, 64), (197, 132, 48)),
@@ -178,6 +181,10 @@ class BoardRenderer:
         subtitle = self.ui_font.render("Choose a game mode to begin", True, (228, 214, 190))
         self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 235)))
 
+        pygame.draw.rect(self.screen, (61, 73, 82), HOME_SETTINGS_RECT, border_radius=8)
+        settings = self.ui_font.render("SETTINGS", True, (255, 255, 255))
+        self.screen.blit(settings, settings.get_rect(center=HOME_SETTINGS_RECT.center))
+
         pygame.draw.rect(self.screen, (159, 59, 55), HOME_VS_ROBOT_RECT, border_radius=12)
         pygame.draw.rect(self.screen, (239, 218, 177), HOME_VS_ROBOT_RECT, 2, border_radius=12)
         button = self.game_font.render("VS ROBOT", True, (255, 255, 255))
@@ -190,7 +197,40 @@ class BoardRenderer:
 
     @staticmethod
     def home_action_from_pixel(px, py):
-        return "vs_robot" if HOME_VS_ROBOT_RECT.collidepoint(px, py) else None
+        if HOME_VS_ROBOT_RECT.collidepoint(px, py):
+            return "vs_robot"
+        if HOME_SETTINGS_RECT.collidepoint(px, py):
+            return "settings"
+        return None
+
+    def draw_settings_menu(self, debug_enabled):
+        """Draw the pre-game settings restored from the previous menu flow."""
+        self.screen.fill((25, 20, 16))
+        pygame.draw.rect(self.screen, (61, 73, 82), SETTINGS_BACK_RECT, border_radius=8)
+        back = self.ui_font.render("< HOME", True, (255, 255, 255))
+        self.screen.blit(back, back.get_rect(center=SETTINGS_BACK_RECT.center))
+
+        title = self.game_font.render("SETTINGS", True, (246, 225, 184))
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 118)))
+        label = self.ui_font.render("Debug dashboard", True, (235, 224, 205))
+        self.screen.blit(label, label.get_rect(midleft=(126, DEBUG_STATUS_RECT.centery)))
+
+        status = "ENABLED" if debug_enabled else "DISABLED"
+        color = (62, 129, 91) if debug_enabled else (159, 59, 55)
+        pygame.draw.rect(self.screen, color, DEBUG_STATUS_RECT, border_radius=10)
+        status_text = self.ui_font.render(status, True, (255, 255, 255))
+        self.screen.blit(status_text, status_text.get_rect(center=DEBUG_STATUS_RECT.center))
+
+        note = self.ui_font.render("Opens a separate read-only robot telemetry window", True, (190, 181, 166))
+        self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 284)))
+
+    @staticmethod
+    def settings_action_from_pixel(px, py):
+        if SETTINGS_BACK_RECT.collidepoint(px, py):
+            return "home"
+        if DEBUG_STATUS_RECT.collidepoint(px, py):
+            return "toggle_debug_dashboard"
+        return None
 
     @staticmethod
     def difficulty_from_pixel(px, py):

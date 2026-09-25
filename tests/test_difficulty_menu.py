@@ -1,12 +1,25 @@
 from types import SimpleNamespace
 
 from src.hardware.hardware_manager import HardwareManager
-from src.ui.board_renderer import DIFFICULTY_OPTIONS, HOME_VS_ROBOT_RECT, BoardRenderer
+from src.ui.board_renderer import (
+    DEBUG_STATUS_RECT,
+    DIFFICULTY_OPTIONS,
+    HOME_SETTINGS_RECT,
+    HOME_VS_ROBOT_RECT,
+    SETTINGS_BACK_RECT,
+    BoardRenderer,
+)
 
 
 def test_home_screen_vs_robot_button_starts_only_that_flow():
     assert BoardRenderer.home_action_from_pixel(*HOME_VS_ROBOT_RECT.center) == "vs_robot"
     assert BoardRenderer.home_action_from_pixel(0, 0) is None
+
+
+def test_home_screen_settings_and_debug_actions_are_mapped():
+    assert BoardRenderer.home_action_from_pixel(*HOME_SETTINGS_RECT.center) == "settings"
+    assert BoardRenderer.settings_action_from_pixel(*SETTINGS_BACK_RECT.center) == "home"
+    assert BoardRenderer.settings_action_from_pixel(*DEBUG_STATUS_RECT.center) == "toggle_debug_dashboard"
 
 
 def test_difficulty_menu_maps_each_card_to_its_engine():

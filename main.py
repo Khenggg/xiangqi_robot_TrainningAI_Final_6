@@ -29,6 +29,7 @@ from src.core import xiangqi  # type: ignore
 from src.core.game_state import GameState  # type: ignore
 from src.hardware.hardware_manager import HardwareManager  # type: ignore
 from src.ui.input_handler import InputHandler  # type: ignore
+from src.ui.debug_dashboard import DebugDashboard  # type: ignore
 
 # ==========================================
 # 0. CHẾ ĐỘ & DỌN DẸP TIẾN TRÌNH CŨ
@@ -69,7 +70,23 @@ hw = None
 input_mgr = None
 difficulty_menu_active = False
 home_screen_active = True
+settings_menu_active = False
 difficulty_menu_message = ""
+debug_dashboard = None
+
+
+def set_debug_dashboard(enabled):
+    """Enable or close the optional telemetry window for this app session."""
+    global debug_dashboard
+    config.DEBUG_DASHBOARD = enabled
+    if enabled and debug_dashboard is None:
+        debug_dashboard = DebugDashboard(config.DRY_RUN)
+        if hw is not None:
+            debug_dashboard.robot = hw.robot
+            debug_dashboard.activity = "Game setup"
+    elif not enabled and debug_dashboard is not None:
+        debug_dashboard.close()
+        debug_dashboard = None
 
 def _start_selected_game():
     assert hw is not None
@@ -86,6 +103,8 @@ def _cleanup_all():
     except: pass
     if hw is not None:
         hw.cleanup()
+    if debug_dashboard is not None:
+        debug_dashboard.close()
     try: pygame.quit()
     except: pass
     print("[CLEANUP] ✅ Xong!")
@@ -105,7 +124,9 @@ print(f"[FEN] {state.current_fen}")
 try:
     while running:
         # 2a. Vẽ khung hình
-        if home_screen_active:
+        if settings_menu_active:
+            renderer.draw_settings_menu(getattr(config, "DEBUG_DASHBOARD", False))
+        elif home_screen_active:
             renderer.draw_home_screen()
         else:
             renderer.draw_ui(state.get_render_state())
@@ -129,8 +150,25 @@ try:
                     # both until the player explicitly chooses to play against the robot.
                     hw = HardwareManager(config, _BASE_DIR).initialize_all()
                     input_mgr = InputHandler(state, hw)
+                    if debug_dashboard is not None:
+                        debug_dashboard.robot = hw.robot
+                        debug_dashboard.activity = "Game setup"
                     home_screen_active = False
                     difficulty_menu_active = True
+                elif event.type == pygame.MOUSEBUTTONDOWN and renderer.home_action_from_pixel(event.pos[0], event.pos[1]) == "settings":
+                    home_screen_active = False
+                    settings_menu_active = True
+            elif settings_menu_active:
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    settings_menu_active = False
+                    home_screen_active = True
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    action = renderer.settings_action_from_pixel(event.pos[0], event.pos[1])
+                    if action == "home":
+                        settings_menu_active = False
+                        home_screen_active = True
+                    elif action == "toggle_debug_dashboard":
+                        set_debug_dashboard(not getattr(config, "DEBUG_DASHBOARD", False))
             elif difficulty_menu_active:
                 choice = None
                 if event.type == pygame.KEYDOWN:
@@ -159,11 +197,13 @@ try:
         # Inspect the board itself rather than the object moving a piece.
         # SPACE remains the safe manual fallback when camera confidence is poor.
         if (getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False)
-                and not home_screen_active and not difficulty_menu_active and state.turn == "r" and not state.game_over):
+                and input_mgr is not None and not home_screen_active and not settings_menu_active
+                and not difficulty_menu_active and state.turn == "r" and not state.game_over):
             input_mgr.poll_board_stability()
 
         # 2d. Xử lý AI Turn (Non-blocking)
-        if (not home_screen_active and not difficulty_menu_active and state.turn == "b" and not state.game_over
+        if (hw is not None and input_mgr is not None and not home_screen_active and not settings_menu_active
+                and not difficulty_menu_active and state.turn == "b" and not state.game_over
                 and not state.physical_sync_fault):
             
             # --- Khởi động Thread suy nghĩ ---
