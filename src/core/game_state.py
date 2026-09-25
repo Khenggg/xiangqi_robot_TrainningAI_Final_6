@@ -49,6 +49,11 @@ class GameState:
         # Rollback State
         self._pre_space_state: Optional[Dict[str, Any]] = None
         self.manual_override_active: bool = False
+        # Set only when the snapshot/FEN pipeline has explicitly paused the
+        # game.  Emergency mode is a separate, deliberate control mode.
+        self.snapshot_continue_required: bool = False
+        self.snapshot_continue_can_commit_pending: bool = False
+        self.emergency_mode: bool = False
         # A failed post-move camera check means the physical board may have
         # changed while FEN was intentionally left untouched.  Do not retry the
         # same robot command until an operator resolves the discrepancy.
@@ -71,6 +76,7 @@ class GameState:
             "status_color": self.status_color,
             "status_expiry": self.status_expiry,
             "manual_override_active": self.manual_override_active,
+            "snapshot_continue_required": self.snapshot_continue_required,
         }
 
     def reset_game(self, hw_manager=None):
@@ -112,6 +118,9 @@ class GameState:
         self.human_commit_generation = 0
         self.ai_started_for_human_commit_generation = 0
         self.manual_override_active = False
+        self.snapshot_continue_required = False
+        self.snapshot_continue_can_commit_pending = False
+        self.emergency_mode = False
         self.physical_sync_fault = False
         self.pending_ai_move = None
 
@@ -190,6 +199,9 @@ class GameState:
         print(f"[ROLLBACK] ✅ Done. FEN: {self.current_fen}")
         
         self.manual_override_active = False
+        self.snapshot_continue_required = False
+        self.snapshot_continue_can_commit_pending = False
+        self.emergency_mode = False
 
     def set_pending_ai_move(self, move, expected_board, captured_piece):
         """Remember the only state transition a fault-recovery may commit."""
@@ -245,3 +257,44 @@ class GameState:
         if xiangqi.get_king_pos("b", self.board) is None:
             self.handle_game_over("r")
             self.turn = "r"
+
+    def process_emergency_move(self, src, dst, p_name):
+        """Commit one rule-checked client move for the side currently to move.
+
+        A Red move intentionally follows the normal human path, which opens
+        exactly one AI/robot reply.  A Black move is an operator correction:
+        it cancels any in-flight AI result and hands the turn back to Red.
+        """
+        # An operator edit supersedes any unverified robot transition.  Never
+        # let a later Continue overwrite the corrected client position.
+        self.pending_ai_move = None
+        self.physical_sync_fault = False
+        self.snapshot_continue_required = False
+        self.snapshot_continue_can_commit_pending = False
+        color = self.turn
+        if color == "r":
+            self.process_human_move(src, dst, p_name)
+            return
+
+        print(f"[EMERGENCY] ✅ Manual Black move: {p_name} {src}->{dst}")
+        captured_piece = self.board[dst[1]][dst[0]]
+        self.move_history.append({"turn": "b", "src": src, "dst": dst})
+        if captured_piece != ".":
+            self.r_captured.append(captured_piece)
+        self.board, _ = xiangqi.make_temp_move(self.board, (src, dst))
+        self.last_move = (src, dst)
+        self.turn = "r"
+        self.move_number += 1
+        # Invalidate a worker which may have been calculating the old Black
+        # position; Python cannot safely kill that thread, but its result is
+        # discarded by the main-loop token check.
+        self.ai_epoch += 1
+        self.ai_job_token = None
+        self.ai_thinking = False
+        self.ai_thread = None
+        self.ai_results = {}
+        self.update_fen_from_board()
+        self.api_client.send_move_update_board(self.current_fen)
+        self.set_status("✅ Emergency Black move accepted — Red to move.", color=(0, 120, 0), duration=6.0)
+        if xiangqi.get_king_pos("r", self.board) is None:
+            self.handle_game_over("b")

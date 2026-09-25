@@ -297,6 +297,8 @@ try:
                                             if not hw.verify_visual_move(s, d):
                                                 robot_success = False
                                                 state.physical_sync_fault = True
+                                                state.snapshot_continue_required = True
+                                                state.snapshot_continue_can_commit_pending = True
                                                 state.set_status(
                                                     "⚠️ Không xác nhận được vị trí quân sau khi thả — FEN chưa được cập nhật.",
                                                     color=(180, 100, 0), duration=20.0,
@@ -310,6 +312,7 @@ try:
                                         print("❌ [CRITICAL] Robot critical error, stopping game.")
                                         robot_success = False
                                         state.physical_sync_fault = True
+                                        state.snapshot_continue_required = True
                                         time.sleep(2)
                             else:
                                 print(f"\n{'='*50}")

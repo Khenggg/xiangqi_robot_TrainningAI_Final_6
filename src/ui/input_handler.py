@@ -1,11 +1,13 @@
 import time
 from src.core import xiangqi  # type: ignore
 from src.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT,
-                                   BTN_RESUME_SCAN_RECT, NUM_COLS, NUM_ROWS)  # type: ignore
+                                   BTN_CONTINUE_RECT, NUM_COLS, NUM_ROWS)  # type: ignore
 from src.vision.board_stability_monitor import BoardStabilityMonitor
 from src.vision.player_turn_arbiter import PlayerTurnArbiter
 from src.vision.player_turn_types import BoardObservation, CommitRequest, InteractionCapability, PlayerTurnMode, Visibility
 from src.core.human_move_commit_coordinator import HumanMoveCommitCoordinator
+from src.vision.legal_successor_matcher import LegalSuccessorMatcher
+from src.vision.player_turn_types import MatchKind
 
 class InputHandler:
     """Manages Pygame Key/Mouse events and bridges them to GameState and HardwareManager."""
@@ -80,9 +82,10 @@ class InputHandler:
         return self._unified_active
 
     def handle_mouse_down(self, mx, my):
-        if (BTN_RESUME_SCAN_RECT.collidepoint(mx, my)
-                and self.state.manual_override_active and not self.state.game_over):
-            self.resume_automatic_scanning()
+        if (BTN_CONTINUE_RECT.collidepoint(mx, my)
+                and getattr(self.state, "snapshot_continue_required", False)
+                and not self.state.game_over):
+            self._continue_after_snapshot_pause()
             return
 
         # Surrender Button
@@ -98,7 +101,7 @@ class InputHandler:
             return
 
         # Manual Override (Mouse Drag)
-        if (self.state.allow_mouse_move or self.state.manual_override_active) and self.state.turn == "r" and not self.state.game_over:
+        if (self.state.allow_mouse_move or self.state.manual_override_active) and not self.state.game_over:
             if self._player_turn_mode == PlayerTurnMode.UNIFIED:
                 self.state.set_status("⚠️ UNIFIED: cần xác nhận bàn cờ vật lý trước.", color=(180, 100, 0))
                 return
@@ -107,7 +110,8 @@ class InputHandler:
                 clicked_piece = self.state.board[r][c]
                 
                 # Select a piece
-                if clicked_piece.startswith("r"):
+                active_color = self.state.turn
+                if clicked_piece.startswith(active_color):
                     self.state.selected_pos = (c, r)
                     
                 # Move a selected piece
@@ -115,15 +119,32 @@ class InputHandler:
                     src, dst = self.state.selected_pos, (c, r)
                     p_name = self.state.board[src[1]][src[0]]
                     
-                    if xiangqi.is_valid_move(src, dst, self.state.board, "r"):
+                    if xiangqi.is_valid_move(src, dst, self.state.board, active_color):
                         print("[UI] 🖱️ Người dùng đi cờ trên màn hình.")
                         detector = getattr(self.hw, "yolo_detector", None)
                         if detector and detector.has_baseline():
                             occ = [row[:] for row in detector._baseline_occ]
                             self.state.save_rollback_state(occ, detector._baseline_time)
-                        committed = self._commit_human_move(src, dst, p_name, source="MOUSE")
+                        if getattr(self.state, "emergency_mode", False):
+                            emergency_commit = getattr(self.state, "process_emergency_move", None)
+                            if callable(emergency_commit):
+                                emergency_commit(src, dst, p_name)
+                                committed = True
+                            else:
+                                # Lightweight test/dry-run state objects only
+                                # expose the legacy Red commit hook.
+                                committed = (active_color == "r" and
+                                             self._commit_human_move(src, dst, p_name, source="EMERGENCY"))
+                        elif active_color == "r":
+                            committed = self._commit_human_move(src, dst, p_name, source="MOUSE")
+                        else:
+                            committed = False
                         self.state.selected_pos = None
-                        self.state.manual_override_active = not committed
+                        # Emergency mode remains active until the operator
+                        # presses M again; normal mouse fallback keeps its old
+                        # one-move behavior.
+                        if not getattr(self.state, "emergency_mode", False):
+                            self.state.manual_override_active = not committed
                         
                         # Retake T1 baseline after manual override
                         if committed and self.hw.cam_monitor:
@@ -190,7 +211,7 @@ class InputHandler:
             self._reconcile_physical_sync_fault()
             return
 
-        if self.state.allow_mouse_move or self.state.game_over or self.state.turn != "r":
+        if self.state.game_over:
             return
 
         # Z KEY: Rollback
@@ -200,10 +221,13 @@ class InputHandler:
         # M KEY: Emergency client-side move mode. This is intentionally
         # explicit so a camera failure cannot silently switch control paths.
         elif key == pygame.K_m:
-            self.state.manual_override_active = True
+            enabled = not getattr(self.state, "emergency_mode", False)
+            self.state.emergency_mode = enabled
+            self.state.manual_override_active = enabled
             self._board_stability_monitor.reset()
             self.state.set_status(
-                "⚠️ Emergency client mode: chọn quân Đỏ rồi chọn ô đích.",
+                ("⚠️ Emergency client mode: đi quân đến lượt (Đỏ/Đen) trên client."
+                 if enabled else "✅ Đã tắt Emergency mode — tiếp tục quét camera."),
                 color=(180, 100, 0), duration=12.0,
             )
             
@@ -223,11 +247,13 @@ class InputHandler:
         # arm did not complete the move; matching expected_board means it did.
         if self.hw.verify_physical_board(self.state.board):
             self.state.clear_pending_ai_move()
+            self.state.snapshot_continue_required = False
             self.state.set_status("↩️ Bàn thật vẫn ở FEN cũ — có thể thử lại nước AI.", color=(0, 100, 180), duration=10.0)
             return
 
         if self.hw.verify_physical_board(pending["expected_board"]):
             if self.state.commit_pending_ai_move():
+                self.state.snapshot_continue_required = False
                 self.state.api_client.send_move_update_board(self.state.current_fen)
                 if xiangqi.get_king_pos("r", self.state.board) is None:
                     self.state.handle_game_over("b")
@@ -305,6 +331,8 @@ class InputHandler:
             if not auto_retry:
                 self.state.set_status(message, color=(180, 0, 0), duration=8.0)
                 self.state.manual_override_active = True
+                self.state.snapshot_continue_required = True
+                self.state.snapshot_continue_can_commit_pending = False
                 self.hw.clear_yolo_baseline()
             return False
             
@@ -315,6 +343,8 @@ class InputHandler:
                 self.state.set_status("❌ NƯỚC ĐI KHÔNG HỢP LỆ", color=(180, 0, 0), duration=8.0)
                 self.state.set_invalid_flash(dst[0], dst[1])
                 self.state.manual_override_active = True
+                self.state.snapshot_continue_required = True
+                self.state.snapshot_continue_can_commit_pending = False
                 self.hw.clear_yolo_baseline()
             return False
 
@@ -323,7 +353,59 @@ class InputHandler:
         committed = self._commit_human_move(src, dst, piece, source="SPACE")
         if committed:
             self.state.manual_override_active = False
+            self.state.emergency_mode = False
+            self.state.snapshot_continue_required = False
         return committed
+
+    def _continue_after_snapshot_pause(self):
+        """Apply the operator-approved recovery shown by the Continue button."""
+        if (getattr(self.state, "physical_sync_fault", False)
+                and getattr(self.state, "snapshot_continue_can_commit_pending", False)
+                and getattr(self.state, "pending_ai_move", None)):
+            # The robot command completed but visual confirmation returned e.g.
+            # 0/3.  Continue is an explicit operator override to advance the
+            # FEN to the move already made on the physical board.
+            if self.state.commit_pending_ai_move():
+                self.state.api_client.send_move_update_board(self.state.current_fen)
+        elif getattr(self.state, "physical_sync_fault", False):
+            # A robot exception is not proof that it completed the move.  Keep
+            # the original verified reconciliation path instead of guessing.
+            self._reconcile_physical_sync_fault()
+            return
+        else:
+            # Do not install a new baseline blindly: the physical Red move may
+            # exist while FEN still describes the old board.  CChess must
+            # prove either the old board or one unique legal successor.
+            recognizer = getattr(self.hw, "recognize_board_state", None)
+            camera = getattr(self.hw, "cam_monitor", None)
+            frame, _ = camera.get_fresh_snapshot() if camera else (None, [])
+            result = recognizer(frame) if callable(recognizer) and frame is not None else None
+            layout = result.get("board") if result and result.get("success") else None
+            match = LegalSuccessorMatcher(self.state.board).match(layout)
+            if match.kind == MatchKind.UNIQUE:
+                src, dst = match.move
+                piece = self.state.board[src[1]][src[0]]
+                self._commit_human_move(src, dst, piece, source="CONTINUE")
+            elif match.kind != MatchKind.BASELINE_EQUAL:
+                self.state.snapshot_continue_required = False
+                self.state.emergency_mode = True
+                self.state.manual_override_active = True
+                self.state.set_status(
+                    "⚠️ Không thể xác nhận FEN. Emergency mode đã bật để nhập nước đi.",
+                    color=(180, 100, 0), duration=12.0,
+                )
+                return
+        self.state.physical_sync_fault = False
+        self.state.snapshot_continue_required = False
+        self.state.snapshot_continue_can_commit_pending = False
+        self.state.manual_override_active = False
+        self.state.emergency_mode = False
+        self._board_stability_monitor.reset()
+        capture = getattr(self.hw, "capture_baseline_if_needed", None)
+        captured = bool(capture(force_delay=0.0)) if callable(capture) else False
+        message = ("✅ Continue: FEN đã tiếp tục, đang quét bàn cờ mới."
+                   if captured else "✅ Continue: FEN đã tiếp tục. Nhấn SPACE để tạo baseline mới.")
+        self.state.set_status(message, color=(0, 120, 0), duration=10.0)
 
     def try_auto_confirm_move(self, retries=10, retry_seconds=0.2):
         """Reuse the existing rule-validated snapshot flow after hand exit."""
