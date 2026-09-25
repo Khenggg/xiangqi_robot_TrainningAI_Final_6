@@ -1,7 +1,12 @@
 from types import SimpleNamespace
 
 from src.hardware.hardware_manager import HardwareManager
-from src.ui.board_renderer import DIFFICULTY_OPTIONS, BoardRenderer
+from src.ui.board_renderer import DIFFICULTY_OPTIONS, HOME_VS_ROBOT_RECT, BoardRenderer
+
+
+def test_home_screen_vs_robot_button_starts_only_that_flow():
+    assert BoardRenderer.home_action_from_pixel(*HOME_VS_ROBOT_RECT.center) == "vs_robot"
+    assert BoardRenderer.home_action_from_pixel(0, 0) is None
 
 
 def test_difficulty_menu_maps_each_card_to_its_engine():

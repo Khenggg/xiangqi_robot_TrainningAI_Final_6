@@ -25,6 +25,7 @@ BTN_COLOR = (200, 50, 50)
 BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT - 60, 120, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(SCREEN_WIDTH / 2 + 30, SCREEN_HEIGHT - 60, 120, 40)
+HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 330, 330, 68)
 DIFFICULTY_OPTIONS = (
     ("easy", "1 · EASY", pygame.Rect(105, 330, 275, 64), (62, 129, 91)),
     ("medium", "2 · MEDIUM", pygame.Rect(420, 330, 275, 64), (197, 132, 48)),
@@ -165,6 +166,31 @@ class BoardRenderer:
         if message:
             note = self.ui_font.render(message, True, (255, 204, 112))
             self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 500)))
+
+    def draw_home_screen(self):
+        """Draw the launcher shown before the player chooses a game mode."""
+        self.screen.fill((25, 20, 16))
+        accent = pygame.Rect(0, 0, SCREEN_WIDTH, 8)
+        pygame.draw.rect(self.screen, (194, 46, 46), accent)
+
+        title = self.game_font.render("XIANGQI ROBOT", True, (246, 225, 184))
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 190)))
+        subtitle = self.ui_font.render("Choose a game mode to begin", True, (228, 214, 190))
+        self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 235)))
+
+        pygame.draw.rect(self.screen, (159, 59, 55), HOME_VS_ROBOT_RECT, border_radius=12)
+        pygame.draw.rect(self.screen, (239, 218, 177), HOME_VS_ROBOT_RECT, 2, border_radius=12)
+        button = self.game_font.render("VS ROBOT", True, (255, 255, 255))
+        self.screen.blit(button, button.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery - 6)))
+        detail = self.ui_font.render("Choose the robot difficulty next", True, (255, 224, 205))
+        self.screen.blit(detail, detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery + 22)))
+
+        hint = self.ui_font.render("Click VS ROBOT or press Enter", True, (190, 181, 166))
+        self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 465)))
+
+    @staticmethod
+    def home_action_from_pixel(px, py):
+        return "vs_robot" if HOME_VS_ROBOT_RECT.collidepoint(px, py) else None
 
     @staticmethod
     def difficulty_from_pixel(px, py):

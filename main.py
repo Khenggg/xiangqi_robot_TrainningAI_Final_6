@@ -64,13 +64,15 @@ pygame.display.set_caption(f"Xiangqi Robot VIP - { _mode_label }")
 renderer = BoardRenderer(screen)
 
 # Khởi tạo các module quản lý SRP
-hw = HardwareManager(config, _BASE_DIR).initialize_all()
 state = GameState(allow_mouse_move=config.DRY_RUN)
-input_mgr = InputHandler(state, hw)
-difficulty_menu_active = True
+hw = None
+input_mgr = None
+difficulty_menu_active = False
+home_screen_active = True
 difficulty_menu_message = ""
 
 def _start_selected_game():
+    assert hw is not None
     hw.capture_baseline_if_needed(force_delay=1.0)
     if not config.DRY_RUN:
         state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
@@ -82,7 +84,8 @@ def _cleanup_all():
         if state and state.api_client:
             state.api_client.end_match(reason="OTHER")
     except: pass
-    hw.cleanup()
+    if hw is not None:
+        hw.cleanup()
     try: pygame.quit()
     except: pass
     print("[CLEANUP] ✅ Xong!")
@@ -98,15 +101,18 @@ clock = pygame.time.Clock()
 print(f"\n[GAME] === GAME STARTED ===")
 print(f"[FEN] {state.current_fen}")
 
-# Khởi chạy main loop.  The first game starts only after difficulty selection.
+# Khởi chạy main loop. The launcher keeps difficulty selection out of the boot flow.
 try:
     while running:
         # 2a. Vẽ khung hình
-        renderer.draw_ui(state.get_render_state())
-        renderer.draw_pieces(state.board)
-        renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
-        if state.game_over:
-            renderer.draw_game_over(state.winner)
+        if home_screen_active:
+            renderer.draw_home_screen()
+        else:
+            renderer.draw_ui(state.get_render_state())
+            renderer.draw_pieces(state.board)
+            renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
+            if state.game_over:
+                renderer.draw_game_over(state.winner)
         if difficulty_menu_active:
             renderer.draw_difficulty_menu(hw.difficulty_availability(), difficulty_menu_message)
 
@@ -114,6 +120,17 @@ try:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif home_screen_active:
+                start_vs_robot = event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    start_vs_robot = renderer.home_action_from_pixel(event.pos[0], event.pos[1]) == "vs_robot"
+                if start_vs_robot:
+                    # Connecting to the robot and calibrating the camera can block, so defer
+                    # both until the player explicitly chooses to play against the robot.
+                    hw = HardwareManager(config, _BASE_DIR).initialize_all()
+                    input_mgr = InputHandler(state, hw)
+                    home_screen_active = False
+                    difficulty_menu_active = True
             elif difficulty_menu_active:
                 choice = None
                 if event.type == pygame.KEYDOWN:
@@ -135,18 +152,18 @@ try:
                 input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
 
         # 2c. Camera Feed update
-        if hw.cam_monitor is not None:
+        if hw is not None and hw.cam_monitor is not None:
             key = hw.cam_monitor.update_display()
             if key == ord("q"): running = False
 
         # Inspect the board itself rather than the object moving a piece.
         # SPACE remains the safe manual fallback when camera confidence is poor.
         if (getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False)
-                and not difficulty_menu_active and state.turn == "r" and not state.game_over):
+                and not home_screen_active and not difficulty_menu_active and state.turn == "r" and not state.game_over):
             input_mgr.poll_board_stability()
 
         # 2d. Xử lý AI Turn (Non-blocking)
-        if (not difficulty_menu_active and state.turn == "b" and not state.game_over
+        if (not home_screen_active and not difficulty_menu_active and state.turn == "b" and not state.game_over
                 and not state.physical_sync_fault):
             
             # --- Khởi động Thread suy nghĩ ---

@@ -55,7 +55,7 @@ GRIPPER_CLOSE_SETTLE_SEC = 0.25
 MOVE_SPEED = 60 #Percentage based
 
 # Góc xoay của đầu Robot (Rx, Ry, Rz)
-ROTATION = [-176.418, -1.049, -40.623] 
+ROTATION = [-179, 0, -40.623] 
 
 # --- PHYSICAL PICK / PLACE MOTION PROFILE ---
 # Các pose Cartesian FR5 gồm [X, Y, Z, Rx, Ry, Rz]. XY được nội suy từ R1-R4;
