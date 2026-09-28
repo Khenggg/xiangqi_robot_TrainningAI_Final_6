@@ -32,3 +32,12 @@ fairino3_v6_pybullet.urdf
 # Node.js dependencies
 node_modules/
 
+# AI Engine binaries (quá lớn >50MB, tải thủ công theo README)
+engines/**/*.exe
+engines/**/*.nnue
+
+# Local tooling & MCP caches
+.codebase-memory/
+reports/*.log
+*.log
+

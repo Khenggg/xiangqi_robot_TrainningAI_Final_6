@@ -35,6 +35,7 @@ from src.motion.result import (
     MotionExecutionResult,
 )
 from src.ai.moonfish_engine import MoonfishEngine
+from src.ai.pikafish_engine import PikafishEngine
 from src.ai.cloud_engine import CloudEngine
 from src.ai.ai_controller import AIController
 from src.vision.camera_monitor import CameraMonitor
@@ -112,7 +113,9 @@ class HardwareManager:
                 print("[MAIN] ✅ Virtual FR3 Backend connected via simulation runtime.")
             elif self.backend is None:
                 try:
-                    self.backend = VirtualFR3Backend()
+                    self.backend = VirtualFR3Backend(
+                        default_speed_factor=float(getattr(self.config, "ROBOT_SPEED_FACTOR", 0.25))
+                    )
                     self.backend.connect()
                     print("[MAIN] ✅ Virtual FR3 Backend connected.")
                 except Exception as e:
@@ -152,6 +155,7 @@ class HardwareManager:
                     board_pose_provider=self.board_pose_provider,
                     motion_profile=self.motion_profile,
                     tool_rotation_deg=tool_rot,
+                    default_speed_factor=float(getattr(self.config, "ROBOT_SPEED_FACTOR", 0.25)),
                 )
                 self.motion_executor = MotionExecutor(
                     backend=self.backend,
@@ -172,6 +176,7 @@ class HardwareManager:
                 self.backend = PhysicalFR3Backend(
                     ip=getattr(self.config, "ROBOT_IP", "192.168.58.2"),
                     dry_run=self.dry_run,
+                    default_vel=float(getattr(self.config, "MOVE_SPEED", 20.0)),
                 )
                 self.gripper_driver = TwoOutputGripperDriver(
                     set_do_fn=self.backend.set_tool_do,
@@ -332,6 +337,7 @@ class HardwareManager:
                 board_pose_provider=self.board_pose_provider,
                 motion_profile=self.motion_profile,
                 tool_rotation_deg=tool_rot,
+                default_speed_factor=float(getattr(self.config, "ROBOT_SPEED_FACTOR", 0.25)),
             )
             self.motion_executor = MotionExecutor(
                 backend=self.backend,
@@ -371,21 +377,42 @@ class HardwareManager:
         local_engine = None
         cloud_engine = None
 
-        # 1. Khởi tạo Local Moonfish (nếu cần)
+        # 1. Khởi tạo Local Engine (Ưu tiên Pikafish, fallback sang Moonfish)
         if engine_type in ["HYBRID", "LOCAL"]:
-            try:
-                exe_path = self.config.MOONFISH_EXE
-                nnue_path = self.config.MOONFISH_NNUE
-                local_engine = MoonfishEngine(exe_path)
-                local_engine.start(nnue_path=nnue_path)
-                print(f"✅ Moonfish engine started! (think={self.config.MOONFISH_THINK_MS}ms)")
-            except Exception as e:
-                print(f"⚠️ Moonfish init error: {e}")
-                local_engine = None
+            local_backend = getattr(self.config, "LOCAL_AI_BACKEND", "PIKAFISH").upper()
+            
+            # Thử Pikafish trước
+            if local_backend == "PIKAFISH":
+                try:
+                    pika_exe = getattr(self.config, "PIKAFISH_EXE", None)
+                    pika_nnue = getattr(self.config, "PIKAFISH_NNUE", None)
+                    if pika_exe and os.path.isfile(pika_exe):
+                        threads = getattr(self.config, "PIKAFISH_THREADS", 2)
+                        hash_mb = getattr(self.config, "PIKAFISH_HASH_MB", 64)
+                        local_engine = PikafishEngine(pika_exe, pika_nnue)
+                        local_engine.start(threads=threads, hash_mb=hash_mb)
+                        default_elo = getattr(self.config, "DEFAULT_AI_ELO", 1400)
+                        local_engine.set_elo(default_elo)
+                        print(f"[MAIN] Pikafish engine started! (ELO={default_elo}, Threads={threads}, Hash={hash_mb}MB)")
+                except Exception as e:
+                    print(f"[MAIN] Pikafish init error: {e} -> Thu fallback sang Moonfish...")
+                    local_engine = None
+
+            # Fallback sang Moonfish nếu Pikafish chưa có hoặc lỗi
+            if local_engine is None:
+                try:
+                    exe_path = getattr(self.config, "MOONFISH_EXE", None)
+                    if exe_path and os.path.isfile(exe_path):
+                        local_engine = MoonfishEngine(exe_path)
+                        local_engine.start(nnue_path=getattr(self.config, "MOONFISH_NNUE", None))
+                        print(f"[MAIN] Moonfish engine started! (think={getattr(self.config, 'MOONFISH_THINK_MS', 1000)}ms)")
+                except Exception as e:
+                    print(f"[MAIN] Moonfish init error: {e}")
+                    local_engine = None
             
             if local_engine is None and not self.dry_run:
                 print("\n========================================================")
-                print("⚠️ CẢNH BÁO: KHÔNG TÌM THẤY MOONFISH ENGINE DỰ PHÒNG LOCAL!")
+                print(" CẢNH BÁO: KHÔNG TÌM THẤY LOCAL AI ENGINE (PIKAFISH/MOONFISH)!")
                 print("   Hệ thống sẽ duy trì hoạt động bằng API Cloud Engine.")
                 print("========================================================\n")
 

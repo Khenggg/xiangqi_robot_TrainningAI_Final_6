@@ -6,6 +6,7 @@ Implements collision checking abstraction for:
 - FR3 links <-> pieces
 - Gripper proxies <-> board
 - Gripper proxies <-> pieces
+- Gripper proxies <-> non-mounting FR3 links
 - FR3 self-collision (filtering legitimate adjacent links)
 
 Enforces mandatory invariants:
@@ -20,6 +21,7 @@ import numpy as np
 import pybullet as p
 
 from src.simulation.physics.state import PiecePhysicalState
+from src.simulation.physics.transforms import quat_to_rot_matrix, rot_matrix_to_quat
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,40 @@ class FR3CollisionGuard:
         self.gripper_board_margin_m = float(gripper_board_margin_m)
         self.self_collision_margin_m = float(self_collision_margin_m)
 
+    def validate_gripper_transition(
+        self, joints_rad: Sequence[float], closed: bool,
+        allowed_grasp_piece_id: Optional[str] = None,
+    ) -> CollisionResult:
+        """Check the full jaw stroke without committing gripper or robot state."""
+        with self.world._physics_lock:
+            gripper = self.world.gripper
+            original_width = gripper.jaw_width_m
+            attached_piece = gripper.attached_piece
+            target_width = gripper.closed_width_m if closed else gripper.open_width_m
+            try:
+                # During release, payload contact with its destination board
+                # is intentional. The payload remains tagged as attached so
+                # it is excluded from stationary obstacle checks as well.
+                if not closed:
+                    gripper.attached_piece = None
+                # A 1 mm maximum jaw displacement per sample bounds missed
+                # contacts between the two endpoint poses.
+                steps = max(1, int(np.ceil(abs(target_width - original_width) / 0.001)))
+                for i in range(steps + 1):
+                    gripper.jaw_width_m = original_width + (target_width - original_width) * i / steps
+                    result = self.validate_configuration(
+                        joints_rad,
+                        allowed_grasp_piece_id=allowed_grasp_piece_id,
+                        restore_state=True,
+                    )
+                    if not result.safe:
+                        return result
+                return CollisionResult(safe=True)
+            finally:
+                gripper.attached_piece = attached_piece
+                gripper.jaw_width_m = original_width
+                gripper._update_proxy_poses()
+
     def validate_configuration(
         self,
         joints_rad: Sequence[float],
@@ -117,9 +153,13 @@ class FR3CollisionGuard:
         robot_id = self.world.robot_body_id
         board_id = self.world.board_body_id
 
+        attached_piece = self.world.get_attached_piece()
+        # Candidate payload poses are temporary. Keep robot and payload snapshots
+        # consistent even for callers that omit restore_state.
         q_bullet_orig = None
-        if restore_state:
+        if restore_state or attached_piece is not None:
             q_bullet_orig = [p.getJointState(robot_id, j, physicsClientId=client)[0] for j in range(6)]
+        attached_pose_orig = attached_piece.get_pose_robot_base() if attached_piece is not None else None
 
         try:
             return self._validate_configuration_internal(
@@ -133,6 +173,8 @@ class FR3CollisionGuard:
                 board_id=board_id,
             )
         finally:
+            if attached_piece is not None and attached_pose_orig is not None:
+                attached_piece.set_pose_robot_base(*attached_pose_orig)
             if q_bullet_orig is not None:
                 sync_fn = getattr(self.world, "sync_robot_collision_configuration", getattr(self.world, "sync_robot_configuration", None))
                 if sync_fn:
@@ -153,6 +195,25 @@ class FR3CollisionGuard:
         sync_fn = getattr(self.world, "sync_robot_collision_configuration", getattr(self.world, "sync_robot_configuration", None))
         if sync_fn:
             sync_fn(joints_rad)
+        attached_p = self.world.get_attached_piece()
+        if attached_p is not None:
+            attachment = self.world.gripper.T_gripper_piece
+            if attachment is None:
+                return CollisionResult(safe=False, colliding_body="payload", obstacle="attachment",
+                                       failure_reason="Attached payload transform unavailable")
+            flange = p.getLinkState(robot_id, 5, computeForwardKinematics=True, physicsClientId=client)
+            flange_pos = np.asarray(flange[4], dtype=float)
+            flange_quat = np.asarray(flange[5], dtype=float)
+            R_flange = quat_to_rot_matrix(flange_quat)
+            tcp_pos = flange_pos + R_flange @ self.world._tool_offset
+            grasp_pos = tcp_pos + R_flange @ self.world.gripper.tcp_to_grasp_center
+            T_grasp = np.eye(4, dtype=float)
+            T_grasp[:3, :3] = R_flange
+            T_grasp[:3, 3] = grasp_pos
+            T_payload = T_grasp @ attachment
+            attached_p.set_pose_robot_base(
+                T_payload[:3, 3], rot_matrix_to_quat(T_payload[:3, :3])
+            )
         p.performCollisionDetection(physicsClientId=client)
 
         # 2. Check FR3 links <-> board
@@ -197,12 +258,55 @@ class FR3CollisionGuard:
                         ),
                     )
 
+        floor_id = self.world.floor_body_id
+        for proxy_id in self.world.gripper.proxy_body_ids:
+            for pt in p.getClosestPoints(proxy_id, floor_id, distance=gb_margin, physicsClientId=client):
+                dist = float(pt[8])
+                if dist < gb_margin:
+                    return CollisionResult(
+                        safe=False, colliding_body="gripper", robot_link=5,
+                        obstacle="floor", distance_m=dist,
+                        penetration_m=max(0.0, -dist),
+                        q_failed=[round(float(q), 4) for q in joints_rad],
+                        failure_reason=f"Gripper colliding with floor ({dist*1000:.2f}mm)",
+                    )
+        for pt in p.getClosestPoints(robot_id, floor_id, distance=margin, physicsClientId=client):
+            link = int(pt[3])
+            if link == -1:  # fixed base is bolted to the floor
+                continue
+            dist = float(pt[8])
+            if dist < margin:
+                return CollisionResult(
+                    safe=False, colliding_body="robot", robot_link=link,
+                    obstacle="floor", distance_m=dist,
+                    penetration_m=max(0.0, -dist),
+                    q_failed=[round(float(q), 4) for q in joints_rad],
+                    failure_reason=f"Robot link {link} colliding with floor ({dist*1000:.2f}mm)",
+                )
+
+        # The tool is a separate kinematic body, so PyBullet's robot self
+        # collision query never sees tool-vs-arm contacts. Link 5 is the
+        # intended mounting link; every other robot link remains protected.
+        for proxy_id in self.world.gripper.proxy_body_ids:
+            pts = p.getClosestPoints(proxy_id, robot_id, distance=self_margin, physicsClientId=client)
+            for pt in pts:
+                link = int(pt[4])
+                if link == 5:
+                    continue
+                dist = float(pt[8])
+                if dist < self_margin:
+                    return CollisionResult(
+                        safe=False, colliding_body="gripper", robot_link=5,
+                        obstacle=f"robot_link_{link}", distance_m=dist,
+                        penetration_m=max(0.0, -dist),
+                        q_failed=[round(float(q), 4) for q in joints_rad],
+                        failure_reason=f"Gripper colliding with robot link {link} ({dist*1000:.2f}mm)",
+                    )
+
         # 4. Check FR3 links <-> pieces (stationary board obstacles)
         attached_p = self.world.get_attached_piece()
         attached_id = attached_p.piece_id if attached_p is not None else None
         for pid, piece in self.world.pieces.items():
-            if piece.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
-                continue
             # Attached payload piece moves with gripper, not a stationary obstacle
             if (pid == attached_id) or piece.attached_to_gripper:
                 continue
@@ -227,22 +331,16 @@ class FR3CollisionGuard:
         attached_p = self.world.get_attached_piece()
         attached_id = attached_p.piece_id if attached_p is not None else None
         for pid, piece in self.world.pieces.items():
-            if piece.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
-                continue
             is_target_piece = (pid == allowed_grasp_piece_id) or (pid == attached_id) or (piece.attached_to_gripper)
             if is_target_piece:
                 # If piece is already attached, it moves with gripper end-effector assembly.
                 # Palm penetration check strictly guards against crushing an unattached piece during grasp descent.
                 if not piece.attached_to_gripper and pid != attached_id:
-                    if self.world.gripper.palm_body_id >= 0:
-                        pts = p.getClosestPoints(
-                            self.world.gripper.palm_body_id,
-                            piece.body_id,
-                            distance=0.0,
-                            physicsClientId=client,
-                        )
-                        if pts and pts[0][8] < -1e-4:
-                            dist = float(pts[0][8])
+                    for fixed_id in self.world.gripper.fixed_body_ids:
+                        pts = p.getClosestPoints(fixed_id, piece.body_id, distance=0.0,
+                                                 physicsClientId=client)
+                        if pts and min(pt[8] for pt in pts) < -1e-4:
+                            dist = float(min(pt[8] for pt in pts))
                             return CollisionResult(
                                 safe=False,
                                 colliding_body="gripper_palm",
@@ -255,6 +353,21 @@ class FR3CollisionGuard:
                                     f"Gripper palm penetrating target piece {pid} (penetration={-dist*1000:.2f}mm)"
                                 ),
                             )
+                    for jaw_id in (self.world.gripper.left_jaw_body_id,
+                                   self.world.gripper.right_jaw_body_id):
+                        if jaw_id < 0:
+                            continue
+                        for pt in p.getClosestPoints(jaw_id, piece.body_id, distance=0.0,
+                                                     physicsClientId=client):
+                            dist = float(pt[8])
+                            if dist < -1e-4:
+                                return CollisionResult(
+                                    safe=False, colliding_body="gripper_jaw", robot_link=5,
+                                    obstacle=f"piece:{pid}", distance_m=dist,
+                                    penetration_m=-dist,
+                                    q_failed=[round(float(q), 4) for q in joints_rad],
+                                    failure_reason=f"Gripper jaw crushing target piece {pid} ({-dist*1000:.2f}mm)",
+                                )
             else:
                 for proxy_id in self.world.gripper.proxy_body_ids:
                     pts = p.getClosestPoints(proxy_id, piece.body_id, distance=margin, physicsClientId=client)
@@ -271,11 +384,55 @@ class FR3CollisionGuard:
                                 q_failed=[round(float(q), 4) for q in joints_rad],
                                 failure_reason=(
                                     f"Gripper colliding with obstacle piece {pid} "
-                                    f"(dist={dist*1000:.2f}mm < margin {margin*1000:.2f}mm)"
+                                    f"(clearance={dist*1000:.2f}mm, required={margin*1000:.2f}mm)"
                                 ),
                             )
 
-        # 6. Check FR3 self-collision (excluding adjacent pairs)
+        # 6. The carried piece is a moving collision body, not a static exclusion.
+        if attached_p is not None:
+            pts = p.getClosestPoints(attached_p.body_id, board_id, distance=gb_margin, physicsClientId=client)
+            for pt in pts:
+                dist = float(pt[8])
+                if dist < gb_margin:
+                    return CollisionResult(
+                        safe=False, colliding_body="payload", obstacle="board", distance_m=dist,
+                        penetration_m=max(0.0, -dist), q_failed=[round(float(q), 4) for q in joints_rad],
+                        failure_reason=f"Attached piece {attached_p.piece_id} too close to board ({dist*1000:.2f}mm)",
+                    )
+            for pt in p.getClosestPoints(attached_p.body_id, floor_id, distance=gb_margin,
+                                         physicsClientId=client):
+                dist = float(pt[8])
+                if dist < gb_margin:
+                    return CollisionResult(
+                        safe=False, colliding_body="payload", obstacle="floor", distance_m=dist,
+                        penetration_m=max(0.0, -dist), q_failed=[round(float(q), 4) for q in joints_rad],
+                        failure_reason=f"Attached piece {attached_p.piece_id} too close to floor ({dist*1000:.2f}mm)",
+                    )
+            for pt in p.getClosestPoints(attached_p.body_id, robot_id, distance=margin,
+                                         physicsClientId=client):
+                dist = float(pt[8])
+                if dist < margin:
+                    link = int(pt[4])
+                    return CollisionResult(
+                        safe=False, colliding_body="payload", obstacle=f"robot_link_{link}",
+                        robot_link=link, distance_m=dist,
+                        penetration_m=max(0.0, -dist), q_failed=[round(float(q), 4) for q in joints_rad],
+                        failure_reason=f"Attached piece {attached_p.piece_id} too close to robot link {link} ({dist*1000:.2f}mm)",
+                    )
+            for pid, piece in self.world.pieces.items():
+                if pid == attached_p.piece_id:
+                    continue
+                pts = p.getClosestPoints(attached_p.body_id, piece.body_id, distance=margin, physicsClientId=client)
+                for pt in pts:
+                    dist = float(pt[8])
+                    if dist < margin:
+                        return CollisionResult(
+                            safe=False, colliding_body="payload", obstacle=f"piece:{pid}", distance_m=dist,
+                            penetration_m=max(0.0, -dist), q_failed=[round(float(q), 4) for q in joints_rad],
+                            failure_reason=f"Attached piece {attached_p.piece_id} colliding with {pid} ({dist*1000:.2f}mm)",
+                        )
+
+        # 7. Check FR3 self-collision (excluding adjacent pairs)
         pts = p.getClosestPoints(robot_id, robot_id, distance=self_margin, physicsClientId=client)
         for pt in pts:
             linkA, linkB = int(pt[3]), int(pt[4])

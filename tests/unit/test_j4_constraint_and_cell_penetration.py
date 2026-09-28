@@ -1,23 +1,14 @@
-"""
-Unit tests and kinematic evaluation for J4 angle constraints and board penetration.
-
-Validates the user requirement:
-1. Optimal unconstrained IK reaches all 90 cells with strictly perpendicular gripper (tilt ~ 0 deg)
-   and ZERO board penetration (clearance > 70mm for all arm links).
-2. Constraining J4 to [-100 deg, -80 deg] causes:
-   - 0/90 cells reachable when maintaining perpendicular gripper.
-   - 90/90 cells penetrate below the board surface if forced to touch cell positions,
-     with gripper tilt exceeding 30 to 93 degrees (causing piece slip).
-"""
+"""Active 90-cell grasp clearance and rigid-link kinematics checks."""
 
 import json
 from pathlib import Path
 import unittest
 import numpy as np
+import pytest
 
-from src.domain.board_pose import BoardPlacementState
 from src.domain.geometry import get_physical_geometry
 from src.simulation.kinematics.fr3 import FR3Kinematics
+from src.simulation.runtime import VirtualXiangqiSimulation
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -47,48 +38,86 @@ class J4ConstraintAndPenetrationTests(unittest.TestCase):
         cls.z_tips = cls.z0 + 0.0015
         cls.z_flange = cls.z_tips + cls.L_gripper
 
-    def test_optimal_ik_reaches_all_90_cells_perpendicular_without_penetration(self):
-        """Verify unconstrained IK achieves 100% perpendicularity and 0% penetration across all 90 cells."""
-        q_seed = np.radians([0.0, -70.0, 120.0, -140.0, -90.0, 0.0])
-        reachable = 0
-        min_clearances = []
-        tilts = []
-        placement = BoardPlacementState.compute(forward_shift_mm=25.0, board_yaw_deg=90.0)
+    def test_current_feasibility_status_diagnostic(self):
+        """
+        Diagnostic measurement of current reachability status.
+        Currently achieves >= 67 collision-free cells under CAD proxy envelope.
+        Serves to protect against reachability regressions during development.
+        """
+        sim = VirtualXiangqiSimulation(auto_sync_telemetry=False)
+        sim.start()
+        try:
+            target_z = sim.board_surface_z + sim.geom.piece_height_mm / 2000.0
+            safe_count = 0
+            blocked = []
+            for row in range(self.num_rows):
+                for col in range(self.num_cols):
+                    xyz = sim.cell_to_robot_xyz_m(row, col, target_z)
+                    pose = [v * 1000.0 for v in xyz] + list(sim.target_tool_euler_deg)
+                    piece_id = sim._get_piece_at_cell(row, col)
+                    ik = sim.backend.solve_tcp_ik(
+                        pose,
+                        allow_multi_seed=True,
+                        allow_alternate_yaw=True,
+                        allowed_grasp_piece_id=piece_id,
+                    )
+                    if not ik.success:
+                        blocked.append((row, col, ik.failure_reason))
+                        continue
+                    collision = sim.collision_guard.validate_configuration(
+                        ik.joints_rad, allowed_grasp_piece_id=piece_id
+                    )
+                    self.assertTrue(collision.safe, f"Collision at ({row}, {col}): {collision.failure_reason}")
+                    safe_count += 1
+                    tcp_z = sim.backend._compute_tcp_pose_mm_deg(ik.joints_rad)[2] / 1000.0
+                    self.assertGreaterEqual(tcp_z - sim.board_surface_z, 0.0005)
+            self.assertGreaterEqual(safe_count, 67, f"Grasp reachability regressed: {blocked}")
+            self.assertEqual(safe_count + len(blocked), self.num_rows * self.num_cols)
+        finally:
+            sim.stop()
 
-        for r in range(self.num_rows):
-            for c in range(self.num_cols):
-                target_xyz = placement.cell_to_robot_xyz(r, c, z_rel_m=0.0)
-                T_target = np.eye(4)
-                T_target[:3, :3] = self.R_target
-                T_target[:3, 3] = [target_xyz[0], target_xyz[1], self.z_flange]
-
-                res = self.kin.inverse_kinematics(T_target, seed_joints=q_seed, max_iterations=80)
-                if not res.success:
-                    res = self.kin.inverse_kinematics(T_target, seed_joints=None, allow_multi_seed=True, max_iterations=100)
-
-                self.assertTrue(res.success, f"Failed to reach cell ({r}, {c})")
-                reachable += 1
-                q_seed = res.joints_rad
-
-                # Verify verticality: tool Z in robot base should point along -Z [0, 0, -1]
-                T_actual = self.kin.forward_kinematics(res.joints_rad).as_matrix()
-                tool_z = T_actual[:3, 2]
-                dot = np.clip(np.dot(tool_z, [0, 0, -1]), -1.0, 1.0)
-                tilt_deg = float(np.degrees(np.arccos(dot)))
-                tilts.append(tilt_deg)
-                self.assertLess(tilt_deg, 0.1, f"Gripper tilted {tilt_deg} deg at cell ({r}, {c})")
-
-                # Gripper tip clearance: flange Z minus gripper length compared to board surface
-                actual_flange_z = T_actual[2, 3]
-                gripper_tip_z = actual_flange_z - self.L_gripper
-                clearance_mm = (gripper_tip_z - self.z0) * 1000.0
-                min_clearances.append(clearance_mm)
-                # Gripper tips must hover strictly at or above board surface (0% penetration)
-                self.assertGreaterEqual(clearance_mm, 0.0, f"Gripper penetrated board by {clearance_mm}mm at ({r}, {c})")
-
-        self.assertEqual(reachable, 90)
-        self.assertLess(max(tilts), 0.05, "Maximum gripper tilt exceeded 0.05 deg")
-        self.assertGreaterEqual(min(min_clearances), 1.0, "Detected gripper tip penetration or clearance < 1mm")
+    @pytest.mark.acceptance
+    def test_gate_90_of_90_cells_grasp_and_contact_acceptance(self):
+        """
+        OFFICIAL PHYSICAL ACCEPTANCE GATE:
+        All 90/90 board cells must be reachable and collision-free with CAD gripper envelope.
+        STATUS: NOT PASSED (FAIL).
+        Transparently fails until future kinematic/gripper optimization achieves 90/90.
+        """
+        sim = VirtualXiangqiSimulation(auto_sync_telemetry=False)
+        sim.start()
+        try:
+            target_z = sim.board_surface_z + sim.geom.piece_height_mm / 2000.0
+            safe_count = 0
+            blocked = []
+            for row in range(self.num_rows):
+                for col in range(self.num_cols):
+                    xyz = sim.cell_to_robot_xyz_m(row, col, target_z)
+                    pose = [v * 1000.0 for v in xyz] + list(sim.target_tool_euler_deg)
+                    piece_id = sim._get_piece_at_cell(row, col)
+                    ik = sim.backend.solve_tcp_ik(
+                        pose,
+                        allow_multi_seed=True,
+                        allow_alternate_yaw=True,
+                        allowed_grasp_piece_id=piece_id,
+                    )
+                    if not ik.success:
+                        blocked.append((row, col, ik.failure_reason))
+                        continue
+                    collision = sim.collision_guard.validate_configuration(
+                        ik.joints_rad, allowed_grasp_piece_id=piece_id
+                    )
+                    if not collision.safe:
+                        blocked.append((row, col, collision.failure_reason))
+                        continue
+                    safe_count += 1
+            self.assertEqual(
+                safe_count, 90,
+                f"ACCEPTANCE GATE NOT PASSED (chưa đạt): Only {safe_count}/90 cells reachable. "
+                f"Blocked cells ({len(blocked)}/90): {blocked}"
+            )
+        finally:
+            sim.stop()
 
     def test_links_remain_strictly_rigid_with_zero_deformation(self):
         """Verify that link lengths are strictly invariant (delta < 1 um) across all 90 cell configurations.

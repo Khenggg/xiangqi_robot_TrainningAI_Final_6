@@ -136,9 +136,9 @@ export function buildCoordinateRulerGroup(options = {}) {
   });
 
   // -------------------------------------------------------------------------
-  // 1. TRỤC OX (NGANG: -400mm -> +400mm)
+  // 1. TRỤC OX (NGANG: -650mm -> +400mm, bao trọn bàn cờ X-)
   // -------------------------------------------------------------------------
-  const xMin = -0.40;
+  const xMin = -0.65;
   const xMax = 0.40;
   const xPoints = [
     new THREE.Vector3(xMin, yFloor, 0),
@@ -196,7 +196,7 @@ export function buildCoordinateRulerGroup(options = {}) {
   const xTickMinorPoints = [];
   const xTickFinePoints = [];
 
-  for (let mm = -400; mm <= 400; mm += 1) {
+  for (let mm = -650; mm <= 400; mm += 1) {
     const x = mm / 1000.0;
     if (mm % 100 === 0) {
       const tickLen = 0.009;
@@ -251,11 +251,30 @@ export function buildCoordinateRulerGroup(options = {}) {
     group.add(new THREE.LineSegments(geo, tickMatFine));
   }
 
+  // Các mốc đặc biệt trên trục X (tương ứng vị trí bàn cờ X-)
+  const specialXMarkers = [
+    { x: -0.20, label: "Cột 0: -200mm (gần robot)", color: "#38bdf8" },
+    { x: -0.36, label: "Tâm bàn: -360mm", color: "#fbbf24" },
+    { x: -0.52, label: "Cột 8: -520mm (xa robot)", color: "#f87171" },
+  ];
+  specialXMarkers.forEach((m) => {
+    const sprite = createTextSprite(`📍 ${m.label}`, {
+      fontSize: 12,
+      fontColor: m.color,
+      bgColor: "rgba(15, 23, 42, 0.85)",
+      borderColor: m.color,
+      scale: 0.0095,
+      depthTest: true,
+    });
+    sprite.position.set(m.x, yFloor + 0.005, 0.018);
+    labelsX.add(sprite);
+  });
+
   // -------------------------------------------------------------------------
-  // 2. TRỤC OZ (DỌC HƯỚNG BÀN CỜ: 0mm -> +650mm)
+  // 2. TRỤC OZ (DỌC HƯỚNG 10 HÀNG: -350mm -> +350mm)
   // -------------------------------------------------------------------------
-  const zMin = 0.0;
-  const zMax = 0.65;
+  const zMin = -0.35;
+  const zMax = 0.35;
   const zPoints = [
     new THREE.Vector3(0, yFloor, zMin),
     new THREE.Vector3(0, yFloor, zMax),
@@ -299,7 +318,7 @@ export function buildCoordinateRulerGroup(options = {}) {
   const zTickMinorPoints = [];
   const zTickFinePoints = [];
 
-  for (let mm = 0; mm <= 650; mm += 1) {
+  for (let mm = -350; mm <= 350; mm += 1) {
     const z = mm / 1000.0;
     if (mm % 100 === 0) {
       const tickLen = 0.009;
@@ -308,8 +327,9 @@ export function buildCoordinateRulerGroup(options = {}) {
         new THREE.Vector3(tickLen / 2, yFloor, z)
       );
 
-      if (mm > 0) {
-        const sprite = createTextSprite(`Z: ${mm}mm`, {
+      if (mm !== 0) {
+        const sign = mm > 0 ? `+${mm}` : `${mm}`;
+        const sprite = createTextSprite(`Z: ${sign}mm`, {
           fontSize: 12,
           fontColor: "#bfdbfe",
           bgColor: "rgba(15, 23, 42, 0.8)",
@@ -340,11 +360,11 @@ export function buildCoordinateRulerGroup(options = {}) {
     }
   }
 
-  // Các mốc đặc biệt trên trục Z (tương ứng trục Cột trong góc quay 90°)
+  // Các mốc đặc biệt trên trục Z (tương ứng trục Hàng trong bố trí Yaw 0°)
   const specialZMarkers = [
-    { z: 0.20, label: "Cột 0: 200mm", color: "#38bdf8" },
-    { z: 0.36, label: "Tâm: 360mm", color: "#fbbf24" },
-    { z: 0.52, label: "Cột 8: 520mm", color: "#f87171" },
+    { z: -0.18, label: "Hàng 0 (Đen): -180mm", color: "#4ade80" },
+    { z: 0.0, label: "Sông (Trung Lộ): 0mm", color: "#fbbf24" },
+    { z: 0.18, label: "Hàng 9 (Đỏ): +180mm", color: "#f87171" },
   ];
   specialZMarkers.forEach((m) => {
     const sprite = createTextSprite(`📍 ${m.label}`, {
@@ -497,17 +517,20 @@ export function buildCoordinateRulerGroup(options = {}) {
   // -------------------------------------------------------------------------
   // 5. HIT PROXIES CHO 4 CẠNH BÀN CỜ (BOARD EDGES)
   // -------------------------------------------------------------------------
-  // Bàn cờ đặt tại tâm (0, 0.0105, 0.36), kích thước: 0.367m x 0.410m
+  // Bàn cờ đặt trong boardEdgesGroup với vị trí và rotation đồng bộ authoritative placement.
+  // Kích thước cục bộ: Local X (chiều dài 10 hàng) = 0.410m, Local Z (chiều rộng 9 cột) = 0.367m.
   const boardEdgesGroup = new THREE.Group();
   boardEdgesGroup.name = "board-edges-group";
   group.add(boardEdgesGroup);
 
-  const boardCenterZ = 0.36;
-  // Trong góc quay 90°:
-  // - Trục Z (world) / -X (robot): chiều ngang bàn cờ outer_width = 0.367m -> nửa rộng = 0.1835m
-  // - Trục X (world) / -Y (robot): chiều dài bàn cờ outer_length = 0.410m -> nửa dài = 0.205m
-  const boardHalfZ = 0.367 / 2; // 0.1835m (độ sâu theo Z)
-  const boardHalfX = 0.410 / 2; // 0.205m (chiều ngang theo X)
+  // Khởi tạo vị trí ban đầu theo bố trí X- (yaw 0.0°)
+  boardEdgesGroup.position.set(-0.36, 0.0105, 0.0);
+  boardEdgesGroup.rotation.y = -Math.PI / 2; // (0° - 90°) * PI / 180
+  labelsBoard.position.set(-0.36, 0.0105, 0.0);
+  labelsBoard.rotation.y = -Math.PI / 2;
+
+  const boardHalfZ = 0.367 / 2; // 0.1835m (chiều cột trong hệ local)
+  const boardHalfX = 0.410 / 2; // 0.205m (chiều hàng trong hệ local)
 
   const makeEdgeProxy = (w, h, d, x, y, z, edgeName) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), hitProxyMat);
@@ -517,14 +540,14 @@ export function buildCoordinateRulerGroup(options = {}) {
     boardEdgesGroup.add(mesh);
   };
 
-  // Cạnh trước (Near - mép gần robot trên trục Z: 360 - 183.5 = 176.5mm)
-  makeEdgeProxy(0.42, 0.025, 0.03, 0, yFloor + 0.01, boardCenterZ - boardHalfZ, "NEAR");
-  // Cạnh sau (Far - mép xa robot trên trục Z: 360 + 183.5 = 543.5mm)
-  makeEdgeProxy(0.42, 0.025, 0.03, 0, yFloor + 0.01, boardCenterZ + boardHalfZ, "FAR");
-  // Cạnh trái (-X: -205mm)
-  makeEdgeProxy(0.03, 0.025, 0.38, -boardHalfX, yFloor + 0.01, boardCenterZ, "LEFT");
-  // Cạnh phải (+X: +205mm)
-  makeEdgeProxy(0.03, 0.025, 0.38, boardHalfX, yFloor + 0.01, boardCenterZ, "RIGHT");
+  // Cạnh trước (NEAR - mép Cột 0 gần robot): local Z = -boardHalfZ
+  makeEdgeProxy(0.42, 0.025, 0.03, 0, 0, -boardHalfZ, "NEAR");
+  // Cạnh sau (FAR - mép Cột 8 xa robot): local Z = +boardHalfZ
+  makeEdgeProxy(0.42, 0.025, 0.03, 0, 0, +boardHalfZ, "FAR");
+  // Cạnh trái (LEFT - mép Hàng 0 Đen): local X = -boardHalfX
+  makeEdgeProxy(0.03, 0.025, 0.38, -boardHalfX, 0, 0, "LEFT");
+  // Cạnh phải (RIGHT - mép Hàng 9 Đỏ): local X = +boardHalfX
+  makeEdgeProxy(0.03, 0.025, 0.38, boardHalfX, 0, 0, "RIGHT");
 
   // -------------------------------------------------------------------------
   // CÁC HÀM TIỆN ÍCH QUẢN LÝ HIỂN THỊ TỌA ĐỘ KHI CLICK (API)
@@ -587,19 +610,37 @@ export function buildCoordinateRulerGroup(options = {}) {
   };
 
   /**
-   * Cập nhật vị trí các hit proxies cạnh bàn cờ theo authoritative runtime placement.
+   * Cập nhật vị trí và góc quay các hit proxies cạnh bàn cờ theo authoritative runtime placement.
    */
-  group.updateBoardPlacement = function (boardCenterZ, boardSurfaceY) {
-    if (boardCenterZ !== undefined && boardCenterZ !== null) {
-      const dz = Number(boardCenterZ) - 0.36;
-      boardEdgesGroup.position.z = dz;
-      labelsBoard.position.z = dz;
+  group.updateBoardPlacement = function (centerXOrObj, surfaceY, centerZ, yawDeg) {
+    let cx = -0.36, cy = 0.0105, cz = 0.0, yaw = 0.0;
+    if (typeof centerXOrObj === "object" && centerXOrObj !== null) {
+      const c = centerXOrObj.board_center_world_m || [
+        centerXOrObj.boardCenterX ?? -0.36,
+        centerXOrObj.boardSurfaceY ?? 0.0105,
+        centerXOrObj.boardCenterZ ?? 0.0,
+      ];
+      cx = Number(c[0]);
+      cy = Number(c[1]);
+      cz = Number(c[2]);
+      yaw = Number(centerXOrObj.board_yaw_deg ?? centerXOrObj.boardYawDeg ?? 0.0);
+    } else if (arguments.length === 2) {
+      cz = Number(centerXOrObj);
+      cy = Number(surfaceY);
+      cx = -0.36;
+      yaw = 0.0;
+    } else {
+      cx = Number(centerXOrObj ?? -0.36);
+      cy = Number(surfaceY ?? 0.0105);
+      cz = Number(centerZ ?? 0.0);
+      yaw = Number(yawDeg ?? 0.0);
     }
-    if (boardSurfaceY !== undefined && boardSurfaceY !== null) {
-      const dy = Number(boardSurfaceY) - 0.0105;
-      boardEdgesGroup.position.y = dy;
-      labelsBoard.position.y = dy;
-    }
+
+    boardEdgesGroup.position.set(cx, cy, cz);
+    const yawOffsetRad = ((yaw - 90.0) * Math.PI) / 180.0;
+    boardEdgesGroup.rotation.y = yawOffsetRad;
+    labelsBoard.position.set(cx, cy, cz);
+    labelsBoard.rotation.y = yawOffsetRad;
   };
 
   /**

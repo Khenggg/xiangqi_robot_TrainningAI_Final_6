@@ -75,7 +75,8 @@ class VirtualXiangqiSimulation:
     DEFAULT_SERVICE_XY_MARGIN_M: float = 0.030
     DEFAULT_SERVICE_VERTICAL_CLEARANCE_M: float = 0.050
     POST_LIFT_SETTLE_MAX_STEPS: int = 60
-    POST_RELEASE_SETTLE_MAX_STEPS: int = 60
+    POST_RELEASE_SETTLE_MAX_STEPS: int = 120
+    PLACE_RELEASE_CLEARANCE_M: float = 0.001
 
     def __init__(
         self,
@@ -153,6 +154,10 @@ class VirtualXiangqiSimulation:
             bp = cfg.get("virtual_board_placement", {})
             self.grid_origin_robot = bp.get("grid_origin_in_robot_base_m", [-0.18, -0.16, 0.0105])
             self.board_surface_z = bp.get("board_surface_height_m", 0.0105)
+            self.nominal_board_surface_z = float(self.board_surface_z)
+            self.board_yaw_deg = float(bp.get("board_yaw_deg", 90.0))
+            center = bp.get("board_center_in_robot_base_m", [-0.36, 0.0, 0.0105])
+            self.nominal_board_center_robot = [float(center[0]), float(center[1]), self.board_surface_z / 2.0]
             if "target_tool_orientation_matrix" in bp:
                 R_mat = np.array(bp["target_tool_orientation_matrix"], dtype=float)
                 self.target_tool_euler_deg = [round(float(v), 2) for v in np.rad2deg(matrix_to_rpy(R_mat))]
@@ -161,6 +166,9 @@ class VirtualXiangqiSimulation:
         else:
             self.grid_origin_robot = [-0.18, -0.16, 0.0105]
             self.board_surface_z = 0.0105
+            self.nominal_board_surface_z = float(self.board_surface_z)
+            self.board_yaw_deg = 90.0
+            self.nominal_board_center_robot = [-0.36, 0.0, self.board_surface_z / 2.0]
             self.target_tool_euler_deg = [180.0, 0.0, 90.0]
 
         repo_root = Path(__file__).resolve().parent.parent.parent
@@ -172,9 +180,28 @@ class VirtualXiangqiSimulation:
                 with open(reach_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     dataset_meta = data.get("metadata", {})
-                    self.reachability_dataset = {
-                        (c["row"], c["col"]): c for c in data.get("cells", [])
-                    }
+                    d_status = str(dataset_meta.get("status", "VALID"))
+                    d_yaw = float(dataset_meta.get("board_yaw_deg", 90.0))
+                    # Stale or mismatched datasets must not supply unvalidated joint seeds
+                    tool_m = self.backend.flange_to_tcp_distance_m
+                    d_tool = float(dataset_meta.get("gripper_length_m", float("nan")))
+                    d_shift = float(dataset_meta.get("forward_shift_mm", float("nan")))
+                    if (d_status != "STALE/UNVALIDATED"
+                            and abs(d_yaw - self.board_yaw_deg) < 1e-6
+                            and abs(d_tool - tool_m) < 1e-6
+                            and abs(d_shift) < 1e-6):
+                        self.reachability_dataset = {
+                            (c["row"], c["col"]): c for c in data.get("cells", [])
+                        }
+                    else:
+                        logger.info(
+                            "Ignoring cell reachability dataset (status=%s, yaw=%.1f deg vs current=%.1f deg, tool=%.4f vs %.4f m)",
+                            d_status,
+                            d_yaw,
+                            self.board_yaw_deg,
+                            d_tool,
+                            tool_m,
+                        )
             except Exception:
                 pass
 
@@ -183,7 +210,9 @@ class VirtualXiangqiSimulation:
             forward_shift_mm=0.0,
             safe_transit_height_mm=70.0,
             board_height_offset_mm=0.0,
-            nominal_grid_origin_m=self.grid_origin_robot,
+            board_yaw_deg=self.board_yaw_deg,
+            nominal_board_center_robot_m=self.nominal_board_center_robot,
+            nominal_board_surface_z_m=self.nominal_board_surface_z,
             placement_version=1,
         )
         self.placement_analyzer = BoardPlacementAnalyzer(
@@ -271,17 +300,14 @@ class VirtualXiangqiSimulation:
 
     def _get_piece_at_cell(self, row: int, col: int) -> Optional[str]:
         """Find the ID of any piece currently resting on the given grid cell."""
-        try:
-            x_cell, y_cell, _ = self.canonical_cell_to_robot_xyz(row, col)
-            cell_xy = np.array([x_cell, y_cell], dtype=float)
-            for pid, piece in self.world.pieces.items():
-                if piece.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
-                    continue
-                p_pos, _ = piece.get_pose_robot_base()
-                if np.linalg.norm(np.array(p_pos[:2]) - cell_xy) < 0.025:
-                    return pid
-        except Exception:
-            pass
+        x_cell, y_cell, _ = self.cell_to_robot_xyz_m(row, col)
+        cell_xy = np.array([x_cell, y_cell], dtype=float)
+        for pid, piece in self.world.pieces.items():
+            if piece.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
+                continue
+            p_pos, _ = piece.get_pose_robot_base()
+            if np.linalg.norm(np.array(p_pos[:2]) - cell_xy) < 0.025:
+                return pid
         return None
 
     def find_nearest_cell(self, pos_robot_m: Sequence[float]) -> Tuple[int, int]:
@@ -314,7 +340,10 @@ class VirtualXiangqiSimulation:
         # Detect gripper transition
         if snapshot.gripper_closed != self._last_gripper_closed:
             if snapshot.gripper_closed:
-                self.world.try_grasp()
+                # A manual close has no authority to select an arbitrary nearby piece.
+                target_piece_id = self.backend.allowed_grasp_piece_id
+                if target_piece_id is not None:
+                    self.world.try_grasp(target_piece_id=target_piece_id)
             else:
                 self.world.release_attached_piece()
             self._last_gripper_closed = snapshot.gripper_closed
@@ -441,7 +470,13 @@ class VirtualXiangqiSimulation:
                     safe_plane_z = self.board_surface_z + safe_h_m
 
                     # 1. Open gripper
-                    self.backend.set_gripper(False)
+                    if not self.backend.set_gripper(False):
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PickResult(
+                            success=False, status="GRIPPER_COLLISION_REJECTED",
+                            error=self.backend._last_error, piece_id=piece_id,
+                            piece_grasped=False, payload_clear=False, requires_recovery=False,
+                        )
 
                     rx, ry, rz = self.target_tool_euler_deg
                     hover_pose = [px * 1000.0, py * 1000.0, (pz + eff_hover_h) * 1000.0, rx, ry, rz]
@@ -502,6 +537,9 @@ class VirtualXiangqiSimulation:
                             requires_recovery=False,
                         )
 
+                    # IK may select the equivalent 180-degree jaw orientation. Preserve
+                    # that collision-checked branch through alignment and vertical descent.
+                    hover_pose[3:] = list(self.backend.get_state_snapshot().tcp_pose_mm_deg[3:])
                     if not self.backend.move_cartesian(hover_pose, speed_factor=speed_factor):
                         self.backend.set_trajectory_stage("FAILED")
                         return PickResult(
@@ -519,7 +557,7 @@ class VirtualXiangqiSimulation:
 
                         # 3. Descend to grasp (TCP at piece center)
                         self.backend.set_trajectory_stage("DESCEND")
-                        grasp_pose = [px * 1000.0, py * 1000.0, pz * 1000.0, rx, ry, rz]
+                        grasp_pose = [px * 1000.0, py * 1000.0, pz * 1000.0] + hover_pose[3:]
                         if not self.backend.move_cartesian(grasp_pose, speed_factor=speed_factor):
                             self.backend.set_trajectory_stage("FAILED")
                             return PickResult(
@@ -534,7 +572,14 @@ class VirtualXiangqiSimulation:
 
                         # 4. Close gripper (triggers try_grasp)
                         self.backend.set_trajectory_stage("GRASP")
-                        self.backend.set_gripper(True)
+                        if not self.backend.set_gripper(True):
+                            self.backend.set_trajectory_stage("FAILED")
+                            return PickResult(
+                                success=False, status="GRIPPER_COLLISION_REJECTED",
+                                error=self.backend._last_error,
+                                piece_id=piece_id, piece_grasped=False,
+                                payload_clear=False, requires_recovery=False,
+                            )
                         attached = self.world.get_attached_piece()
                         if attached is not None and attached.piece_id == piece_id:
                             grasp_res = GraspResult(success=True, status=GraspStatus.SUCCESS, piece_id=attached.piece_id)
@@ -557,14 +602,16 @@ class VirtualXiangqiSimulation:
                         if not grasp_res.success:
                             logger.warning(f"Grasp verification failed for {piece_id}: {grasp_res.reason}")
                             self.backend.set_trajectory_stage("FAILED")
+                            opened = self.backend.set_gripper(False)
+                            recovery_error = "" if opened else f"; reopening gripper rejected: {self.backend._last_error}"
                             return PickResult(
                                 success=False,
                                 status=str(getattr(grasp_res, "status", "GRASP_FAILED")),
-                                error=f"Grasp verification failed: {grasp_res.reason}",
+                                error=f"Grasp verification failed: {grasp_res.reason}{recovery_error}",
                                 piece_id=piece_id,
                                 piece_grasped=False,
                                 payload_clear=False,
-                                requires_recovery=False,
+                                requires_recovery=True,
                             )
 
                         self.backend.set_attached_piece_id(piece_id)
@@ -743,7 +790,11 @@ class VirtualXiangqiSimulation:
 
                     rx, ry, rz = self.target_tool_euler_deg
                     hover_pose = [tx * 1000.0, ty * 1000.0, (piece_z + eff_hover_h) * 1000.0, rx, ry, rz]
-                    place_pose = [tx * 1000.0, ty * 1000.0, piece_z * 1000.0, rx, ry, rz]
+                    place_pose = [
+                        tx * 1000.0, ty * 1000.0,
+                        (piece_z + self.PLACE_RELEASE_CLEARANCE_M) * 1000.0,
+                        rx, ry, rz,
+                    ]
 
                     # 1. Move to hover (APPROACH)
                     self.backend.set_trajectory_stage("APPROACH")
@@ -826,14 +877,22 @@ class VirtualXiangqiSimulation:
 
                     # 3. Open gripper & release piece (RELEASE)
                     self.backend.set_trajectory_stage("RELEASE")
-                    self.backend.set_gripper(False)
+                    if not self.backend.set_gripper(False):
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PlaceResult(
+                            success=False, status="GRIPPER_COLLISION_REJECTED",
+                            error=self.backend._last_error, piece_id=placed_piece_id,
+                            target_cell=target_cell_tuple, piece_placed=False,
+                            piece_released=False, post_release_lift_complete=False,
+                            board_clear=False, service_safe=False, requires_recovery=True,
+                        )
                     self.world.release_attached_piece()
                     self.backend.set_attached_piece_id(None)
                     self.backend.set_allowed_grasp_piece_id(None)
 
                     # 4. Settle (SETTLE)
                     self.backend.set_trajectory_stage("SETTLE")
-                    self.world.step_until_settled(max_steps=40)
+                    self.world.step_until_settled(max_steps=self.POST_RELEASE_SETTLE_MAX_STEPS)
 
                     # Physical placement verification
                     piece_released = True
@@ -1254,6 +1313,8 @@ class VirtualXiangqiSimulation:
                         safe_transit_height_mm=cur_h,
                         board_height_offset_mm=cur_z_off,
                         board_yaw_deg=self.placement_state.board_yaw_deg,
+                        nominal_board_center_robot_m=self.nominal_board_center_robot,
+                        nominal_board_surface_z_m=self.nominal_board_surface_z,
                         placement_version=new_version,
                     )
 
@@ -1274,6 +1335,7 @@ class VirtualXiangqiSimulation:
                         forward_shift_mm=new_state.forward_shift_mm,
                         safe_transit_height_mm=new_state.safe_transit_height_mm,
                         board_surface_mm=new_state.grid_origin_robot_m[2] * 1000.0,
+                        board_yaw_deg=new_state.board_yaw_deg,
                         placement_version=new_version,
                     )
                     if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
@@ -1341,7 +1403,7 @@ class VirtualXiangqiSimulation:
                 if hasattr(self.world, "reset_pieces"):
                     self.world.reset_pieces()
                 if hasattr(self.world, "step_until_settled"):
-                    self.world.step_until_settled(max_steps=30)
+                    self.world.step_until_settled(max_steps=60)
                 self._scheduled_drop = None
                 self.last_drop_event = None
                 if self.telemetry is not None and hasattr(self.telemetry, "update_world_state"):
@@ -1863,7 +1925,7 @@ class VirtualXiangqiSimulation:
                         }
 
                     self.backend.set_trajectory_stage("IDLE")
-                    self.world.step_until_settled(max_steps=80)
+                    self.world.step_until_settled(max_steps=self.world.max_settle_steps)
                     report = self.evaluate_service_safety()
                     if not report.service_safe:
                         return {
@@ -2780,15 +2842,19 @@ class VirtualXiangqiSimulation:
                 grasp = cmd.get("grasp_piece")
             # Strict fail-safe default: missing grasp flag defaults to False (arm-only transit)
             grasp_piece_bool = bool(grasp) if grasp is not None else False
+            speed = cmd.get("speed_factor")
             if src is not None and dst is not None and len(src) == 2 and len(dst) == 2:
                 threading.Thread(
                     target=self._run_trajectory_async,
-                    args=((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1])), p_ver, grasp_piece_bool),
+                    args=((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1])), p_ver, grasp_piece_bool, speed),
                     daemon=True,
                 ).start()
         elif action == "SET_GRIPPER":
             closed = bool(cmd.get("closed", False))
-            self.backend.set_gripper(closed)
+            if not self.backend.set_gripper(closed) and self.telemetry is not None:
+                self.telemetry.broadcast_custom({
+                    "type": "error", "message": self.backend._last_error or "Gripper command rejected",
+                })
         elif action == "RESET":
             speed = cmd.get("speed_factor")
             threading.Thread(target=self.reset_robot, kwargs={"speed_factor": speed}, daemon=True).start()
@@ -2892,9 +2958,12 @@ class VirtualXiangqiSimulation:
         dst: Tuple[int, int],
         planned_version: Optional[int] = None,
         grasp_piece: Optional[bool] = False,
+        speed_factor: Optional[float] = None,
     ) -> None:
         """Execute trajectory asynchronously and broadcast authoritative completion packet."""
-        res = self.execute_3stage_trajectory(src, dst, planned_placement_version=planned_version, grasp_piece=grasp_piece)
+        res = self.execute_3stage_trajectory(
+            src, dst, speed_factor=speed_factor, planned_placement_version=planned_version, grasp_piece=grasp_piece
+        )
         if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
             self.telemetry.broadcast_custom({
                 "type": "trajectory_result",
@@ -2999,7 +3068,9 @@ class VirtualXiangqiSimulation:
             src_grasp_m = self.cell_to_robot_xyz_m(r_src, c_src, z_grasp)
             src_app_m = self.cell_to_robot_xyz_m(r_src, c_src, z_transit)
             dst_app_m = self.cell_to_robot_xyz_m(r_dst, c_dst, z_transit)
-            dst_grasp_m = self.cell_to_robot_xyz_m(r_dst, c_dst, z_grasp)
+            dst_grasp_m = self.cell_to_robot_xyz_m(
+                r_dst, c_dst, z_grasp + self.PLACE_RELEASE_CLEARANCE_M
+            )
 
             to_mm_deg = lambda p_m: [p_m[0] * 1000.0, p_m[1] * 1000.0, p_m[2] * 1000.0] + tool_rpy
 
@@ -3168,7 +3239,14 @@ class VirtualXiangqiSimulation:
                 # Grasp piece if present at src_cell and should_grasp is True
                 if should_grasp and piece_at_src:
                     self.backend.set_trajectory_stage("GRASP")
-                    self.backend.set_gripper(True)
+                    if not self.backend.set_gripper(True):
+                        self.backend.set_trajectory_stage("FAILED")
+                        return {
+                            "success": False, "status": "GRIPPER_COLLISION_REJECTED",
+                            "failed_stage": "GRASP", "error": self.backend._last_error,
+                            "service_safe": False, "requires_recovery": False,
+                            "placement_version": current_ver,
+                        }
                     attached = self.world.get_attached_piece()
                     if attached is not None and attached.piece_id == piece_at_src:
                         grasp_res = GraspResult(success=True, status=GraspStatus.SUCCESS, piece_id=attached.piece_id)
@@ -3177,11 +3255,14 @@ class VirtualXiangqiSimulation:
                     world_attached = self.world.get_attached_piece()
                     if not (grasp_res.success and world_attached is not None and world_attached.piece_id == piece_at_src):
                         self.backend.set_trajectory_stage("FAILED")
-                        self.backend.set_gripper(False)
-                        self.world.release_attached_piece()
-                        self.backend.set_attached_piece_id(None)
+                        opened = self.backend.set_gripper(False)
+                        if opened:
+                            self.backend.set_attached_piece_id(None)
                         status_name = grasp_res.status.name if hasattr(grasp_res, "status") and hasattr(grasp_res.status, "name") else str(getattr(grasp_res, "status", "GRASP_FAILED"))
-                        err_msg = f"GRASP stage failed: Could not grasp piece {piece_at_src} at source cell {src_cell} ({status_name})"
+                        reason = getattr(grasp_res, "reason", None) or status_name
+                        err_msg = f"GRASP stage failed for {piece_at_src} at {src_cell}: {reason} ({status_name})"
+                        if not opened:
+                            err_msg += f"; reopening gripper rejected: {self.backend._last_error}"
                         self.backend._last_error = err_msg
                         return {
                             "success": False,
@@ -3286,7 +3367,14 @@ class VirtualXiangqiSimulation:
                 piece_released = False
                 if should_grasp and (piece_at_src or self.world.get_attached_piece() is not None):
                     self.backend.set_trajectory_stage("RELEASE")
-                    self.backend.set_gripper(False)
+                    if not self.backend.set_gripper(False):
+                        self.backend.set_trajectory_stage("FAILED")
+                        return {
+                            "success": False, "status": "GRIPPER_COLLISION_REJECTED",
+                            "failed_stage": "RELEASE", "error": self.backend._last_error,
+                            "service_safe": False, "requires_recovery": True,
+                            "placement_version": current_ver,
+                        }
                     self.world.release_attached_piece()
                     self.backend.set_attached_piece_id(None)
                     self.backend.set_allowed_grasp_piece_id(None)

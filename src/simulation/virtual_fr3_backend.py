@@ -21,6 +21,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from src.domain.geometry import get_canonical_tool_geometry
+from src.simulation.tool_geometry import virtual_link_to_tcp_offset_m
 from src.hardware.backends.base import RobotBackend, RobotStateSnapshot
 from src.simulation.kinematics.fr3 import FR3Kinematics, IKResult, IKStatus
 from src.simulation.kinematics.urdf_chain import Pose3D, matrix_to_rpy, rpy_to_matrix
@@ -121,23 +122,37 @@ class VirtualFR3Backend(RobotBackend):
         tool_xyz = list(canonical_tool.canonical_tcp_offset_m)
         tool_rpy = [0.0, 0.0, 0.0]
         if self.scene_config_path.is_file():
-            try:
-                with open(self.scene_config_path, "r", encoding="utf-8-sig") as f:
-                    data = json.load(f)
-                tool_cfg = data.get("tool_transform", {})
-                tool_xyz = tool_cfg.get("flange_to_tcp_xyz_m", tool_xyz)
-                tool_rpy = tool_cfg.get("flange_to_tcp_rpy_deg", tool_rpy)
-            except Exception as e:
-                logger.warning(f"Could not load tool_transform from {self.scene_config_path}: {e}")
+            with open(self.scene_config_path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            tool_cfg = data.get("tool_transform", {})
+            scene_xyz = np.asarray(tool_cfg.get("flange_to_tcp_xyz_m", tool_xyz), dtype=float)
+            if scene_xyz.shape != (3,) or not np.all(np.isfinite(scene_xyz)) or not np.allclose(
+                scene_xyz, tool_xyz, rtol=0.0, atol=1e-6
+            ):
+                raise ValueError("Scene flange-to-TCP transform differs from canonical robot profile")
+            tool_rpy = tool_cfg.get("flange_to_tcp_rpy_deg", tool_rpy)
+            if np.asarray(tool_rpy, dtype=float).shape != (3,) or not np.allclose(
+                tool_rpy, [0.0, 0.0, 0.0], rtol=0.0, atol=1e-6
+            ):
+                raise ValueError("Scene TCP rotation is unsupported by the collision proxy")
 
         R_tool = rpy_to_matrix(np.radians(tool_rpy))
         T_flange_tcp = np.eye(4, dtype=float)
         T_flange_tcp[:3, :3] = R_tool
         T_flange_tcp[:3, 3] = np.array(tool_xyz, dtype=float)
 
+        # URDF FK terminates at wrist3_link origin, 100 mm behind the
+        # physical mounting flange represented by the STEP viewer.
+        T_link_flange = np.eye(4, dtype=float)
+        T_link_flange[:3, 3] = virtual_link_to_tcp_offset_m() - np.asarray(tool_xyz)
+        T_link_tcp = T_link_flange @ T_flange_tcp
+
+        self._T_link_flange = T_link_flange
+        self._T_link_tcp = T_link_tcp
+        self._T_tcp_link = np.linalg.inv(T_link_tcp)
         self._T_flange_tcp = T_flange_tcp
         self._T_tcp_flange = np.linalg.inv(T_flange_tcp)
-        self.flange_to_tcp_distance_m = float(np.linalg.norm(T_flange_tcp[:3, 3]))
+        self.flange_to_tcp_distance_m = float(np.linalg.norm(tool_xyz))
 
         self.collision_guard = None
         self.collision_guard_enabled = True
@@ -207,14 +222,13 @@ class VirtualFR3Backend(RobotBackend):
             self._sync_telemetry()
 
     def _compute_flange_pose_mm_deg(self, joints_rad: np.ndarray) -> List[float]:
-        pose = self.kinematics.forward_kinematics(joints_rad)
-        return pose.to_xyz_rpy_deg()
+        pose_link = self.kinematics.forward_kinematics(joints_rad)
+        return Pose3D.from_matrix(pose_link.as_matrix() @ self._T_link_flange).to_xyz_rpy_deg()
 
     def _compute_tcp_pose_mm_deg(self, joints_rad: np.ndarray) -> List[float]:
-        """Compute tool TCP pose via rigid transformation composition: T_base_tcp = T_base_flange @ T_flange_tcp."""
-        pose_flange = self.kinematics.forward_kinematics(joints_rad)
-        T_base_flange = pose_flange.as_matrix()
-        T_base_tcp = T_base_flange @ self._T_flange_tcp
+        """Compute TCP from URDF wrist3_link origin through the mounting flange."""
+        pose_link = self.kinematics.forward_kinematics(joints_rad)
+        T_base_tcp = pose_link.as_matrix() @ self._T_link_tcp
         return Pose3D.from_matrix(T_base_tcp).to_xyz_rpy_deg()
 
     def connect(self) -> bool:
@@ -254,9 +268,11 @@ class VirtualFR3Backend(RobotBackend):
 
         poses_to_try = [list(tcp_pose_mm_deg)]
         if allow_alternate_yaw:
-            alt_pose = list(tcp_pose_mm_deg)
-            alt_pose[5] = (alt_pose[5] + 180.0 + 180.0) % 360.0 - 180.0
-            poses_to_try.append(alt_pose)
+            nom_yaw = float(tcp_pose_mm_deg[5])
+            for delta in (-90.0, 90.0, 180.0):
+                alt_pose = list(tcp_pose_mm_deg)
+                alt_pose[5] = (nom_yaw + delta + 180.0) % 360.0 - 180.0
+                poses_to_try.append(alt_pose)
 
         all_candidates: List[IKResult] = []
         seen: List[np.ndarray] = []
@@ -267,7 +283,7 @@ class VirtualFR3Backend(RobotBackend):
             T_tcp = np.eye(4, dtype=float)
             T_tcp[:3, :3] = R_tcp
             T_tcp[:3, 3] = p_m
-            T_flange = T_tcp @ self._T_tcp_flange
+            T_flange = T_tcp @ self._T_tcp_link
             pose_flange = Pose3D.from_matrix(T_flange)
 
             cands = self.kinematics.solve_ik_candidates(
@@ -338,14 +354,31 @@ class VirtualFR3Backend(RobotBackend):
         T_tcp = np.eye(4, dtype=float)
         T_tcp[:3, :3] = R_tcp
         T_tcp[:3, 3] = p_m
-        T_flange = T_tcp @ self._T_tcp_flange
+        T_flange = T_tcp @ self._T_tcp_link
         pose_flange = Pose3D.from_matrix(T_flange)
-        return self.kinematics.inverse_kinematics(
+        result = self.kinematics.inverse_kinematics(
             pose_flange,
             seed_joints=seed_joints,
             allow_multi_seed=allow_multi_seed,
             ref_joints=q_ref,
         )
+        if result.success and self.collision_guard is not None and self.collision_guard_enabled:
+            collision = self.collision_guard.validate_configuration(
+                result.joints_rad,
+                allowed_grasp_piece_id=allowed_grasp_piece_id,
+                restore_state=True,
+            )
+            if not collision.safe:
+                return IKResult(
+                    status=IKStatus.UNREACHABLE, success=False,
+                    joints_rad=None, joints_deg=None,
+                    position_error_mm=result.position_error_mm,
+                    orientation_error_deg=result.orientation_error_deg,
+                    iterations=result.iterations,
+                    condition_number=result.condition_number,
+                    failure_reason=f"IK pose rejected by collision guard: {collision.failure_reason}",
+                )
+        return result
 
 
     def set_trajectory_stage(self, stage: Optional[str]) -> None:
@@ -422,15 +455,40 @@ class VirtualFR3Backend(RobotBackend):
             except Exception as e:
                 logger.warning("Robot state listener %r raised exception: %s", listener, e)
 
+    def set_joints_direct(self, joints_deg: Sequence[float]) -> None:
+        """Set authoritative joint state directly (used to sync initial state from physical hardware)."""
+        with self._state_lock:
+            self._current_joints_deg = [float(d) for d in joints_deg[:6]]
+            self._current_joints_rad = np.array(
+                [math.radians(d) for d in self._current_joints_deg], dtype=float
+            )
+            self._flange_pose_mm_deg = self._compute_flange_pose_mm_deg(self._current_joints_rad)
+            self._tcp_pose_mm_deg = self._compute_tcp_pose_mm_deg(self._current_joints_rad)
+            self._sync_telemetry()
+
     def set_gripper(self, closed: bool) -> bool:
         """Set gripper virtual actuator state."""
         with self._state_lock:
             if not self._connected:
                 self._last_error = "Cannot set gripper: robot not connected"
                 return False
+            if self.collision_guard is not None and bool(closed) != self._gripper_closed:
+                collision = self.collision_guard.validate_gripper_transition(
+                    self._current_joints_rad,
+                    bool(closed),
+                    allowed_grasp_piece_id=self._allowed_grasp_piece_id,
+                )
+                if not collision.safe:
+                    self._last_error = f"Gripper command rejected by collision guard: {collision.failure_reason}"
+                    self._motion_state = "COLLISION_REJECTED"
+                    self._sync_telemetry()
+                    return False
             self._gripper_closed = bool(closed)
             if not self._gripper_closed:
                 self._attached_piece_id = None
+            self._last_error = None
+            if self._motion_state == "COLLISION_REJECTED":
+                self._motion_state = "IDLE"
             self._sync_telemetry()
             return True
 
@@ -736,7 +794,7 @@ class VirtualFR3Backend(RobotBackend):
             T_base_tcp_i = np.eye(4, dtype=float)
             T_base_tcp_i[:3, :3] = R_tcp_i
             T_base_tcp_i[:3, 3] = p_m
-            T_base_flange_i = T_base_tcp_i @ self._T_tcp_flange
+            T_base_flange_i = T_base_tcp_i @ self._T_tcp_link
             wp_flange = Pose3D.from_matrix(T_base_flange_i)
 
             ik_res = self.kinematics.inverse_kinematics(

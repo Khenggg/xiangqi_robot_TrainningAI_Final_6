@@ -1,30 +1,58 @@
-# ==================================
-# === FILE: VIP/ai_controller.py ===
-# === AI Controller — Smart Engine Wrapper (Hybrid) ===
-# ==================================
+# =============================================================================
+# === FILE: src/ai/ai_controller.py ===
+# === AI Controller — Smart Engine Wrapper (Hybrid / Pikafish / Moonfish) ===
+# =============================================================================
 import traceback
+from typing import Optional, Tuple, Any
 
 
 class AIController:
-    """Wrapper quản lý cả Local Moonfish Engine và Cloud Engine.
+    """Wrapper quản lý cả Local Engine (Pikafish / Moonfish) và Cloud Engine.
 
-    Cách dùng từ main_VIP.py:
-        ai_ctrl = AIController(local_engine, cloud_engine, config)
+    Hỗ trợ kiểm soát độ khó theo mức điểm ELO (800 - 3000+) tương tự Chess.com.
     """
 
-    def __init__(self, local_engine, cloud_engine, config):
+    def __init__(self, local_engine: Any, cloud_engine: Any, config: Any):
         """
         Args:
-            local_engine: MoonfishEngine instance (có thể None nếu config là CLOUD)
-            cloud_engine: CloudEngine instance (có thể None nếu config là LOCAL)
+            local_engine: PikafishEngine hoặc MoonfishEngine instance
+            cloud_engine: CloudEngine instance
             config: module config
         """
         self.local_engine = local_engine
         self.cloud_engine = cloud_engine
         self.config = config
+        self.current_elo = getattr(config, "DEFAULT_AI_ELO", 1400)
+        
+        # Đồng bộ ELO ban đầu xuống local engine nếu được hỗ trợ
+        if self.local_engine and hasattr(self.local_engine, "set_elo"):
+            self.current_elo = self.local_engine.set_elo(self.current_elo)
 
-    def pick_move(self, board_snapshot, color="b"):
-        """Gọi Moonfish để lấy nước đi tốt nhất.
+    def set_elo(self, elo: int) -> Tuple[int, str]:
+        """Đặt mức ELO cho AI. Trả về (elo, title)."""
+        if self.local_engine and hasattr(self.local_engine, "set_elo"):
+            self.current_elo = self.local_engine.set_elo(elo)
+            title = self.local_engine.get_elo_title()
+            return self.current_elo, title
+        self.current_elo = elo
+        return self.current_elo, f"ELO {elo}"
+
+    def step_elo(self, direction: int = 1) -> Tuple[int, str]:
+        """Tăng hoặc giảm 1 nấc ELO (+1: tăng, -1: giảm)."""
+        if self.local_engine and hasattr(self.local_engine, "step_elo"):
+            self.current_elo = self.local_engine.step_elo(direction)
+            title = self.local_engine.get_elo_title()
+            return self.current_elo, title
+        return self.current_elo, f"ELO {self.current_elo}"
+
+    def get_elo_info(self) -> Tuple[int, str]:
+        """Lấy thông tin ELO hiện tại: (elo_score, title)."""
+        if self.local_engine and hasattr(self.local_engine, "get_elo_title"):
+            return self.local_engine.get_current_elo(), self.local_engine.get_elo_title()
+        return self.current_elo, f"ELO {self.current_elo}"
+
+    def pick_move(self, board_snapshot: list, color: str = "b") -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
+        """Gọi Engine để lấy nước đi tốt nhất.
 
         Hàm này chạy BLOCKING — phải gọi trong thread riêng.
 
@@ -33,40 +61,51 @@ class AIController:
             color:          màu AI đang đánh ('b' = đen)
 
         Returns:
-            (src, dst) tuple nếu tìm được nước đi
-            None nếu thất bại hoặc engine chưa khởi động
+            (src, dst) tuple nếu tìm được nước đi, hoặc None.
         """
         engine_type = getattr(self.config, "ENGINE_TYPE", "LOCAL")
 
-        # THỬ CLOUD ENGINE (Nếu mode là HYBRID hoặc CLOUD)
+        # 1. THỬ CLOUD ENGINE (Nếu mode là HYBRID hoặc CLOUD)
+        # Lưu ý: Nếu ở mode HYBRID mà đang muốn chơi theo ELO địa phương của Pikafish,
+        # ta vẫn ưu tiên Cloud nếu được cấu hình rõ ràng.
         if engine_type in ["HYBRID", "CLOUD"]:
             if self.cloud_engine is not None:
                 try:
                     result = self.cloud_engine.pick_best_move(board_snapshot, color)
-                    return result
+                    if result:
+                        return result
                 except Exception as e:
                     if engine_type == "CLOUD":
-                        print(f"[AI] ❌ Lỗi Cloud API (Chế độ chỉ Cloud): {e}")
+                        print(f"[AI] [ERR] Lỗi Cloud API (Chế độ chỉ Cloud): {e}")
                         return None
                     else:
-                        print(f"[AI] ⚠️ Cloud API timeout/error: {e} -> Dùng Local Moonfish để cứu nguy!")
+                        print(f"[AI] [WARN] Cloud API timeout/error: {e} -> Chuyển sang Local Engine...")
             else:
-                 print("[AI] ⚠️ Chế độ Cloud được bật nhưng chưa có instance CloudEngine.")
+                if engine_type == "CLOUD":
+                    print("[AI] [WARN] Chế độ Cloud được bật nhưng chưa có instance CloudEngine.")
+                    return None
 
-        # THỬ LOCAL ENGINE (Nếu mode là LOCAL hoặc HYBRID fallback fail)
+        # 2. THỬ LOCAL ENGINE (Pikafish / Moonfish)
         if engine_type in ["HYBRID", "LOCAL"]:
             if self.local_engine is None:
-                print("[AI] ❌ Moonfish engine chưa khởi động! "
-                      "Kiểm tra file exe trong thư mục moonfish/.")
+                print("[AI] [ERR] Local engine chưa khởi động! Kiểm tra đường dẫn engine trong config.py.")
                 return None
             
             try:
-                result = self.local_engine.pick_best_move(
-                    board_snapshot, color, movetime_ms=self.config.MOONFISH_THINK_MS
-                )
-                return result
+                # Nếu là PikafishEngine (có hỗ trợ ELO)
+                if hasattr(self.local_engine, "pick_best_move"):
+                    if hasattr(self.local_engine, "current_elo"):
+                        result = self.local_engine.pick_best_move(
+                            board_snapshot, color, elo=self.current_elo
+                        )
+                    else:
+                        think_ms = getattr(self.config, "MOONFISH_THINK_MS", 1000)
+                        result = self.local_engine.pick_best_move(
+                            board_snapshot, color, movetime_ms=think_ms
+                        )
+                    return result
             except Exception as e:
-                print(f"[AI] ❌ Lỗi cả Local Moonfish: {e}")
+                print(f"[AI] [ERR] Lỗi Local Engine: {e}")
                 traceback.print_exc()
                 return None
         

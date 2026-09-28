@@ -13,6 +13,7 @@ import time
 import numpy as np
 
 from src.hardware.backends.base import RobotBackend, RobotStateSnapshot
+from src.domain.geometry import get_canonical_tool_geometry
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +62,16 @@ class PhysicalFR3Backend(RobotBackend):
         self._motion_state: str = "DISCONNECTED"
         self._last_error: Optional[str] = None
         self._gripper_closed: bool = False
+        self._trajectory_stage: Optional[str] = "IDLE"
 
         # Internal state cache (for dry-run and between read cycles)
         self._current_joints_deg: List[float] = [0.0, -45.0, 90.0, -135.0, -90.0, 0.0]
         self._current_tcp_pose_mm_deg: List[float] = [-360.0, 0.0, 200.0, 180.0, 0.0, 90.0]
-        # Canonical tool length is 150.0 mm (no legacy 218 mm residual).
-        # TCP Z = 200.0 mm -> Flange Z = TCP Z + 150.0 = 350.0 mm for initial mock.
-        self._current_flange_pose_mm_deg: List[float] = [-360.0, 0.0, 350.0, 180.0, 0.0, 90.0]
+        # Dry-run cache only: +Z_tool points downward at the nominal pose.
+        tool_length_mm = get_canonical_tool_geometry().flange_to_tcp_distance_mm
+        self._current_flange_pose_mm_deg: List[float] = [
+            -360.0, 0.0, 200.0 + tool_length_mm, 180.0, 0.0, 90.0
+        ]
         self._flange_authoritative: bool = False
         self._flange_pose_source: str = "MOCK" if self.dry_run else "UNAVAILABLE"
 
@@ -172,6 +176,48 @@ class PhysicalFR3Backend(RobotBackend):
             self._last_error = str(exc)
             self._enabled = False
             logger.error(f"[PhysicalFR3Backend] RobotEnable(1) exception: {exc}")
+            return False
+
+    def recover_from_error(self) -> bool:
+        """
+        Recover from Emergency Stop or controller error:
+        1. ResetAllError() to clear fault state.
+        2. RobotEnable(1) to re-energize servo motors.
+        3. Mode(0) to restore automatic trajectory mode.
+        """
+        if self.dry_run:
+            self._motion_state = "IDLE"
+            self._last_error = None
+            self._enabled = True
+            return True
+
+        if not self._connected or self._rpc is None:
+            self._last_error = "Cannot recover: Not connected"
+            return False
+
+        try:
+            logger.info(f"[PhysicalFR3Backend] Recovering from error/E-stop on FR3 at {self.ip}...")
+            if hasattr(self._rpc, "ResetAllError"):
+                err_reset = self._rpc.ResetAllError()
+                logger.info(f"[PhysicalFR3Backend] ResetAllError returned: {err_reset}")
+
+            err_en = self._rpc.RobotEnable(1)
+            logger.info(f"[PhysicalFR3Backend] RobotEnable(1) returned: {err_en}")
+
+            if hasattr(self._rpc, "Mode"):
+                self._rpc.Mode(0)
+
+            if err_en == 0:
+                self._enabled = True
+                self._motion_state = "IDLE"
+                self._last_error = None
+                return True
+            else:
+                self._last_error = f"RobotEnable(1) failed with return code {err_en} (Kiểm tra xem nút E-Stop đã xoay nhả chưa)"
+                return False
+        except Exception as exc:
+            self._last_error = str(exc)
+            logger.error(f"[PhysicalFR3Backend] Recovery exception: {exc}")
             return False
 
     def disable_robot(self) -> bool:
@@ -386,15 +432,16 @@ class PhysicalFR3Backend(RobotBackend):
                                 self._motion_state = "ERROR"
                                 self._last_error = f"Controller error: main={main_c}, sub={sub_c}"
                                 return
+                            elif self._motion_state == "ERROR":
+                                self._motion_state = "IDLE"
+                                self._last_error = None
 
             if hasattr(self._rpc, "GetRobotMotionDone"):
                 res_md = self._rpc.GetRobotMotionDone()
                 if isinstance(res_md, (tuple, list)) and len(res_md) >= 2:
                     err_md, motion_done = res_md[0], res_md[1]
                     if isinstance(err_md, int) and err_md == 0 and isinstance(motion_done, (int, float)):
-                        if int(motion_done) == 0:
-                            self._motion_state = "MOVING"
-                        elif self._motion_state == "MOVING":
+                        if int(motion_done) == 1:
                             self._motion_state = "IDLE"
 
         except Exception as exc:
@@ -416,7 +463,12 @@ class PhysicalFR3Backend(RobotBackend):
             timestamp=time.time(),
             flange_pose_source=self._flange_pose_source,
             last_error=self._last_error,
+            trajectory_stage=self._trajectory_stage,
         )
+
+    def set_trajectory_stage(self, stage: Optional[str]) -> None:
+        """Set the authoritative trajectory stage (PREPOSITION, LIFT, TRANSIT, LAND, COMPLETE, IDLE)."""
+        self._trajectory_stage = stage
 
     def move_joint(
         self,
@@ -462,6 +514,23 @@ class PhysicalFR3Backend(RobotBackend):
                 offset_flag=0,
                 offset_pos=[0.0] * 6,
             )
+            # Auto-recovery: If code 14 (Servo disabled/E-stop latched), attempt error reset and retry once
+            if err == 14:
+                logger.warning("[PhysicalFR3Backend] Code 14 received: Attempting auto-recovery (ResetAllError + RobotEnable)...")
+                if self.recover_from_error():
+                    err = self._rpc.MoveJ(
+                        joint_pos=target_q,
+                        desc_pos=[0.0] * 6,
+                        tool=self.tool_num,
+                        user=self.user_num,
+                        vel=vel,
+                        acc=0.0,
+                        ovl=100.0,
+                        exaxis_pos=[0.0] * 4,
+                        blendT=-1.0,
+                        offset_flag=0,
+                        offset_pos=[0.0] * 6,
+                    )
             # Strict motion success check: only code 0 is authoritative success
             if not is_motion_success_code(err):
                 raise RuntimeError(f"MoveJ failed with return code {err}")
@@ -536,8 +605,14 @@ class PhysicalFR3Backend(RobotBackend):
         """
         if self.gripper_driver is None:
             from src.hardware.gripper.two_output import TwoOutputGripperDriver
+            import config
             self.gripper_driver = TwoOutputGripperDriver(
                 set_do_fn=self.set_tool_do,
+                open_do_id=int(getattr(config, "TOOL_DO_OPEN", 1)),
+                close_do_id=int(getattr(config, "TOOL_DO_CLOSE", 0)),
+                open_pulse_sec=float(getattr(config, "TOOL_DO_OPEN_PULSE_SEC", 0.35)),
+                close_pulse_sec=float(getattr(config, "TOOL_DO_CLOSE_PULSE_SEC", 0.30)),
+                deadtime_sec=float(getattr(config, "TOOL_DO_DEADTIME_SEC", 0.10)),
                 dry_run=self.dry_run,
             )
 
@@ -606,8 +681,14 @@ class PhysicalFR3Backend(RobotBackend):
 
         try:
             if hasattr(self._rpc, "GetRobotTeachingPoint"):
-                err, data = self._rpc.GetRobotTeachingPoint(name)
-                if err == 0 and data is not None and len(data) >= 3:
+                res = self._rpc.GetRobotTeachingPoint(name)
+                if isinstance(res, (list, tuple)) and len(res) >= 2:
+                    err, data = res[0], res[1]
+                else:
+                    return -1, []
+                if err == 0 and data is not None:
+                    if isinstance(data, str):
+                        data = [v.strip() for v in data.split(",") if v.strip()]
                     parsed = [float(str(v).strip()) for v in data]
                     return 0, parsed
                 return int(err), []

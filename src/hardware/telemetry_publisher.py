@@ -161,6 +161,8 @@ class TelemetryPublisher:
         self._latest_board_placement: Optional[dict] = None
         self._latest_placement_analysis: Optional[dict] = None
         self.placement_version: int = 1
+        self.source: str = "VIRTUAL"
+        self.controller_ip: Optional[str] = None
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._server_thread: Optional[threading.Thread] = None
@@ -256,6 +258,8 @@ class TelemetryPublisher:
                 "trajectory_stage": self._trajectory_stage,
                 "last_error": self._last_error,
                 "placement_version": self.placement_version,
+                "source": self.source,
+                "controller_ip": self.controller_ip,
             }
         return json.dumps(packet)
 

@@ -21,6 +21,7 @@ import numpy as np
 import pybullet as p
 
 from src.domain.geometry import get_physical_geometry, get_canonical_tool_geometry
+from src.simulation.tool_geometry import virtual_link_to_tcp_offset_m
 from src.simulation.placement import BoardPlacementState
 from src.simulation.physics.gripper import VirtualGripper
 from src.simulation.physics.piece import XiangqiPieceBody
@@ -166,6 +167,7 @@ class VirtualPhysicalWorld:
 
             self.sim_time = 0.0
             self.board_body_id = -1
+            self.floor_body_id = -1
             self.pieces: Dict[str, XiangqiPieceBody] = {}
 
             # Settle thresholds
@@ -181,6 +183,11 @@ class VirtualPhysicalWorld:
             self.xy_margin_oob = float(oob_cfg["xy_boundary_margin_m"])
 
             # Build world
+            floor_shape = p.createCollisionShape(p.GEOM_PLANE, physicsClientId=self.client_id)
+            self.floor_body_id = p.createMultiBody(
+                baseMass=0.0, baseCollisionShapeIndex=floor_shape,
+                basePosition=[0.0, 0.0, 0.0], physicsClientId=self.client_id,
+            )
             self._spawn_board()
             self._spawn_pieces()
 
@@ -192,8 +199,19 @@ class VirtualPhysicalWorld:
 
             # Resolve canonical tool offset
             tool_cfg = self.scene_cfg.get("tool_transform", {})
-            can_tcp = list(get_canonical_tool_geometry().canonical_tcp_offset_m)
-            self._tool_offset = np.array(tool_cfg.get("flange_to_tcp_xyz_m", can_tcp), dtype=float)
+            can_tcp = np.asarray(get_canonical_tool_geometry().canonical_tcp_offset_m, dtype=float)
+            scene_tcp = np.asarray(tool_cfg.get("flange_to_tcp_xyz_m", can_tcp), dtype=float)
+            if scene_tcp.shape != (3,) or not np.all(np.isfinite(scene_tcp)) or not np.allclose(
+                scene_tcp, can_tcp, rtol=0.0, atol=1e-6
+            ):
+                raise ValueError("Scene flange-to-TCP transform differs from canonical robot profile")
+            self._tool_offset = virtual_link_to_tcp_offset_m()
+            scene_rpy = np.asarray(tool_cfg.get("flange_to_tcp_rpy_deg", [0.0, 0.0, 0.0]), dtype=float)
+            if scene_rpy.shape != (3,) or not np.allclose(scene_rpy, 0.0, rtol=0.0, atol=1e-6):
+                raise ValueError("Scene TCP rotation is unsupported by the collision proxy")
+            if not np.allclose(self.gripper.tcp_to_grasp_center, 0.0, rtol=0.0, atol=1e-6):
+                raise ValueError("Grasp-center offset requires explicit runtime TCP target conversion")
+            # CAD-derived proxy geometry is checked against the visual asset when loaded.
 
             # Full articulated FR3 robot for collision queries
             self.robot_body_id = -1
@@ -309,10 +327,15 @@ class VirtualPhysicalWorld:
         half_v = outer_length_m / 2.0  # 0.2050 m
         half_z = thickness_m / 2.0     # 0.00525 m
 
-        # Box collision shape with local halfExtents [half_u, half_v, half_z]
-        col_shape = p.createCollisionShape(
-            p.GEOM_BOX,
-            halfExtents=[half_u, half_v, half_z],
+        # Match the visible outer rim: 10 mm wider on every side and 1 mm
+        # lower at the top than the playing surface.
+        col_shape = p.createCollisionShapeArray(
+            shapeTypes=[p.GEOM_BOX, p.GEOM_BOX],
+            halfExtents=[
+                [half_u, half_v, half_z],
+                [half_u + 0.010, half_v + 0.010, (thickness_m - 0.001) / 2.0],
+            ],
+            collisionFramePositions=[[0.0, 0.0, 0.0], [0.0, 0.0, -0.0005]],
             physicsClientId=self.client_id,
         )
 
@@ -343,7 +366,7 @@ class VirtualPhysicalWorld:
         # Store board bounding box for out-of-bounds check and backward compatibility
         nom_center = self.board_cfg.get("board_center_in_robot_base_m", [-0.360, 0.0, 0.0105])
         self._nominal_board_center = [nom_center[0], nom_center[1], box_center[2]]
-        self._nominal_surface_height = self.board_placement_state.board_surface_z_robot_m
+        self._nominal_surface_height = float(self.board_cfg.get("board_surface_height_m", 0.0105))
         self._board_half_u = half_u
         self._board_half_v = half_v
         self._board_half_z = half_z
@@ -365,16 +388,11 @@ class VirtualPhysicalWorld:
     def relocate_board(self, forward_shift_m: float, height_offset_m: float = 0.0) -> bool:
         """
         Reposition PyBullet board collider and consistently translate all pieces ON_BOARD.
-        d > 0 means board moves farther from robot along -X_robot.
+        Forward shift follows the active board placement yaw and its board-local axis.
         """
         shift_m = float(forward_shift_m)
         h_off_m = float(height_offset_m)
-
-        # Delta translation from current placement
-        delta_x = -(shift_m - self.current_forward_shift_m)
-        delta_y = 0.0
-        delta_z = h_off_m - self.current_height_offset_m
-        delta = np.array([delta_x, delta_y, delta_z], dtype=float)
+        old_center = np.asarray(self.board_placement_state.board_center_robot_m, dtype=float)
 
         # Recompute authoritative placement state
         self.board_placement_state = BoardPlacementState.compute(
@@ -386,6 +404,7 @@ class VirtualPhysicalWorld:
             nominal_board_surface_z_m=self._nominal_surface_height,
             placement_version=self.board_placement_state.placement_version + 1,
         )
+        delta = np.asarray(self.board_placement_state.board_center_robot_m, dtype=float) - old_center
 
         if self.board_body_id >= 0 and self.client_id >= 0:
             p.resetBasePositionAndOrientation(
@@ -614,14 +633,19 @@ class VirtualPhysicalWorld:
                     s = (1.0 - alpha) * shift_old + alpha * shift_new
                     h = (1.0 - alpha) * h_old + alpha * h_new
 
-                    cx = self._nominal_board_center[0] - s
-                    cy = self._nominal_board_center[1]
-                    cz = (self._nominal_surface_height + h) - self._board_half_z
+                    candidate = BoardPlacementState.compute(
+                        forward_shift_mm=s * 1000.0,
+                        safe_transit_height_mm=self.board_placement_state.safe_transit_height_mm,
+                        board_height_offset_mm=h * 1000.0,
+                        board_yaw_deg=self.board_placement_state.board_yaw_deg,
+                        nominal_board_center_robot_m=self._nominal_board_center,
+                        nominal_board_surface_z_m=self._nominal_surface_height,
+                    )
 
                     p.resetBasePositionAndOrientation(
                         self.board_body_id,
-                        [cx, cy, cz],
-                        self.board_placement_state.quat_robot_from_board,
+                        candidate.board_center_robot_m,
+                        candidate.quat_robot_from_board,
                         physicsClientId=self.client_id,
                     )
 
@@ -772,7 +796,7 @@ class VirtualPhysicalWorld:
                     continue
                 c = int(p_info["col"])
                 r = int(p_info["row"])
-                pos = self.board_placement_state.cell_to_robot_xyz(r, c, z_rel_m=(height_m / 2.0) + 0.001)
+                pos = self.board_placement_state.cell_to_robot_xyz(r, c, z_rel_m=height_m / 2.0)
 
                 p.resetBasePositionAndOrientation(
                     p_body.body_id,
@@ -946,11 +970,11 @@ class VirtualPhysicalWorld:
         Useful for diagnostic contact inspection.
         """
         contacts = []
-        body_names = {
-            self.gripper.palm_body_id: "palm",
-            self.gripper.left_jaw_body_id: "left_jaw",
-            self.gripper.right_jaw_body_id: "right_jaw",
-        }
+        body_names = {}
+        for idx, fb in enumerate(self.gripper.fixed_body_ids):
+            body_names[fb] = f"fixed_{idx}" if idx > 0 else "palm"
+        body_names[self.gripper.left_jaw_body_id] = "left_jaw"
+        body_names[self.gripper.right_jaw_body_id] = "right_jaw"
         for gb, name in body_names.items():
             if gb < 0:
                 continue

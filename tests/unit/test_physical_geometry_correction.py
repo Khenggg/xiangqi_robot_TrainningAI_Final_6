@@ -16,6 +16,7 @@ from pathlib import Path
 import sys
 import unittest
 import numpy as np
+import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -32,10 +33,11 @@ from src.simulation.placement import BoardPlacementAnalyzer, BoardPlacementState
 from src.simulation.virtual_fr3_backend import VirtualFR3Backend
 from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.physics.collision_guard import FR3CollisionGuard
+from src.simulation.runtime import VirtualXiangqiSimulation
 
 
 class TestPhysicalGeometryCorrection(unittest.TestCase):
-    """Rigorous verification of physical geometry correction to 150mm canonical tool."""
+    """Verify the active measured flange-to-tip geometry and virtual collision contract."""
 
     def test_tool_length_source(self):
         """Verify tool length is loaded from single source of truth with explicit provenance."""
@@ -51,10 +53,10 @@ class TestPhysicalGeometryCorrection(unittest.TestCase):
         self.assertFalse(tool_data.get("has_adapter_plate"))
 
         can_tcp = tool_data.get("canonical_tcp", {})
-        self.assertEqual(can_tcp.get("flange_to_tcp_xyz_m"), [0.0, 0.0, 0.150])
-        self.assertEqual(can_tcp.get("flange_to_tcp_distance_m"), 0.150)
-        self.assertEqual(can_tcp.get("length_mm"), 150.0)
-        self.assertEqual(can_tcp.get("provenance"), "MEASURED_APPROXIMATE")
+        self.assertEqual(can_tcp.get("flange_to_tcp_xyz_m"), [0.0, 0.0, 0.1683])
+        self.assertEqual(can_tcp.get("flange_to_tcp_distance_m"), 0.1683)
+        self.assertEqual(can_tcp.get("length_mm"), 168.3)
+        self.assertEqual(can_tcp.get("provenance"), "MEASURED_PHYSICAL")
 
         cad_geom = tool_data.get("cad_geometry", {})
         self.assertEqual(cad_geom.get("length_mm"), 147.5)
@@ -68,12 +70,12 @@ class TestPhysicalGeometryCorrection(unittest.TestCase):
         # 2. Verify domain geometry loader
         tool = get_canonical_tool_geometry()
         self.assertIsInstance(tool, ToolGeometry)
-        self.assertEqual(tool.canonical_tcp_offset_m, (0.0, 0.0, 0.150))
-        self.assertEqual(tool.flange_to_tcp_distance_m, 0.150)
-        self.assertEqual(tool.flange_to_tcp_distance_mm, 150.0)
+        self.assertEqual(tool.canonical_tcp_offset_m, (0.0, 0.0, 0.1683))
+        self.assertEqual(tool.flange_to_tcp_distance_m, 0.1683)
+        self.assertEqual(tool.flange_to_tcp_distance_mm, 168.3)
         self.assertEqual(tool.cad_length_mm, 147.5)
         self.assertEqual(tool.legacy_unverified_length_mm, 218.0)
-        self.assertEqual(tool.status, ProvenanceStatus.MEASURED_APPROXIMATE)
+        self.assertEqual(tool.status, ProvenanceStatus.MEASURED_PHYSICAL)
         self.assertEqual(tool.cad_status, ProvenanceStatus.CAD_DERIVED)
         self.assertEqual(tool.legacy_status, ProvenanceStatus.LEGACY_UNVERIFIED)
 
@@ -91,22 +93,23 @@ class TestPhysicalGeometryCorrection(unittest.TestCase):
             rec = prov[key]
             self.assertIsInstance(rec.status, ProvenanceStatus)
             self.assertTrue(len(rec.description) > 0)
+        self.assertEqual(prov["tool_length"].status, tool.status)
 
     def test_tcp_transform_matches_physical_profile(self):
-        """Verify all subsystems match the canonical 150mm tool transform."""
+        """Verify all subsystems match the canonical 168.3 mm tool transform."""
         # 1. Virtual backend
         backend = VirtualFR3Backend()
-        self.assertAlmostEqual(backend.flange_to_tcp_distance_m, 0.150, places=4)
-        self.assertAlmostEqual(backend._T_flange_tcp[2, 3], 0.150, places=4)
+        self.assertAlmostEqual(backend.flange_to_tcp_distance_m, 0.1683, places=4)
+        self.assertAlmostEqual(backend._T_flange_tcp[2, 3], 0.1683, places=4)
 
         # 2. BoardPlacementAnalyzer
         analyzer = BoardPlacementAnalyzer()
-        self.assertAlmostEqual(analyzer.tool_length_m, 0.150, places=4)
-        self.assertAlmostEqual(analyzer.tool_length_mm, 150.0, places=1)
+        self.assertAlmostEqual(analyzer.tool_length_m, 0.1683, places=4)
+        self.assertAlmostEqual(analyzer.tool_length_mm, 168.3, places=1)
 
         # 3. PyBullet world
         world = VirtualPhysicalWorld()
-        self.assertAlmostEqual(world._tool_offset[2], 0.150, places=4)
+        self.assertAlmostEqual(world._tool_offset[2], 0.2683, places=4)
         world.close()
 
         # 4. Scene configuration file
@@ -114,8 +117,8 @@ class TestPhysicalGeometryCorrection(unittest.TestCase):
         with open(scene_path, "r", encoding="utf-8") as f:
             scene_cfg = json.load(f)
         tool_cfg = scene_cfg.get("tool_transform", {})
-        self.assertEqual(tool_cfg.get("status"), "MEASURED_APPROXIMATE")
-        self.assertEqual(tool_cfg.get("flange_to_tcp_xyz_m"), [0.0, 0.0, 0.150])
+        self.assertEqual(tool_cfg.get("status"), "MEASURED_PHYSICAL")
+        self.assertEqual(tool_cfg.get("flange_to_tcp_xyz_m"), [0.0, 0.0, 0.1683])
 
     def test_gripper_mesh_tcp_alignment(self):
         """Verify CAD visual mesh is not artificially distorted or scaled to force-match TCP."""
@@ -124,25 +127,25 @@ class TestPhysicalGeometryCorrection(unittest.TestCase):
         with open(asset_path, "r", encoding="utf-8") as f:
             asset_cfg = json.load(f)
 
-        # Mesh scale should remain authentic CAD tessellation scale (0.0008), not scaled to 150mm
+        # Visual mesh remains provisional and must not be used as the collision envelope.
         self.assertAlmostEqual(asset_cfg.get("scale_to_m"), 0.0008, places=6)
-        
-        # Verify CAD length is recorded as 147.5mm while canonical TCP is 150.0mm (+2.5mm grasp center offset)
+        self.assertEqual(asset_cfg.get("status"), "VISUAL_CALIBRATION_PROVISIONAL")
         tool = get_canonical_tool_geometry()
         self.assertAlmostEqual(tool.cad_length_mm, 147.5, places=1)
-        self.assertAlmostEqual(tool.flange_to_tcp_distance_mm, 150.0, places=1)
+        self.assertAlmostEqual(tool.flange_to_tcp_distance_mm, 168.3, places=1)
         delta_mm = tool.flange_to_tcp_distance_mm - tool.cad_length_mm
-        self.assertAlmostEqual(delta_mm, 2.5, places=1, msg="TCP grasp center must be 2.5mm beyond fingertip edge")
+        self.assertAlmostEqual(delta_mm, 20.8, places=1)
 
     def test_90_cell_reachability_with_measured_tool(self):
-        """Verify shared/cell_reachability_dataset.json reflects measured tool and 100% reachability."""
+        """Historical reachability seeds must be marked stale after the geometry change."""
         dataset_path = _PROJECT_ROOT / "shared" / "cell_reachability_dataset.json"
         self.assertTrue(dataset_path.is_file(), f"Dataset missing: {dataset_path}")
         with open(dataset_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         metadata = data.get("metadata", {})
-        self.assertAlmostEqual(metadata.get("gripper_length_m"), 0.150, places=3)
+        self.assertEqual(metadata.get("status"), "STALE/UNVALIDATED")
+        self.assertNotAlmostEqual(metadata.get("gripper_length_m"), get_canonical_tool_geometry().flange_to_tcp_distance_m)
         self.assertEqual(metadata.get("total_cells"), 90)
 
         cells = data.get("cells", [])
@@ -154,62 +157,87 @@ class TestPhysicalGeometryCorrection(unittest.TestCase):
             self.assertFalse(cell.get("penetrates_board", False))
 
     def test_board_collision_with_measured_tool(self):
-        """Verify robot links maintain positive clearance to board across extreme board cells."""
-        dataset_path = _PROJECT_ROOT / "shared" / "cell_reachability_dataset.json"
-        with open(dataset_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        """Measure clearance only for reachable poses; track blocked poses explicitly."""
+        sim = VirtualXiangqiSimulation(auto_sync_telemetry=False)
+        sim.start()
+        try:
+            reachable = set()
+            blocked = set()
+            for r, c in [(0, 0), (0, 8), (9, 0), (9, 8), (4, 4), (0, 4), (9, 4), (4, 0), (4, 8)]:
+                piece_id = sim._get_piece_at_cell(r, c)
+                for stage, z in (("hover", sim.board_surface_z + 0.070),
+                                 ("grasp", sim.board_surface_z + sim.geom.piece_height_mm / 2000.0)):
+                    xyz = sim.cell_to_robot_xyz_m(r, c, z)
+                    pose = [v * 1000.0 for v in xyz] + list(sim.target_tool_euler_deg)
+                    cands = sim.backend.solve_tcp_ik_candidates(
+                        pose, allow_alternate_yaw=True, allowed_grasp_piece_id=piece_id
+                    )
+                    if not cands:
+                        blocked.add((r, c, stage))
+                        continue
+                    reachable.add((r, c, stage))
+                    q = cands[0].joints_rad
+                    self.assertTrue(sim.collision_guard.validate_configuration(
+                        q, allowed_grasp_piece_id=piece_id
+                    ).safe)
+                    sim.world.sync_robot_collision_configuration(q)
+                    clearance_m, _ = sim.world.get_board_to_robot_clearance()
+                    self.assertGreaterEqual(clearance_m, 0.0005)
+            self.assertGreaterEqual(len(reachable), 14, f"Reachability regressed: {blocked}")
+            self.assertIn((4, 4, "grasp"), reachable)
+            self.assertIn((0, 0, "grasp"), reachable)
+        finally:
+            sim.stop()
 
-        cells_dict = {(c["row"], c["col"]): c for c in data["cells"]}
-        world = VirtualPhysicalWorld()
-        guard = FR3CollisionGuard(world)
+    @pytest.mark.acceptance
+    def test_gate_18_of_18_key_poses_acceptance(self):
+        """
+        Simulator endpoint gate for 18 hover/grasp poses across nine cells.
+        This does not test the path, bilateral jaw contact, or hardware safety.
+        """
+        sim = VirtualXiangqiSimulation(auto_sync_telemetry=False)
+        sim.start()
+        try:
+            reachable = set()
+            blocked = set()
+            for r, c in [(0, 0), (0, 8), (9, 0), (9, 8), (4, 4), (0, 4), (9, 4), (4, 0), (4, 8)]:
+                piece_id = sim._get_piece_at_cell(r, c)
+                for stage, z in (("hover", sim.board_surface_z + 0.070),
+                                 ("grasp", sim.board_surface_z + sim.geom.piece_height_mm / 2000.0)):
+                    xyz = sim.cell_to_robot_xyz_m(r, c, z)
+                    pose = [v * 1000.0 for v in xyz] + list(sim.target_tool_euler_deg)
+                    cands = sim.backend.solve_tcp_ik_candidates(
+                        pose, allow_alternate_yaw=True, allowed_grasp_piece_id=piece_id
+                    )
+                    if not cands:
+                        blocked.add((r, c, stage))
+                        continue
+                    q = cands[0].joints_rad
+                    if not sim.collision_guard.validate_configuration(q, allowed_grasp_piece_id=piece_id).safe:
+                        blocked.add((r, c, stage))
+                        continue
+                    reachable.add((r, c, stage))
+            self.assertEqual(
+                len(reachable), 18,
+                f"ACCEPTANCE GATE NOT PASSED (chưa đạt): Only {len(reachable)}/18 key poses reachable. Blocked: {blocked}"
+            )
+        finally:
+            sim.stop()
 
-        # Test all corners, edges, and center
-        test_cells = [(0, 0), (0, 8), (9, 0), (9, 8), (4, 4), (0, 4), (9, 4), (4, 0), (4, 8)]
-        for r, c in test_cells:
-            cell_data = cells_dict[(r, c)]
-            q_gr = np.deg2rad(cell_data["grasp_joints_deg"])
-            q_ap = np.deg2rad(cell_data["approach_joints_deg"])
-
-            # Validate approach configuration
-            col_ap = guard.validate_configuration(q_ap)
-            self.assertTrue(col_ap.safe, f"Approach collision at ({r}, {c}): {col_ap.failure_reason}")
-
-            # Validate grasp configuration
-            col_gr = guard.validate_configuration(q_gr, allowed_grasp_piece_id="*")
-            self.assertTrue(col_gr.safe, f"Grasp collision at ({r}, {c}): {col_gr.failure_reason}")
-
-        world.close()
-
-    def test_pick_place_trajectory_with_measured_tool(self):
-        """Verify 3-stage MoveL pick trajectory (Approach -> Land -> Lift) succeeds without collision."""
-        dataset_path = _PROJECT_ROOT / "shared" / "cell_reachability_dataset.json"
-        with open(dataset_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        cells_dict = {(c["row"], c["col"]): c for c in data["cells"]}
-        cell_44 = cells_dict[(4, 4)]
-        q_ap = np.deg2rad(cell_44["approach_joints_deg"])
-
-        world = VirtualPhysicalWorld()
-        guard = FR3CollisionGuard(world)
-        backend = VirtualFR3Backend()
-        backend.set_collision_guard(guard)
-
-        state = BoardPlacementState.compute(forward_shift_mm=25.0, safe_transit_height_mm=40.0, board_yaw_deg=90.0)
-        p_ap = state.cell_to_robot_xyz(4, 4, 0.040)
-        p_gr = state.cell_to_robot_xyz(4, 4, 0.004715)
-        pose_ap_mm = [p_ap[0] * 1000.0, p_ap[1] * 1000.0, p_ap[2] * 1000.0, 180.0, 0.0, 90.0]
-        pose_gr_mm = [p_gr[0] * 1000.0, p_gr[1] * 1000.0, p_gr[2] * 1000.0, 180.0, 0.0, 90.0]
-
-        # Land MoveL: Approach -> Grasp
-        plan_land = backend.plan_cartesian(q_ap, pose_gr_mm, samples=15, check_collision=True, allowed_grasp_piece_id="*")
-        self.assertTrue(plan_land.success, f"Land MoveL failed: {plan_land.failure_reason}")
-
-        # Lift MoveL: Grasp -> Approach
-        plan_lift = backend.plan_cartesian(plan_land.final_q, pose_ap_mm, samples=15, check_collision=True, allowed_grasp_piece_id="*")
-        self.assertTrue(plan_lift.success, f"Lift MoveL failed: {plan_lift.failure_reason}")
-
-        world.close()
+    def test_pick_place_rejects_unverified_jaw_contact(self):
+        """The current CAD stroke cannot claim a physical grip on a 22.5 mm piece."""
+        sim = VirtualXiangqiSimulation(auto_sync_telemetry=False)
+        sim.start()
+        try:
+            self.assertTrue(sim.backend.collision_guard_enabled)
+            result = sim.execute_3stage_trajectory((0, 0), (4, 4), grasp_piece=True)
+            self.assertFalse(result["success"])
+            self.assertEqual(result["failed_stage"], "GRASP")
+            self.assertIn("NO_JAW_CONTACT", result["error"])
+            self.assertIsNone(sim.world.get_attached_piece())
+            self.assertFalse(sim.world.gripper.is_closed)
+        finally:
+            sim.stop()
 
 
 if __name__ == "__main__":

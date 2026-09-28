@@ -1,5 +1,7 @@
 {
   "metadata": {
+    "status": "STALE/UNVALIDATED",
+    "stale_reason": "Dataset was generated for board_yaw_deg=90.0 and gripper_length_m=0.150. Current active simulation placement is board_yaw_deg=0.0 and gripper_length_m=0.1683.",
     "total_cells": 90,
     "gripper_length_m": 0.15,
     "piece_height_m": 0.00943,

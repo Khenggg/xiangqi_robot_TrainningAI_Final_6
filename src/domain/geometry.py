@@ -19,6 +19,7 @@ class ProvenanceStatus(str, Enum):
     Guarantees no unverified or provisional values are silently treated as ground truth.
     """
     MEASURED = "MEASURED"                          # Ground truth directly measured with certified physical tool
+    MEASURED_PHYSICAL = "MEASURED_PHYSICAL"        # Physical flange-to-fingertip measurement; calibration record still required
     MEASURED_APPROXIMATE = "MEASURED_APPROXIMATE"  # Hand-measured on physical hardware (e.g. caliper / tape ~150mm)
     CAD_DERIVED = "CAD_DERIVED"                    # Extracted directly from CAD STEP / URDF model
     PROVISIONAL_SIMULATION = "PROVISIONAL_SIMULATION"  # Simulation-only tuning candidate pending physical validation
@@ -39,12 +40,12 @@ class ProvenanceRecord:
 @dataclass(frozen=True)
 class ToolGeometry:
     """Canonical single-source-of-truth tool definition for FAIRINO FR3 gripper."""
-    canonical_tcp_offset_m: Tuple[float, float, float]  # [0.0, 0.0, 0.150]
-    flange_to_tcp_distance_m: float                     # 0.150
-    flange_to_tcp_distance_mm: float                    # 150.0
+    canonical_tcp_offset_m: Tuple[float, float, float]
+    flange_to_tcp_distance_m: float
+    flange_to_tcp_distance_mm: float
     cad_length_mm: float                                # 147.5
     legacy_unverified_length_mm: float                  # 218.0
-    status: ProvenanceStatus                            # ProvenanceStatus.MEASURED_APPROXIMATE
+    status: ProvenanceStatus
     cad_status: ProvenanceStatus = ProvenanceStatus.CAD_DERIVED
     legacy_status: ProvenanceStatus = ProvenanceStatus.LEGACY_UNVERIFIED
     mount_type: str = "DIRECT_J6_FLANGE"
@@ -423,54 +424,45 @@ def get_default_robot_profile_path() -> Path:
 def load_canonical_tool_geometry(profile_path: Optional[Path] = None) -> ToolGeometry:
     """
     Load canonical tool geometry from shared/robot_profiles/fr3.json.
-    Falls back to shared/virtual_fr3_scene.json or measured defaults.
+    Reject missing, invalid, or inconsistent safety-critical tool geometry.
     """
     path = Path(profile_path) if profile_path else get_default_robot_profile_path()
-    if path.is_file():
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            tool_data = data.get("tool", {})
-            can_tcp = tool_data.get("canonical_tcp", {})
-            cad_data = tool_data.get("cad_geometry", {})
-            legacy_data = tool_data.get("legacy_geometry", {})
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    try:
+        tool_data = data["tool"]
+        can_tcp = tool_data["canonical_tcp"]
+        cad_data = tool_data["cad_geometry"]
+        legacy_data = tool_data["legacy_geometry"]
+        tcp_xyz = tuple(float(x) for x in can_tcp["flange_to_tcp_xyz_m"])
+        tcp_rpy_deg = tuple(float(x) for x in can_tcp["flange_to_tcp_rpy_deg"])
+        dist_m = float(can_tcp["flange_to_tcp_distance_m"])
+        dist_mm = float(can_tcp["length_mm"])
+        cad_mm = float(cad_data["length_mm"])
+        legacy_mm = float(legacy_data["length_mm"])
+        status = ProvenanceStatus(can_tcp["provenance"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid canonical tool geometry in {path}: {exc}") from exc
+    if (len(tcp_xyz) != 3 or not all(math.isfinite(x) for x in tcp_xyz)
+            or len(tcp_rpy_deg) != 3 or not all(math.isfinite(x) and abs(x) <= 1e-6 for x in tcp_rpy_deg)
+            or not all(math.isfinite(x) and x > 0 for x in (dist_m, dist_mm, cad_mm, legacy_mm))
+            or abs(tcp_xyz[0]) > 1e-6 or abs(tcp_xyz[1]) > 1e-6 or tcp_xyz[2] <= 0
+            or not math.isclose(math.dist(tcp_xyz, (0.0, 0.0, 0.0)), dist_m, abs_tol=1e-6)
+            or not math.isclose(dist_mm, dist_m * 1000.0, abs_tol=1e-3)):
+        raise ValueError(f"Inconsistent flange-to-TCP geometry in {path}")
 
-            tcp_xyz = tuple(float(x) for x in can_tcp.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.150]))
-            dist_m = float(can_tcp.get("flange_to_tcp_distance_m", tcp_xyz[2]))
-            dist_mm = float(can_tcp.get("length_mm", dist_m * 1000.0))
-            cad_mm = float(cad_data.get("length_mm", 147.5))
-            legacy_mm = float(legacy_data.get("length_mm", 218.0))
-            status = ProvenanceStatus(can_tcp.get("provenance", "MEASURED_APPROXIMATE"))
-
-            return ToolGeometry(
-                canonical_tcp_offset_m=(tcp_xyz[0], tcp_xyz[1], tcp_xyz[2]),
-                flange_to_tcp_distance_m=dist_m,
-                flange_to_tcp_distance_mm=dist_mm,
-                cad_length_mm=cad_mm,
-                legacy_unverified_length_mm=legacy_mm,
-                status=status,
-                cad_status=ProvenanceStatus.CAD_DERIVED,
-                legacy_status=ProvenanceStatus.LEGACY_UNVERIFIED,
-                mount_type=str(tool_data.get("mount_type", "DIRECT_J6_FLANGE")),
-                has_adapter_plate=bool(tool_data.get("has_adapter_plate", False)),
-                source_file=str(path),
-            )
-        except Exception:
-            pass
-
-    # Fallback to defaults
     return ToolGeometry(
-        canonical_tcp_offset_m=(0.0, 0.0, 0.150),
-        flange_to_tcp_distance_m=0.150,
-        flange_to_tcp_distance_mm=150.0,
-        cad_length_mm=147.5,
-        legacy_unverified_length_mm=218.0,
-        status=ProvenanceStatus.MEASURED_APPROXIMATE,
+        canonical_tcp_offset_m=tcp_xyz,
+        flange_to_tcp_distance_m=dist_m,
+        flange_to_tcp_distance_mm=dist_mm,
+        cad_length_mm=cad_mm,
+        legacy_unverified_length_mm=legacy_mm,
+        status=status,
         cad_status=ProvenanceStatus.CAD_DERIVED,
         legacy_status=ProvenanceStatus.LEGACY_UNVERIFIED,
-        mount_type="DIRECT_J6_FLANGE",
-        has_adapter_plate=False,
-        source_file="defaults",
+        mount_type=str(tool_data.get("mount_type", "DIRECT_J6_FLANGE")),
+        has_adapter_plate=bool(tool_data.get("has_adapter_plate", False)),
+        source_file=str(path),
     )
 
 
@@ -495,9 +487,9 @@ def get_physical_constants_provenance() -> Dict[str, ProvenanceRecord]:
             parameter="tool_length",
             value=tool.flange_to_tcp_distance_mm,
             unit="mm",
-            status=ProvenanceStatus.MEASURED_APPROXIMATE,
-            description="FR3 J6 flange plane to actual grasp center of Xiangqi piece (direct mount)",
-            notes="Approx. 150mm measured on physical FR3 hardware. Does not include obsolete adapter plate.",
+            status=tool.status,
+            description="FR3 J6 flange plane to the contact fingertip TCP (direct mount)",
+            notes="Read from the canonical FR3 tool profile; physical calibration record still required.",
         ),
         "cad_tool_length": ProvenanceRecord(
             parameter="cad_tool_length",
@@ -513,7 +505,7 @@ def get_physical_constants_provenance() -> Dict[str, ProvenanceRecord]:
             unit="mm",
             status=ProvenanceStatus.LEGACY_UNVERIFIED,
             description="Obsolete Virtual Twin flange-to-TCP length with custom adapter plate",
-            notes="OBSOLETE / UNVERIFIED. 218mm replaced by 150mm on direct flange mount.",
+            notes="OBSOLETE / UNVERIFIED. Current fingertip TCP length comes from the canonical FR3 profile.",
         ),
         "board_outer_width": ProvenanceRecord(
             parameter="board_outer_width",

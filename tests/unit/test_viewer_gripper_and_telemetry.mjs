@@ -64,7 +64,7 @@ expectProfileError((c) => { delete c.gripper_model; }, "gripper_model");
 expectProfileError((c) => { c.palm.dimensions_m = [0.06, -0.04, 0.03]; }, "palm dimensions");
 expectProfileError((c) => { c.jaw.dimensions_m = [0.008, 0.025]; }, "jaw.dimensions_m");
 expectProfileError((c) => { c.stroke.open_width_m = -0.04; }, "stroke.open_width_m");
-expectProfileError((c) => { c.stroke.closed_width_m = 0.05; }, "open_width_m (0.04) > closed_width_m (0.05)");
+expectProfileError((c) => { c.stroke.closed_width_m = 0.05; }, "> closed_width_m (0.05)");
 expectProfileError((c) => { c.stroke.travel_axis = "W"; }, "travel_axis");
 expectProfileError((c) => { c.tcp_to_grasp_center_m = [0, 0, NaN]; }, "tcp_to_grasp_center_m");
 expectProfileError((c) => { c.capture_volume.xy_radius_m = 0; }, "capture_volume.xy_radius_m");

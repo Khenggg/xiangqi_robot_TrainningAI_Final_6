@@ -52,8 +52,37 @@ html, body {
 #liveState.live {
   background: #1f8b4c;
 }
+#liveState.physical {
+  background: #238636;
+  border: 1px solid #3fb950;
+  box-shadow: 0 0 8px rgba(63, 185, 80, 0.4);
+}
+#liveState.virtual {
+  background: #1f6feb;
+  border: 1px solid #58a6ff;
+}
 #liveState.error {
   background: #b5433a;
+}
+.source-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: transparent;
+  color: #8b949e;
+  letter-spacing: 0.02em;
+}
+.source-badge.source-physical {
+  background: rgba(35, 134, 54, 0.2);
+  color: #3fb950;
+  border: 1px solid rgba(63, 185, 80, 0.4);
+}
+.source-badge.source-virtual {
+  background: rgba(31, 111, 235, 0.2);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.4);
 }
 #jointsReadout {
   font-size: 12px;
@@ -318,6 +347,120 @@ canvas#scene {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* Speed Control Section */
+.panel-speed-section {
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid rgba(48, 54, 61, 0.9);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.speed-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.speed-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #58a6ff;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.speed-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.speed-badge.speed-safe {
+  color: #3fb950;
+  background: rgba(46, 160, 67, 0.2);
+  border-color: rgba(46, 160, 67, 0.5);
+}
+
+.speed-badge.speed-warning {
+  color: #d29922;
+  background: rgba(210, 153, 34, 0.2);
+  border-color: rgba(210, 153, 34, 0.5);
+}
+
+.speed-badge.speed-danger {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.2);
+  border-color: rgba(248, 81, 73, 0.5);
+}
+
+.speed-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.speed-slider-wrap input[type="range"] {
+  flex: 1;
+  accent-color: #2f81f7;
+  cursor: pointer;
+  height: 6px;
+}
+
+#panelSpeedVal {
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #f0f6fc;
+  min-width: 34px;
+  text-align: right;
+}
+
+.speed-presets {
+  display: flex;
+  gap: 4px;
+  justify-content: space-between;
+}
+
+.speed-preset-btn {
+  flex: 1;
+  background: #21262d;
+  color: #8b949e;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 5px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.speed-preset-btn:hover {
+  background: #30363d;
+  color: #f0f6fc;
+}
+
+.speed-preset-btn.active {
+  background: #1f6feb;
+  color: #ffffff;
+  border-color: #58a6ff;
+  box-shadow: 0 0 8px rgba(31, 111, 235, 0.4);
+}
+
+.speed-preset-btn.danger-preset:hover {
+  background: #da3633;
+  color: #ffffff;
 }
 
 /* Cell Inspector */

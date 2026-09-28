@@ -16,6 +16,7 @@ class GameState:
         self.board, self.turn = fen_to_board_array(self.current_fen)
         self.game_over = False
         self.winner = None
+        self.game_over_reason: str = ""
         self.last_move = None
         self.selected_pos = None
         self.r_captured = []
@@ -24,6 +25,11 @@ class GameState:
         self.move_number = 1
         
         
+        # AI ELO State
+        self.ai_elo: int = getattr(config, "DEFAULT_AI_ELO", 1400)
+        self.ai_elo_title: str = "Quán cóc (1400)"
+        self.history_snapshots: List[Dict[str, Any]] = []
+
         # UI Feedback State
         self.status_message: str = ""
         self.status_color: Tuple[int, int, int] = (0, 0, 0)
@@ -41,6 +47,26 @@ class GameState:
         self._pre_space_state: Optional[Dict[str, Any]] = None
         self.manual_override_active: bool = False
 
+        # Hint State
+        self.hint_move: Optional[Tuple[Tuple[int, int], Tuple[int, int]]] = None
+        self.hint_expiry: float = 0.0
+
+    def get_legal_moves_for_selected(self) -> List[Tuple[int, int]]:
+        """Trả về danh sách toạ độ (col, row) các ô hợp lệ mà quân cờ đang chọn có thể đi tới."""
+        if not self.selected_pos:
+            return []
+        sc, sr = self.selected_pos
+        p = self.board[sr][sc]
+        if p == '.' or p[0] != self.turn:
+            return []
+
+        valid_dests = []
+        for r in range(xiangqi.NUM_ROWS):
+            for c in range(xiangqi.NUM_COLS):
+                if xiangqi.is_valid_move((sc, sr), (c, r), self.board, self.turn):
+                    valid_dests.append((c, r))
+        return valid_dests
+
     def update_fen_from_board(self):
         """Cập nhật current_fen từ board array hiện tại."""
         self.current_fen = board_array_to_fen(self.board, self.turn, self.move_number)
@@ -49,6 +75,7 @@ class GameState:
         """Tạo dict game state cho renderer."""
         return {
             "game_over": self.game_over,
+            "winner": self.winner,
             "turn": self.turn,
             "allow_mouse": self.allow_mouse_move,
             "ai_thinking": self.ai_thinking,
@@ -56,6 +83,13 @@ class GameState:
             "status_message": self.status_message,
             "status_color": self.status_color,
             "status_expiry": self.status_expiry,
+            "ai_elo": self.ai_elo,
+            "ai_elo_title": self.ai_elo_title,
+            "legal_moves": self.get_legal_moves_for_selected(),
+            "move_history": list(self.move_history),
+            "is_check": xiangqi.is_king_in_check(self.turn, self.board),
+            "hint_move": self.hint_move if time.time() < self.hint_expiry else None,
+            "game_over_reason": self.game_over_reason,
         }
 
     def reset_game(self, hw_manager=None):
@@ -81,6 +115,7 @@ class GameState:
         self.r_captured = []
         self.b_captured = []
         self.move_history = []
+        self.history_snapshots = []
         self.move_number = 1
         self.status_message = ""
         self.status_expiry = 0.0
@@ -111,9 +146,16 @@ class GameState:
         self.invalid_flash_pos = (col, row)
         self.invalid_flash_expiry = time.time() + duration
 
-    def handle_game_over(self, the_winner):
+    def handle_game_over(self, the_winner: str, reason: str = "CHIẾU BÍ"):
         self.winner = the_winner
         self.game_over = True
+        self.game_over_reason = reason
+        if the_winner == "r":
+            self.set_status(f"🏆 CHIẾN THẮNG! AI bị {reason}!", color=(34, 197, 94), duration=12.0)
+        elif the_winner == "b":
+            self.set_status(f"💀 BẠN ĐÃ THUA! Bạn bị {reason}!", color=(220, 38, 38), duration=12.0)
+        else:
+            self.set_status("🤝 VÁN ĐẤU HÒA!", color=(234, 88, 12), duration=12.0)
 
     def save_rollback_state(self, baseline_occ=None, baseline_time=None):
         self._pre_space_state = {
@@ -159,10 +201,60 @@ class GameState:
         
         self.manual_override_active = False
 
+    def undo_round(self, hw_manager=None) -> bool:
+        """Hoàn tác nước cờ gần nhất của người chơi và nước đáp trả của AI (phím U)."""
+        if self.ai_thinking:
+            self.set_status("⚠️ AI đang tính toán, vui lòng đợi!", color=(200, 100, 0), duration=2.5)
+            return False
+
+        if not self.history_snapshots:
+            print("[UNDO] ⚠️ Không có nước đi nào để Undo!")
+            self.set_status("⚠️ Chưa có nước đi nào để hoàn tác!", color=(180, 100, 0), duration=2.5)
+            return False
+
+        print("[UNDO] ↩️ Đang hoàn tác nước cờ...")
+        snap = self.history_snapshots.pop()
+        self.board = [row[:] for row in snap["board"]]
+        self.turn = snap["turn"]
+        self.last_move = snap["last_move"]
+        self.current_fen = snap["current_fen"]
+        self.move_number = snap["move_number"]
+        self.r_captured = list(snap["r_captured"])
+        self.b_captured = list(snap["b_captured"])
+        self.move_history = list(snap["move_history"])
+        self.game_over = False
+        self.winner = None
+        self.selected_pos = None
+
+        if hw_manager and hasattr(hw_manager, "clear_yolo_baseline"):
+            hw_manager.clear_yolo_baseline()
+
+        if self.api_client:
+            try:
+                self.api_client.send_move_update_board(self.current_fen)
+            except Exception:
+                pass
+
+        print(f"[UNDO] ✅ Hoàn tác thành công! FEN: {self.current_fen}")
+        self.set_status("↩️ Đã hoàn tác nước cờ (Undo)! Đến lượt bạn đi.", color=(0, 150, 0), duration=4.0)
+        return True
+
     def process_human_move(self, src, dst, p_name):
         print(f"[HUMAN] ✅ Moved: {p_name} {src}->{dst}")
         self.set_status("✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
         
+        # Lưu snapshot trạng thái trước nước đi để phục vụ Undo
+        self.history_snapshots.append({
+            "board": [row[:] for row in self.board],
+            "turn": self.turn,
+            "last_move": self.last_move,
+            "current_fen": self.current_fen,
+            "move_number": self.move_number,
+            "r_captured": list(self.r_captured),
+            "b_captured": list(self.b_captured),
+            "move_history": list(self.move_history),
+        })
+
         self.move_history.append({"turn": "r", "src": src, "dst": dst})
         
         cap_p = self.board[dst[1]][dst[0]]
@@ -179,6 +271,18 @@ class GameState:
         # [API] Đồng bộ nước đi lên máy chủ Simulation
         self.api_client.send_move_update_board(self.current_fen)
         
-        if xiangqi.get_king_pos("b", self.board) is None:
-            self.handle_game_over("r")
+        # Kiểm tra Chiếu bí / Tuyệt sát hoặc Chiếu tướng đối với AI
+        if xiangqi.is_checkmate("b", self.board):
+            is_chk = xiangqi.is_king_in_check("b", self.board)
+            reason = "CHIẾU BÍ" if is_chk else "TUYỆT SÁT"
+            print(f"[GAME] 🏆 BẠN ĐÃ THẮNG! AI bị {reason}!")
+            self.handle_game_over("r", reason=reason)
             self.turn = "r"
+            if self.api_client:
+                try:
+                    self.api_client.end_match(winner="RED", reason="CHECKMATE")
+                except Exception:
+                    pass
+        elif xiangqi.is_king_in_check("b", self.board):
+            print("[GAME] ⚠️ ĐANG CHIẾU TƯỚNG AI!")
+            self.set_status("⚠️ CHIẾU TƯỚNG! AI đang tìm cách chống đỡ...", color=(234, 88, 12), duration=3.0)

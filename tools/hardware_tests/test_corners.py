@@ -26,9 +26,18 @@ import argparse
 import numpy as np
 import cv2
 
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_DIR = os.path.dirname(_THIS_DIR)
+_TOOLS_DIR = os.path.dirname(_THIS_DIR)
+_PROJECT_DIR = os.path.dirname(_TOOLS_DIR)
 sys.path.insert(0, _PROJECT_DIR)
+sys.path.insert(0, _TOOLS_DIR)
 
 import config
 

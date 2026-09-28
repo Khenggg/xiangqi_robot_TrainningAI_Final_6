@@ -1,5 +1,18 @@
 # KNOWN_ISSUES.md — COMPACT ISSUE & REGRESSION TRACKER
 
+## 2026-09-26 current collision milestone
+
+- **OPEN - physical grip:** the declared closed CAD jaws remain roughly 2-7 mm from the nominal 22.5 mm rook in direct PyBullet queries. Simulator grasp now fails closed with NO_JAW_CONTACT; actual stroke, alignment, and force need measurement before a verified pick can be enabled.
+- **VERIFIED — simulated static endpoints only:** the 90/90 and 18/18 acceptance-marked tests solve IK and query collision at individual poses. They do not test grasp contact, full trajectories, or physical FR3 safety.
+- **VERIFIED — carried payload pairs:** the guard now checks payload-floor and payload-robot-link pairs in addition to payload-board and payload-piece pairs. Direct PyBullet penetrating fixtures must be rejected.
+- **VERIFIED — direct PyBullet collision contacts:** Independent test suite test_direct_pybullet_contact_clearance.py proves direct PyBullet contactDistance < 0 for board, outer rim, floor, arm Link 2, carried piece, and closing jaw travel (5.2 mm each along X) across all 19 fixed component boxes + 2 moving finger hulls (total 21 shapes across 4 bodies). The 19th component (viewer_adapter_collar) is explicitly verified in PyBullet.
+- **VERIFIED — dangerous command invariance:** test_dangerous_command_invariance_and_web.py proves 100% invariance of joints, TCP, and gripper state on command rejection, with non-optimistic 3D web viewer telemetry contract.
+- **OPEN — reachability seeds:** shared/cell_reachability_dataset.json is marked STALE/UNVALIDATED and records historical yaw 90°/150 mm data. Runtime strictly ignores it.
+- **OPEN — route planner:** move_joint_with_lift_recovery contains a reactive 65 mm lift fallback. Preplanned collision-free corridors for all 8010 ordered routes remain to be proven.
+- **OPEN — hardware:** no physical FR3 motion, calibration parity, or physical clearance has been verified on physical hardware.
+- **OPEN - regression baseline:** nine board-placement / stale-dataset tests still fail under the active yaw 0 degree scene. The targeted collision suite passed, but the wider suite is not green.
+---
+
 > **Purpose:** Persistent tracking of bugs, blockers, and edge cases. Prevents agents from rediscovering solved bugs or re-investigating known characteristics.
 
 ---

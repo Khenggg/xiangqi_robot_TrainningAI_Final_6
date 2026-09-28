@@ -8,7 +8,7 @@
   "scale_to_m": 0.0008,
   "scale_calibration_notes": "Tessellated STEP mesh from occt-import-js requires scale 0.0008 to align with visual FR3 wrist3 flange geometry. Marked as VISUAL_CALIBRATION_PROVISIONAL.",
   "finger_source_color_hex": "#694d3b",
-  "finger_travel_mm": 16.0,
+  "finger_travel_mm": 6.5,
   "animation_duration_ms": 220,
   "cad_flange_origin": [
     37.555,
@@ -17,15 +17,18 @@
   ],
   "profiles": {
     "fr3": {
+      "robot_flange_origin_m": [0.0, 0.0, 0.1],
+      "target_flange_to_tip_m": 0.168058,
+      "cad_axial_length_mm": 147.5,
       "flange_target_offset_m": [
         0.0,
         0.0,
-        0.1
+        0.150058
       ],
       "mount_offset_m": [
-        -0.03,
+        -0.030044,
         0.014,
-        0.16
+        0.210058
       ],
       "mount_rotation_euler_rad": [
         3.141592653589793,

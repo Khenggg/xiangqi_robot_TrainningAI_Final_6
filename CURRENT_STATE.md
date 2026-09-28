@@ -1,5 +1,35 @@
 # CURRENT_STATE.md — ACTIVE MACHINE-READABLE REPOSITORY STATE
 
+## 2026-09-26 collision worktree update
+
+This section describes **uncommitted, simulation-only work** on `integration/unified-fr3-system` at `fab750a918c1457ae14bfda900572fb16f846e26`. The historical G90 metrics and test counts below apply to an older checkout; they must not be used as evidence for the current yaw 0° scene. `LAST_REVIEWED_HEAD` below remains historical because the entire dirty worktree has not been reviewed.
+
+### CONTACT-GATED CORRECTION (simulation only)
+
+- The current 22.5 mm rook is **not gripped** by the declared CAD jaw stroke. Direct PyBullet queries at the nominal grasp leave roughly 2-7 mm separation at the two jaws. Closing now returns NO_JAW_CONTACT; no piece is attached and EXECUTE_3STAGE stops at GRASP rather than claiming placement success. Actual stroke, alignment, and grip force still require measurement.
+- The carried piece is checked against the floor and every robot link as well as the board and other pieces. Deliberate PyBullet payload penetration into the floor or link 2 is rejected.
+- The viewer resolves empty-board clicks through the same board placement transform used to render cells. Piece click metadata follows authoritative nearest_row/nearest_col telemetry. A Node helper test passed; a full browser click session has not been verified.
+- The 90/90 and 18/18 acceptance-marked tests check **static simulator IK/collision endpoints only**. They do not verify grip contact, full paths, or hardware safety. Stage-machine tests that need a successful grasp use a documented synthetic bilateral-contact fixture; direct PyBullet contact tests remain unmocked.
+
+### VERIFIED_FIXED (current scope)
+
+- Canonical flange-to-fingertip TCP is 168.3 mm in the active profile; invalid profile data or scene/profile disagreement now fails closed. The collision proxy covers the full axial tool and uses the same transform.
+- Adaptive tool yaw: four orthogonal IK candidates yield collision-checked static endpoint poses at 90/90 cells; this is not a successful grasp/contact result.
+- Physical FR3 reach envelope: MAX_REACH_RADIUS_M updated from 0.65m to 0.78m in fr3.py, faithful to physical arm span (0.724m from shoulder, ~0.737m-0.864m from base origin), unlocking all 18 key hover & grasp poses.
+- PyBullet compound collider 12+7 split ensures all 19 fixed component boxes + 2 moving finger hulls (including viewer_adapter_collar) are registered in physics engine.
+- Carried piece payload checks: extended collision verification to floor and robot arm links.
+- Pick descent preserves the collision-checked IK jaw orientation. Collision checks include out-of-bounds bodies and the moving attached piece against board and other pieces. Placement releases from 1 mm above the board so the attached piece maintains the 0.5 mm minimum guard clearance until release.
+- Repeated board placement updates use the immutable scene surface height, so offsets do not accumulate.
+
+### TEST_EVIDENCE (current scope)
+
+- Direct PyBullet grasp/payload test: 3/3 passed. The nominal rook test asserts an honest NO_JAW_CONTACT failure; synthetic payload penetrations of floor and robot link 2 are rejected.
+- Targeted collision and stage-machine fast suite: 99/99 passed. Stage-machine positive grasp cases use synthetic bilateral contact, not actual CAD jaw contact with the nominal rook.
+- Viewer helper and existing viewer Node tests passed. The live browser click flow was not exercised.
+- An extended fast suite initially returned 44 passed / 11 failed. Two tests in this change set were repaired and rerun (2/2 passed). Nine board-placement/stale-dataset tests remain failing under the active yaw 0 degree scene; the wider suite is not green.
+- Historical 90/90 and 18/18 endpoint gates below are not proof of grasp, complete collision-free motion, or hardware safety. No physical robot command was sent.
+---
+
 > **Purpose:** Authoritative record of the currently reviewed codebase state. Agents MUST read this file to determine the delta between `LAST_REVIEWED_HEAD` and `HEAD` without rescanning the entire repository.
 
 ---

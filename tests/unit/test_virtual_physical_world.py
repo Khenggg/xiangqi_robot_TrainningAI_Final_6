@@ -44,9 +44,9 @@ class VirtualPhysicalWorldTests(unittest.TestCase):
         self.assertLess(self.world.board_y_min, self.world.board_y_max)
         width = self.world.board_y_max - self.world.board_y_min
         depth = self.world.board_x_max - self.world.board_x_min
-        # In 90 deg orientation: u (width) maps to -X_robot, v (length) maps to -Y_robot
-        self.assertAlmostEqual(width, self.world.geom.outer_length_mm / 1000.0, places=3)
-        self.assertAlmostEqual(depth, self.world.geom.outer_width_mm / 1000.0, places=3)
+        # Active yaw=0 orientation maps board width to Y and board length to X.
+        self.assertAlmostEqual(width, self.world.geom.outer_width_mm / 1000.0, places=3)
+        self.assertAlmostEqual(depth, self.world.geom.outer_length_mm / 1000.0, places=3)
 
     def test_piece_spawning_and_count_by_side(self):
         red_pieces = [p for p in self.world.pieces.values() if p.side == "r"]

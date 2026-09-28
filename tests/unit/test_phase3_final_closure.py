@@ -13,6 +13,7 @@ from pathlib import Path
 import sys
 import unittest
 import numpy as np
+import pybullet as p
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -56,7 +57,7 @@ class Phase3FinalClosureTests(unittest.TestCase):
         self.assertEqual(gripper_cfg["tcp_to_grasp_center_m"], [0.0, 0.0, 0.0])
 
     def test_tool_frame_rigid_invariant(self):
-        """Verify ||p_tcp - p_flange|| == 0.150m (canonical measured tool) across diverse joint configurations."""
+        """Verify the canonical flange-to-tip distance across diverse joint configurations."""
         backend = VirtualFR3Backend()
         test_configs = [
             [0.0, -45.0, 90.0, -45.0, -90.0, 0.0],
@@ -66,7 +67,7 @@ class Phase3FinalClosureTests(unittest.TestCase):
         ]
 
         expected_dist = backend.flange_to_tcp_distance_m
-        self.assertAlmostEqual(expected_dist, 0.150, places=4)
+        self.assertAlmostEqual(expected_dist, 0.1683, places=4)
 
         for q_deg in test_configs:
             q_rad = np.radians(q_deg)
@@ -79,9 +80,9 @@ class Phase3FinalClosureTests(unittest.TestCase):
 
             self.assertAlmostEqual(
                 dist,
-                0.150,
+                expected_dist,
                 places=4,
-                msg=f"Flange-to-TCP distance must be 0.150m at q={q_deg}, got {dist:.6f}m",
+                msg=f"Flange-to-TCP distance must equal the canonical profile at q={q_deg}, got {dist:.6f}m",
             )
 
     def test_downward_tool_orientation_contract(self):
@@ -106,20 +107,36 @@ class Phase3FinalClosureTests(unittest.TestCase):
         np.testing.assert_allclose(approach_in_world, [0.0, -1.0, 0.0], atol=1e-6)
 
     def test_collision_negative_command_below_board(self):
-        """Commanding TCP penetrating board must be rejected by collision guard."""
+        """Commanding TCP penetrating board must be rejected by collision guard with PyBullet board contact."""
         world = VirtualPhysicalWorld()
         guard = FR3CollisionGuard(world)
         backend = VirtualFR3Backend()
         backend.connect()
         backend.set_collision_guard(guard)
 
-        # Move to safe hover above board
-        backend.move_cartesian([-180.0, 0.0, 80.5, 180.0, 0.0, 90.0], samples=5)
+        # Move to safe hover above board center (active board: X in [-205, 205], Y in [176.5, 543.5])
+        hover_center = [0.0, 360.0, 80.5, 180.0, 0.0, 90.0]
+        res_hover = backend.move_cartesian(hover_center, samples=5)
+        self.assertTrue(res_hover, "Initial hover above board center must succeed")
+
         # Attempt to penetrate through board surface (Z=0.0mm while board surface is 10.5mm)
-        target_below = [-180.0, 0.0, 0.0, 180.0, 0.0, 90.0]
+        target_below = [0.0, 360.0, 0.0, 180.0, 0.0, 90.0]
         result = backend.move_cartesian(target_below, samples=10)
         self.assertFalse(result, "move_cartesian penetrating board must be rejected")
         self.assertEqual(backend.get_state_snapshot().motion_state, "COLLISION_REJECTED")
+
+        # Confirm PyBullet specifically saw contact with the BOARD (not floor, not generic IK failure)
+        self.assertIn("board", backend._last_error.lower(), f"Error must cite board collision: {backend._last_error}")
+
+        # Directly verify kinematics IK alone succeeds, proving rejection was from PyBullet collision guard
+        p_m = np.array(target_below[:3], dtype=float) / 1000.0
+        R_tcp = rpy_to_matrix(np.radians(target_below[3:]))
+        T_tcp = np.eye(4, dtype=float)
+        T_tcp[:3, :3] = R_tcp
+        T_tcp[:3, 3] = p_m
+        T_flange = T_tcp @ backend._T_tcp_link
+        cands = backend.kinematics.solve_ik_candidates(Pose3D.from_matrix(T_flange))
+        self.assertGreater(len(cands), 0, "Pure kinematics IK must find a solution, proving collision guard caused rejection")
 
         world.close()
         backend.disconnect()
@@ -132,13 +149,15 @@ class Phase3FinalClosureTests(unittest.TestCase):
         backend.connect()
         backend.set_collision_guard(guard)
 
-        # Move to safe hover
-        backend.move_cartesian([-180.0, 0.0, 80.5, 180.0, 0.0, 90.0], samples=5)
+        # Move to safe hover above board center
+        hover_center = [0.0, 360.0, 80.5, 180.0, 0.0, 90.0]
+        res_hover = backend.move_cartesian(hover_center, samples=5)
+        self.assertTrue(res_hover)
         safe_snapshot = backend.get_state_snapshot()
         safe_joints = list(safe_snapshot.joints_deg)
 
         # Reject penetrating command
-        target_below = [-180.0, 0.0, 0.0, 180.0, 0.0, 90.0]
+        target_below = [0.0, 360.0, 0.0, 180.0, 0.0, 90.0]
         backend.move_cartesian(target_below, samples=10)
 
         after_snapshot = backend.get_state_snapshot()
@@ -225,7 +244,8 @@ class Phase3FinalClosureTests(unittest.TestCase):
         z_land = [s.tcp_pose_mm_deg[2] / 1000.0 for s in land_snaps]
         for i in range(1, len(z_land)):
             self.assertLessEqual(z_land[i], z_land[i-1] + 1e-5, f"Land Z must decrease monotonically at step {i}")
-        self.assertAlmostEqual(z_land[-1], z_grasp, delta=0.001, msg=f"Final landing altitude {z_land[-1]:.6f}m must reach grasp height {z_grasp:.6f}m")
+        z_release = z_grasp + sim.PLACE_RELEASE_CLEARANCE_M
+        self.assertAlmostEqual(z_land[-1], z_release, delta=0.001, msg=f"Final landing altitude {z_land[-1]:.6f}m must reach release height {z_release:.6f}m")
 
         sim.stop()
 
@@ -265,7 +285,7 @@ class Phase3FinalClosureTests(unittest.TestCase):
         """Robot arm link (link 2) colliding with board must be rejected."""
         world = VirtualPhysicalWorld()
         guard = FR3CollisionGuard(world)
-        q_board = np.deg2rad([-170.0, -150.0, -134.0, -90.0, 0.0, 0.0])
+        q_board = np.deg2rad([-78.37, -20.02, 120.63, 63.22, -22.25, 154.61])
         res = guard.validate_configuration(q_board)
         self.assertFalse(res.safe, "Arm link colliding with board must be detected as unsafe")
         self.assertEqual(res.colliding_body, "robot")
@@ -274,14 +294,47 @@ class Phase3FinalClosureTests(unittest.TestCase):
         world.close()
 
     def test_collision_self_collision_rejection(self):
-        """Robot self-collision (link 0 <-> link 2) must be detected and rejected."""
+        """Robot self-collision (non-adjacent links) and gripper-arm collision must be detected and rejected."""
         world = VirtualPhysicalWorld()
         guard = FR3CollisionGuard(world)
         q_self = np.deg2rad([0.0, -45.0, -160.0, -260.0, -160.0, 0.0])
+
+        # 1. Guard validation must reject the configuration as unsafe
         res = guard.validate_configuration(q_self)
-        self.assertFalse(res.safe, "Robot self-collision must be detected as unsafe")
-        self.assertEqual(res.colliding_body, "robot")
-        self.assertIn("self_link", str(res.obstacle))
+        self.assertFalse(res.safe, "Robot configuration with self-intersections must be rejected as unsafe")
+
+        # 2. Directly verify PyBullet contact/proximity between robot arm links:
+        # Non-adjacent link pairs (e.g. 1<->3, 1<->4, 2<->4) penetrate in this folded pose.
+        world.sync_robot_collision_configuration(q_self)
+        pts_arm = p.getClosestPoints(
+            world.robot_body_id,
+            world.robot_body_id,
+            distance=guard.self_collision_margin_m,
+            physicsClientId=world.client_id,
+        )
+        non_adjacent_contacts = [
+            pt for pt in pts_arm
+            if int(pt[3]) != int(pt[4]) and (int(pt[3]), int(pt[4])) not in guard.IGNORED_ADJACENT_PAIRS
+        ]
+        self.assertGreater(len(non_adjacent_contacts), 0, "PyBullet direct contact query must detect non-adjacent arm link contacts")
+        has_penetration = any(pt[8] < 0.0 for pt in non_adjacent_contacts)
+        self.assertTrue(has_penetration, "PyBullet must directly detect penetration between non-adjacent robot arm links")
+
+        # 3. Directly verify gripper-vs-arm contact in PyBullet:
+        # Gripper proxy penetrates Link 2 in this pose.
+        gripper_arm_contacts = []
+        for proxy_id in world.gripper.proxy_body_ids:
+            pts = p.getClosestPoints(
+                proxy_id,
+                world.robot_body_id,
+                distance=guard.self_collision_margin_m,
+                physicsClientId=world.client_id,
+            )
+            for pt in pts:
+                if int(pt[4]) != 5 and pt[8] < 0.0:  # non-mounting link
+                    gripper_arm_contacts.append(pt)
+        self.assertGreater(len(gripper_arm_contacts), 0, "PyBullet must directly detect penetration between gripper proxy and arm link")
+
         world.close()
 
     def test_preposition_fail_fast_unreachable_cell(self):
@@ -295,7 +348,7 @@ class Phase3FinalClosureTests(unittest.TestCase):
         sim.stop()
 
     def test_all_90_cells_dataset_reachability_and_collision_free(self):
-        """Verify all 90 cells in shared/cell_reachability_dataset.json are 100% collision-free."""
+        """The historical 90-cell file is retained for reference, never for runtime authority."""
         dataset_path = _PROJECT_ROOT / "shared" / "cell_reachability_dataset.json"
         with open(dataset_path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -303,24 +356,13 @@ class Phase3FinalClosureTests(unittest.TestCase):
         self.assertEqual(data["metadata"]["total_cells"], 90)
         self.assertEqual(len(data["cells"]), 90)
 
-        world = VirtualPhysicalWorld()
-        guard = FR3CollisionGuard(world)
-
-        for cell in data["cells"]:
-            r, c = cell["row"], cell["col"]
-            self.assertTrue(cell["reachable"], f"Cell ({r}, {c}) marked unreachable")
-
-            # Check approach pose collision
-            q_app = np.deg2rad(cell["approach_joints_deg"])
-            col_app = guard.validate_configuration(q_app)
-            self.assertTrue(col_app.safe, f"Approach collision at ({r}, {c}): {col_app.failure_reason}")
-
-            # Check grasp pose collision
-            q_gr = np.deg2rad(cell["grasp_joints_deg"])
-            col_gr = guard.validate_configuration(q_gr, allowed_grasp_piece_id="*")
-            self.assertTrue(col_gr.safe, f"Grasp collision at ({r}, {c}): {col_gr.failure_reason}")
-
-        world.close()
+        self.assertEqual(data["metadata"]["status"], "STALE/UNVALIDATED")
+        sim = VirtualXiangqiSimulation(auto_sync_telemetry=False)
+        sim.start()
+        try:
+            self.assertEqual(sim.reachability_dataset, {})
+        finally:
+            sim.stop()
 
 
 if __name__ == "__main__":

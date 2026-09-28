@@ -1,70 +1,161 @@
+# =============================================================================
+# === FILE: input_handler.py ===
+# === Quản lý sự kiện Chuột & Bàn phím với trải nghiệm chuẩn App Cờ Tướng ===
+# =============================================================================
 import time
-from src.core import xiangqi  # type: ignore
-from src.ui.board_renderer import BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT, NUM_COLS, NUM_ROWS  # type: ignore
+import threading
+import pygame
+from typing import Optional, Tuple
+from src.core import xiangqi
+from src.ui.board_renderer import (
+    BoardRenderer,
+    BTN_SURRENDER_RECT,
+    BTN_NEW_GAME_RECT,
+    BTN_UNDO_RECT,
+    BTN_HINT_RECT,
+    ELO_BUTTON_RECTS,
+    BTN_ELO_PREV_RECT,
+    BTN_ELO_NEXT_RECT,
+    NUM_COLS,
+    NUM_ROWS,
+)
 from src.vision.move_observation import MoveObservation, derive_move_observation
+
 
 class InputHandler:
     """Manages Pygame Key/Mouse events and bridges them to GameState and HardwareManager."""
+
     def __init__(self, game_state, hw_manager):
         self.state = game_state
         self.hw = hw_manager
 
-    def handle_mouse_down(self, mx, my):
-        # Surrender Button
-        if BTN_SURRENDER_RECT.collidepoint(mx, my) and not self.state.game_over:
-            print("[GAME] YOU SURRENDER!")
-            self.state.handle_game_over("b")
-            self.state.api_client.end_match(winner="BLACK", reason="RESIGN")
+    # =========================================================================
+    # 1. XỬ LÝ CHUỘT (MOUSE INPUT - CLICK BUTTONS & CLICK-TO-MOVE)
+    # =========================================================================
+    def handle_mouse_down(self, mx: int, my: int):
+        # 1. Nút Xin đi lại (Undo Round)
+        if BTN_UNDO_RECT.collidepoint(mx, my):
+            self.state.undo_round(self.hw)
             return
 
-        # New Game Button
+        # 2. Nút Gợi ý nước đi (Hint)
+        if BTN_HINT_RECT.collidepoint(mx, my):
+            self._handle_hint()
+            return
+
+        # 3. Nút Ván mới (New Game)
         if BTN_NEW_GAME_RECT.collidepoint(mx, my):
             self.state.reset_game(self.hw)
             return
 
-        # Manual Override (Mouse Drag)
+        # 4. Nút Xin thua (Surrender / Resign)
+        if BTN_SURRENDER_RECT.collidepoint(mx, my):
+            self._handle_surrender()
+            return
+
+        # 5. Nút Giảm ELO [-]
+        if BTN_ELO_PREV_RECT.collidepoint(mx, my):
+            self._step_elo(-1)
+            return
+
+        # 6. Nút Tăng ELO [+]
+        if BTN_ELO_NEXT_RECT.collidepoint(mx, my):
+            self._step_elo(1)
+            return
+
+        # 7. Danh sách 8 nút chọn nhanh ELO (800 - 3000)
+        for target_elo, rect in ELO_BUTTON_RECTS.items():
+            if rect.collidepoint(mx, my):
+                self._set_elo(target_elo)
+                return
+
+        # 8. Tương tác bàn cờ (Click-to-Move cho người chơi)
         if (self.state.allow_mouse_move or self.state.manual_override_active) and self.state.turn == "r" and not self.state.game_over:
             c, r = BoardRenderer.pixel_to_grid(mx, my)
             if 0 <= c < NUM_COLS and 0 <= r < NUM_ROWS:
                 clicked_piece = self.state.board[r][c]
-                
-                # Select a piece
-                if clicked_piece.startswith("r"):
-                    self.state.selected_pos = (c, r)
-                    
-                # Move a selected piece
-                elif self.state.selected_pos:
-                    src, dst = self.state.selected_pos, (c, r)
+
+                # Nếu đang có quân được chọn
+                if self.state.selected_pos is not None:
+                    src = self.state.selected_pos
+                    dst = (c, r)
+
+                    # Bấm lại chính nó -> Hủy chọn (Deselect)
+                    if dst == src:
+                        self.state.selected_pos = None
+                        return
+
+                    # Bấm sang một quân khác của phe Đỏ -> Đổi quân được chọn
+                    if clicked_piece.startswith("r"):
+                        self.state.selected_pos = (c, r)
+                        return
+
+                    # Thử đi tới ô được click
                     p_name = self.state.board[src[1]][src[0]]
-                    
                     if xiangqi.is_valid_move(src, dst, self.state.board, "r"):
-                        print("[UI] 🖱️ Người dùng đi cờ trên màn hình.")
+                        print(f"[UI] 🖱️ Người dùng đi cờ: {p_name} {src} ➜ {dst}")
                         self.state.process_human_move(src, dst, p_name)
                         self.state.selected_pos = None
+                        self.state.hint_move = None
                         self.state.manual_override_active = False
-                        
-                        # Retake T1 baseline after manual override
-                        if self.hw.cam_monitor:
-                            print("[UI] 📸 Đang chụp lại T1 baseline sau khi Override...")
-                            self.state.set_status("📸 Cập nhật Mắt Camera...", color=(0, 100, 180), duration=2.0)
+
+                        # Chụp lại baseline nếu camera đang hoạt động
+                        if self.hw and hasattr(self.hw, "cam_monitor") and self.hw.cam_monitor:
                             self.hw.capture_baseline_if_needed(force_delay=1.0)
                     else:
-                        print(f"Invalid move: {src}->{dst}")
-                        self.state.set_status("❌  Invalid move!", color=(180, 0, 0))
+                        print(f"[UI] ❌ Nước đi không hợp lệ: {src} ➜ {dst}")
+                        self.state.set_status("❌ Nước đi không hợp lệ!", color=(220, 38, 38), duration=2.5)
                         self.state.set_invalid_flash(dst[0], dst[1])
-                        self.state.selected_pos = None
+                else:
+                    # Chưa có quân chọn -> Nếu bấm trúng quân Đỏ thì chọn quân
+                    if clicked_piece.startswith("r"):
+                        self.state.selected_pos = (c, r)
 
+    # =========================================================================
+    # 2. XỬ LÝ PHÍM TẮT (KEYBOARD INPUT)
+    # =========================================================================
     def handle_keyboard(self, key):
-        import pygame  # type: ignore
-
-        # G KEY: Test Gripper Tool DO0 (Bật 3s rồi Tắt)
-        if key == pygame.K_g:
-            self._handle_gripper_test(do_id=0)
+        # U KEY: Undo Last Move (Hoàn tác nước cờ)
+        if key == pygame.K_u:
+            self.state.undo_round(self.hw)
             return
 
-        # H KEY: Test Gripper Tool DO1 (Bật 3s rồi Tắt)
-        elif key == pygame.K_h:
-            self._handle_gripper_test(do_id=1)
+        # H KEY: Gợi ý nước đi (Hint)
+        if key == pygame.K_h:
+            self._handle_hint()
+            return
+
+        # N KEY: Ván mới (New Game)
+        if key == pygame.K_n:
+            self.state.reset_game(self.hw)
+            return
+
+        # PHÍM 1-8: Đổi cấp độ ELO của AI
+        elo_key_map = {
+            pygame.K_1: 800,
+            pygame.K_2: 1100,
+            pygame.K_3: 1400,
+            pygame.K_4: 1700,
+            pygame.K_5: 2000,
+            pygame.K_6: 2300,
+            pygame.K_7: 2600,
+            pygame.K_8: 3000,
+        }
+        if key in elo_key_map:
+            self._set_elo(elo_key_map[key])
+            return
+
+        # [ KEY / ] KEY / - / +: Tăng hoặc giảm nấc ELO
+        if key in (pygame.K_LEFTBRACKET, pygame.K_MINUS):
+            self._step_elo(-1)
+            return
+        elif key in (pygame.K_RIGHTBRACKET, pygame.K_EQUALS):
+            self._step_elo(1)
+            return
+
+        # G KEY: Test Gripper Tool DO0
+        if key == pygame.K_g:
+            self._handle_gripper_test(do_id=0)
             return
 
         # I KEY: Lấy dữ liệu & Kiểm tra kết nối từ Robot FR3
@@ -78,14 +169,72 @@ class InputHandler:
         # Z KEY: Rollback
         if key == pygame.K_z:
             self.state.handle_rollback(self.hw)
-            
-        # SPACE KEY: Trigger YOLO Detection
+
+        # SPACE KEY: Trigger YOLO / Camera Detection
         elif key == pygame.K_SPACE:
             self._handle_space_key()
 
+    # =========================================================================
+    # 3. HELPER ACTIONS (ĐỔI ELO, GỢI Ý, XIN THUA, TEST THIẾT BỊ)
+    # =========================================================================
+    def _set_elo(self, target_elo: int):
+        """Đặt mức ELO cho AI qua AIController."""
+        if self.hw and hasattr(self.hw, "ai_ctrl") and self.hw.ai_ctrl:
+            elo, title = self.hw.ai_ctrl.set_elo(target_elo)
+            self.state.ai_elo = elo
+            self.state.ai_elo_title = title
+            self.state.set_status(f"🎯 AI ELO: {title}", color=(234, 88, 12), duration=3.0)
+            print(f"[UI] 🎯 Đã đổi AI ELO thành {elo} ({title})")
+
+    def _step_elo(self, direction: int):
+        """Tăng hoặc giảm 1 nấc ELO."""
+        if self.hw and hasattr(self.hw, "ai_ctrl") and self.hw.ai_ctrl:
+            elo, title = self.hw.ai_ctrl.step_elo(direction)
+            self.state.ai_elo = elo
+            self.state.ai_elo_title = title
+            self.state.set_status(f"🎯 AI ELO: {title}", color=(234, 88, 12), duration=3.0)
+            print(f"[UI] 🎯 Đã đổi AI ELO thành {elo} ({title})")
+
+    def _handle_hint(self):
+        """Tìm và hiển thị nước đi gợi ý cho người chơi."""
+        if self.state.game_over:
+            return
+        if self.state.turn != "r":
+            self.state.set_status("⚠️ Đang trong lượt của AI, hãy đợi AI đi xong!", color=(200, 100, 0), duration=2.5)
+            return
+
+        if self.hw and hasattr(self.hw, "ai_ctrl") and self.hw.ai_ctrl:
+            board_snap = [row[:] for row in self.state.board]
+
+            def _hint_worker():
+                self.state.set_status("💡 AI đang tìm nước gợi ý tốt nhất...", color=(202, 138, 4), duration=2.0)
+                hint = self.hw.ai_ctrl.pick_move(board_snap, color="r")
+                if hint:
+                    self.state.hint_move = hint
+                    self.state.hint_expiry = time.time() + 6.0
+                    hs, hd = hint
+                    p = self.state.board[hs[1]][hs[0]]
+                    self.state.set_status(f"💡 Gợi ý: {p} ({hs[0]},{hs[1]}) ➜ ({hd[0]},{hd[1]})", color=(168, 85, 247), duration=6.0)
+                    print(f"[HINT] 💡 Gợi ý nước đi: {p} {hs} ➜ {hd}")
+                else:
+                    self.state.set_status("⚠️ Không tìm được nước gợi ý!", color=(180, 100, 0), duration=2.5)
+
+            threading.Thread(target=_hint_worker, daemon=True).start()
+
+    def _handle_surrender(self):
+        """Xử lý khi người chơi xin thua."""
+        if not self.state.game_over:
+            print("[GAME] YOU SURRENDER!")
+            self.state.handle_game_over("b", reason="XIN THUA")
+            if hasattr(self.state, "api_client") and self.state.api_client:
+                try:
+                    self.state.api_client.end_match(winner="BLACK", reason="RESIGN")
+                except Exception:
+                    pass
+            self.state.set_status("🏳️ Bạn đã xin thua ván cờ!", color=(220, 38, 38), duration=5.0)
+
     def _handle_gripper_test(self, do_id=0):
         if self.hw.gripper_driver is not None:
-            import threading
             def _driver_worker():
                 action_name = "CLOSE" if do_id == 0 else "OPEN"
                 print(f"\n[GRIPPER TEST] 🔧 Đang test kích hoạt GripperDriver: {action_name}...")
@@ -120,14 +269,6 @@ class InputHandler:
             print(f"  - Khớp Joints (deg): {[round(q, 2) for q in snap.joints_deg]}")
             print(f"  - TCP Pose (mm, deg): {[round(p, 2) for p in snap.tcp_pose_mm_deg]}")
             print(f"  - Flange Pose (mm, deg): {[round(p, 2) for p in snap.flange_pose_mm_deg]}")
-            flange_src = getattr(snap, "flange_pose_source", "UNAVAILABLE")
-            print(f"    Source: {flange_src}")
-            print(f"  - Kẹp Closed: {snap.gripper_closed}")
-            print(f"  - Motion Authorized: {getattr(self.hw, 'physical_motion_authorized', False)}")
-            print(f"  - Robot Ready: {self.hw.is_robot_ready}")
-            if self.hw.board_pose_provider is not None:
-                cal = getattr(self.hw.board_pose_provider, "is_calibrated", False)
-                print(f"  - Board Calibrated: {'✅ YES' if cal else '❌ NO'}")
             print("="*50 + "\n")
             self.state.set_status("✅ Đã lấy thông số từ Backend (Xem Terminal)", color=(0, 100, 180), duration=4.0)
             return
@@ -136,25 +277,6 @@ class InputHandler:
             print("[ROBOT INFO] ❌ Robot chưa kết nối!")
             self.state.set_status("❌ Robot chưa kết nối!", color=(180, 0, 0), duration=3.0)
             return
-
-        try:
-            r = self.hw.robot.robot
-            print("\n" + "="*50)
-            print("🤖 [THÔNG TIN TRẠNG THÁI TỪ ROBOT FAIRINO FR3 (LEGACY)]")
-            print(f"  - IP Robot: {self.hw.robot.ip}")
-            print(f"  - Trạng thái SDK: {'✅ ĐANG KẾT NỐI TỐT' if self.hw.robot.connected else '❌ MẤT KẾT NỐI'}")
-            err, ip = r.GetControllerIP()
-            if err == 0:
-                print(f"  - Controller IP phản hồi: {ip}")
-            err, tp = r.GetRobotTeachingPoint("HOMECHESS")
-            if err == 0:
-                print(f"  - Tọa độ HOMECHESS đọc từ Controller: X={float(tp[0]):.1f}, Y={float(tp[1]):.1f}, Z={float(tp[2]):.1f}")
-            print(f"  - Cổng kẹp đang cấu hình trong code: Tool DO{self.hw.robot.gripper_do_id}")
-            print("="*50 + "\n")
-            self.state.set_status("✅ Đã lấy thông số từ Robot (Xem Terminal)", color=(0, 100, 180), duration=4.0)
-        except Exception as e:
-            print(f"[ROBOT INFO] ❌ Lỗi đọc dữ liệu: {e}")
-            self.state.set_status(f"❌ Lỗi đọc Robot: {e}", color=(180, 0, 0), duration=3.0)
 
     def _handle_space_key(self, auto_retry=False) -> bool:
         print("\n[SPACE] 🎯 Người chơi bấm SPACE — đang chụp T2 snapshot...")
@@ -193,12 +315,8 @@ class InputHandler:
         obs = None
         cchess_result = None
 
-        # ---------------------------------------------------------------------
-        # 1. PRIMARY: CChess full-board recognition + quality gate + MoveObservation
-        # ---------------------------------------------------------------------
         if hasattr(self.hw, "recognize_board_state") and self.hw.cchess_recognizer is not None:
             try:
-                print("[SPACE] 🔍 Chạy CChess Full-Board Recognizer (Primary)...")
                 cchess_result = self.hw.recognize_board_state(frame)
                 if cchess_result and cchess_result.get("success") and cchess_result.get("quality_ok", True):
                     rec_board = cchess_result.get("board")
@@ -209,99 +327,57 @@ class InputHandler:
                         player_color="r",
                         confidence_grid=confs,
                     )
-                    print(f"[SPACE] 🎯 CChess observation: success={obs.success}, move={obs.src}→{obs.dst}, error={obs.error}")
-                else:
-                    q_err = cchess_result.get("error") if cchess_result else "CChess result empty"
-                    print(f"[SPACE] ⚠️ CChess quality gate không đạt: {q_err}")
             except Exception as e:
                 print(f"[SPACE] ⚠️ CChess recognizer error: {e}")
 
-        # ---------------------------------------------------------------------
-        # 2. SENSOR FUSION & FALLBACK: YOLO Occupancy detector
-        # ---------------------------------------------------------------------
         if self.hw.yolo_detector and self.hw.yolo_detector.has_baseline():
             yolo_obs = self.hw.yolo_detector.detect_move_observation(
                 frame, detections, self.state.board, cchess_result=cchess_result
             )
             if obs is not None and obs.success:
-                # Primary CChess succeeded; use YOLO as secondary verification if YOLO also detected a move
-                if yolo_obs.success:
-                    if (yolo_obs.src, yolo_obs.dst) != (obs.src, obs.dst):
-                        print(f"[SPACE] ⚠️ Xung đột cảm biến: CChess={obs.src}→{obs.dst} vs YOLO={yolo_obs.src}→{yolo_obs.dst}. Fail closed.")
-                        obs = MoveObservation(
-                            success=False,
-                            is_ambiguous=True,
-                            error=f"Xung đột cảm biến: CChess ({obs.src}→{obs.dst}) != YOLO ({yolo_obs.src}→{yolo_obs.dst})",
-                        )
-                    else:
-                        print(f"[SPACE] ✅ Cảm biến đồng thuận: CChess và YOLO đều xác nhận {obs.src}→{obs.dst}")
+                if yolo_obs.success and (yolo_obs.src, yolo_obs.dst) != (obs.src, obs.dst):
+                    obs = MoveObservation(
+                        success=False,
+                        is_ambiguous=True,
+                        error=f"Xung đột cảm biến: CChess != YOLO",
+                    )
             elif obs is None or (not obs.success and not obs.is_ambiguous):
-                # CChess was unavailable or could not detect a change, fallback to YOLO
-                print("[SPACE] 🔄 Thử YOLO Snapshot Detector (Fallback)...")
                 obs = yolo_obs
 
         if obs is None:
             obs = MoveObservation(success=False, error="Không có hệ thống nhận diện khả dụng")
 
-        # ---------------------------------------------------------------------
-        # 3. VERIFY & COMMIT STRUCTURED OBSERVATION
-        # ---------------------------------------------------------------------
         if not obs.success:
             if obs.is_ambiguous:
-                print(f"[SPACE] ⚠️ Nước đi mơ hồ / không thể xác định duy nhất: {obs.error}")
-                if not auto_retry:
-                    self.state.set_status(f"⚠️ Nước đi mơ hồ: {obs.error}", color=(180, 100, 0), duration=10.0)
-                    self.state.manual_override_active = True
-                    self.hw.clear_yolo_baseline()
+                self.state.set_status(f"⚠️ Nước đi mơ hồ: {obs.error}", color=(180, 100, 0), duration=10.0)
             else:
-                print(f"[SPACE] ❌ Nhận diện thất bại: {obs.error}")
-                if not auto_retry:
-                    self.state.set_status(f"❌ {obs.error or 'Không thấy nước đi hợp lệ!'}", color=(180, 0, 0), duration=5.0)
-                    if obs.dst:
-                        self.state.set_invalid_flash(obs.dst[0], obs.dst[1])
-                    self.state.manual_override_active = True
-                    self.hw.clear_yolo_baseline()
+                self.state.set_status(f"❌ {obs.error or 'Không thấy nước đi hợp lệ!'}", color=(180, 0, 0), duration=5.0)
+            self.state.manual_override_active = True
+            self.hw.clear_yolo_baseline()
             return False
 
-        # Additional Xiangqi rule verification on logical board
         if not xiangqi.is_valid_move(obs.src, obs.dst, self.state.board, "r"):
-            print(f"[SPACE] ❌ Nước đi vi phạm luật cờ: {obs.piece} {obs.src}->{obs.dst}")
-            if not auto_retry:
-                self.state.set_status("⚠️ Lỗi nhận diện / Đi sai luật! Dùng chuột kéo thả.", color=(180, 100, 0), duration=60.0)
-                self.state.set_invalid_flash(obs.dst[0], obs.dst[1])
-                self.state.manual_override_active = True
-                self.hw.clear_yolo_baseline()
+            self.state.set_status("⚠️ Lỗi nhận diện / Đi sai luật! Dùng chuột kéo thả.", color=(180, 100, 0), duration=10.0)
+            self.state.manual_override_active = True
+            self.hw.clear_yolo_baseline()
             return False
 
-        # Commit move
-        move_type_str = "Ăn quân" if obs.is_capture else "Di chuyển"
-        cap_str = f" (ăn {obs.captured_piece})" if obs.is_capture and obs.captured_piece else ""
-        print(f"[SPACE] ✅ Xác nhận nước đi ({move_type_str}{cap_str}): {obs.piece} {obs.src}→{obs.dst} (conf={obs.confidence:.2f})")
         self.state.process_human_move(obs.src, obs.dst, obs.piece)
-
-        # Cập nhật baseline YOLO với frame mới sau khi đi nước hợp lệ
         if self.hw.yolo_detector:
             self.hw.yolo_detector.capture_baseline(frame, detections)
         return True
 
     def try_auto_confirm_move(self, retries=10, retry_seconds=0.2) -> bool:
-        """Reuse the existing rule-validated snapshot flow after hand exit."""
-        import time
         if self.state.turn != "r" or self.state.game_over:
             return False
         if not self.hw.yolo_detector or not self.hw.yolo_detector.has_baseline():
             self.hw.reset_hand_interaction_monitor()
-            self.state.set_status("⚠️ Chưa có baseline. Hãy nhấn SPACE để xác minh.", color=(180, 100, 0), duration=12.0)
             return False
-        self.state.set_status("✋ Hand left board — verifying move...", color=(0, 100, 180), duration=3.0)
-        for attempt in range(1, int(retries) + 1):
+        for _ in range(int(retries)):
             if self._handle_space_key(auto_retry=True):
                 self.hw.reset_hand_interaction_monitor()
                 return True
-            if attempt < retries:
-                time.sleep(float(retry_seconds))
+            time.sleep(float(retry_seconds))
         self.state.manual_override_active = False
         self.hw.reset_hand_interaction_monitor()
-        self.state.set_status("⚠️ Không xác minh được nước đi. Hãy nhấn SPACE.", color=(180, 100, 0), duration=12.0)
-        print("[AUTO CONFIRM] Failed after retry limit; waiting for SPACE fallback.")
         return False

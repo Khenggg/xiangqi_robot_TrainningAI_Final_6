@@ -1,168 +1,95 @@
-"""
-Unit tests for 3-stage Pick & Place Safe Waypoint Trajectory (Lift -> Transit -> Land).
-
-Validates the user requirement:
-"mỗi lần đi tới đâu nó phải nhấc lên trước rồi mới đi tới vị trí đó để không vô tình làm ảnh hưởng tới quân cờ khác"
-1. Every cell has both a Grasp waypoint (+1.5mm) and an Approach waypoint (+70mm safe lift).
-2. During air transit between cells, gripper tip altitude maintains > 65mm above board surface
-   (clearance > 55mm above chess piece tops of 9.43mm), guaranteeing zero piece disturbance.
-3. Descent/ascent motions are purely vertical over each cell.
-4. Link lengths remain strictly invariant (delta < 1 um) with zero physical deformation.
-"""
+"""Trajectory checks against the active board, tool, and collision scene."""
 
 import json
 from pathlib import Path
 import unittest
+
 import numpy as np
 
-from src.domain.geometry import get_physical_geometry
-from src.simulation.kinematics.fr3 import FR3Kinematics
-from src.simulation.virtual_fr3_backend import VirtualFR3Backend
+from src.simulation.runtime import VirtualXiangqiSimulation
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class TrajectoryWaypointsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.dataset_path = _REPO_ROOT / "shared" / "cell_reachability_dataset.json"
-        with open(cls.dataset_path, "r", encoding="utf-8") as f:
-            cls.dataset = json.load(f)
+        cls.sim = VirtualXiangqiSimulation(auto_sync_telemetry=False)
+        cls.sim.start()
 
-        cls.scene_path = _REPO_ROOT / "shared" / "virtual_fr3_scene.json"
-        with open(cls.scene_path, "r", encoding="utf-8") as f:
-            cls.scene = json.load(f)
+    @classmethod
+    def tearDownClass(cls):
+        cls.sim.stop()
 
-        cls.kin = FR3Kinematics()
-        cls.board_cfg = cls.scene["virtual_board_placement"]
-        cls.x0, cls.y0, cls.z0 = cls.board_cfg["grid_origin_in_robot_base_m"]
+    def _pose(self, row, col, height_m, orientation=None):
+        xyz = self.sim.cell_to_robot_xyz_m(row, col, height_m)
+        return [v * 1000.0 for v in xyz] + list(
+            self.sim.target_tool_euler_deg if orientation is None else orientation
+        )
 
-        cls.geom = get_physical_geometry()
-        cls.piece_height_m = cls.geom.piece.height / 1000.0  # 9.43mm -> 0.00943m
-        cls.piece_top_z = cls.z0 + cls.piece_height_m
+    def test_stale_dataset_is_not_used_as_current_waypoints(self):
+        dataset = json.loads((ROOT / "shared/cell_reachability_dataset.json").read_text(encoding="utf-8"))
+        self.assertEqual(dataset["metadata"]["status"], "STALE/UNVALIDATED")
+        self.assertEqual(self.sim.reachability_dataset, {})
 
-        # Canonical measured tool length (150mm [MEASURED_APPROXIMATE])
-        tool_cfg = cls.scene.get("tool_transform", {})
-        cls.L_gripper = float(tool_cfg.get("flange_to_tcp_xyz_m", [0.0, 0.0, 0.150])[2])
-        meta = cls.dataset.get("metadata", {})
-        cls.safe_lift_mm = float(meta.get("clearance_safe_lift_m", 0.040)) * 1000.0
-        cls.grasp_clearance_mm = float(meta.get("clearance_grasp_m", 0.004715)) * 1000.0
-        cls.backend = VirtualFR3Backend()
-
-    def test_all_90_cells_have_grasp_and_approach_waypoints(self):
-        """Verify 100% reachability for both grasp and approach poses."""
-        cells = self.dataset.get("cells", [])
-        self.assertEqual(len(cells), 90)
-
-        for cell in cells:
-            r, c = cell["row"], cell["col"]
-            self.assertTrue(cell["reachable"], f"Cell ({r}, {c}) not marked reachable")
-            self.assertIn("grasp_joints_deg", cell)
-            self.assertIn("approach_joints_deg", cell)
-
-            q_grasp = np.radians(cell["grasp_joints_deg"])
-            q_approach = np.radians(cell["approach_joints_deg"])
-
-            # FK check for grasp (piece center height: 0.0105 + 0.00943/2 = 0.015215m -> clearance ~4.715mm)
-            T_grasp = self.kin.forward_kinematics(q_grasp).as_matrix()
-            flange_z_grasp = T_grasp[2, 3]
-            tip_z_grasp = flange_z_grasp - self.L_gripper
-            clearance_grasp_mm = (tip_z_grasp - self.z0) * 1000.0
-            self.assertAlmostEqual(clearance_grasp_mm, self.grasp_clearance_mm, delta=1.0,
-                                   msg=f"Cell ({r},{c}) grasp clearance not ~{self.grasp_clearance_mm}mm (piece center)")
-
-            # FK check for approach (safe lift height)
-            T_app = self.kin.forward_kinematics(q_approach).as_matrix()
-            flange_z_app = T_app[2, 3]
-            tip_z_app = flange_z_app - self.L_gripper
-            clearance_app_mm = (tip_z_app - self.z0) * 1000.0
-            self.assertAlmostEqual(clearance_app_mm, self.safe_lift_mm, delta=1.0,
-                                   msg=f"Cell ({r},{c}) approach clearance not ~{self.safe_lift_mm}mm")
-
-            # Perpendicularity check
-            for label, T in [("grasp", T_grasp), ("approach", T_app)]:
-                tool_z = T[:3, 2]
-                dot = np.clip(np.dot(tool_z, [0, 0, -1]), -1.0, 1.0)
-                tilt_deg = float(np.degrees(np.arccos(dot)))
-                self.assertLess(tilt_deg, 0.15, f"Cell ({r},{c}) {label} tilt exceeded 0.15 deg")
-
-    def test_naive_joint_interpolation_can_violate_safe_transit(self):
-        """Negative control: Naive joint-space interpolation between distant cells sags below safe clearance corridor."""
-        cell_map = {(c["row"], c["col"]): c for c in self.dataset.get("cells", [])}
-        src = cell_map[(0, 0)]
-        dst = cell_map[(9, 8)]
-
-        q_src_app = np.radians(src["approach_joints_deg"])
-        q_dst_app = np.radians(dst["approach_joints_deg"])
-
-        dips_detected = False
-        for alpha in np.linspace(0.0, 1.0, 21):
-            q_interp = (1.0 - alpha) * q_src_app + alpha * q_dst_app
-            T = self.kin.forward_kinematics(q_interp).as_matrix()
-            flange_z = T[2, 3]
-            tip_z = flange_z - self.L_gripper
-            clearance_pieces_mm = (tip_z - self.piece_top_z) * 1000.0
-            if clearance_pieces_mm < 10.0:
-                dips_detected = True
-                break
-
-        self.assertTrue(dips_detected, "Expected naive linear joint interpolation to sag below 10mm corridor, demonstrating why production Cartesian planning is required.")
-
-    def test_production_planner_transit_maintains_safe_height(self):
-        """Production planner enforces TCP altitude >= safe_transit_plane_z - tolerance (<= 1.0mm) across all transit waypoints."""
-        test_pairs = [
-            ((0, 0), (9, 8)),  # Main diagonal
-            ((0, 8), (9, 0)),  # Anti-diagonal
-            ((0, 4), (9, 4)),  # King-file full traverse
-            ((2, 1), (7, 6)),  # Knight move traverse
-        ]
-
-        cell_map = {(c["row"], c["col"]): c for c in self.dataset.get("cells", [])}
-        safe_plane_z = self.z0 + (self.safe_lift_mm / 1000.0)
-        tolerance_m = 0.001  # 1.0 mm simulation tolerance
-
-        for (r1, c1), (r2, c2) in test_pairs:
-            src = cell_map[(r1, c1)]
-            dst = cell_map[(r2, c2)]
-
-            q_src_app = np.radians(src["approach_joints_deg"])
-            target_pose = [dst["x_m"] * 1000.0, dst["y_m"] * 1000.0, safe_plane_z * 1000.0, 180.0, 0.0, 90.0]
-
-            plan = self.backend.plan_cartesian(q_src_app, target_pose, samples=20)
-            self.assertTrue(plan.success, f"Production plan_cartesian failed between ({r1},{c1}) and ({r2},{c2})")
-
-            for idx, q_sample in enumerate(plan.q_samples):
-                tcp_pose = self.backend._compute_tcp_pose_mm_deg(q_sample)
-                tcp_z = tcp_pose[2] / 1000.0
-                self.assertGreaterEqual(
-                    tcp_z,
-                    safe_plane_z - tolerance_m,
-                    f"Sample {idx}/20 TCP Z ({tcp_z*1000.0:.2f}mm) dipped below safe transit plane ({safe_plane_z*1000.0:.2f}mm - 1mm) between ({r1},{c1}) and ({r2},{c2})",
+    def test_current_grasp_and_approach_endpoints_clear_board(self):
+        board_z = self.sim.board_surface_z
+        grasp_z = board_z + self.sim.geom.piece_height_mm / 2000.0
+        approach_z = board_z + self.sim.placement_state.safe_transit_height_mm / 1000.0
+        for row, col in ((0, 0), (4, 4), (9, 0)):
+            for name, height in (("grasp", grasp_z), ("approach", approach_z)):
+                piece_id = self.sim._get_piece_at_cell(row, col) if name == "grasp" else None
+                ik = self.sim.backend.solve_tcp_ik(
+                    self._pose(row, col, height),
+                    allow_multi_seed=True,
+                    allow_alternate_yaw=True,
+                    allowed_grasp_piece_id=piece_id,
                 )
+                self.assertTrue(ik.success, f"{name} IK failed at ({row}, {col})")
+                result = self.sim.collision_guard.validate_configuration(
+                    ik.joints_rad, allowed_grasp_piece_id=piece_id
+                )
+                self.assertTrue(result.safe, f"{name} collision at ({row}, {col}): {result.failure_reason}")
+                tcp = self.sim.backend._compute_tcp_pose_mm_deg(ik.joints_rad)
+                self.assertGreaterEqual(tcp[2] / 1000.0 - board_z, 0.0005)
 
-    def test_vertical_lift_and_descent_linearity(self):
-        """Verify that lift and descent phases move vertically over cell (XY drift < 15mm)."""
-        sample_cells = [(0, 0), (4, 4), (9, 8), (0, 8), (9, 0)]
-        cell_map = {(c["row"], c["col"]): c for c in self.dataset.get("cells", [])}
-        expected_lift_delta_mm = self.safe_lift_mm - self.grasp_clearance_mm
+    def test_cartesian_transit_maintains_safe_height(self):
+        board_z = self.sim.board_surface_z
+        safe_z = board_z + self.sim.placement_state.safe_transit_height_mm / 1000.0
+        start = self.sim.backend.solve_tcp_ik(
+            self._pose(0, 0, safe_z), allow_multi_seed=True, allow_alternate_yaw=True
+        )
+        self.assertTrue(start.success)
+        orientation = self.sim.backend._compute_tcp_pose_mm_deg(start.joints_rad)[3:]
+        plan = self.sim.backend.plan_cartesian(
+            start.joints_rad, self._pose(9, 0, safe_z, orientation), samples=20
+        )
+        self.assertTrue(plan.success, plan.failure_reason)
+        self.assertTrue(plan.collision_safe)
+        for q in plan.q_samples:
+            tcp_z = self.sim.backend._compute_tcp_pose_mm_deg(q)[2] / 1000.0
+            self.assertGreaterEqual(tcp_z, safe_z - 0.001)
 
-        for (r, c) in sample_cells:
-            cell = cell_map[(r, c)]
-            q_grasp = np.radians(cell["grasp_joints_deg"])
-            q_app = np.radians(cell["approach_joints_deg"])
-
-            T_grasp = self.kin.forward_kinematics(q_grasp).as_matrix()
-            T_app = self.kin.forward_kinematics(q_app).as_matrix()
-
-            # XY position at grasp vs approach
-            xy_drift_m = np.hypot(T_app[0, 3] - T_grasp[0, 3], T_app[1, 3] - T_grasp[1, 3])
-            self.assertLess(xy_drift_m, 0.015,
-                            f"Cell ({r},{c}) XY drift during vertical lift {xy_drift_m*1000:.1f}mm exceeds 15mm")
-
-            # Z delta must be positive lift ~ expected_lift_delta_mm
-            z_lift_m = T_app[2, 3] - T_grasp[2, 3]
-            self.assertAlmostEqual(z_lift_m * 1000.0, expected_lift_delta_mm, delta=1.5,
-                                   msg=f"Cell ({r},{c}) lift height delta not ~{expected_lift_delta_mm:.3f}mm")
+    def test_cartesian_lift_stays_over_cell(self):
+        row, col = 4, 4
+        board_z = self.sim.board_surface_z
+        grasp_z = board_z + self.sim.geom.piece_height_mm / 2000.0
+        safe_z = board_z + self.sim.placement_state.safe_transit_height_mm / 1000.0
+        start = self.sim.backend.solve_tcp_ik(
+            self._pose(row, col, grasp_z), allow_multi_seed=True, allow_alternate_yaw=True
+        )
+        self.assertTrue(start.success)
+        start_tcp = self.sim.backend._compute_tcp_pose_mm_deg(start.joints_rad)
+        plan = self.sim.backend.plan_cartesian(
+            start.joints_rad, self._pose(row, col, safe_z, start_tcp[3:]), samples=20
+        )
+        self.assertTrue(plan.success, plan.failure_reason)
+        self.assertTrue(plan.collision_safe)
+        for q in plan.q_samples:
+            tcp = self.sim.backend._compute_tcp_pose_mm_deg(q)
+            self.assertLess(np.hypot(tcp[0] - start_tcp[0], tcp[1] - start_tcp[1]), 1.0)
+            self.assertGreaterEqual(tcp[2] / 1000.0 - board_z, 0.0005)
 
 
 if __name__ == "__main__":

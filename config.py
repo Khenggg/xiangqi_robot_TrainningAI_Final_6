@@ -62,12 +62,16 @@ PICK_HEIGHT_PROVENANCE = "PROVISIONAL_SIMULATION"  # Đánh dấu nguồn gốc 
 # Cấu hình Kẹp (Gripper) - Tùy chỉnh theo loại van của bạn
 GRIPPER_CLOSE = 1
 GRIPPER_OPEN = 0
-MOVE_SPEED = 50
+
+# Tốc độ thực thi cánh tay robot (Giảm tốc độ an toàn - Safety First)
+# MOVE_SPEED (FAIRINO SDK velocity %): Giảm từ 50% xuống 20% giúp robot di chuyển cực kỳ êm ái, tránh giật và va chạm.
+MOVE_SPEED = 20.0
+ROBOT_SPEED_FACTOR = 0.25  # 25% tốc độ tối đa cho cả MotionResolver và Virtual Simulation (chậm & an toàn)
 
 # Cổng điều khiển Tool DO cho TwoOutputGripperDriver
 TOOL_DO_OPEN = 1
 TOOL_DO_CLOSE = 0
-TOOL_DO_OPEN_PULSE_SEC = 0.30
+TOOL_DO_OPEN_PULSE_SEC = 0.35
 TOOL_DO_CLOSE_PULSE_SEC = 0.30
 TOOL_DO_DEADTIME_SEC = 0.10
 
@@ -133,7 +137,7 @@ AI_THINK_TIME = 10  # Time per move in seconds — AI gets 10s after subtracting
 AI_DEPTH = 30          # Độ sâu mặc định (sẽ bị ghi đè bởi logic tự động)
 
 # --- AI ENGINE CONFIGURATION ---
-ENGINE_TYPE = "HYBRID" # "HYBRID" (Ưu tiên Cloud), "CLOUD" (Chỉ Cloud), "LOCAL" (Chỉ Local)
+ENGINE_TYPE = "LOCAL" # "LOCAL" (Ưu tiên Pikafish với đầy đủ ELO), "HYBRID" (Ưu tiên Cloud), "CLOUD" (Chỉ Cloud)
 CLOUD_API_URL = "https://tuongkydaisu.com/api/engine/bestmove"
 CLOUD_TIMEOUT_SEC = 5
 
@@ -142,8 +146,17 @@ SIMULATION_API_URL = "https://tuongkydaisu.com"
 # Secret token read securely from environment variable, avoiding hardcoded secrets in source control
 SIMULATION_TOKEN = _os.environ.get("SIMULATION_TOKEN", "")
 
-# --- MOONFISH ENGINE ---
-_BASE_DIR      = _os.path.dirname(_os.path.abspath(__file__))
+# --- PIKAFISH ENGINE (PRIMARY LOCAL ENGINE WITH NNUE & ELO CONTROL) ---
+_BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
+PIKAFISH_DIR = _os.path.join(_BASE_DIR, 'engines', 'pikafish')
+PIKAFISH_EXE = _os.path.join(PIKAFISH_DIR, 'Pikafish-Windows-x86-64-universal.exe')
+PIKAFISH_NNUE = _os.path.join(PIKAFISH_DIR, 'pikafish.nnue')
+PIKAFISH_THREADS = 2
+PIKAFISH_HASH_MB = 64
+DEFAULT_AI_ELO = 1400  # Default ELO rating (1400: Quán cóc)
+LOCAL_AI_BACKEND = "PIKAFISH"  # "PIKAFISH" hoặc "MOONFISH"
+
+# --- MOONFISH ENGINE (LEGACY FALLBACK) ---
 _MOONFISH_DIR = _os.path.join(_BASE_DIR, 'moonfish')
 MOONFISH_EXE  = _os.path.join(_MOONFISH_DIR, 'moonfish_ucci.py')
 MOONFISH_NNUE = None  # Moonfish doesn't use NNUE

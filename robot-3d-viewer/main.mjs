@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget } from "./live_state.mjs";
 import { fetchPhysicalGeometry } from "./geometry.mjs";
+import { nearestBoardIntersection } from "./board_picker.mjs";
 import { fetchVirtualGripperProfile } from "./gripper_profile.mjs";
 import { fetchGripperVisualAsset } from "./gripper_asset.mjs";
 import { fetchStartLayout } from "./layout.mjs";
@@ -214,10 +215,6 @@ function gripperMountQuaternion(profileId, visualAsset) {
 
 function gripperMountOffset(profileId, visualAsset) {
   const pcfg = visualAsset.profiles[profileId] || visualAsset.profiles.fr3;
-  const calibratedOffset = pcfg.mount_offset_m;
-  if (calibratedOffset && !pcfg.mount_roll_rad) {
-    return calibratedOffset;
-  }
   const target = new THREE.Vector3(...pcfg.flange_target_offset_m);
   const flange = new THREE.Vector3(...visualAsset.cadFlangeOrigin)
     .multiplyScalar(visualAsset.scaleToM)
@@ -230,10 +227,9 @@ const gripperVisual = {
   loadPromise: null,
   fingers: [],
   closed: false,
-  animation: null,
 };
 
-function buildStepMesh(stepMesh, visualAsset) {
+function buildStepMesh(stepMesh) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
@@ -251,16 +247,14 @@ function buildStepMesh(stepMesh, visualAsset) {
     new THREE.BufferAttribute(Uint32Array.from(stepMesh.index.array), 1),
   );
   geometry.computeBoundingSphere();
-  const [red = 0.44, green = 0.31, blue = 0.22] = stepMesh.color || [];
   const material = new THREE.MeshStandardMaterial({
     color: ROBOT_SHELL_COLOR,
     roughness: 0.62,
     metalness: 0.12,
   });
   const mesh = new THREE.Mesh(geometry, material);
-  const fingerColorHex = visualAsset?.fingerSourceColorHex || "#694d3b";
-  mesh.userData.isGripperFinger =
-    new THREE.Color(red, green, blue).getHex() === new THREE.Color(fingerColorHex).getHex();
+  // STEP part name is stable; source color varies across occt-import-js builds.
+  mesh.userData.isGripperFinger = stepMesh.name === "pinza";
   return mesh;
 }
 
@@ -294,7 +288,7 @@ async function loadSharedGripper() {
     gripper.userData.robotVisualRole = "shared-gripper";
     gripperVisual.fingers = [];
     result.meshes.forEach((stepMesh) => {
-      const mesh = buildStepMesh(stepMesh, visualAsset);
+      const mesh = buildStepMesh(stepMesh);
       if (mesh.userData.isGripperFinger) {
         const bounds = new THREE.Box3().setFromBufferAttribute(
           mesh.geometry.getAttribute("position"),
@@ -322,41 +316,13 @@ async function setGripperClosed(closed) {
   if (!gripperVisual.fingers.length || gripperVisual.closed === closed) {
     return;
   }
-  if (gripperVisual.animation) return gripperVisual.animation;
   const visualAsset = await getGripperVisualAsset();
   const fingerTravel = visualAsset.fingerTravelMm;
-  const animDuration = visualAsset.animationDurationMs;
-  const fingers = gripperVisual.fingers.map(
-    ({ mesh, openPosition, direction }) => ({
-      mesh,
-      from: mesh.position.clone(),
-      to: openPosition
-        .clone()
-        .addScaledVector(
-          new THREE.Vector3(1, 0, 0),
-          closed ? direction * fingerTravel : 0,
-        ),
-    }),
-  );
-  gripperVisual.animation = new Promise((resolve) => {
-    const startedAt = performance.now();
-    const tick = (now) => {
-      const progress = Math.min(Math.max((now - startedAt) / animDuration, 0), 1);
-      const eased = progress * progress * (3 - 2 * progress);
-      fingers.forEach(({ mesh, from, to }) =>
-        mesh.position.lerpVectors(from, to, eased),
-      );
-      if (progress < 1) {
-        requestAnimationFrame(tick);
-        return;
-      }
-      gripperVisual.closed = closed;
-      gripperVisual.animation = null;
-      resolve();
-    };
-    requestAnimationFrame(tick);
-  });
-  return gripperVisual.animation;
+  for (const { mesh, openPosition, direction } of gripperVisual.fingers) {
+    mesh.position.copy(openPosition);
+    if (closed) mesh.position.x += direction * fingerTravel;
+  }
+  gripperVisual.closed = closed;
 }
 
 export function buildProceduralGripper(profile) {
@@ -489,10 +455,11 @@ export async function buildRobotArm(profile, gripperProfile) {
       parent = rotator;
     }
 
-    // Mount the CAD gripper if available, otherwise fallback to procedural gripper
+    // FR3 requires its exact CAD tool; a missing asset must be visible.
     let armGripper = null;
+    let visualAsset = null;
     try {
-      const visualAsset = await getGripperVisualAsset();
+      visualAsset = await getGripperVisualAsset();
       const loadedGripper = await loadSharedGripper();
       if (loadedGripper.parent) loadedGripper.parent.remove(loadedGripper);
       const j6ToolMount = new THREE.Group();
@@ -502,17 +469,56 @@ export async function buildRobotArm(profile, gripperProfile) {
       j6ToolMount.quaternion.copy(gripperMountQuaternion(profile.id, visualAsset));
       j6ToolMount.scale.setScalar(visualAsset.scaleToM);
       j6ToolMount.add(loadedGripper);
+
+      if (profile.id === "fr3") {
+        const cfg = visualAsset.profiles.fr3;
+        const robotFlange = new THREE.Vector3(...cfg.robot_flange_origin_m);
+        const cadFlange = new THREE.Vector3(...cfg.flange_target_offset_m);
+        const collarHeight = cadFlange.z - robotFlange.z;
+        const cadLength = cfg.cad_axial_length_mm * visualAsset.scaleToM;
+        if (
+          collarHeight <= 0 ||
+          Math.hypot(cadFlange.x - robotFlange.x, cadFlange.y - robotFlange.y) > 1e-6 ||
+          Math.abs(collarHeight + cadLength - cfg.target_flange_to_tip_m) > 1e-6
+        ) {
+          throw new Error("FR3 gripper visual length does not match the flange-to-tip target");
+        }
+        // Fill the measured gap between the J6 flange and the unchanged STEP body.
+        const collarGeo = new THREE.CylinderGeometry(0.033, 0.033, collarHeight, 28);
+        collarGeo.rotateX(Math.PI / 2);
+        const collarMesh = new THREE.Mesh(collarGeo, material());
+        collarMesh.name = `${profile.id}-gripper-adapter-collar`;
+        collarMesh.position.set(robotFlange.x, robotFlange.y, robotFlange.z + collarHeight / 2);
+        collarMesh.castShadow = true;
+        parent.add(collarMesh);
+      }
+
       parent.add(j6ToolMount);
+      if (profile.id === "fr3") state.toolVisualValid = true;
       armGripper = {
         group: j6ToolMount,
         setClosed: (isClosed) => setGripperClosed(Boolean(isClosed)),
         update: () => {},
       };
     } catch (err) {
+      if (profile.id === "fr3") {
+        state.toolVisualValid = false;
+        console.error("[VIEWER] FR3 CAD gripper unavailable:", err);
+        handleBackendError("FR3 CAD gripper unavailable; live connection is disabled until the STEP asset loads.");
+        armGripper = { group: new THREE.Group(), setClosed: () => {}, update: () => {} };
+        parent.add(armGripper.group);
+      } else {
       console.warn("[VIEWER] Using procedural gripper fallback:", err.message);
       const proceduralGripper = buildProceduralGripper(gripperProfile);
+      if (profile.id === "fr3") {
+        const cfg = visualAsset?.profiles.fr3;
+        proceduralGripper.group.position.fromArray(cfg?.robot_flange_origin_m || [0, 0, 0.1]);
+        const nominalLength = gripperProfile.palmDimensionsM[2] + gripperProfile.jawDimensionsM[2];
+        proceduralGripper.group.scale.z = (cfg?.target_flange_to_tip_m || nominalLength) / nominalLength;
+      }
       parent.add(proceduralGripper.group);
       armGripper = proceduralGripper;
+      }
     }
     candidate.gripper = armGripper;
 
@@ -551,6 +557,7 @@ const state = {
   currentArm: null,
   jointsDeg: [0, -45, 90, -45, -90, 0],
   homePoseDeg: [0, -45, 90, -45, -90, 0],
+  hasInitializedLiveHome: false,
   cellDataset: null,
   selectedCell: { row: 4, col: 4 },
   currentCell: null,
@@ -562,6 +569,7 @@ const state = {
   forwardShiftMm: 0.0,
   safeTransitHeightMm: 70.0,
   boardHeightOffsetMm: 0.0,
+  pickSourceCell: null,
 };
 window.__state = state;
 
@@ -582,10 +590,84 @@ async function switchRobotProfile(profileId) {
 }
 
 // ---------------------------------------------------------------------------
-// 5) LIVE MIRROR QUA WEBSOCKET — tương thích với telemetry_publisher.py
+// 5) TỐC ĐỘ VẬN HÀNH & LIVE MIRROR QUA WEBSOCKET
 // ---------------------------------------------------------------------------
 const liveStateEl = document.getElementById("liveState");
+const sourceBadgeEl = document.getElementById("sourceBadge");
 const jointsReadoutEl = document.getElementById("jointsReadout");
+
+export function getActiveSpeedFactor() {
+  const slider = document.getElementById("panelSpeedSlider");
+  if (slider) {
+    return (parseFloat(slider.value) || 20) / 100.0;
+  }
+  const hudSelect = document.getElementById("speedFactorSelect");
+  if (hudSelect) {
+    return parseFloat(hudSelect.value) || 0.2;
+  }
+  return 0.2;
+}
+
+export function setActiveSpeedFactor(val) {
+  const factor = Math.max(0.05, Math.min(1.0, parseFloat(val) || 0.2));
+  const pct = Math.round(factor * 100);
+
+  const slider = document.getElementById("panelSpeedSlider");
+  if (slider) slider.value = pct;
+
+  const valEl = document.getElementById("panelSpeedVal");
+  if (valEl) valEl.textContent = `${pct}%`;
+
+  const badge = document.getElementById("panelSpeedBadge");
+  if (badge) {
+    if (pct <= 20) {
+      badge.className = "speed-badge speed-safe";
+      badge.textContent = `${pct}% (An toàn - Khuyên dùng)`;
+    } else if (pct <= 50) {
+      badge.className = "speed-badge speed-warning";
+      badge.textContent = `${pct}% (Vừa phải)`;
+    } else {
+      badge.className = "speed-badge speed-danger";
+      badge.textContent = `${pct}% (Nhanh - Cẩn trọng!)`;
+    }
+  }
+
+  const hudSelect = document.getElementById("speedFactorSelect");
+  if (hudSelect) {
+    const opts = Array.from(hudSelect.options);
+    const match = opts.find((o) => Math.abs(parseFloat(o.value) - factor) < 0.05);
+    if (match) hudSelect.value = match.value;
+  }
+
+  document.querySelectorAll(".speed-preset-btn").forEach((btn) => {
+    const btnVal = parseFloat(btn.dataset.speed);
+    btn.classList.toggle("active", Math.abs(btnVal - factor) < 0.03);
+  });
+}
+
+function initSpeedControlEvents() {
+  const slider = document.getElementById("panelSpeedSlider");
+  if (slider) {
+    slider.addEventListener("input", () => {
+      setActiveSpeedFactor(parseFloat(slider.value) / 100.0);
+    });
+  }
+
+  document.querySelectorAll(".speed-preset-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setActiveSpeedFactor(btn.dataset.speed);
+    });
+  });
+
+  const hudSelect = document.getElementById("speedFactorSelect");
+  if (hudSelect) {
+    hudSelect.addEventListener("change", () => {
+      setActiveSpeedFactor(hudSelect.value);
+    });
+  }
+
+  setActiveSpeedFactor(0.2);
+}
 
 function setLiveBadge(text, kind = "") {
   liveStateEl.textContent = text;
@@ -603,12 +685,34 @@ function applyLiveState(payload) {
   }
   // Authoritative joints directly from backend telemetry
   state.jointsDeg = [...validation.joints];
+  if (!state.hasInitializedLiveHome && validation.joints.length === 6) {
+    state.homePoseDeg = [...validation.joints];
+    state.hasInitializedLiveHome = true;
+    console.log("[VIEWER] 📍 Set initial Home pose to live robot posture:", state.homePoseDeg);
+  }
   syncAllJointSliders();
   if (state.currentArm) {
     applyJointsDeg(state.currentArm, state.jointsDeg);
   }
   if (jointsReadoutEl) {
     jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ");
+  }
+
+  // Update Telemetry Source Badge (Physical vs Virtual)
+  if (sourceBadgeEl) {
+    if (payload.source === "PHYSICAL") {
+      setLiveBadge("🟢 LIVE THẬT", "live physical");
+      sourceBadgeEl.textContent = `📡 FR3 THẬT (${payload.controller_ip || "192.168.58.2"})`;
+      sourceBadgeEl.className = "source-badge source-physical";
+    } else if (payload.source === "VIRTUAL_SYNCED_FROM_PHYSICAL") {
+      setLiveBadge("🔵 SIMULATION", "live virtual");
+      sourceBadgeEl.textContent = `🤖 Đã đồng bộ từ FR3 thật (${payload.controller_ip || "192.168.58.2"})`;
+      sourceBadgeEl.className = "source-badge source-virtual";
+    } else {
+      setLiveBadge("🔵 SIMULATION", "live virtual");
+      sourceBadgeEl.textContent = "🤖 Mô Phỏng Ảo";
+      sourceBadgeEl.className = "source-badge source-virtual";
+    }
   }
 
   // Authoritative trajectory stage directly from backend telemetry
@@ -624,8 +728,16 @@ function applyLiveState(payload) {
 }
 
 function connectLive() {
+  if (state.toolVisualValid === false) {
+    handleBackendError("FR3 CAD gripper unavailable; live connection is disabled.");
+    return;
+  }
   if (state.liveSocket) {
     state.liveSocket.close();
+    if (sourceBadgeEl) {
+      sourceBadgeEl.textContent = "";
+      sourceBadgeEl.className = "source-badge";
+    }
     return;
   }
   const url = document.getElementById("wsUrl").value.trim();
@@ -679,6 +791,16 @@ function connectLive() {
         }
         if (!data.success) {
           handleBackendError(data.error || `Quỹ đạo thất bại ở giai đoạn ${data.failed_stage}`);
+        } else if (data.piece_placed) {
+          const badge = document.getElementById("diagStatusBadge");
+          if (badge) {
+            badge.className = "badge-safe";
+            badge.textContent = "✅ ĐÃ GẮP & ĐẶT QUÂN THÀNH CÔNG";
+          }
+          const expl = document.getElementById("diagExplanation");
+          if (expl) {
+            expl.innerHTML = `🎯 <strong>Gắp &amp; Đặt Quân Hoàn Tất:</strong> Robot đã hoàn thành gắp quân từ ô (${data.src[0]}, ${data.src[1]}) sang ô (${data.dst[0]}, ${data.dst[1]}), xác nhận ổn định vật lý và lùi về tư thế an toàn!`;
+          }
         }
       } else if (data.type === "backend_data_reset") {
         const badge = document.getElementById("diagStatusBadge");
@@ -704,10 +826,20 @@ function connectLive() {
       console.warn("Live message error:", error.message);
     }
   };
-  socket.onerror = () => setLiveBadge("LỖI", "error");
+  socket.onerror = () => {
+    setLiveBadge("LỖI", "error");
+    if (sourceBadgeEl) {
+      sourceBadgeEl.textContent = "";
+      sourceBadgeEl.className = "source-badge";
+    }
+  };
   socket.onclose = () => {
     state.liveSocket = null;
     setLiveBadge("OFFLINE");
+    if (sourceBadgeEl) {
+      sourceBadgeEl.textContent = "";
+      sourceBadgeEl.className = "source-badge";
+    }
   };
 }
 
@@ -796,21 +928,18 @@ function updateSingleJoint(index, val) {
     // Backend validates, collision-checks, moves physics, and returns authoritative telemetry
     const targetJoints = [...state.jointsDeg];
     targetJoints[index] = clamped;
+    const _speedFactor = getActiveSpeedFactor();
     state.liveSocket.send(JSON.stringify({
       command: "MOVE_JOINT",
       joints_deg: targetJoints,
+      speed_factor: _speedFactor,
     }));
   } else {
-    // Non-authoritative offline preview
-    state.jointsDeg[index] = clamped;
-    state.currentCell = null;
-    updateStepperUI(null, []);
-    if (jointsReadoutEl) {
-      jointsReadoutEl.textContent = state.jointsDeg.map((v) => v.toFixed(1)).join(", ") + " (PREVIEW)";
-    }
-    if (state.currentArm) {
-      applyJointsDeg(state.currentArm, state.jointsDeg);
-    }
+    // No collision authority is available while offline. Keep the last
+    // validated posture instead of rendering an unchecked intersection.
+    setLiveBadge("CONNECT LIVE TO MOVE", "error");
+    if (slider) slider.value = state.jointsDeg[index];
+    if (num) num.value = state.jointsDeg[index].toFixed(1);
   }
 }
 
@@ -942,9 +1071,10 @@ export function computeGeometricPrecheck(d_mm, H_mm, z_board_mm = 10.5, yaw_deg 
   };
 }
 
-function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0, yaw_deg = 90.0) {
+function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0, yaw_deg = null) {
+  const activeYaw = yaw_deg !== null && yaw_deg !== undefined ? Number(yaw_deg) : Number(state.boardYawDeg ?? 0.0);
   const z_board = 10.5 + z_off_mm;
-  const res = computeGeometricPrecheck(d_mm, H_mm, z_board, yaw_deg);
+  const res = computeGeometricPrecheck(d_mm, H_mm, z_board, activeYaw);
   const elD = document.getElementById("readoutShiftD");
   const elNearGrid = document.getElementById("readoutNearGridDepth") || document.getElementById("readoutRow0Dist");
   const elFarGrid = document.getElementById("readoutFarGridDepth") || document.getElementById("readoutRow9Dist");
@@ -952,6 +1082,15 @@ function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0, yaw_deg = 90.0) {
   const elCenter = document.getElementById("readoutCenterDist");
   const elFar = document.getElementById("readoutFarEdgeDist");
   const elH = document.getElementById("readoutHVal");
+  const elYaw = document.getElementById("readoutBoardYaw");
+  if (elYaw) {
+    if (Math.abs(activeYaw) < 1.0) {
+      elYaw.textContent = "0.0° (col=-X, row=+Z)";
+    } else {
+      const sign = activeYaw > 0 ? "+" : "";
+      elYaw.textContent = `${sign}${activeYaw.toFixed(1)}° (col=-X, row=-Y)`;
+    }
+  }
   const elFarGrasp = document.getElementById("readoutFarGraspDist");
   const elFarApp = document.getElementById("readoutFarAppDist");
   const elGraspMargin = document.getElementById("readoutGraspMargin");
@@ -1024,13 +1163,11 @@ export function applyAuthoritativeBoardPlacement(packet) {
   }
 
   // Atomically update geometric precheck UI readouts
-  updateGeometricPrecheckUI(d, h, zOff);
+  updateGeometricPrecheckUI(d, h, zOff, packet.board_yaw_deg ?? state.boardYawDeg);
 
   // 7 & 8. Atomically update board coordinate ruler edges and ruler labels
-  const centerWorldZ = packet.board_center_world_m?.[2] ?? (0.36 + d / 1000.0);
-  const surfaceWorldY = packet.board_center_world_m?.[1] ?? (0.0105 + zOff / 1000.0);
   if (coordinateRulerGroup?.updateBoardPlacement) {
-    coordinateRulerGroup.updateBoardPlacement(centerWorldZ, surfaceWorldY);
+    coordinateRulerGroup.updateBoardPlacement(packet);
   }
 
   // 9, 10, 11, 12. Atomically update target ring, dimension tape, markers, readouts
@@ -1111,7 +1248,8 @@ export function applyPlacementAnalysisUI(data) {
   const elHMax = document.getElementById("readoutHMax");
   const badge = document.getElementById("geomPrecheckBadge");
 
-  const preview = computeGeometricPrecheck(d_mm, H_mm, 10.5 + z_off_mm, data.board_yaw_deg ?? 90.0);
+  const activeYaw = Number(data.board_yaw_deg ?? state.boardYawDeg ?? 0.0);
+  const preview = computeGeometricPrecheck(d_mm, H_mm, 10.5 + z_off_mm, activeYaw);
   if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
   if (elNearGrid) elNearGrid.textContent = data.near_grid_depth_mm !== undefined ? `${data.near_grid_depth_mm.toFixed(1)} mm` : (data.nearest_cell_distance_mm !== undefined ? `${data.nearest_cell_distance_mm.toFixed(1)} mm` : `${preview.near_grid_depth_mm.toFixed(1)} mm`);
   if (elFarGrid) elFarGrid.textContent = data.far_grid_depth_mm !== undefined ? `${data.far_grid_depth_mm.toFixed(1)} mm` : (data.farthest_cell_distance_mm !== undefined ? `${data.farthest_cell_distance_mm.toFixed(1)} mm` : `${preview.far_grid_depth_mm.toFixed(1)} mm`);
@@ -1119,7 +1257,14 @@ export function applyPlacementAnalysisUI(data) {
   if (elCenter) elCenter.textContent = data.board_center_distance_mm !== undefined ? `${data.board_center_distance_mm.toFixed(1)} mm` : `${preview.board_center_distance_mm.toFixed(1)} mm`;
   if (elFar) elFar.textContent = data.far_board_edge_distance_mm !== undefined ? `${data.far_board_edge_distance_mm.toFixed(1)} mm` : `${preview.far_board_edge_distance_mm.toFixed(1)} mm`;
   const elYaw = document.getElementById("readoutBoardYaw");
-  if (elYaw) elYaw.textContent = `+${Number(data.board_yaw_deg ?? 90.0).toFixed(1)}° (col=-X, row=-Y)`;
+  if (elYaw) {
+    if (Math.abs(activeYaw) < 1.0) {
+      elYaw.textContent = "0.0° (col=-X, row=+Z)";
+    } else {
+      const sign = activeYaw > 0 ? "+" : "";
+      elYaw.textContent = `${sign}${activeYaw.toFixed(1)}° (col=-X, row=-Y)`;
+    }
+  }
   if (elH) elH.textContent = `${H_mm.toFixed(1)} mm`;
 
   if (elFarGrasp) elFarGrasp.textContent = data.far_grasp_distance_mm !== undefined ? `${data.far_grasp_distance_mm.toFixed(1)} mm` : `${preview.D_far_grasp.toFixed(1)} mm`;
@@ -1218,6 +1363,9 @@ function updateOperationStateUI(stateName) {
 function initServicePanelEvents() {
   const sendCmd = (cmdObj) => {
     if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+      if (cmdObj.speed_factor === undefined) {
+        cmdObj.speed_factor = getActiveSpeedFactor();
+      }
       state.liveSocket.send(JSON.stringify(cmdObj));
     } else {
       handleBackendError("Chưa kết nối Backend: Bấm Connect live để gửi lệnh.");
@@ -1300,7 +1448,7 @@ function initPlacementPanelEvents() {
     const d = Number(shiftNum?.value ?? 0);
     const h = Number(transitNum?.value ?? 70);
     const zOff = Number(zOffsetNum?.value ?? 0);
-    updateGeometricPrecheckUI(d, h, zOff);
+    updateGeometricPrecheckUI(d, h, zOff, state.boardYawDeg);
   };
 
   shiftSlider?.addEventListener("input", (e) => {
@@ -1378,41 +1526,102 @@ function initPlacementPanelEvents() {
 }
 
 function initJointControlPanelEvents() {
+  initSpeedControlEvents();
+
   const homeBtn = document.getElementById("homeBtn");
   if (homeBtn) {
     homeBtn.addEventListener("click", () => {
-      if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
-        state.liveSocket.send(JSON.stringify({ command: "RESET" }));
-      } else {
-        const homeDeg = state.homePoseDeg || [0.0, -45.0, 90.0, -45.0, -90.0, 0.0];
-        state.jointsDeg = [...homeDeg];
-        syncAllJointSliders();
-        if (state.currentArm) {
-          applyJointsDeg(state.currentArm, state.jointsDeg);
-        }
+      if (!state.liveSocket || state.liveSocket.readyState !== WebSocket.OPEN) {
+        handleBackendError("Connect live is required to validate the Home move.");
+        return;
       }
+      const homeDeg = state.homePoseDeg || [0.0, -45.0, 90.0, -45.0, -90.0, 0.0];
+      const _speedFactor = getActiveSpeedFactor();
+      state.liveSocket.send(JSON.stringify({
+        command: "RESET",
+        speed_factor: _speedFactor,
+        joints_deg: homeDeg,
+      }));
       state.currentCell = null;
       updateStepperUI(null, []);
       const badge = document.getElementById("diagStatusBadge");
       if (badge) {
-        badge.className = "badge-safe";
-        badge.textContent = "ĐÃ VỀ HOME";
+        badge.className = "badge-warn";
+        badge.textContent = "HOME REQUESTED";
       }
     });
   }
 
+  const setHomeBtn = document.getElementById("setHomeBtn");
+  if (setHomeBtn) {
+    setHomeBtn.addEventListener("click", () => {
+      state.homePoseDeg = [...state.jointsDeg];
+      if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+        state.liveSocket.send(JSON.stringify({
+          command: "SET_HOME",
+          joints_deg: state.homePoseDeg,
+        }));
+      }
+      const badge = document.getElementById("diagStatusBadge");
+      if (badge) {
+        badge.className = "badge-safe";
+        badge.textContent = `ĐÃ LƯU HOME: [${state.homePoseDeg.map((v) => v.toFixed(0)).join(",")}]`;
+      }
+      setHomeBtn.style.color = "#3fb950";
+      setTimeout(() => {
+        setHomeBtn.style.color = "";
+      }, 1500);
+    });
+  }
+
+  function sendGripperCommand(closed) {
+    if (!state.liveSocket || state.liveSocket.readyState !== WebSocket.OPEN) {
+      handleBackendError("Bấm Connect live để điều khiển kẹp trong mô phỏng.");
+      return;
+    }
+    state.liveSocket.send(JSON.stringify({
+      command: "SET_GRIPPER",
+      closed: closed,
+      pulse_sec: closed ? 0.30 : 0.35,
+    }));
+  }
+
+  function updateGripperUIState(closed) {
+    const gripperBtn = document.getElementById("gripperBtn");
+    if (gripperBtn) {
+      gripperBtn.textContent = closed ? "🗜️ Đang Kẹp" : "🗜️ Kẹp / Nhả";
+      gripperBtn.style.color = closed ? "#f0883e" : "#c9d1d9";
+    }
+    const closeBtn = document.getElementById("gripperCloseBtn");
+    if (closeBtn) {
+      closeBtn.style.background = closed ? "#388bfd33" : "#21262d";
+      closeBtn.style.borderColor = closed ? "#58a6ff" : "#363b42";
+    }
+    const openBtn = document.getElementById("gripperOpenBtn");
+    if (openBtn) {
+      openBtn.style.background = !closed ? "#3fb95033" : "#21262d";
+      openBtn.style.borderColor = !closed ? "#3fb950" : "#363b42";
+    }
+    const badge = document.getElementById("diagStatusBadge");
+    if (badge) {
+      badge.className = closed ? "badge-running" : "badge-safe";
+      badge.textContent = closed ? "ĐANG KẸP (DO0)" : "ĐÃ NHẢ KẸP (DO1)";
+    }
+  }
+
+  const gripperCloseBtn = document.getElementById("gripperCloseBtn");
+  if (gripperCloseBtn) {
+    gripperCloseBtn.addEventListener("click", () => sendGripperCommand(true));
+  }
+
+  const gripperOpenBtn = document.getElementById("gripperOpenBtn");
+  if (gripperOpenBtn) {
+    gripperOpenBtn.addEventListener("click", () => sendGripperCommand(false));
+  }
+
   const gripperBtn = document.getElementById("gripperBtn");
   if (gripperBtn) {
-    gripperBtn.addEventListener("click", () => {
-      state.gripperClosed = !state.gripperClosed;
-      if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
-        state.liveSocket.send(JSON.stringify({ command: "SET_GRIPPER", closed: state.gripperClosed }));
-      } else if (state.currentArm?.gripper) {
-        state.currentArm.gripper.setClosed(state.gripperClosed);
-      }
-      gripperBtn.textContent = state.gripperClosed ? "🗜️ Đang Kẹp" : "🗜️ Kẹp / Nhả";
-      gripperBtn.style.color = state.gripperClosed ? "#f0883e" : "#c9d1d9";
-    });
+    gripperBtn.addEventListener("click", () => sendGripperCommand(!state.gripperClosed));
   }
 
   function triggerBackendDataReset() {
@@ -1476,13 +1685,31 @@ function initJointControlPanelEvents() {
   tabPlacementBtn?.addEventListener("click", () => switchTab(tabPlacementBtn, placementContent));
   tabServiceBtn?.addEventListener("click", () => switchTab(tabServiceBtn, serviceContent));
 
-  // Reach cell button
+  // Reach cell button & Pick-and-Place controls
   const reachBtn = document.getElementById("reachCellBtn");
+  const pickPlaceBtn = document.getElementById("pickPlaceBtn");
   const rowSelect = document.getElementById("cellRowSelect");
   const colSelect = document.getElementById("cellColSelect");
+  const autoGraspCb = document.getElementById("autoGraspCheckbox");
+
   if (reachBtn && rowSelect && colSelect) {
     reachBtn.addEventListener("click", () => {
-      goToCell(Number(rowSelect.value), Number(colSelect.value));
+      goToCell(Number(rowSelect.value), Number(colSelect.value), false);
+    });
+  }
+
+  if (pickPlaceBtn && rowSelect && colSelect) {
+    pickPlaceBtn.addEventListener("click", () => {
+      goToCell(Number(rowSelect.value), Number(colSelect.value), true);
+    });
+  }
+
+  if (autoGraspCb) {
+    autoGraspCb.addEventListener("change", (e) => {
+      if (!e.target.checked) {
+        state.pickSourceCell = null;
+        clearPickSourceUI();
+      }
     });
   }
 
@@ -1542,17 +1769,32 @@ function initJointControlPanelEvents() {
       }
     }
 
-    // 2. Click vào quân cờ hoặc ô cờ
+    // 2. Resolve the closest hit first: a piece can be above the board surface.
     for (const hit of hits) {
       let obj = hit.object;
       while (obj && !obj.userData?.id && obj !== scene) {
         obj = obj.parent;
       }
-      if (obj?.userData && obj.userData.col !== undefined && obj.userData.row !== undefined) {
-        goToCell(obj.userData.row, obj.userData.col);
+      if (obj?.userData?.id) {
+        const row = obj.userData.row;
+        const col = obj.userData.col;
+        if (!Number.isInteger(row) || !Number.isInteger(col)) return;
+        goToCell(row, col);
         const tabReachBtnEl = document.getElementById("tabReachBtn");
         tabReachBtnEl?.click();
-        break;
+        return;
+      }
+      if (hit.object?.userData?.isBoardSurface && physicalGeometryRef) {
+        if (autoGraspCb?.checked && !state.pickSourceCell) {
+          handleBackendError("Hãy click vào quân cờ nguồn trước khi chọn ô đích.");
+          return;
+        }
+        const cell = nearestBoardIntersection(hit.point, physicalGeometryRef, boardPointToXYZ);
+        if (cell) {
+          goToCell(cell.row, cell.col);
+          document.getElementById("tabReachBtn")?.click();
+        }
+        return;
       }
     }
   });
@@ -1678,6 +1920,15 @@ function handleBackendTrajectoryStage(stage, payload) {
     if (expl) {
       expl.innerHTML = `🛫 <strong>Preposition (Tiếp cận nguồn):</strong> Robot di chuyển khớp tới vị trí ô xuất phát trước khi nhấc.`;
     }
+  } else if (stage === "GRASP") {
+    updateStepperUI(null, []);
+    if (badge) {
+      badge.className = "badge-transit";
+      badge.textContent = "🤏 0.5. ĐANG KẸP QUÂN CỜ (GRASP)";
+    }
+    if (expl) {
+      expl.innerHTML = `🤏 <strong>Giai đoạn Gắp (Grasp):</strong> Ngàm kẹp đóng lại để giữ chặt quân cờ. Đã kiểm tra dung sai và collision guard.`;
+    }
   } else if (stage === "LIFT") {
     updateStepperUI("stepLift", []);
     const zBoard_mm = (state.boardSurfaceHeightM ?? (0.0105 + (state.boardHeightOffsetMm ?? 0.0) / 1000.0)) * 1000.0;
@@ -1690,6 +1941,15 @@ function handleBackendTrajectoryStage(stage, payload) {
     }
     if (expl) {
       expl.innerHTML = `🛫 <strong>Giai đoạn 1 (Nhấc lên):</strong> Cánh tay nâng thẳng đứng ngàm kẹp lên cao độ an toàn <strong>+${safeH_mm.toFixed(1)}mm</strong> ($Z = ${zSafe_m}\\text{m}$, $\\Delta XY \\le 1.0\\text{mm}$, tilt $\\le 0.5^\\circ$).`;
+    }
+  } else if (stage === "PAYLOAD_CLEAR") {
+    updateStepperUI("stepLift", []);
+    if (badge) {
+      badge.className = "badge-safe";
+      badge.textContent = "🛡️ 1.5. KIỂM TRA TẢI TRỌNG (PAYLOAD CLEAR)";
+    }
+    if (expl) {
+      expl.innerHTML = `🛡️ <strong>Kiểm tra an toàn tải:</strong> Xác nhận quân cờ trong ngàm kẹp hoàn toàn cách ly với mặt bàn và các quân cờ lân cận.`;
     }
   } else if (stage === "TRANSIT") {
     updateStepperUI("stepTransit", ["stepLift"]);
@@ -1718,6 +1978,51 @@ function handleBackendTrajectoryStage(stage, payload) {
     if (expl) {
       expl.innerHTML = `🛬 <strong>Giai đoạn 3 (Hạ cánh):</strong> Ngàm kẹp hạ cánh thẳng đứng xuống cao độ gắp $Z = ${zGrasp_m}\\text{m}$ ($+${graspRel_mm.toFixed(3)}\\text{mm}$ tâm quân cờ, $\\Delta XY \\le 1.0\\text{mm}$, tilt $\\le 0.5^\\circ$).`;
     }
+  } else if (stage === "RELEASE") {
+    updateStepperUI("stepLand", ["stepLift", "stepTransit"]);
+    if (badge) {
+      badge.className = "badge-transit";
+      badge.textContent = "🖐️ 3.5. ĐANG MỞ KẸP / THẢ QUÂN (RELEASE)";
+    }
+    if (expl) {
+      expl.innerHTML = `🖐️ <strong>Giai đoạn Thả (Release):</strong> Robot hạ cánh chính xác tại ô đích, ngàm kẹp mở ra và đặt quân cờ xuống mặt bàn.`;
+    }
+  } else if (stage === "SETTLE") {
+    updateStepperUI("stepLand", ["stepLift", "stepTransit"]);
+    if (badge) {
+      badge.className = "badge-warn";
+      badge.textContent = "⏳ 4. CHỜ QUÂN CỜ ỔN ĐỊNH (SETTLING)";
+    }
+    if (expl) {
+      expl.innerHTML = `⏳ <strong>Chờ ổn định vật lý:</strong> Mô phỏng PyBullet tính toán cân bằng trọng lực và ma sát để quân cờ đứng vững trên bàn.`;
+    }
+  } else if (stage === "POST_RELEASE_LIFT") {
+    updateStepperUI(null, ["stepLift", "stepTransit", "stepLand"]);
+    if (badge) {
+      badge.className = "badge-warn";
+      badge.textContent = "🛫 5. NHẤC TAY RỜI QUÂN (POST-RELEASE LIFT)";
+    }
+    if (expl) {
+      expl.innerHTML = `🛫 <strong>Nhấc tay an toàn:</strong> Cánh tay nâng thẳng đứng rời khỏi quân cờ vừa thả để tránh va chạm mép quân.`;
+    }
+  } else if (stage === "CLEAR_BOARD") {
+    updateStepperUI(null, ["stepLift", "stepTransit", "stepLand"]);
+    if (badge) {
+      badge.className = "badge-transit";
+      badge.textContent = "✈️ 6. NÂNG CAO ĐỘ THOÁT BÀN (CLEAR BOARD)";
+    }
+    if (expl) {
+      expl.innerHTML = `✈️ <strong>Nâng cao độ thoát bàn:</strong> Robot đưa ngàm kẹp lên độ cao cách ly an toàn phía trên mặt bàn cờ.`;
+    }
+  } else if (stage === "SERVICE_RETREAT") {
+    updateStepperUI(null, ["stepLift", "stepTransit", "stepLand"]);
+    if (badge) {
+      badge.className = "badge-safe";
+      badge.textContent = "🛡️ 7. LÙI VỀ VỊ TRÍ CHỜ (SERVICE RETREAT)";
+    }
+    if (expl) {
+      expl.innerHTML = `🛡️ <strong>Lùi về an toàn (Pass C):</strong> Robot tự động rút về tư thế service safe sẵn sàng cho lệnh kế tiếp.`;
+    }
   } else if (stage === "COMPLETE") {
     updateStepperUI(null, ["stepLift", "stepTransit", "stepLand"]);
     if (badge) {
@@ -1740,7 +2045,7 @@ function handleBackendTrajectoryStage(stage, payload) {
       clearanceVal.style.color = "#3fb950";
     }
     if (expl) {
-      expl.innerHTML = `✅ <strong>Đã hoàn thành quỹ đạo 3 giai đoạn:</strong> Robot đã thực thi Lift (+70mm) ➔ Transit ➔ Land bởi backend runtime có thẩm quyền. Trạng thái: <strong>COLLISION-FREE</strong>.`;
+      expl.innerHTML = `✅ <strong>Đã hoàn thành quỹ đạo:</strong> Robot đã thực thi toàn bộ chu trình gắp và thả cờ bởi backend runtime có thẩm quyền. Trạng thái: <strong>COLLISION-FREE</strong>.`;
     }
   } else if (stage === "RECOVERY_LIFT") {
     updateStepperUI(null, []);
@@ -1773,8 +2078,164 @@ function handleBackendError(errMsg) {
   }
 }
 
-function goToCell(row, col) {
+let cellSourceRing = null;
+function getOrCreateSourceRing() {
+  if (!cellSourceRing) {
+    const geo = new THREE.RingGeometry(0.016, 0.020, 32);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xf59e0b, side: THREE.DoubleSide });
+    cellSourceRing = new THREE.Mesh(geo, mat);
+    cellSourceRing.position.set(0, -10, 0);
+    cellSourceRing.visible = false;
+    scene.add(cellSourceRing);
+  }
+  return cellSourceRing;
+}
+
+function updatePickSourceUI(row, col) {
+  const ring = getOrCreateSourceRing();
+  if (physicalGeometryRef) {
+    const pt = boardPointToXYZ(row, col, physicalGeometryRef);
+    ring.position.set(pt.x, pt.y + 0.0015, pt.z);
+    ring.visible = true;
+  }
+  const badge = document.getElementById("diagStatusBadge");
+  if (badge) {
+    badge.className = "badge-warn";
+    badge.textContent = `🎯 ĐÃ CHỌN NGUỒN (${row}, ${col}) — CHỌN Ô ĐÍCH ĐỂ ĐẶT`;
+  }
+  const expl = document.getElementById("diagExplanation");
+  if (expl) {
+    expl.innerHTML = `🎯 <strong>Bước 1/2 hoàn tất:</strong> Đã chọn quân cờ tại ô nguồn <strong>(${row}, ${col})</strong> (vòng tròn vàng).<br/>👉 <em>Hãy click vào ô đích trên bàn cờ hoặc chọn hàng/cột rồi bấm "Gắp & Đặt Quân" để robot thực hiện gắp và thả!</em>`;
+  }
+}
+
+function clearPickSourceUI() {
+  if (cellSourceRing) {
+    cellSourceRing.visible = false;
+  }
+}
+
+function executePickAndPlace(srcRow, srcCol, dstRow, dstCol) {
+  clearPickSourceUI();
+  state.selectedCell = { row: dstRow, col: dstCol };
+  let cell = { row: dstRow, col: dstCol, x_m: 0, y_m: 0, z_m: 0 };
+
+  const ring = getOrCreateTargetRing();
+  if (physicalGeometryRef) {
+    const pt = boardPointToXYZ(dstRow, dstCol, physicalGeometryRef);
+    ring.position.set(pt.x, pt.y + 0.001, pt.z);
+    ring.material.color.setHex(0x238636);
+
+    const robX = -pt.z;
+    const robY = -pt.x;
+    const robZ = pt.y;
+    cell = { row: dstRow, col: dstCol, x_m: robX, y_m: robY, z_m: robZ };
+
+    const worldX_mm = (pt.x * 1000).toFixed(1);
+    const worldY_mm = (pt.y * 1000).toFixed(1);
+    const worldZ_mm = (pt.z * 1000).toFixed(1);
+
+    const robX_mm = (robX * 1000).toFixed(1);
+    const robY_mm = (robY * 1000).toFixed(1);
+    const robZ_mm = (robZ * 1000).toFixed(1);
+
+    const coordReadoutEl = document.getElementById("coordReadout");
+    if (coordReadoutEl) {
+      coordReadoutEl.textContent = `X: ${worldX_mm}mm | Y: ${worldY_mm}mm | Z: ${worldZ_mm}mm`;
+    }
+    const diagWorldCoord = document.getElementById("diagWorldCoord");
+    if (diagWorldCoord) {
+      diagWorldCoord.textContent = `X: ${worldX_mm}mm, Y: ${worldY_mm}mm, Z: ${worldZ_mm}mm`;
+    }
+    const diagRobotCoord = document.getElementById("diagRobotCoord");
+    if (diagRobotCoord) {
+      diagRobotCoord.textContent = `X: ${robX_mm}mm, Y: ${robY_mm}mm, Z: ${robZ_mm}mm`;
+    }
+  }
+
+  const rowSelect = document.getElementById("cellRowSelect");
+  const colSelect = document.getElementById("cellColSelect");
+  if (rowSelect) rowSelect.value = String(dstRow);
+  if (colSelect) colSelect.value = String(dstCol);
+
+  const cellLabel = document.getElementById("diagCellLabel");
+  if (cellLabel) {
+    cellLabel.textContent = `GẮP (${srcRow}, ${srcCol}) ➔ ĐẶT (${dstRow}, ${dstCol})`;
+  }
+
+  state.targetDestinationCell = cell;
+
+  if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
+    const _speedFactor = getActiveSpeedFactor();
+    const cmd = {
+      command: "EXECUTE_3STAGE",
+      src: [srcRow, srcCol],
+      dst: [dstRow, dstCol],
+      placement_version: state.placementVersion || 1,
+      grasp_piece: true,
+      speed_factor: _speedFactor,
+    };
+    state.liveSocket.send(JSON.stringify(cmd));
+    const badge = document.getElementById("diagStatusBadge");
+    if (badge) {
+      badge.className = "badge-warn";
+      badge.textContent = `🎯 GỬI LỆNH GẮP & ĐẶT: (${srcRow},${srcCol}) ➔ (${dstRow},${dstCol})...`;
+    }
+    const expl = document.getElementById("diagExplanation");
+    if (expl) {
+      expl.innerHTML = `🎯 <strong>Bắt đầu quỹ đạo Gắp & Đặt:</strong> Robot gắp quân tại (${srcRow}, ${srcCol}), nâng qua cao trình an toàn, chuyển tới (${dstRow}, ${dstCol}) và nhả quân.`;
+    }
+  } else {
+    handleBackendError("Chưa kết nối Backend (Bấm nút 'Connect live')");
+  }
+}
+
+function goToCell(row, col, explicitGrasp = false) {
+  const autoGraspCb = document.getElementById("autoGraspCheckbox");
+  const isAutoGrasp = Boolean(autoGraspCb?.checked);
+
+  if (explicitGrasp) {
+    if (state.pickSourceCell) {
+      const src = state.pickSourceCell;
+      state.pickSourceCell = null;
+      executePickAndPlace(src.row, src.col, row, col);
+      return;
+    } else {
+      state.pickSourceCell = { row, col };
+      updatePickSourceUI(row, col);
+      return;
+    }
+  }
+
+  if (isAutoGrasp) {
+    if (!state.pickSourceCell) {
+      state.pickSourceCell = { row, col };
+      updatePickSourceUI(row, col);
+      return;
+    } else {
+      if (state.pickSourceCell.row === row && state.pickSourceCell.col === col) {
+        state.pickSourceCell = null;
+        clearPickSourceUI();
+        const badge = document.getElementById("diagStatusBadge");
+        if (badge) {
+          badge.className = "badge-safe";
+          badge.textContent = "ĐÃ HỦY CHỌN NGUỒN";
+        }
+        return;
+      }
+      const src = state.pickSourceCell;
+      state.pickSourceCell = null;
+      executePickAndPlace(src.row, src.col, row, col);
+      return;
+    }
+  }
+
+  // Chế độ di chuyển thường (không gắp)
+  state.pickSourceCell = null;
+  clearPickSourceUI();
   state.selectedCell = { row, col };
+  let cell = { row, col, x_m: 0, y_m: 0, z_m: 0 };
 
   // Update 3D ring marker & coordinates
   const ring = getOrCreateTargetRing();
@@ -1788,7 +2249,7 @@ function goToCell(row, col) {
     const robX = -pt.z;
     const robY = -pt.x;
     const robZ = pt.y;
-    const cell = { row, col, x_m: robX, y_m: robY, z_m: robZ };
+    cell = { row, col, x_m: robX, y_m: robY, z_m: robZ };
 
     const worldX_mm = (pt.x * 1000).toFixed(1);
     const worldY_mm = (pt.y * 1000).toFixed(1);
@@ -1843,12 +2304,14 @@ function goToCell(row, col) {
   if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
     const srcRow = state.currentCell ? state.currentCell.row : 4;
     const srcCol = state.currentCell ? state.currentCell.col : 4;
+    const _speedFactor = getActiveSpeedFactor();
     const cmd = {
       command: "EXECUTE_3STAGE",
       src: [srcRow, srcCol],
       dst: [row, col],
       placement_version: state.placementVersion || 1,
       grasp_piece: false,
+      speed_factor: _speedFactor,
     };
     state.liveSocket.send(JSON.stringify(cmd));
     const badge = document.getElementById("diagStatusBadge");
@@ -1889,7 +2352,9 @@ async function initApp() {
     const physicalGeometry = await fetchPhysicalGeometry();
     physicalGeometryRef = physicalGeometry;
     setBoardGeometry(physicalGeometry);
-    await fetchScenePlacement();
+    const scenePlacement = await fetchScenePlacement();
+    state.boardYawDeg = Number(scenePlacement.board_yaw_deg ?? 0.0);
+    updateGeometricPrecheckUI(0, 70, 0, state.boardYawDeg);
 
     const cellDataset = await fetchCellReachabilityDataset();
     state.cellDataset = cellDataset;

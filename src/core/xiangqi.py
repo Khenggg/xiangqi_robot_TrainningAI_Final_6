@@ -253,3 +253,15 @@ def find_all_valid_moves(color, board):
                     if is_valid_move((c,r), d, board, color):
                         moves.append(((c,r), d))
     return moves
+
+
+def is_checkmate(color, board) -> bool:
+    """
+    Kiểm tra phe 'color' có bị chiếu bí hoặc tuyệt sát (hết nước đi) không.
+    Trong cờ tướng:
+    - Nếu mất Tướng -> Thua ngay lập tức.
+    - Nếu không còn bất kỳ nước đi hợp lệ nào -> Thua (Chiếu bí hoặc Tuyệt sát).
+    """
+    if get_king_pos(color, board) is None:
+        return True
+    return len(find_all_valid_moves(color, board)) == 0

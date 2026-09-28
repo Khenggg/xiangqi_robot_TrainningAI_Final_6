@@ -38,18 +38,19 @@ _mode_label = '🛠️ DRY RUN (MOUSE & LOG)' if config.DRY_RUN else '🤖 REAL 
 print(f"\n=== MODE: {_mode_label} ===")
 
 def _kill_zombie_processes():
-    try:
-        result = subprocess.run(
-            ['tasklist', '/FI', 'IMAGENAME eq moonfish*', '/FO', 'CSV', '/NH'],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.stdout.strip() and 'moonfish' in result.stdout.lower():
-            print("[CLEANUP] ⚠️ Phát hiện moonfish zombie process — đang kill...")
-            subprocess.run(['taskkill', '/F', '/IM', 'moonfish*'], capture_output=True, timeout=5)
-            print("[CLEANUP] ✅ Killed zombie moonfish processes.")
-            time.sleep(0.5)
-    except Exception as e:
-        print(f"[CLEANUP] ⚠️ Không thể kiểm tra zombie processes: {e}")
+    for proc_name in ['moonfish*', 'Pikafish*']:
+        try:
+            result = subprocess.run(
+                ['tasklist', '/FI', f'IMAGENAME eq {proc_name}', '/FO', 'CSV', '/NH'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip() and ('moonfish' in result.stdout.lower() or 'pikafish' in result.stdout.lower()):
+                print(f"[CLEANUP] ⚠️ Phát hiện {proc_name} zombie process — đang kill...")
+                subprocess.run(['taskkill', '/F', '/IM', proc_name], capture_output=True, timeout=5)
+                print(f"[CLEANUP] ✅ Killed zombie {proc_name} processes.")
+                time.sleep(0.3)
+        except Exception as e:
+            print(f"[CLEANUP] ⚠️ Không thể kiểm tra zombie processes: {e}")
 
 _kill_zombie_processes()
 
@@ -67,6 +68,8 @@ renderer = BoardRenderer(screen)
 # Khởi tạo các module quản lý SRP
 hw = HardwareManager(config, _BASE_DIR).initialize_all()
 state = GameState(allow_mouse_move=config.DRY_RUN)
+if hw.ai_ctrl:
+    state.ai_elo, state.ai_elo_title = hw.ai_ctrl.get_elo_info()
 input_mgr = InputHandler(state, hw)
 
 dashboard = None
@@ -113,11 +116,22 @@ if not config.DRY_RUN:
 try:
     while running:
         # 2a. Vẽ khung hình
-        renderer.draw_ui(state.get_render_state())
+        ui_state = state.get_render_state()
+        renderer.draw_ui(ui_state)
         renderer.draw_pieces(state.board)
-        renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
+        renderer.draw_highlight(
+            last_move=state.last_move,
+            selected_pos=state.selected_pos,
+            invalid_flash_pos=state.invalid_flash_pos,
+            invalid_flash_expiry=state.invalid_flash_expiry,
+            legal_moves=ui_state.get("legal_moves"),
+            board=state.board,
+            is_check=ui_state.get("is_check", False),
+            turn=state.turn,
+            hint_move=ui_state.get("hint_move"),
+        )
         if state.game_over:
-            renderer.draw_game_over(state.winner)
+            renderer.draw_game_over(state.winner, getattr(state, "game_over_reason", "CHIẾU BÍ"))
 
         # 2b. Xử lý Input
         for event in pygame.event.get():
@@ -189,8 +203,10 @@ try:
                             visual_pick_enabled=bool(getattr(config, "VISUAL_PICK_ENABLED", False)),
                         )
                     else:
-                        print("[AI] No moves available -> AI Lost")
-                        state.handle_game_over("r")
+                        is_chk = xiangqi.is_king_in_check("b", state.board)
+                        reason = "CHIẾU BÍ" if is_chk else "TUYỆT SÁT"
+                        print(f"[AI] No moves available ({reason}) -> AI Lost")
+                        state.handle_game_over("r", reason=reason)
                         state.api_client.end_match(winner="RED", reason="CHECKMATE")
 
         pygame.display.flip()

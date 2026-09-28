@@ -412,9 +412,15 @@ class BoardPlacementState:
         nom_surface_z = float(nominal_board_surface_z_m)
         thickness_m = 0.0105  # canonical 10.5 mm
 
-        # Board center translates along -X_robot with forward shift d
-        center_x = round(nom_cx - d_m, 6)
-        center_y = round(nom_cy, 6)
+        # Forward shift translates along the line from robot base to board center:
+        # At yaw 0 deg (board at +Y_robot), forward shift d translates along +Y_robot.
+        # At yaw 90 deg (board at -X_robot), forward shift d translates along -X_robot.
+        if abs(yaw_deg) < 1.0:
+            center_x = round(nom_cx, 6)
+            center_y = round(nom_cy + d_m, 6)
+        else:
+            center_x = round(nom_cx - d_m, 6)
+            center_y = round(nom_cy, 6)
         surface_z = round(nom_surface_z + h_offset_m, 6)
         box_center_z = round(surface_z - thickness_m / 2.0, 6)
 

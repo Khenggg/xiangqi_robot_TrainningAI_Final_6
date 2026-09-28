@@ -85,9 +85,8 @@ class FR3Kinematics:
     Jacobian computation, and workspace validation.
     """
 
-    # Approximate max physical reach from base origin (shoulder to flange full extension)
-    # d1=0.14m, a2=0.28m, a3=0.24m, d4+d6=0.204m -> max span ~ 0.63m
-    MAX_REACH_RADIUS_M = 0.65
+    # Physical reach from base origin (shoulder d1=0.14m, a2=0.28m, a3=0.24m, d4+d6=0.204m -> max span ~ 0.724m from shoulder, ~0.78m from base)
+    MAX_REACH_RADIUS_M = 0.78
 
     def __init__(self, profile_path: Optional[Union[str, Path]] = None):
         if profile_path is None:

@@ -22,6 +22,7 @@ class GraspStatus(str, Enum):
     """Result status for deterministic geometric grasp attempt."""
     SUCCESS = "SUCCESS"
     NO_CANDIDATE = "NO_CANDIDATE"
+    NO_JAW_CONTACT = "NO_JAW_CONTACT"
     AMBIGUOUS = "AMBIGUOUS"
     ALREADY_ATTACHED = "ALREADY_ATTACHED"
     INVALID_GRIPPER_STATE = "INVALID_GRIPPER_STATE"

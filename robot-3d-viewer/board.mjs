@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { settledPieceCell } from "./board_picker.mjs";
 import { fetchPhysicalGeometry, parsePhysicalGeometry } from "./geometry.mjs";
 import { fetchStartLayout, parseStartLayout, START_LAYOUT, LABEL_RED, LABEL_BLACK, PIECE_TYPE_NAMES } from "./layout.mjs";
 
@@ -29,6 +30,7 @@ export async function fetchScenePlacement(url = "/shared/virtual_fr3_scene.json"
     boardCenterX: Number(worldCenter[0]),
     boardSurfaceY: Number(worldCenter[1]),
     boardCenterZ: Number(worldCenter[2]),
+    board_yaw_deg: Number(data.virtual_board_placement.board_yaw_deg ?? 90.0),
   };
   setScenePlacement(placement);
   return placement;
@@ -368,9 +370,11 @@ export function buildBoardGrid(geometry = null) {
   );
   boardTop.position.set(0, -boardThickness / 2, 0);
   boardTop.receiveShadow = true;
+  boardTop.userData.isBoardSurface = true;
   group.add(boardTop);
 
   group.position.set(center.x, center.y, center.z);
+  group.rotation.y = ((placement.boardYawDeg - 90.0) * Math.PI) / 180.0;
   _activeBoardGroup = group;
   return group;
 }
@@ -518,8 +522,15 @@ export function updatePiecesFromWorldState(piecesGroup, piecesDict, piecesList) 
 
     mesh.userData.status = p.status;
     mesh.userData.is_grasped = p.is_grasped;
-    mesh.userData.board_col = p.board_col;
-    mesh.userData.board_row = p.board_row;
+    const cell = settledPieceCell(p);
+    if (cell) {
+      mesh.userData.row = cell.row;
+      mesh.userData.col = cell.col;
+    } else {
+      // A carried, falling, or displaced piece has no selectable board cell.
+      mesh.userData.row = null;
+      mesh.userData.col = null;
+    }
   }
 }
 

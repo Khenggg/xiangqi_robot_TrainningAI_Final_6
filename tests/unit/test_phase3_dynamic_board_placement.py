@@ -1,6 +1,6 @@
 """
 Unit tests for Phase 3 Dynamic Board Placement Corrective Pass:
-1. Coordinate transform contract (d=0, d=30mm, robot -X to viewer +Z).
+1. Active yaw 0 degree coordinate transform contract and forward shift.
 2. Authoritative BoardPlacementState & PyBullet/pieces consistency.
 3. Dataset invalidation policy & on-demand IK runtime authority.
 4. Guaranteed allowed_grasp_piece_id cleanup on all exit paths.
@@ -42,50 +42,29 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         cls.kinematics = FR3Kinematics()
 
     def test_coordinate_transform_contract(self):
-        """
-        Verify Section 35 coordinate contract:
-        - d = 0, row 0 col 4: x = -0.180, y = 0.0
-        - d = +30mm, row 0 col 4: x = -0.210, y = 0.0
-        - d = +30mm, row 9 col 8: x = -0.570, y = +0.160
-        - Viewer mapping: robot -X shift by -30mm maps to Three.js world +Z shift by +30mm.
-        """
-        r_sp = self.geom.grid_cell_length_mm / 1000.0  # 0.040m
-        c_sp = self.geom.grid_cell_width_mm / 1000.0   # 0.040m
-
-        # 1. d = 0, row 0 col 4
-        x, y, z = canonical_cell_to_robot_xyz_m(
-            row=0, col=4, forward_shift_mm=0.0, z_m=0.0105,
-            row_spacing_m=r_sp, col_spacing_m=c_sp,
-        )
-        self.assertAlmostEqual(x, -0.360, places=4)
-        self.assertAlmostEqual(y, 0.180, places=4)
-        self.assertAlmostEqual(z, 0.0105, places=4)
-
-        # 2. d = +30mm, row 0 col 4
-        x, y, z = canonical_cell_to_robot_xyz_m(
-            row=0, col=4, forward_shift_mm=30.0, z_m=0.0105,
-            row_spacing_m=r_sp, col_spacing_m=c_sp,
-        )
-        self.assertAlmostEqual(x, -0.390, places=4)
-        self.assertAlmostEqual(y, 0.180, places=4)
-
-        # 3. d = +30mm, row 9 col 8
-        x, y, z = canonical_cell_to_robot_xyz_m(
-            row=9, col=8, forward_shift_mm=30.0, z_m=0.0105,
-            row_spacing_m=r_sp, col_spacing_m=c_sp,
-        )
-        self.assertAlmostEqual(x, -0.550, places=4)
-        self.assertAlmostEqual(y, -0.180, places=4)
-
-        # 4. Three.js world mapping verification: world_z = -robot_x
-        state_nom = BoardPlacementState.compute(forward_shift_mm=0.0)
-        state_shift = BoardPlacementState.compute(forward_shift_mm=30.0)
-
-        delta_robot_x = state_shift.board_center_robot_m[0] - state_nom.board_center_robot_m[0]
-        delta_world_z = state_shift.board_center_world_m[2] - state_nom.board_center_world_m[2]
-
-        self.assertAlmostEqual(delta_robot_x, -0.030, places=4, msg="Robot X must shift by -30mm")
-        self.assertAlmostEqual(delta_world_z, +0.030, places=4, msg="Viewer world Z must shift by +30mm")
+        """Forward shift follows active yaw 0 degrees in robot and viewer frames."""
+        sim = VirtualXiangqiSimulation(auto_sync_telemetry=False)
+        sim.start()
+        try:
+            initial_cell = sim.cell_to_robot_xyz_m(0, 4)
+            initial_robot_center = np.array(sim.placement_state.board_center_robot_m)
+            initial_world_center = np.array(sim.placement_state.board_center_world_m)
+            self.assertAlmostEqual(initial_cell[0], 0.180, places=4)
+            self.assertAlmostEqual(initial_cell[1], 0.360, places=4)
+            self.assertTrue(sim.runtime_go_service_safe()["success"])
+            self.assertTrue(sim.set_board_placement(forward_shift_mm=30.0, internal_reset=True)["success"])
+            shifted_cell = sim.cell_to_robot_xyz_m(0, 4)
+            np.testing.assert_allclose(np.array(shifted_cell) - initial_cell, [0.0, 0.030, 0.0], atol=1e-6)
+            np.testing.assert_allclose(
+                np.array(sim.placement_state.board_center_robot_m) - initial_robot_center,
+                [0.0, 0.030, 0.0], atol=1e-6,
+            )
+            np.testing.assert_allclose(
+                np.array(sim.placement_state.board_center_world_m) - initial_world_center,
+                [-0.030, 0.0, 0.0], atol=1e-6,
+            )
+        finally:
+            sim.stop()
 
     def test_board_placement_runtime_state_and_pybullet_consistency(self):
         """
@@ -115,16 +94,16 @@ class DynamicBoardPlacementTests(unittest.TestCase):
         self.assertEqual(sim.placement_state.placement_version, init_ver + 1)
         self.assertEqual(sim.backend.get_state_snapshot().placement_version, init_ver + 1)
 
-        # Check PyBullet board pose
+        # Active yaw 0 degrees moves the board along +Y_robot.
         new_board_pos = sim.world.get_board_pose()[0]
-        # In robot frame: board shifted by -0.025m along X.
-        self.assertAlmostEqual(new_board_pos[0] - init_board_pos[0], -0.025, places=4)
+        np.testing.assert_allclose(new_board_pos - init_board_pos, [0.0, 0.025, 0.0], atol=1e-4)
 
         # Check all pieces translated consistently
         for pid, p in sim.world.pieces.items():
             new_p = p.get_pose_robot_base()[0]
-            delta_x = new_p[0] - piece_p_before[pid][0]
-            self.assertAlmostEqual(delta_x, -0.025, places=4, msg=f"Piece {pid} must translate by -25mm along robot X")
+            delta = new_p - piece_p_before[pid]
+            np.testing.assert_allclose(delta, [0.0, 0.025, 0.0], atol=1e-4,
+                                       err_msg=f"Piece {pid} must follow the board in robot base")
 
         # Revert back to nominal
         sim.reset_board_placement()

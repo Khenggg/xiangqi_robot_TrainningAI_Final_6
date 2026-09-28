@@ -31,7 +31,18 @@
         </label>
         <button id="liveBtn">Connect live</button>
         <span id="liveState">OFFLINE</span>
+        <span id="sourceBadge" class="source-badge" title="Nguồn telemetry cánh tay robot"></span>
         <span id="opStateBadge" class="state-idle" title="Trạng thái vận hành máy trạng thái runtime">IDLE</span>
+        <label title="Tốc độ di chuyển cánh tay robot (Speed Factor - Giảm tốc để an toàn)">
+          ⚡ Tốc độ:
+          <select id="speedFactorSelect">
+            <option value="0.1">0.1x (Siêu chậm 10%)</option>
+            <option value="0.2" selected>0.2x (Chậm & An toàn 20%)</option>
+            <option value="0.35">0.35x (Êm ái 35%)</option>
+            <option value="0.5">0.5x (Vừa phải 50%)</option>
+            <option value="1.0">1.0x (Tốc độ thường)</option>
+          </select>
+        </label>
         <button id="toggleControlsBtn" class="hud-btn-secondary" title="Bật/tắt bảng điều khiển góc khớp">🎮 Điều khiển khớp</button>
         <button id="toggleRulerBtn" class="hud-btn-secondary" title="Click trực tiếp vào cạnh trục/bàn cờ hoặc bấm nút này để hiện hệ số tọa độ (Phím R)">📏 Thước đo (Click cạnh)</button>
         <button id="resetBackendBtn" class="hud-btn-danger" title="Khởi động lại toàn bộ dữ liệu backend (Robot về Home, 32 quân cờ về vị trí xuất phát, reset vị trí bàn cờ)">🔄 Reset Backend</button>
@@ -54,10 +65,31 @@
             <button id="tabPlacementBtn" class="tab-btn">📐 Vị Trí</button>
             <button id="tabServiceBtn" class="tab-btn">🛠️ Service</button>
           </div>
+
+          <!-- GLOBAL SPEED OVERRIDE SECTION (VISIBLE ACROSS ALL TABS) -->
+          <div class="panel-speed-section" id="panelSpeedSection">
+            <div class="speed-header">
+              <span class="speed-title">⚡ Tốc độ vận hành (Speed):</span>
+              <span id="panelSpeedBadge" class="speed-badge speed-safe">20% (An toàn - Khuyên dùng)</span>
+            </div>
+            <div class="speed-slider-wrap">
+              <input type="range" id="panelSpeedSlider" min="5" max="100" step="5" value="20" title="Kéo để điều chỉnh tốc độ robot" />
+              <span id="panelSpeedVal">20%</span>
+            </div>
+            <div class="speed-presets">
+              <button type="button" class="speed-preset-btn" data-speed="0.1">10% Chậm</button>
+              <button type="button" class="speed-preset-btn active" data-speed="0.2">20% An toàn</button>
+              <button type="button" class="speed-preset-btn" data-speed="0.35">35% Êm ái</button>
+              <button type="button" class="speed-preset-btn" data-speed="0.5">50% Vừa</button>
+              <button type="button" class="speed-preset-btn danger-preset" data-speed="1.0">100% Nhanh</button>
+            </div>
+          </div>
           <div id="jointsTabContent" class="tab-content active">
-            <div class="panel-actions">
-              <button id="homeBtn" class="action-btn" title="Đưa robot về tư thế đứng chuẩn">🏠 Về Home</button>
-              <button id="gripperBtn" class="action-btn" title="Đóng hoặc mở ngàm kẹp CAD">🗜️ Kẹp / Nhả</button>
+            <div class="panel-actions" style="flex-wrap: wrap;">
+              <button id="homeBtn" class="action-btn" title="Đưa robot về vị trí Home (Tọa độ hiện tại đã lưu)">🏠 Về Home</button>
+              <button id="setHomeBtn" class="action-btn" title="Lưu tọa độ/góc khớp hiện tại của robot làm điểm Home mới">📍 Đặt làm Home</button>
+              <button id="gripperCloseBtn" class="action-btn" title="Kẹp ngàm giữ quân cờ (Tool DO0)">🗜️ Kẹp Lại</button>
+              <button id="gripperOpenBtn" class="action-btn" title="Nhả ngàm mở rộng về vị trí ban đầu (Tool DO1)">🔓 Nhả Kẹp</button>
               <button id="panelResetBackendBtn" class="action-btn danger-action" title="Khởi động lại toàn bộ dữ liệu backend">🔄 Reset Data</button>
             </div>
             <div class="joints-container" id="jointControlsList"></div>
@@ -91,7 +123,16 @@
                   <option value="8">8 (Xa robot / Far side)</option>
                 </select>
               </label>
-              <button id="reachCellBtn" class="action-btn primary-action">🚀 Đi Tới</button>
+              <button id="reachCellBtn" class="action-btn primary-action" title="Di chuyển ngàm kẹp đến ô đích (không gắp cờ)">🚀 Đi Tới</button>
+              <button id="pickPlaceBtn" class="action-btn" style="background: #238636; color: #fff; font-weight: bold;" title="Gắp quân cờ tại ô nguồn và đặt sang ô đích">🎯 Gắp &amp; Đặt Quân</button>
+            </div>
+
+            <div style="margin: 8px 0; padding: 6px 10px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;">
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none;">
+                <input type="checkbox" id="autoGraspCheckbox" style="accent-color: #238636; width: 16px; height: 16px;">
+                <span>🎯 <strong>Chế độ Gắp Quân (Pick &amp; Place)</strong></span>
+              </label>
+              <span style="font-size: 11px; opacity: 0.8; color: #94a3b8;">(Click quân cờ ➔ Click ô trống)</span>
             </div>
 
             <div class="safety-guard-badge" style="margin: 8px 0 12px 0; padding: 6px 10px; background: rgba(46, 160, 67, 0.15); border: 1px solid rgba(46, 160, 67, 0.4); border-radius: 6px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #3fb950; font-weight: 600;">

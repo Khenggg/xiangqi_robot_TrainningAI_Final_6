@@ -3,6 +3,7 @@ Virtual kinematic gripper proxy and deterministic grasp / attachment manager.
 """
 
 from collections import deque
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -25,6 +26,9 @@ class VirtualGripper:
     Kinematic gripper proxy attached to the Virtual FR3 robot.
     Operates natively in robot_base frame.
     """
+    # Numerical contact tolerance for the virtual CAD-derived collision hulls.
+    # This is not a measured physical grip-force or stroke specification.
+    MAX_JAW_CONTACT_GAP_M = 0.00005
 
     def __init__(
         self,
@@ -37,8 +41,8 @@ class VirtualGripper:
         if not profile_path.is_file():
             raise FileNotFoundError(f"Gripper profile not found at {profile_path}")
 
-        with open(profile_path, "r", encoding="utf-8-sig") as f:
-            self.profile = json.load(f)
+        gripper_profile_bytes = profile_path.read_bytes()
+        self.profile = json.loads(gripper_profile_bytes.decode("utf-8-sig"))
 
         validate_gripper_profile(self.profile)
 
@@ -62,9 +66,34 @@ class VirtualGripper:
         jaw = self.profile["jaw"]
         self.jaw_dimensions_m = np.array(jaw["dimensions_m"], dtype=float)
 
+        # The collision envelope is generated from the exact STEP used by the
+        # viewer. A changed mesh or mounting transform must regenerate it.
+        root = Path(__file__).resolve().parents[3]
+        collision_asset = json.loads(
+            (root / "shared" / "gripper_collision_asset.json").read_text(encoding="utf-8")
+        )
+        visual_bytes = (root / "shared" / "gripper_visual_asset.json").read_bytes()
+        profile_bytes = (root / "shared" / "robot_profiles" / "fr3.json").read_bytes()
+        visual = json.loads(visual_bytes)
+        step_bytes = (root / "robot-3d-viewer" / "assets" / "fr3_v6" / visual["asset_file"]).read_bytes()
+        if (collision_asset.get("schema_version") != 2 or
+                hashlib.sha256(visual_bytes).hexdigest() != collision_asset.get("source_visual_sha256") or
+                hashlib.sha256(profile_bytes).hexdigest() != collision_asset.get("source_profile_sha256") or
+                hashlib.sha256(gripper_profile_bytes).hexdigest() != collision_asset.get("source_gripper_profile_sha256") or
+                hashlib.sha256(step_bytes).hexdigest() != collision_asset.get("source_step_sha256")):
+            raise ValueError("Gripper STEP/profile/visual changed; regenerate CAD-derived collision envelope")
+        self.collision_asset = collision_asset
+        fingers = collision_asset["finger_boxes"]
+        cad_open_gap = (fingers[1]["center_m"][0] - fingers[1]["half_extents_m"][0]
+                        - fingers[0]["center_m"][0] - fingers[0]["half_extents_m"][0])
+        cad_closed_gap = cad_open_gap - 2.0 * collision_asset["finger_travel_m"]
+        if abs(self.open_width_m - cad_open_gap) > 1e-5 or abs(self.closed_width_m - cad_closed_gap) > 1e-5:
+            raise ValueError("Gripper stroke differs from CAD-derived open/closed jaw gap")
+
         # PyBullet body IDs (managed by VirtualPhysicalWorld)
         self.client_id: int = -1
         self.palm_body_id: int = -1
+        self.fixed_body_ids: List[int] = []
         self.left_jaw_body_id: int = -1
         self.right_jaw_body_id: int = -1
 
@@ -97,43 +126,52 @@ class VirtualGripper:
 
     @property
     def proxy_body_ids(self) -> List[int]:
-        return [b for b in (self.palm_body_id, self.left_jaw_body_id, self.right_jaw_body_id) if b >= 0]
+        return [b for b in (*self.fixed_body_ids, self.left_jaw_body_id, self.right_jaw_body_id) if b >= 0]
 
     def spawn_proxies(self, client_id: int) -> None:
         """
-        Spawn kinematic PyBullet collision proxy bodies for palm, left jaw, and right jaw
-        using dimensions strictly loaded from shared/virtual_gripper_profile.json.
+        Spawn CAD-derived conservative component boxes. Every rendered STEP
+        triangle is inside one of these boxes, including the visual adapter.
         """
         self.client_id = client_id
-        palm_half = (self.palm_dimensions_m / 2.0).tolist()
-        jaw_half = (self.jaw_dimensions_m / 2.0).tolist()
+        fixed = self.collision_asset["fixed_boxes"]
+        # PyBullet silently truncates compound collision arrays above 16
+        # children. Keep each chunk smaller and verify every child exists.
+        self.fixed_body_ids = []
+        for offset in range(0, len(fixed), 12):
+            chunk = fixed[offset:offset + 12]
+            shape = p.createCollisionShapeArray(
+                shapeTypes=[p.GEOM_BOX] * len(chunk),
+                halfExtents=[box["half_extents_m"] for box in chunk],
+                collisionFramePositions=[box["center_m"] for box in chunk],
+                physicsClientId=client_id,
+            )
+            body = p.createMultiBody(
+                baseMass=0.0, baseCollisionShapeIndex=shape,
+                basePosition=[0.0, 0.0, -10.0], physicsClientId=client_id,
+            )
+            actual = len(p.getCollisionShapeData(body, -1, physicsClientId=client_id))
+            if actual != len(chunk):
+                raise RuntimeError(f"PyBullet omitted fixed gripper geometry: {actual}/{len(chunk)}")
+            self.fixed_body_ids.append(body)
+        self.palm_body_id = self.fixed_body_ids[0]
 
-        col_palm = p.createCollisionShape(
-            p.GEOM_BOX,
-            halfExtents=palm_half,
-            physicsClientId=client_id,
+        finger_boxes = self.collision_asset["finger_boxes"]
+        col_left = p.createCollisionShape(
+            p.GEOM_MESH, vertices=finger_boxes[0]["vertices_m"], physicsClientId=client_id,
         )
-        self.palm_body_id = p.createMultiBody(
-            baseMass=0.0,
-            baseCollisionShapeIndex=col_palm,
-            basePosition=[0.0, 0.0, -10.0],
-            physicsClientId=client_id,
-        )
-
-        col_jaw = p.createCollisionShape(
-            p.GEOM_BOX,
-            halfExtents=jaw_half,
-            physicsClientId=client_id,
+        col_right = p.createCollisionShape(
+            p.GEOM_MESH, vertices=finger_boxes[1]["vertices_m"], physicsClientId=client_id,
         )
         self.left_jaw_body_id = p.createMultiBody(
             baseMass=0.0,
-            baseCollisionShapeIndex=col_jaw,
+            baseCollisionShapeIndex=col_left,
             basePosition=[0.0, 0.0, -10.0],
             physicsClientId=client_id,
         )
         self.right_jaw_body_id = p.createMultiBody(
             baseMass=0.0,
-            baseCollisionShapeIndex=col_jaw,
+            baseCollisionShapeIndex=col_right,
             basePosition=[0.0, 0.0, -10.0],
             physicsClientId=client_id,
         )
@@ -142,13 +180,14 @@ class VirtualGripper:
     def remove_proxies(self) -> None:
         """Safely remove proxy bodies from PyBullet."""
         if self.client_id >= 0:
-            for b in (self.palm_body_id, self.left_jaw_body_id, self.right_jaw_body_id):
+            for b in self.proxy_body_ids:
                 if b >= 0:
                     try:
                         p.removeBody(b, physicsClientId=self.client_id)
                     except Exception:
                         pass
         self.palm_body_id = -1
+        self.fixed_body_ids = []
         self.left_jaw_body_id = -1
         self.right_jaw_body_id = -1
 
@@ -169,34 +208,17 @@ class VirtualGripper:
         q_tcp = np.asarray(quat, dtype=float)
         R_tcp = quat_to_rot_matrix(q_tcp)
 
-        palm_dz = float(self.palm_dimensions_m[2])
-        jaw_dz = float(self.jaw_dimensions_m[2])
         w = float(jaw_width) if jaw_width is not None else float(self.jaw_width_m)
-        half_w = w / 2.0
-
-        # TCP is at the midpoint of the finger tips at Z=0.
-        # Jaws extend backwards (towards flange) along -Z from Z=0 to -jaw_dz.
-        # Palm extends backwards behind the jaws from -jaw_dz to -(jaw_dz + palm_dz).
-        p_palm = p_tcp + R_tcp @ np.array([0.0, 0.0, -jaw_dz - palm_dz / 2.0])
-        p.resetBasePositionAndOrientation(
-            self.palm_body_id,
-            p_palm.tolist(),
-            list(q_tcp),
-            physicsClientId=self.client_id,
+        travel_fraction = np.clip(
+            (self.open_width_m - w) / (self.open_width_m - self.closed_width_m), 0.0, 1.0
         )
-
-        if self.travel_axis == "Y":
-            left_loc = np.array([0.0, -half_w, -jaw_dz / 2.0])
-            right_loc = np.array([0.0, half_w, -jaw_dz / 2.0])
-        elif self.travel_axis == "Z":
-            left_loc = np.array([0.0, 0.0, -jaw_dz / 2.0 - half_w])
-            right_loc = np.array([0.0, 0.0, -jaw_dz / 2.0 + half_w])
-        else:  # "X"
-            left_loc = np.array([-half_w, 0.0, -jaw_dz / 2.0])
-            right_loc = np.array([half_w, 0.0, -jaw_dz / 2.0])
-
-        p_left = p_tcp + R_tcp @ left_loc
-        p_right = p_tcp + R_tcp @ right_loc
+        finger_shift = float(travel_fraction * self.collision_asset["finger_travel_m"])
+        for body in self.fixed_body_ids:
+            p.resetBasePositionAndOrientation(
+                body, p_tcp.tolist(), list(q_tcp), physicsClientId=self.client_id,
+            )
+        p_left = p_tcp + R_tcp @ np.array([finger_shift, 0.0, 0.0])
+        p_right = p_tcp + R_tcp @ np.array([-finger_shift, 0.0, 0.0])
 
         p.resetBasePositionAndOrientation(
             self.left_jaw_body_id,
@@ -270,6 +292,13 @@ class VirtualGripper:
 
         return np.zeros(3, dtype=float), np.zeros(3, dtype=float)
 
+    def _jaw_gap_to_piece_m(self, jaw_id: int, piece: XiangqiPieceBody) -> Optional[float]:
+        """Read the separation of a CAD jaw hull from a piece in PyBullet."""
+        points = p.getClosestPoints(
+            jaw_id, piece.body_id, distance=0.05, physicsClientId=self.client_id,
+        )
+        return min(float(point[8]) for point in points) if points else None
+
     def evaluate_grasp_eligibility(
         self,
         pieces: Sequence[XiangqiPieceBody],
@@ -280,6 +309,7 @@ class VirtualGripper:
         2. No piece already attached.
         3. Piece center must fall inside cylindrical capture volume around grasp_pos.
         4. Exactly one candidate must qualify (ambiguity rejection).
+        5. Both CAD jaw hulls must touch that piece within numerical tolerance.
         """
         if not self.is_closed:
             return GraspResult(
@@ -297,11 +327,11 @@ class VirtualGripper:
             )
 
         candidates = []
-        for p in pieces:
-            if p.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
+        for candidate in pieces:
+            if candidate.physical_state == PiecePhysicalState.OUT_OF_BOUNDS:
                 continue
 
-            pos_robot, _ = p.get_pose_robot_base()
+            pos_robot, _ = candidate.get_pose_robot_base()
             dx = pos_robot[0] - self.grasp_pos[0]
             dy = pos_robot[1] - self.grasp_pos[1]
             dz = pos_robot[2] - self.grasp_pos[2]
@@ -309,7 +339,7 @@ class VirtualGripper:
             r_xy = math.hypot(dx, dy)
             if r_xy <= self.capture_radius_xy and abs(dz) <= self.capture_half_height_z:
                 dist_3d = math.sqrt(dx * dx + dy * dy + dz * dz)
-                candidates.append((p, dist_3d))
+                candidates.append((candidate, dist_3d))
 
         if len(candidates) == 0:
             return GraspResult(
@@ -326,12 +356,31 @@ class VirtualGripper:
             )
 
         piece, dist = candidates[0]
+        if self.client_id < 0 or self.left_jaw_body_id < 0 or self.right_jaw_body_id < 0:
+            return GraspResult(
+                success=False, status=GraspStatus.NO_JAW_CONTACT, piece_id=piece.piece_id,
+                reason="CAD jaw collision bodies are unavailable; grasp cannot be verified",
+            )
+        jaw_gaps_m = [self._jaw_gap_to_piece_m(jaw_id, piece) for jaw_id in
+                      (self.left_jaw_body_id, self.right_jaw_body_id)]
+        if any(gap is None or gap > self.MAX_JAW_CONTACT_GAP_M for gap in jaw_gaps_m):
+            gap_text = [None if gap is None else round(gap * 1000, 3) for gap in jaw_gaps_m]
+            return GraspResult(
+                success=False, status=GraspStatus.NO_JAW_CONTACT, piece_id=piece.piece_id,
+                reason=f"Closed CAD jaws do not both contact {piece.piece_id}; gaps={gap_text}mm",
+            )
+        if any(gap < -0.0001 for gap in jaw_gaps_m):
+            return GraspResult(
+                success=False, status=GraspStatus.NO_JAW_CONTACT, piece_id=piece.piece_id,
+                reason="A CAD jaw penetrates the selected piece instead of gripping it",
+            )
         return GraspResult(
             success=True,
             status=GraspStatus.SUCCESS,
             piece_id=piece.piece_id,
             distance_m=dist,
-            reason=f"Single candidate {piece.piece_id} captured at {dist*1000:.1f}mm",
+            reason=(f"Both CAD jaws contact {piece.piece_id}; center offset={dist*1000:.1f}mm, "
+                    f"jaw gaps={[round(gap*1000, 3) for gap in jaw_gaps_m]}mm"),
         )
 
     def attach_piece(self, piece: XiangqiPieceBody) -> bool:

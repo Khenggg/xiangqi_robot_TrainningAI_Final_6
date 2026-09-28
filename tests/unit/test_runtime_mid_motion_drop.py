@@ -13,6 +13,7 @@ Verifies:
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 import numpy as np
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -46,12 +47,14 @@ class RuntimeMidMotionDropTests(unittest.TestCase):
         self.world.close()
 
     def test_mid_motion_drop_during_cartesian_move(self):
-        piece_id = "black_knight_0"
+        piece_id = "black_cannon_0"
         piece = self.world.pieces[piece_id]
         pos_init, _ = piece.get_pose_robot_base()
 
         # 1. Pick piece
-        pick_res = self.runtime.pick_piece(piece_id)
+        # Isolate forced-drop dynamics from the unmeasured physical jaw stroke.
+        with mock.patch.object(self.world.gripper, "_jaw_gap_to_piece_m", return_value=0.0):
+            pick_res = self.runtime.pick_piece(piece_id)
         self.assertTrue(pick_res.success, f"Failed to pick {piece_id}: {pick_res.reason}")
         self.assertTrue(self.world.gripper.is_attached)
         self.assertEqual(self.world.gripper.attached_piece_id, piece_id)

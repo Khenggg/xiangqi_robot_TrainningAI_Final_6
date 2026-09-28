@@ -136,25 +136,31 @@ def execute_ai_move(
         except Exception as e:
             print(f"[API] Error updating board: {e}")
 
-    # Check game over
-    if xiangqi.get_king_pos("r", state.board) is None:
+    # Check game over (Chiếu bí hoặc Tuyệt sát người chơi)
+    if xiangqi.is_checkmate("r", state.board):
+        is_chk = xiangqi.is_king_in_check("r", state.board)
+        reason = "CHIẾU BÍ" if is_chk else "TUYỆT SÁT"
+        print(f"[GAME] 💀 BẠN ĐÃ THUA! Bạn bị {reason}!")
         if hasattr(state, "handle_game_over"):
-            state.handle_game_over("b")
+            state.handle_game_over("b", reason=reason)
         if hasattr(state, "api_client") and state.api_client:
             try:
                 state.api_client.end_match(winner="BLACK", reason="CHECKMATE")
             except Exception:
                 pass
     else:
+        if xiangqi.is_king_in_check("r", state.board):
+            print("[GAME] ⚠️ BẠN ĐANG BỊ CHIẾU TƯỚNG!")
+            if hasattr(state, "set_status"):
+                state.set_status("⚠️ BẠN ĐANG BỊ CHIẾU TƯỚNG! Hãy tìm nước chống đỡ!", color=(220, 38, 38), duration=5.0)
+        else:
+            if hasattr(state, "set_status"):
+                state.set_status("Đến lượt bạn đi!", color=(34, 197, 94), duration=4.0)
+
         if getattr(hw, "is_robot_ready", False) and hasattr(hw, "capture_baseline_if_needed"):
             hw.capture_baseline_if_needed(force_delay=1.0)
-            if hasattr(state, "set_status"):
-                state.set_status("Your turn!", color=(0, 100, 180), duration=5.0)
-        else:
-            if hasattr(hw, "clear_yolo_baseline"):
-                hw.clear_yolo_baseline()
-            if hasattr(state, "set_status"):
-                state.set_status("Your turn!", color=(0, 100, 180), duration=5.0)
+        elif hasattr(hw, "clear_yolo_baseline"):
+            hw.clear_yolo_baseline()
         print("[GAME] Your turn...")
 
     return True
