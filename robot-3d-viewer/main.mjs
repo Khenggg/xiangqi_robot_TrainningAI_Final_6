@@ -784,10 +784,21 @@ function connectLive() {
       } else if (data.type === "full_route_validation_result") {
         updateFullRouteValidationResultUI(data);
       } else if (data.type === "trajectory_result") {
+        state.pickSourceCell = null;
+        clearPickSourceUI();
         if (data.placement_version !== undefined) {
           state.placementVersion = Number(data.placement_version);
           const verBadge = document.getElementById("placementVersionBadge");
           if (verBadge) verBadge.textContent = `VER: ${data.placement_version}`;
+        }
+        if (data.success && data.src && data.dst && xiangqiPieces) {
+          const movedMesh = Object.values(xiangqiPieces).find(
+            m => (m.userData?.row === data.src[0] && m.userData?.col === data.src[1]) || (m.userData?.row === data.dst[0] && m.userData?.col === data.dst[1])
+          );
+          if (movedMesh) {
+            movedMesh.userData.row = data.dst[0];
+            movedMesh.userData.col = data.dst[1];
+          }
         }
         if (!data.success) {
           handleBackendError(data.error || `Quỹ đạo thất bại ở giai đoạn ${data.failed_stage}`);
@@ -1738,7 +1749,12 @@ function initJointControlPanelEvents() {
   canvas.addEventListener("pointerup", (e) => {
     const dt = performance.now() - pointerDownTime;
     const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
-    if (dt > 300 || dist > 5) return;
+    if (dt > 600 || dist > 15) return;
+
+    // Ensure measurement pins are always cleared
+    if (coordinateRulerGroup?.clearPins) {
+      coordinateRulerGroup.clearPins();
+    }
 
     const rect = canvas.getBoundingClientRect();
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1747,53 +1763,87 @@ function initJointControlPanelEvents() {
 
     const hits = raycaster.intersectObjects(scene.children, true);
 
-    // 1. Kiểm tra click vào cạnh thước / trục tọa độ (Click-to-Show)
-    for (const hit of hits) {
-      if (hit.object?.userData?.isRulerProxy) {
-        const axis = hit.object.userData.axis;
-        if (coordinateRulerGroup?.toggleAxis) {
-          const isVis = coordinateRulerGroup.toggleAxis(axis, hit.point);
-          const coordReadoutEl = document.getElementById("coordReadout");
-          if (coordReadoutEl) {
-            const xMm = (hit.point.x * 1000).toFixed(0);
-            const yMm = (hit.point.y * 1000).toFixed(1);
-            const zMm = (hit.point.z * 1000).toFixed(0);
-            coordReadoutEl.textContent = `📍 Cạnh ${axis}: ${isVis ? "BẬT" : "TẮT"} (X:${xMm}mm Y:${yMm}mm Z:${zMm}mm)`;
-          }
-          const toggleRulerBtn = document.getElementById("toggleRulerBtn");
-          if (toggleRulerBtn && coordinateRulerGroup.isAnyLabelsVisible) {
-            toggleRulerBtn.classList.toggle("active", coordinateRulerGroup.isAnyLabelsVisible());
-          }
-        }
-        return;
-      }
-    }
-
-    // 2. Resolve the closest hit first: a piece can be above the board surface.
+    // Resolve closest hit: pieces first, then board surface
     for (const hit of hits) {
       let obj = hit.object;
       while (obj && !obj.userData?.id && obj !== scene) {
         obj = obj.parent;
       }
       if (obj?.userData?.id) {
-        const row = obj.userData.row;
-        const col = obj.userData.col;
-        if (!Number.isInteger(row) || !Number.isInteger(col)) return;
-        goToCell(row, col);
-        const tabReachBtnEl = document.getElementById("tabReachBtn");
-        tabReachBtnEl?.click();
-        return;
-      }
-      if (hit.object?.userData?.isBoardSurface && physicalGeometryRef) {
-        if (autoGraspCb?.checked && !state.pickSourceCell) {
-          handleBackendError("Hãy click vào quân cờ nguồn trước khi chọn ô đích.");
+        let row = obj.userData.row;
+        let col = obj.userData.col;
+        // Resilient fallback: compute nearest cell from hit point or piece position
+        if (!Number.isInteger(row) || !Number.isInteger(col)) {
+          const nearest = nearestBoardIntersection(hit.point, physicalGeometryRef, boardPointToXYZ)
+                       || nearestBoardIntersection(obj.position, physicalGeometryRef, boardPointToXYZ);
+          if (nearest) {
+            row = nearest.row;
+            col = nearest.col;
+            obj.userData.row = row;
+            obj.userData.col = col;
+          }
+        }
+        if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
+
+        // Check if a pick source piece is already selected
+        if (state.pickSourceCell) {
+          // If clicked the exact same cell -> cancel selection
+          if (state.pickSourceCell.row === row && state.pickSourceCell.col === col) {
+            state.pickSourceCell = null;
+            clearPickSourceUI();
+            const badge = document.getElementById("diagStatusBadge");
+            if (badge) {
+              badge.className = "badge-safe";
+              badge.textContent = "ĐÃ HỦY CHỌN NGUỒN";
+            }
+            return;
+          }
+          // If clicked another piece of the same side -> switch selection to new piece
+          let currentSrcMesh = null;
+          if (xiangqiPieces) {
+            currentSrcMesh = Object.values(xiangqiPieces).find(
+              m => m.userData?.row === state.pickSourceCell.row && m.userData?.col === state.pickSourceCell.col
+            );
+          }
+          if (currentSrcMesh && obj.userData?.side && currentSrcMesh.userData?.side === obj.userData.side) {
+            state.pickSourceCell = { row, col };
+            updatePickSourceUI(row, col);
+            return;
+          }
+          // Destination piece clicked -> execute pick and place (capture or move)
+          const src = state.pickSourceCell;
+          state.pickSourceCell = null;
+          executePickAndPlace(src.row, src.col, row, col);
+          return;
+        } else {
+          // First click on piece: select as pick source
+          state.pickSourceCell = { row, col };
+          updatePickSourceUI(row, col);
+          const tabReachBtnEl = document.getElementById("tabReachBtn");
+          tabReachBtnEl?.click();
           return;
         }
+      }
+      if (hit.object?.userData?.isBoardSurface && physicalGeometryRef) {
         const cell = nearestBoardIntersection(hit.point, physicalGeometryRef, boardPointToXYZ);
-        if (cell) {
-          goToCell(cell.row, cell.col);
-          document.getElementById("tabReachBtn")?.click();
+        if (!cell) return;
+
+        if (state.pickSourceCell) {
+          // Destination cell clicked
+          const src = state.pickSourceCell;
+          state.pickSourceCell = null;
+          executePickAndPlace(src.row, src.col, cell.row, cell.col);
+        } else {
+          // Empty cell clicked without source piece
+          goToCell(cell.row, cell.col, false);
+          const badge = document.getElementById("diagStatusBadge");
+          if (badge) {
+            badge.className = "badge-safe";
+            badge.textContent = `Ô (${cell.row}, ${cell.col}) - Click quân cờ để gắp`;
+          }
         }
+        const tabReachBtnEl = document.getElementById("tabReachBtn");
+        tabReachBtnEl?.click();
         return;
       }
     }
@@ -1812,8 +1862,8 @@ function initJointControlPanelEvents() {
       const coordReadoutEl = document.getElementById("coordReadout");
       if (coordReadoutEl) {
         coordReadoutEl.textContent = isVisible
-          ? "Đang hiện toàn bộ thước đo (Click cạnh để bật/tắt từng trục)"
-          : "Đã ẩn thước đo (Click vào cạnh trục để hiện)";
+          ? "Đang hiện toàn bộ thước đo"
+          : "Đã ẩn thước đo";
       }
     });
   }
@@ -1826,7 +1876,7 @@ function initJointControlPanelEvents() {
     }
   });
 
-  // Pointer move: update real-time hovered coordinates over board & ruler edges
+  // Pointer move: update real-time hovered coordinates over board & pieces
   canvas.addEventListener("pointermove", (e) => {
     const rect = canvas.getBoundingClientRect();
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1837,19 +1887,11 @@ function initJointControlPanelEvents() {
     let isHoveringInteractive = false;
 
     for (const hit of hits) {
-      if (hit.object?.userData?.isRulerProxy) {
-        isHoveringInteractive = true;
-        canvas.style.cursor = "pointer";
-        const axis = hit.object.userData.axis;
-        const x_mm = (hit.point.x * 1000).toFixed(0);
-        const y_mm = (hit.point.y * 1000).toFixed(1);
-        const z_mm = (hit.point.z * 1000).toFixed(0);
-        const coordReadoutEl = document.getElementById("coordReadout");
-        if (coordReadoutEl && !state.selectedCell) {
-          coordReadoutEl.textContent = `👆 Click cạnh ${axis} để hiện tọa độ (X:${x_mm} Y:${y_mm} Z:${z_mm})`;
-        }
-        break;
-      } else if (hit.object?.userData && (hit.object.userData.col !== undefined || hit.object.userData.row !== undefined)) {
+      let obj = hit.object;
+      while (obj && !obj.userData?.id && obj !== scene) {
+        obj = obj.parent;
+      }
+      if (obj?.userData?.id || hit.object?.userData?.isBoardSurface) {
         isHoveringInteractive = true;
         canvas.style.cursor = "pointer";
         break;
@@ -2118,8 +2160,19 @@ function clearPickSourceUI() {
 
 function executePickAndPlace(srcRow, srcCol, dstRow, dstCol) {
   clearPickSourceUI();
+  state.pickSourceCell = null;
   state.selectedCell = { row: dstRow, col: dstCol };
   let cell = { row: dstRow, col: dstCol, x_m: 0, y_m: 0, z_m: 0 };
+
+  if (xiangqiPieces) {
+    const srcMesh = Object.values(xiangqiPieces).find(
+      m => m.userData?.row === srcRow && m.userData?.col === srcCol
+    );
+    if (srcMesh) {
+      srcMesh.userData.row = dstRow;
+      srcMesh.userData.col = dstCol;
+    }
+  }
 
   const ring = getOrCreateTargetRing();
   if (physicalGeometryRef) {
@@ -2193,9 +2246,9 @@ function executePickAndPlace(srcRow, srcCol, dstRow, dstCol) {
 
 function goToCell(row, col, explicitGrasp = false) {
   const autoGraspCb = document.getElementById("autoGraspCheckbox");
-  const isAutoGrasp = Boolean(autoGraspCb?.checked);
+  const isAutoGrasp = explicitGrasp ? true : Boolean(autoGraspCb?.checked);
 
-  if (explicitGrasp) {
+  if (explicitGrasp === true) {
     if (state.pickSourceCell) {
       const src = state.pickSourceCell;
       state.pickSourceCell = null;
@@ -2208,27 +2261,21 @@ function goToCell(row, col, explicitGrasp = false) {
     }
   }
 
-  if (isAutoGrasp) {
-    if (!state.pickSourceCell) {
-      state.pickSourceCell = { row, col };
-      updatePickSourceUI(row, col);
-      return;
-    } else {
-      if (state.pickSourceCell.row === row && state.pickSourceCell.col === col) {
-        state.pickSourceCell = null;
-        clearPickSourceUI();
-        const badge = document.getElementById("diagStatusBadge");
-        if (badge) {
-          badge.className = "badge-safe";
-          badge.textContent = "ĐÃ HỦY CHỌN NGUỒN";
-        }
-        return;
-      }
-      const src = state.pickSourceCell;
+  if (isAutoGrasp && state.pickSourceCell) {
+    if (state.pickSourceCell.row === row && state.pickSourceCell.col === col) {
       state.pickSourceCell = null;
-      executePickAndPlace(src.row, src.col, row, col);
+      clearPickSourceUI();
+      const badge = document.getElementById("diagStatusBadge");
+      if (badge) {
+        badge.className = "badge-safe";
+        badge.textContent = "ĐÃ HỦY CHỌN NGUỒN";
+      }
       return;
     }
+    const src = state.pickSourceCell;
+    state.pickSourceCell = null;
+    executePickAndPlace(src.row, src.col, row, col);
+    return;
   }
 
   // Chế độ di chuyển thường (không gắp)

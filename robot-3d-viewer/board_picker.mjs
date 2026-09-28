@@ -20,11 +20,13 @@ export function nearestBoardIntersection(point, geometry, boardPointToXYZ, maxDi
 }
 
 export function settledPieceCell(piece) {
-  if (!piece || !(piece.status === "ON_BOARD" || piece.status === "RESTING")) return null;
+  if (!piece) return null;
+  // A carried, out-of-bounds, or grasped piece has no selectable board cell
+  if (piece.status === "OUT_OF_BOUNDS" || piece.status === "ATTACHED" || piece.is_grasped) return null;
   const row = piece.nearest_row;
   const col = piece.nearest_col;
   const distance = piece.distance_to_nearest_intersection_m;
-  if (!Number.isInteger(row) || !Number.isInteger(col)
-      || !Number.isFinite(distance) || distance >= 0.025) return null;
+  if (!Number.isInteger(row) || !Number.isInteger(col)) return null;
+  if (Number.isFinite(distance) && distance > 0.035) return null;
   return { row, col };
 }

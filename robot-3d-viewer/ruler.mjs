@@ -532,22 +532,10 @@ export function buildCoordinateRulerGroup(options = {}) {
   const boardHalfZ = 0.367 / 2; // 0.1835m (chiều cột trong hệ local)
   const boardHalfX = 0.410 / 2; // 0.205m (chiều hàng trong hệ local)
 
+  // Edge proxies removed to prevent intercepting piece and board clicks
   const makeEdgeProxy = (w, h, d, x, y, z, edgeName) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), hitProxyMat);
-    mesh.position.set(x, y, z);
-    mesh.name = `hit-proxy-edge-${edgeName}`;
-    mesh.userData = { isRulerProxy: true, axis: "BOARD", edge: edgeName };
-    boardEdgesGroup.add(mesh);
+    // No-op: no hit proxy meshes added to prevent blocking piece clicks
   };
-
-  // Cạnh trước (NEAR - mép Cột 0 gần robot): local Z = -boardHalfZ
-  makeEdgeProxy(0.42, 0.025, 0.03, 0, 0, -boardHalfZ, "NEAR");
-  // Cạnh sau (FAR - mép Cột 8 xa robot): local Z = +boardHalfZ
-  makeEdgeProxy(0.42, 0.025, 0.03, 0, 0, +boardHalfZ, "FAR");
-  // Cạnh trái (LEFT - mép Hàng 0 Đen): local X = -boardHalfX
-  makeEdgeProxy(0.03, 0.025, 0.38, -boardHalfX, 0, 0, "LEFT");
-  // Cạnh phải (RIGHT - mép Hàng 9 Đỏ): local X = +boardHalfX
-  makeEdgeProxy(0.03, 0.025, 0.38, boardHalfX, 0, 0, "RIGHT");
 
   // -------------------------------------------------------------------------
   // CÁC HÀM TIỆN ÍCH QUẢN LÝ HIỂN THỊ TỌA ĐỘ KHI CLICK (API)
@@ -559,32 +547,18 @@ export function buildCoordinateRulerGroup(options = {}) {
   group.toggleAxis = function (axisName, clickPoint = null) {
     if (axisName === "X") {
       labelsX.visible = !labelsX.visible;
-      if (labelsX.visible && clickPoint) {
-        group.showMeasurementPin(clickPoint, `X = ${(clickPoint.x * 1000).toFixed(0)}mm`, colorX);
-      }
       return labelsX.visible;
     }
     if (axisName === "Y") {
       labelsY.visible = !labelsY.visible;
-      if (labelsY.visible && clickPoint) {
-        group.showMeasurementPin(clickPoint, `Y = ${(clickPoint.y * 1000).toFixed(0)}mm`, colorY);
-      }
       return labelsY.visible;
     }
     if (axisName === "Z") {
       labelsZ.visible = !labelsZ.visible;
-      if (labelsZ.visible && clickPoint) {
-        group.showMeasurementPin(clickPoint, `Z = ${(clickPoint.z * 1000).toFixed(0)}mm`, colorZ);
-      }
       return labelsZ.visible;
     }
     if (axisName === "BOARD") {
       labelsBoard.visible = !labelsBoard.visible;
-      if (clickPoint) {
-        const xMm = (clickPoint.x * 1000).toFixed(0);
-        const zMm = (clickPoint.z * 1000).toFixed(0);
-        group.showMeasurementPin(clickPoint, `Mép bàn: X=${xMm}mm | Z=${zMm}mm`, 0xf59e0b);
-      }
       return labelsBoard.visible;
     }
     return false;
@@ -644,42 +618,10 @@ export function buildCoordinateRulerGroup(options = {}) {
   };
 
   /**
-   * Cắm một ghim đo khoảng cách tương tác tại vị trí click.
+   * Cắm một ghim đo khoảng cách tương tác tại vị trí click (Đã vô hiệu hóa để không cản trở thao tác cờ).
    */
   group.showMeasurementPin = function (point, text, colorHex = 0x58a6ff) {
     group.clearPins();
-
-    const pinGroup = new THREE.Group();
-    pinGroup.name = "active-pin";
-
-    // Cột ghim nhỏ
-    const pinGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(point.x, point.y, point.z),
-      new THREE.Vector3(point.x, point.y + 0.025, point.z),
-    ]);
-    const pinLine = new THREE.Line(pinGeo, new THREE.LineBasicMaterial({ color: colorHex, depthTest: true }));
-    pinGroup.add(pinLine);
-
-    // Điểm chấm tròn tiếp xúc
-    const dotGeo = new THREE.SphereGeometry(0.003, 12, 12);
-    const dotMat = new THREE.MeshBasicMaterial({ color: colorHex, depthTest: true });
-    const dot = new THREE.Mesh(dotGeo, dotMat);
-    dot.position.set(point.x, point.y, point.z);
-    pinGroup.add(dot);
-
-    // Huy hiệu nhãn số tọa độ
-    const sprite = createTextSprite(`📍 ${text}`, {
-      fontSize: 13,
-      fontColor: "#ffffff",
-      bgColor: "rgba(15, 23, 42, 0.92)",
-      borderColor: `#${colorHex.toString(16).padStart(6, "0")}`,
-      scale: 0.011,
-      depthTest: true,
-    });
-    sprite.position.set(point.x, point.y + 0.030, point.z);
-    pinGroup.add(sprite);
-
-    pinsGroup.add(pinGroup);
   };
 
   group.clearPins = function () {

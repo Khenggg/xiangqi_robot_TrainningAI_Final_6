@@ -526,8 +526,8 @@ export function updatePiecesFromWorldState(piecesGroup, piecesDict, piecesList) 
     if (cell) {
       mesh.userData.row = cell.row;
       mesh.userData.col = cell.col;
-    } else {
-      // A carried, falling, or displaced piece has no selectable board cell.
+    } else if (p.status === "OUT_OF_BOUNDS" || p.is_grasped || p.status === "ATTACHED") {
+      // Only clear cell when piece is carried or out of bounds
       mesh.userData.row = null;
       mesh.userData.col = null;
     }
