@@ -44,7 +44,7 @@ def run_normal_scenario(sim: VirtualXiangqiSimulation, speed_factor: float = 50.
     print(f"Target piece: {piece_id} at initial intersection (row={r_init}, col={c_init})")
 
     print("[1] Executing pick trajectory...")
-    res = sim.pick_piece(piece_id, hover_height_m=0.06, speed_factor=speed_factor)
+    res = sim.pick_piece(piece_id, speed_factor=speed_factor)
     if not res.success:
         print(f"[-] Pick failed: {res.reason}")
         return False
@@ -52,7 +52,7 @@ def run_normal_scenario(sim: VirtualXiangqiSimulation, speed_factor: float = 50.
 
     target_row, target_col = 4, 1
     print(f"[2] Placing at target board cell (row={target_row}, col={target_col})...")
-    ok = sim.place_piece(target_row, target_col, hover_height_m=0.06, speed_factor=speed_factor)
+    ok = sim.place_piece(target_row, target_col, speed_factor=speed_factor)
     if not ok:
         print("[-] Place motion failed")
         return False
@@ -77,7 +77,7 @@ def run_drop_scenario(sim: VirtualXiangqiSimulation, speed_factor: float = 50.0)
     print(f"Target piece: {piece_id}")
 
     print("[1] Picking piece...")
-    res = sim.pick_piece(piece_id, hover_height_m=0.06, speed_factor=speed_factor)
+    res = sim.pick_piece(piece_id, speed_factor=speed_factor)
     if not res.success:
         print(f"[-] Pick failed: {res.reason}")
         return False
@@ -129,7 +129,7 @@ def run_off_board_scenario(sim: VirtualXiangqiSimulation, speed_factor: float = 
     print(f"Target piece: {piece_id}")
 
     print("[1] Picking piece...")
-    res = sim.pick_piece(piece_id, hover_height_m=0.06, speed_factor=speed_factor)
+    res = sim.pick_piece(piece_id, speed_factor=speed_factor)
     if not res.success:
         print(f"[-] Pick failed: {res.reason}")
         return False
