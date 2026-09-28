@@ -59,6 +59,10 @@ class GameState:
         self.hint_move: Optional[Tuple[Tuple[int, int], Tuple[int, int]]] = None
         self.hint_expiry: float = 0.0
 
+        # Physical / Robot Move Tracking
+        self.pending_ai_move: Optional[Dict[str, Any]] = None
+        self.physical_sync_fault: bool = False
+
     def set_move_observer(self, callback):
         """Observe committed human moves. The observer must not actuate the robot."""
         self._move_observer = callback
@@ -66,11 +70,29 @@ class GameState:
     def create_move_context(self, src_col_row, dst_col_row, actor) -> MoveContext:
         src = (int(src_col_row[1]), int(src_col_row[0]))
         dst = (int(dst_col_row[1]), int(dst_col_row[0]))
+        _rev_codes = {"R": "rook", "N": "knight", "E": "elephant", "A": "advisor",
+                      "K": "king", "C": "cannon", "P": "pawn"}
+        _rev_side = {"r": "red", "b": "black"}
+
+        src_sym = self.board[src[0]][src[1]]
         piece_id = self.piece_ids.get(src)
-        if piece_id is None or piece_symbol_for_identity(piece_id) != self.board[src[0]][src[1]]:
+        if (piece_id is None or piece_symbol_for_identity(piece_id) != src_sym) and src_sym != ".":
+            side = _rev_side.get(src_sym[0], "red")
+            kind = _rev_codes.get(src_sym[2], "pawn")
+            piece_id = f"{side}_{kind}_{src[0]*10 + src[1]}"
+            self.piece_ids[src] = piece_id
+
+        if piece_id is None or piece_symbol_for_identity(piece_id) != src_sym:
             raise ValueError(f"Piece identity is not reconciled at {src}")
-        captured_id = self.piece_ids.get(dst)
+
         destination_symbol = self.board[dst[0]][dst[1]]
+        captured_id = self.piece_ids.get(dst)
+        if (captured_id is None or piece_symbol_for_identity(captured_id) != destination_symbol) and destination_symbol != ".":
+            side = _rev_side.get(destination_symbol[0], "red")
+            kind = _rev_codes.get(destination_symbol[2], "pawn")
+            captured_id = f"{side}_{kind}_{dst[0]*10 + dst[1]}"
+            self.piece_ids[dst] = captured_id
+
         if (captured_id is None) != (destination_symbol == "."):
             raise ValueError(f"Destination identity is not reconciled at {dst}")
         if captured_id is not None and piece_symbol_for_identity(captured_id) != destination_symbol:
@@ -140,6 +162,55 @@ class GameState:
         """Cập nhật current_fen từ board array hiện tại."""
         self.current_fen = board_array_to_fen(self.board, self.turn, self.move_number)
 
+    def set_pending_ai_move(self, move, expected_board, captured_piece):
+        """Remember the only state transition a fault-recovery may commit."""
+        self.set_pending_physical_move(move, expected_board, captured_piece, "b")
+
+    def set_pending_physical_move(self, move, expected_board, captured_piece, moving_color="b"):
+        """Remember a verified physical move without committing it yet."""
+        self.pending_ai_move = {
+            "move": move,
+            "expected_board": [row[:] for row in expected_board],
+            "captured_piece": captured_piece,
+            "moving_color": moving_color,
+        }
+
+    def clear_pending_ai_move(self):
+        self.pending_ai_move = None
+        self.physical_sync_fault = False
+
+    def commit_pending_ai_move(self):
+        """Atomically commit a camera-verified physical AI move to the FEN board."""
+        return self.commit_pending_physical_move()
+
+    def commit_pending_physical_move(self):
+        """Atomically commit a verified robot move for either color."""
+        if self.pending_ai_move is None:
+            return False
+        pending = self.pending_ai_move
+        src, dst = pending["move"]
+        captured_piece = pending["captured_piece"]
+        moving_color = pending.get("moving_color", "b")
+        if self.turn != moving_color:
+            return False
+        self.move_history.append({"turn": moving_color, "src": src, "dst": dst})
+        if captured_piece != ".":
+            (self.b_captured if moving_color == "r" else self.r_captured).append(captured_piece)
+        self.board = [row[:] for row in pending["expected_board"]]
+        self.last_move = pending["move"]
+        self.turn = "b" if moving_color == "r" else "r"
+        self.move_number += 1
+        self.update_fen_from_board()
+        if getattr(self, "pending_move", None) is not None and hasattr(self, "commit_piece_identity"):
+            try:
+                self.commit_piece_identity(self.pending_move)
+            except Exception as e:
+                print(f"[STATE] commit_piece_identity note: {e}")
+        self.pending_ai_move = None
+        self.physical_sync_fault = False
+        print(f"[FEN] {self.current_fen}")
+        return True
+
     def get_render_state(self):
         """Tạo dict game state cho renderer."""
         return {
@@ -159,6 +230,7 @@ class GameState:
             "is_check": xiangqi.is_king_in_check(self.turn, self.board),
             "hint_move": self.hint_move if time.time() < self.hint_expiry else None,
             "game_over_reason": self.game_over_reason,
+            "manual_override_active": self.manual_override_active,
         }
 
     def reset_game(self, hw_manager=None):

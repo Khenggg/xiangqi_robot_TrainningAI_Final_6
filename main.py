@@ -60,7 +60,14 @@ _kill_zombie_processes()
 pygame.init()
 pygame.font.init()
 
-from src.ui.board_renderer import BoardRenderer, SCREEN_WIDTH, SCREEN_HEIGHT  # type: ignore
+from src.core.self_play_controller import SelfPlayController, SelfPlayStatus  # type: ignore
+from src.ui.board_renderer import (
+    BoardRenderer,
+    SCREEN_WIDTH,
+    SCREEN_HEIGHT,
+    BTN_NEW_GAME_RECT,
+    BTN_SELF_PLAY_TOGGLE_RECT,
+)  # type: ignore
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption(f"Xiangqi Robot VIP - { _mode_label }")
 renderer = BoardRenderer(screen)
@@ -71,6 +78,7 @@ state = GameState(allow_mouse_move=config.DRY_RUN)
 if hw.ai_ctrl:
     state.ai_elo, state.ai_elo_title = hw.ai_ctrl.get_elo_info()
 input_mgr = InputHandler(state, hw)
+self_play_ctrl = None
 
 # 3D Digital Twin WebSocket Telemetry & Live Synchronization
 telemetry = None
@@ -111,6 +119,9 @@ def _cleanup_all():
         except: pass
     if telemetry is not None:
         try: telemetry.stop()
+        except: pass
+    if self_play_ctrl is not None:
+        try: self_play_ctrl.end_match()
         except: pass
     # [API] Force Kết thúc trận đấu khi thoát chương trình
     try:
@@ -159,32 +170,78 @@ try:
         )
         if state.game_over:
             renderer.draw_game_over(state.winner, getattr(state, "game_over_reason", "CHIẾU BÍ"))
+        if self_play_ctrl is not None:
+            renderer.draw_self_play_controls(self_play_ctrl)
 
         # 2b. Xử lý Input
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
-                input_mgr.handle_keyboard(event.key)
+                if self_play_ctrl is not None and self_play_ctrl.human_input_disabled:
+                    if event.key == pygame.K_n:
+                        self_play_ctrl.request_next_move()
+                    elif event.key == pygame.K_e:
+                        self_play_ctrl.end_match()
+                    elif event.key == pygame.K_c:
+                        self_play_ctrl.set_run_mode("continuous")
+                    elif event.key == pygame.K_s:
+                        self_play_ctrl.set_run_mode("step")
+                    elif event.key == pygame.K_r:
+                        self_play_ctrl.end_match()
+                else:
+                    if event.key == pygame.K_r:
+                        print("[MAIN] 🤖 Bắt đầu chế độ Tự đấu 2 AI (Self-Play Robot vs Robot)...")
+                        self_play_ctrl = SelfPlayController(state, hw)
+                        if not self_play_ctrl.start(run_mode="continuous"):
+                            print(f"[MAIN] ⚠️ Không thể khởi động Self-Play: {state.status_message}")
+                    else:
+                        input_mgr.handle_keyboard(event.key)
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
+                if self_play_ctrl is not None and self_play_ctrl.human_input_disabled:
+                    if (self_play_ctrl.status in {SelfPlayStatus.ENDED, SelfPlayStatus.FINISHED}
+                            and BTN_NEW_GAME_RECT.collidepoint(event.pos)):
+                        state.reset_game(hw)
+                        self_play_ctrl = None
+                    elif event.pos[0] < 160 and event.pos[1] > SCREEN_HEIGHT - 70:
+                        self_play_ctrl.request_next_move()
+                    elif (SCREEN_WIDTH // 2 - 100 < event.pos[0] < SCREEN_WIDTH // 2 + 100
+                          and event.pos[1] > SCREEN_HEIGHT - 70):
+                        self_play_ctrl.set_run_mode(
+                            "continuous" if self_play_ctrl.run_mode == "step" else "step"
+                        )
+                    elif event.pos[0] > SCREEN_WIDTH - 160 and event.pos[1] > SCREEN_HEIGHT - 70:
+                        self_play_ctrl.end_match()
+                else:
+                    if (self_play_ctrl is None or not self_play_ctrl.active) and BTN_SELF_PLAY_TOGGLE_RECT.collidepoint(event.pos) and not getattr(state, "manual_override_active", False):
+                        print("[MAIN] 🤖 Bắt đầu chế độ Tự đấu 2 AI (Self-Play Robot vs Robot)...")
+                        self_play_ctrl = SelfPlayController(state, hw)
+                        if not self_play_ctrl.start(run_mode="continuous"):
+                            print(f"[MAIN] ⚠️ Không thể khởi động Self-Play: {state.status_message}")
+                    else:
+                        input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
 
         # 2c. Camera Feed update
         if hw.cam_monitor is not None:
             key = hw.cam_monitor.update_display()
             if key == ord("q"): running = False
 
-        # Optional Hand-Aware Auto Confirmation (when enabled in config)
-        if (state.turn == "r" and not state.game_over
-                and getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False)
-                and hw.hand_interaction_finished()):
-            input_mgr.try_auto_confirm_move(
-                retries=getattr(config, "AUTO_MOVE_CONFIRM_RETRIES", 10),
-                retry_seconds=getattr(config, "AUTO_MOVE_CONFIRM_RETRY_SECONDS", 0.2),
-            )
+        # Autonomous Self-Play tick
+        if self_play_ctrl is not None:
+            self_play_ctrl.tick()
 
-        # 2d. Xử lý AI Turn (Non-blocking)
-        if state.turn == "b" and not state.game_over:
+        # Optional Hand-Aware Auto Confirmation (when enabled in config and self-play is not active)
+        if (self_play_ctrl is None or not self_play_ctrl.active):
+            if (state.turn == "r" and not state.game_over
+                    and getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False)
+                    and hw.hand_interaction_finished()):
+                input_mgr.try_auto_confirm_move(
+                    retries=getattr(config, "AUTO_MOVE_CONFIRM_RETRIES", 10),
+                    retry_seconds=getattr(config, "AUTO_MOVE_CONFIRM_RETRY_SECONDS", 0.2),
+                )
+
+        # 2d. Xử lý AI Turn (Non-blocking) - Chế độ Người vs AI
+        if (self_play_ctrl is None or not self_play_ctrl.active) and state.turn == "b" and not state.game_over:
             
             # --- Khởi động Thread suy nghĩ ---
             if not state.ai_thinking and state.ai_thread is None:

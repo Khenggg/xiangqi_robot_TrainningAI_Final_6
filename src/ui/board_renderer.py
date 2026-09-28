@@ -65,6 +65,16 @@ BTN_HINT_RECT = pygame.Rect(PANEL_X + 130, 308, 108, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(PANEL_X + 244, 308, 108, 40)
 BTN_SURRENDER_RECT = pygame.Rect(PANEL_X + 358, 308, 108, 40)
 
+# Nút Tiếp tục quét FEN (Emergency Scan Resume)
+BTN_RESUME_SCAN_RECT = pygame.Rect(PANEL_X + 16, 562, PANEL_WIDTH - 32, 36)
+
+# Nút Robot vs Robot (Tự đấu 2 AI)
+BTN_SELF_PLAY_TOGGLE_RECT = pygame.Rect(PANEL_X + 16, 562, PANEL_WIDTH - 32, 36)
+
+# Khả năng tương thích launcher
+HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 330, 330, 68)
+HOME_ROBOT_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 414, 330, 68)
+
 # Bảng ký tự quân cờ thư pháp truyền thống
 PIECE_DISPLAY_NAMES = {
     "r_K": "帥", "r_A": "仕", "r_E": "相", "r_R": "俥",
@@ -356,14 +366,67 @@ class BoardRenderer:
         pygame.draw.rect(self.screen, (22, 29, 41), status_rect, border_radius=8)
         pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, status_rect, width=1, border_radius=8)
 
-        msg = game_state.get("status_message", "")
-        if msg and time.time() < game_state.get("status_expiry", 0):
-            msg_color = game_state.get("status_color", COLOR_GOLD)
-            msg_surf = self.status_font.render(msg, True, msg_color)
-            self.screen.blit(msg_surf, msg_surf.get_rect(center=status_rect.center))
+        # Emergency Scan Resume Button (khi manual_override_active)
+        if game_state.get("manual_override_active"):
+            pygame.draw.rect(self.screen, (180, 83, 9), BTN_RESUME_SCAN_RECT, border_radius=8)
+            pygame.draw.rect(self.screen, (245, 158, 11), BTN_RESUME_SCAN_RECT, width=1, border_radius=8)
+            res_txt = self.btn_font.render("📸 TIẾP TỤC QUÉT FEN (CAMERA)", True, (255, 255, 255))
+            self.screen.blit(res_txt, res_txt.get_rect(center=BTN_RESUME_SCAN_RECT.center))
         else:
-            hint_default = self.sub_font.render("Mẹo: Bấm quân cờ để xem gợi ý các ô đi hợp lệ!", True, (156, 163, 175))
-            self.screen.blit(hint_default, hint_default.get_rect(center=status_rect.center))
+            now = time.time()
+            st_msg = game_state.get("status_message")
+            st_exp = game_state.get("status_expiry", 0)
+            if st_msg and now < st_exp:
+                st_color = game_state.get("status_color", (156, 163, 175))
+            else:
+                st_msg = "Bấm [R]: Tự đấu 2 AI  •  [H]: Gợi ý  •  [U]: Đi lại"
+                st_color = (156, 163, 175)
+            st_surf = self.sub_font.render(st_msg, True, st_color)
+            self.screen.blit(st_surf, st_surf.get_rect(center=status_rect.center))
+
+    def draw_self_play_controls(self, controller):
+        """Overlay controls for the autonomous physical / virtual match."""
+        if controller is None:
+            return None
+        if not controller.active and controller.status.value not in {"faulted", "ended"}:
+            return None
+
+        # Draw Self-Play Banner
+        banner_rect = pygame.Rect(PANEL_X + 16, 350, PANEL_WIDTH - 32, 28)
+        pygame.draw.rect(self.screen, (30, 27, 75), banner_rect, border_radius=6)
+        pygame.draw.rect(self.screen, (129, 140, 248), banner_rect, width=1, border_radius=6)
+        mode_str = f"TỰ ĐẤU (SELF-PLAY): {controller.status.value.upper()} | {controller.run_mode.upper()}"
+        b_txt = self.sub_font.render(mode_str, True, (224, 231, 255))
+        self.screen.blit(b_txt, b_txt.get_rect(center=banner_rect.center))
+
+        # Controls row
+        end_rect = pygame.Rect(SCREEN_WIDTH - 145, SCREEN_HEIGHT - 58, 125, 40)
+        pygame.draw.rect(self.screen, (180, 50, 50), end_rect, border_radius=8)
+        end = self.btn_font.render("DỪNG (END)", True, (255, 255, 255))
+        self.screen.blit(end, end.get_rect(center=end_rect.center))
+
+        if controller.accepts_next:
+            next_rect = pygame.Rect(20, SCREEN_HEIGHT - 58, 140, 40)
+            pygame.draw.rect(self.screen, (37, 99, 235), next_rect, border_radius=8)
+            nxt = self.btn_font.render("NƯỚC TIẾP (N)", True, (255, 255, 255))
+            self.screen.blit(nxt, nxt.get_rect(center=next_rect.center))
+
+        if controller.status.value in {"ready", "idle"}:
+            toggle_rect = pygame.Rect(SCREEN_WIDTH // 2 - 90, SCREEN_HEIGHT - 58, 180, 40)
+            pygame.draw.rect(self.screen, (109, 40, 217), toggle_rect, border_radius=8)
+            target = "CHẾ ĐỘ LIÊN TỤC" if controller.run_mode == "step" else "CHẾ ĐỘ TỪNG BƯỚC"
+            toggle = self.sub_font.render(target, True, (255, 255, 255))
+            self.screen.blit(toggle, toggle.get_rect(center=toggle_rect.center))
+
+        return end_rect
+
+    @staticmethod
+    def home_action_from_pixel(px, py):
+        if HOME_VS_ROBOT_RECT.collidepoint(px, py):
+            return "vs_robot"
+        if HOME_ROBOT_VS_ROBOT_RECT.collidepoint(px, py):
+            return "robot_vs_robot"
+        return None
 
     # =========================================================================
     # 4. VẼ QUÂN CỜ TRUYỀN THỐNG (AUTHENTIC CHINESE CHESS TOKENS)

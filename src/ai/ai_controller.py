@@ -51,7 +51,7 @@ class AIController:
             return self.local_engine.get_current_elo(), self.local_engine.get_elo_title()
         return self.current_elo, f"ELO {self.current_elo}"
 
-    def pick_move(self, board_snapshot: list, color: str = "b") -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    def pick_move(self, board_snapshot: list, color: str = "b", difficulty: Optional[str] = None) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
         """Gọi Engine để lấy nước đi tốt nhất.
 
         Hàm này chạy BLOCKING — phải gọi trong thread riêng.

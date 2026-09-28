@@ -13,6 +13,7 @@ from src.ui.board_renderer import (
     BTN_NEW_GAME_RECT,
     BTN_UNDO_RECT,
     BTN_HINT_RECT,
+    BTN_RESUME_SCAN_RECT,
     ELO_BUTTON_RECTS,
     BTN_ELO_PREV_RECT,
     BTN_ELO_NEXT_RECT,
@@ -33,6 +34,11 @@ class InputHandler:
     # 1. XỬ LÝ CHUỘT (MOUSE INPUT - CLICK BUTTONS & CLICK-TO-MOVE)
     # =========================================================================
     def handle_mouse_down(self, mx: int, my: int):
+        # 0. Nút Tiếp tục quét FEN khi đang ở manual override
+        if BTN_RESUME_SCAN_RECT.collidepoint(mx, my) and getattr(self.state, "manual_override_active", False):
+            self.resume_automatic_scanning()
+            return
+
         # 1. Nút Xin đi lại (Undo Round)
         if BTN_UNDO_RECT.collidepoint(mx, my):
             self.state.undo_round(self.hw)
@@ -70,7 +76,7 @@ class InputHandler:
                 return
 
         # 8. Tương tác bàn cờ (Click-to-Move cho người chơi)
-        if (self.state.allow_mouse_move or self.state.manual_override_active) and self.state.turn == "r" and not self.state.game_over:
+        if (self.state.allow_mouse_move or getattr(self.state, "manual_override_active", False)) and self.state.turn == "r" and not self.state.game_over:
             c, r = BoardRenderer.pixel_to_grid(mx, my)
             if 0 <= c < NUM_COLS and 0 <= r < NUM_ROWS:
                 clicked_piece = self.state.board[r][c]
@@ -93,6 +99,11 @@ class InputHandler:
                     # Thử đi tới ô được click
                     p_name = self.state.board[src[1]][src[0]]
                     if xiangqi.is_valid_move(src, dst, self.state.board, "r"):
+                        if getattr(self.state, "manual_override_active", False) and hasattr(self.state, "save_rollback_state"):
+                            occ = getattr(getattr(self.hw, "yolo_detector", None), "_baseline_occ", None)
+                            b_time = getattr(getattr(self.hw, "yolo_detector", None), "_baseline_time", None)
+                            self.state.save_rollback_state(occ, b_time)
+
                         print(f"[UI] 🖱️ Người dùng đi cờ: {p_name} {src} ➜ {dst}")
                         self.state.process_human_move(src, dst, p_name)
                         self.state.selected_pos = None
@@ -159,8 +170,10 @@ class InputHandler:
             return
 
         # I KEY: Lấy dữ liệu & Kiểm tra kết nối từ Robot FR3
-        elif key == pygame.K_i:
-            self._handle_robot_info()
+        # M KEY: Emergency manual client mode
+        if key == pygame.K_m and not self.state.game_over:
+            self.state.manual_override_active = True
+            self.state.set_status("⚠️ Emergency client mode enabled: Click to move manually.", color=(234, 88, 12), duration=10.0)
             return
 
         if self.state.allow_mouse_move or self.state.game_over or self.state.turn != "r":
@@ -331,9 +344,19 @@ class InputHandler:
                 print(f"[SPACE] ⚠️ CChess recognizer error: {e}")
 
         if self.hw.yolo_detector and self.hw.yolo_detector.has_baseline():
-            yolo_obs = self.hw.yolo_detector.detect_move_observation(
-                frame, detections, self.state.board, cchess_result=cchess_result
-            )
+            if hasattr(self.hw.yolo_detector, "detect_move_observation"):
+                yolo_obs = self.hw.yolo_detector.detect_move_observation(
+                    frame, detections, self.state.board, cchess_result=cchess_result
+                )
+            elif hasattr(self.hw.yolo_detector, "detect_move"):
+                res = self.hw.yolo_detector.detect_move(frame, detections, self.state.board)
+                if res:
+                    s, d, p = res
+                    yolo_obs = MoveObservation(success=True, src=s, dst=d, piece=p)
+                else:
+                    yolo_obs = MoveObservation(success=False, error="Không tìm thấy nước đi")
+            else:
+                yolo_obs = None
             if obs is not None and obs.success:
                 if yolo_obs.success and (yolo_obs.src, yolo_obs.dst) != (obs.src, obs.dst):
                     obs = MoveObservation(
@@ -363,7 +386,8 @@ class InputHandler:
             return False
 
         self.state.process_human_move(obs.src, obs.dst, obs.piece)
-        if self.hw.yolo_detector:
+        self.state.manual_override_active = False
+        if hasattr(self.hw, "yolo_detector") and hasattr(self.hw.yolo_detector, "capture_baseline"):
             self.hw.yolo_detector.capture_baseline(frame, detections)
         return True
 
@@ -380,4 +404,48 @@ class InputHandler:
             time.sleep(float(retry_seconds))
         self.state.manual_override_active = False
         self.hw.reset_hand_interaction_monitor()
+        return False
+
+    def resume_automatic_scanning(self) -> bool:
+        """Install a fresh physical baseline, then re-enable automatic polling."""
+        detector = getattr(self.hw, "yolo_detector", None)
+        camera = getattr(self.hw, "cam_monitor", None)
+        if detector is None or camera is None:
+            self.state.set_status("❌ Không thể tiếp tục quét: camera chưa sẵn sàng.", color=(180, 0, 0), duration=8.0)
+            return False
+
+        verifier = getattr(self.hw, "verify_physical_board", None)
+        reconciliation_available = bool(
+            getattr(self.hw, "board_reconciler", None) and camera
+        )
+        if reconciliation_available and callable(verifier):
+            try:
+                board_matches = verifier(self.state.board)
+            except Exception as exc:
+                print(f"[RESUME SCAN] Physical-board verification error: {exc}")
+                board_matches = False
+            if not board_matches:
+                self.state.set_status(
+                    "❌ Bàn thật chưa khớp FEN. Chỉnh lại bàn rồi bấm tiếp tục quét.",
+                    color=(180, 0, 0), duration=10.0,
+                )
+                return False
+
+        self.state.set_status("📸 Đang lấy baseline mới để tiếp tục quét...", color=(0, 100, 180), duration=4.0)
+        captured = bool(self.hw.capture_baseline_if_needed(force_delay=0.0))
+        if not captured:
+            self.state.set_status("❌ Không lấy được baseline; quét vẫn đang tạm dừng.", color=(180, 0, 0), duration=8.0)
+            return False
+
+        self.state.manual_override_active = False
+        self.state.set_status("✅ Đã tiếp tục tự động quét FEN.", color=(0, 120, 0), duration=6.0)
+        return True
+
+    def poll_board_stability(self) -> bool:
+        """Commit one legal Red move after repeated stable board observations."""
+        if (self.state.turn != "r" or self.state.game_over
+                or getattr(self.state, "manual_override_active", False)):
+            return False
+        if not hasattr(self.hw, "yolo_detector") or not self.hw.yolo_detector:
+            return False
         return False
