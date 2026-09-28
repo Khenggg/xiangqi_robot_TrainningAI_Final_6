@@ -28,6 +28,12 @@ class RobotStateSnapshot:
     last_error: Optional[str] = None
     trajectory_stage: Optional[str] = None  # "PREPOSITION", "LIFT", "TRANSIT", "LAND", "COMPLETE", etc.
     placement_version: int = 1
+    # Virtual snapshots remain compatible. Physical backends explicitly mark
+    # failed/missing controller measurements invalid instead of refreshing cache.
+    joints_valid: bool = True
+    tcp_valid: bool = True
+    measurement_timestamp: Optional[float] = None
+    telemetry_error: Optional[str] = None
 
     @property
     def joints_rad(self) -> List[float]:

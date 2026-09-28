@@ -163,11 +163,20 @@ class TelemetryPublisher:
         self.placement_version: int = 1
         self.source: str = "VIRTUAL"
         self.controller_ip: Optional[str] = None
+        self.connected = False
+        self.joints_valid = False
+        self.tcp_valid = False
+        self.measurement_timestamp: Optional[float] = None
+        self.telemetry_error: Optional[str] = None
+        self._snapshot_timestamp: Optional[float] = None
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._server_thread: Optional[threading.Thread] = None
         self._heartbeat_thread: Optional[threading.Thread] = None
         self._running = False
+        self._stop_signal: Optional[asyncio.Event] = None
+        self._server_ready = threading.Event()
+        self._server_error: Optional[Exception] = None
 
     def register_command_handler(self, handler):
         """Register a callback to process incoming commands from WebSocket clients."""
@@ -179,9 +188,19 @@ class TelemetryPublisher:
         """Start WebSocket server in background daemon thread."""
         if self._running:
             return
+        if websockets is None:
+            raise RuntimeError("websockets is required for telemetry")
+        self._server_ready.clear()
+        self._server_error = None
         self._running = True
         self._server_thread = threading.Thread(target=self._run_server, daemon=True, name="TelemetryServerThread")
         self._server_thread.start()
+        if not self._server_ready.wait(timeout=3.0):
+            self.stop()
+            raise RuntimeError("Telemetry server did not become ready")
+        if self._server_error is not None:
+            self.stop()
+            raise RuntimeError(f"Telemetry server startup failed: {self._server_error}")
 
         # Start continuous 30 FPS heartbeat publisher
         self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True, name="TelemetryHeartbeatThread")
@@ -191,10 +210,20 @@ class TelemetryPublisher:
     def stop(self):
         """Stop telemetry server and threads."""
         self._running = False
+        loop, signal = self._loop, self._stop_signal
+        if loop is not None and not loop.is_closed() and signal is not None:
+            try:
+                loop.call_soon_threadsafe(signal.set)
+            except RuntimeError:
+                pass
+        for thread in (self._heartbeat_thread, self._server_thread):
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=3.0)
 
     def _run_server(self):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
+        self._stop_signal = asyncio.Event()
 
         async def handler(websocket):
             with self.clients_lock:
@@ -237,20 +266,39 @@ class TelemetryPublisher:
                 print(f"[TELEMETRY] 3D Viewer Client disconnected ({len(self.clients)} active).")
 
         async def main():
-            async with websockets.serve(handler, self.host, self.port):
-                await asyncio.Future()  # Run forever
+            async with websockets.serve(handler, self.host, self.port, close_timeout=1.0) as server:
+                if self.port == 0:
+                    self.port = server.sockets[0].getsockname()[1]
+                self._server_ready.set()
+                if not self._running:
+                    self._stop_signal.set()
+                await self._stop_signal.wait()
 
         try:
             self._loop.run_until_complete(main())
         except Exception as e:
+            self._server_error = e
             print(f"[TELEMETRY] Server loop terminated: {e}")
+        finally:
+            self._running = False
+            self._server_ready.set()
+            tasks = asyncio.all_tasks(self._loop)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                self._loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+            self._loop.close()
+            self._loop = None
+            self._stop_signal = None
 
     def _make_packet_json(self) -> str:
         with self._state_lock:
             packet = {
                 "type": "robot_state",
                 "robot_model": self.robot_model,
-                "timestamp": time.time(),
+                "timestamp": self._snapshot_timestamp,
+                "published_at": time.time(),
+                "measurement_timestamp": self.measurement_timestamp,
                 "joints": list(self.current_joints),
                 "tcp": list(self.current_tcp),
                 "gripper": self.is_gripper_active,
@@ -260,6 +308,10 @@ class TelemetryPublisher:
                 "placement_version": self.placement_version,
                 "source": self.source,
                 "controller_ip": self.controller_ip,
+                "connected": self.connected,
+                "joints_valid": self.joints_valid,
+                "tcp_valid": self.tcp_valid,
+                "telemetry_error": self.telemetry_error,
             }
         return json.dumps(packet)
 
@@ -267,13 +319,24 @@ class TelemetryPublisher:
         """Update telemetry state from authoritative RobotStateSnapshot."""
         with self._state_lock:
             self.robot_model = snapshot.robot_model
-            self.current_joints = list(snapshot.joints_deg)
-            self.current_tcp = list(snapshot.tcp_pose_mm_deg)
+            self.joints_valid = bool(getattr(snapshot, "joints_valid", True))
+            self.tcp_valid = bool(getattr(snapshot, "tcp_valid", True))
+            if self.joints_valid:
+                self.current_joints = list(snapshot.joints_deg)
+            if self.tcp_valid:
+                self.current_tcp = list(snapshot.tcp_pose_mm_deg)
             self.is_gripper_active = bool(snapshot.gripper_closed)
             self._motion_state = snapshot.motion_state
             self._trajectory_stage = getattr(snapshot, "trajectory_stage", None)
             self._last_error = snapshot.last_error
             self.placement_version = getattr(snapshot, "placement_version", 1)
+            self.connected = bool(snapshot.connected)
+            self._snapshot_timestamp = snapshot.timestamp
+            measured = getattr(snapshot, "measurement_timestamp", None)
+            self.measurement_timestamp = measured if measured is not None else (
+                snapshot.timestamp if self.joints_valid else self.measurement_timestamp
+            )
+            self.telemetry_error = getattr(snapshot, "telemetry_error", None)
         self._broadcast_sync()
 
     def update_state(
@@ -295,6 +358,9 @@ class TelemetryPublisher:
             self._motion_state = motion_state
             self._trajectory_stage = trajectory_stage
             self._last_error = last_error
+            self.connected = self.joints_valid = self.tcp_valid = True
+            self._snapshot_timestamp = self.measurement_timestamp = time.time()
+            self.telemetry_error = None
         self._broadcast_sync()
 
     def update_world_state(self, world_state):

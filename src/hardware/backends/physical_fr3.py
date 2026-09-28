@@ -10,6 +10,7 @@ from typing import Any, List, Optional, Sequence, Tuple
 import logging
 import math
 import time
+import threading
 import numpy as np
 
 from src.hardware.backends.base import RobotBackend, RobotStateSnapshot
@@ -63,6 +64,19 @@ class PhysicalFR3Backend(RobotBackend):
         self._last_error: Optional[str] = None
         self._gripper_closed: bool = False
         self._trajectory_stage: Optional[str] = "IDLE"
+        self._snapshot_lock = threading.RLock()
+        self._joints_valid = False
+        self._tcp_valid = False
+        self._measurement_timestamp: Optional[float] = None
+        self._telemetry_error: Optional[str] = None
+        self._last_stream_packet = None
+        self._last_stream_seen_monotonic: Optional[float] = None
+        self._stream_stale_after_s = 0.5
+        self._controller_fault: Optional[str] = None
+        self._controller_status_valid = False
+        self._fault_generation = 0
+        self._command_error: Optional[str] = None
+        self._gripper_outputs_owned = False
 
         # Internal state cache (for dry-run and between read cycles)
         self._current_joints_deg: List[float] = [0.0, -45.0, 90.0, -135.0, -90.0, 0.0]
@@ -95,12 +109,16 @@ class PhysicalFR3Backend(RobotBackend):
             0 on success, non-zero error code on failure.
         """
         status_int = 1 if status else 0
-        if self.dry_run or self._rpc is None:
+        if self.dry_run:
             logger.debug(f"[PhysicalFR3Backend] DRY SetToolDO({do_id}, {status_int})")
             return 0
+        if not self._connected or self._rpc is None:
+            self._last_error = "Cannot set_tool_do: Robot not connected"
+            return -1
 
         try:
             if hasattr(self._rpc, "SetToolDO"):
+                self._gripper_outputs_owned = True
                 err = self._rpc.SetToolDO(int(do_id), status_int, block=0)
                 if err != 0:
                     logger.error(f"[PhysicalFR3Backend] SetToolDO({do_id}, {status_int}) failed with code {err}")
@@ -112,6 +130,11 @@ class PhysicalFR3Backend(RobotBackend):
             self._last_error = str(exc)
             logger.error(f"[PhysicalFR3Backend] SetToolDO({do_id}, {status_int}) exception: {exc}")
             raise
+
+    @property
+    def gripper_outputs_owned(self) -> bool:
+        """Whether this session has actually attempted a physical output write."""
+        return self._gripper_outputs_owned
 
     @property
     def operational_mode(self) -> Optional[int]:
@@ -188,6 +211,7 @@ class PhysicalFR3Backend(RobotBackend):
         if self.dry_run:
             self._motion_state = "IDLE"
             self._last_error = None
+            self._command_error = None
             self._enabled = True
             return True
 
@@ -211,6 +235,7 @@ class PhysicalFR3Backend(RobotBackend):
                 self._enabled = True
                 self._motion_state = "IDLE"
                 self._last_error = None
+                self._command_error = None
                 return True
             else:
                 self._last_error = f"RobotEnable(1) failed with return code {err_en} (Kiểm tra xem nút E-Stop đã xoay nhả chưa)"
@@ -346,15 +371,18 @@ class PhysicalFR3Backend(RobotBackend):
                 self.disable_robot()
             except Exception:
                 pass
-        self._connected = False
-        self._enabled = False
-        self._operational_mode = None
-        self._motion_state = "DISCONNECTED"
-        if self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
+        if self._gripper_outputs_owned and self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
             try:
                 self.gripper_driver.safe_idle()
             except Exception:
                 pass
+        self._gripper_outputs_owned = False
+        self._connected = False
+        self._enabled = False
+        self._operational_mode = None
+        self._motion_state = "DISCONNECTED"
+        self._joints_valid = False
+        self._tcp_valid = False
         if self._rpc is not None:
             try:
                 # Close connection if SDK supports it
@@ -369,104 +397,155 @@ class PhysicalFR3Backend(RobotBackend):
     def is_connected(self) -> bool:
         return self._connected
 
+    @staticmethod
+    def _finite_vector(values) -> Optional[List[float]]:
+        try:
+            if len(values) < 6:
+                return None
+            result = [float(v) for v in values[:6]]
+            return result if all(math.isfinite(v) for v in result) else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def _read_query(self, name: str, **kwargs):
+        try:
+            method = getattr(self._rpc, name, None)
+            result = method(**kwargs) if callable(method) else None
+            if isinstance(result, (tuple, list)) and len(result) >= 2 and result[0] == 0:
+                return result[1]
+        except Exception as exc:
+            logger.debug("Read %s failed: %s", name, exc)
+        return None
+
     def _sync_hardware_state(self) -> None:
-        """Query actual hardware joint positions, TCP pose, and flange pose."""
-        if not self._connected or self.dry_run or self._rpc is None:
-            if self.dry_run:
-                self._flange_pose_source = "MOCK"
+        """Read telemetry without taking a lock across any motion or output call."""
+        with self._snapshot_lock:
+            self._sync_hardware_state_locked()
+
+    def _sync_hardware_state_locked(self) -> None:
+        if self.dry_run:
+            self._joints_valid = self._tcp_valid = self._connected
+            self._flange_pose_source = "MOCK"
+            self._measurement_timestamp = time.time() if self._connected else self._measurement_timestamp
+            return
+        if not self._connected or self._rpc is None:
+            self._joints_valid = self._tcp_valid = False
+            self._controller_status_valid = False
+            self._telemetry_error = "Controller disconnected"
             return
 
-        tcp_valid = False
-        try:
-            # Query actual joints
-            if hasattr(self._rpc, "GetActualJointPosDegree"):
-                err, joints = self._rpc.GetActualJointPosDegree(flag=1)
-                if err == 0 and len(joints) >= 6:
-                    self._current_joints_deg = [float(v) for v in joints[:6]]
+        # The bundled SDK getters return an in-memory packet, even when its
+        # receive socket has stopped. Pin one packet so joints/TCP/status come
+        # from the same frame; a repeated packet must not acquire a new time.
+        rpc_fields = vars(self._rpc)
+        packet = rpc_fields.get("robot_state_pkg")
+        stream_mode = "robot_state_pkg" in rpc_fields
+        if stream_mode:
+            unavailable = (
+                packet is None or isinstance(packet, type)
+                or getattr(self._rpc, "sock_cli_state_state", True) is False
+                or getattr(self._rpc, "reconnect_flag", False) is True
+            )
+            now_mono = time.monotonic()
+            if unavailable:
+                self._joints_valid = self._tcp_valid = False
+                self._controller_status_valid = False
+                self._telemetry_error = "Controller state stream unavailable"
+                return
+            if packet is self._last_stream_packet:
+                if (self._last_stream_seen_monotonic is None
+                        or now_mono - self._last_stream_seen_monotonic > self._stream_stale_after_s):
+                    self._joints_valid = self._tcp_valid = False
+                    self._controller_status_valid = False
+                    self._telemetry_error = "Controller state stream stale"
+                return
+            self._last_stream_packet = packet
+            self._last_stream_seen_monotonic = now_mono
+            joints = self._finite_vector(getattr(packet, "jt_cur_pos", None))
+            tcp = self._finite_vector(getattr(packet, "tl_cur_pos", None))
+            flange = self._finite_vector(getattr(packet, "flange_cur_pos", None))
+            estop = getattr(packet, "EmergencyStop", None)
+            codes = [getattr(packet, "main_code", None), getattr(packet, "sub_code", None)]
+            motion_done = getattr(packet, "motion_done", None)
+        else:
+            joints = self._finite_vector(self._read_query("GetActualJointPosDegree", flag=1))
+            tcp = self._finite_vector(self._read_query("GetActualTCPPose", flag=1))
+            flange = self._finite_vector(self._read_query("GetActualToolFlangePose", flag=1))
+            estop = self._read_query("GetRobotEmergencyStopState")
+            codes = self._read_query("GetRobotErrorCode")
+            motion_done = self._read_query("GetRobotMotionDone")
 
-            # Query actual TCP pose
-            if hasattr(self._rpc, "GetActualTCPPose"):
-                err, pose = self._rpc.GetActualTCPPose(flag=1)
-                if err == 0 and len(pose) >= 6:
-                    self._current_tcp_pose_mm_deg = [float(v) for v in pose[:6]]
-                    tcp_valid = True
+        self._joints_valid = joints is not None
+        self._tcp_valid = tcp is not None
+        if joints is not None:
+            self._current_joints_deg = joints
+            self._measurement_timestamp = time.time()
+        if tcp is not None:
+            self._current_tcp_pose_mm_deg = tcp
+        self._flange_authoritative = flange is not None
+        self._flange_pose_source = "CONTROLLER" if flange is not None else "UNAVAILABLE"
+        if flange is not None:
+            self._current_flange_pose_mm_deg = flange
+        self._telemetry_error = None if joints is not None and tcp is not None else "Missing or invalid joint/TCP telemetry"
 
-            # Query actual Tool Flange Pose from controller if supported
-            flange_queried = False
-            if hasattr(self._rpc, "GetActualToolFlangePose"):
-                err, fpose = self._rpc.GetActualToolFlangePose(flag=1)
-                if err == 0 and len(fpose) >= 6:
-                    self._current_flange_pose_mm_deg = [float(v) for v in fpose[:6]]
-                    self._flange_authoritative = True
-                    self._flange_pose_source = "CONTROLLER"
-                    flange_queried = True
-
-            if not flange_queried:
-                self._flange_authoritative = False
-                self._flange_pose_source = "UNAVAILABLE"
-
-            # Controller Motion State Synchronization (P1-3):
-            # Authoritative SDK queries:
-            # 1. GetRobotEmergencyStopState() -> 0: Normal, 1: Emergency Stop active
-            # 2. GetRobotErrorCode() -> [main_code, sub_code]
-            # 3. GetRobotMotionDone() -> 1: Idle, 0: Moving
-            # If RPC is unavailable or mock does not implement, retain internal motion tracking.
-            if hasattr(self._rpc, "GetRobotEmergencyStopState"):
-                res_es = self._rpc.GetRobotEmergencyStopState()
-                if isinstance(res_es, (tuple, list)) and len(res_es) >= 2:
-                    err_es, es_state = res_es[0], res_es[1]
-                    if isinstance(err_es, int) and err_es == 0 and isinstance(es_state, (int, float)) and int(es_state) == 1:
-                        self._motion_state = "ERROR"
-                        self._last_error = "Controller E-Stop active"
-                        return
-
-            if hasattr(self._rpc, "GetRobotErrorCode"):
-                res_ec = self._rpc.GetRobotErrorCode()
-                if isinstance(res_ec, (tuple, list)) and len(res_ec) >= 2:
-                    err_ec, err_codes = res_ec[0], res_ec[1]
-                    if isinstance(err_ec, int) and err_ec == 0 and isinstance(err_codes, (list, tuple)) and len(err_codes) >= 2:
-                        c0, c1 = err_codes[0], err_codes[1]
-                        if isinstance(c0, (int, float)) and isinstance(c1, (int, float)):
-                            main_c, sub_c = int(c0), int(c1)
-                            if main_c != 0 or sub_c != 0:
-                                self._motion_state = "ERROR"
-                                self._last_error = f"Controller error: main={main_c}, sub={sub_c}"
-                                return
-                            elif self._motion_state == "ERROR":
-                                self._motion_state = "IDLE"
-                                self._last_error = None
-
-            if hasattr(self._rpc, "GetRobotMotionDone"):
-                res_md = self._rpc.GetRobotMotionDone()
-                if isinstance(res_md, (tuple, list)) and len(res_md) >= 2:
-                    err_md, motion_done = res_md[0], res_md[1]
-                    if isinstance(err_md, int) and err_md == 0 and isinstance(motion_done, (int, float)):
-                        if int(motion_done) == 0:
-                            self._motion_state = "MOVING"
-                        elif int(motion_done) == 1:
-                            self._motion_state = "IDLE"
-
-        except Exception as exc:
-            logger.debug(f"[PhysicalFR3Backend] Hardware state sync failed: {exc}")
-            self._flange_authoritative = False
-            self._flange_pose_source = "UNAVAILABLE"
+        estop_valid = isinstance(estop, (int, float)) and estop in (0, 1)
+        codes_valid = (
+            isinstance(codes, (tuple, list)) and len(codes) >= 2
+            and all(isinstance(v, (int, float)) and math.isfinite(v) and int(v) == v for v in codes[:2])
+        )
+        self._controller_status_valid = estop_valid and codes_valid
+        fault = None
+        if estop_valid and estop == 1:
+            fault = "Controller E-Stop active"
+        elif codes_valid and any(codes[:2]):
+            fault = f"Controller error: main={int(codes[0])}, sub={int(codes[1])}"
+        if fault is not None:
+            if fault != self._controller_fault:
+                self._fault_generation += 1
+            self._controller_fault = fault
+        elif self._controller_status_valid:
+            self._controller_fault = None
+        # Incomplete reads never erase a previously observed fault. Likewise,
+        # a successful MotionDone read cannot override an E-stop/error.
+        if self._controller_fault or self._command_error:
+            self._motion_state = "ERROR"
+            self._last_error = self._controller_fault or self._command_error
+        elif self._controller_status_valid and isinstance(motion_done, (int, float)) and motion_done in (0, 1):
+            self._motion_state = "IDLE" if motion_done == 1 else "MOVING"
+            self._last_error = None
 
     def get_state_snapshot(self) -> RobotStateSnapshot:
-        """Return immutable, thread-safe snapshot of current authoritative state."""
-        self._sync_hardware_state()
-        return RobotStateSnapshot(
-            robot_model="FR3",
-            connected=self._connected,
-            motion_state=self._motion_state,
-            joints_deg=list(self._current_joints_deg),
-            flange_pose_mm_deg=list(self._current_flange_pose_mm_deg),
-            tcp_pose_mm_deg=list(self._current_tcp_pose_mm_deg),
-            gripper_closed=self._gripper_closed,
-            timestamp=time.time(),
-            flange_pose_source=self._flange_pose_source,
-            last_error=self._last_error,
-            trajectory_stage=self._trajectory_stage,
-        )
+        """Copy one measured state; never report commanded targets as measurements."""
+        with self._snapshot_lock:
+            self._sync_hardware_state_locked()
+            return RobotStateSnapshot(
+                robot_model="FR3",
+                connected=self._connected,
+                motion_state=self._motion_state,
+                joints_deg=list(self._current_joints_deg),
+                flange_pose_mm_deg=list(self._current_flange_pose_mm_deg),
+                tcp_pose_mm_deg=list(self._current_tcp_pose_mm_deg),
+                gripper_closed=self._gripper_closed,
+                timestamp=time.time(),
+                flange_pose_source=self._flange_pose_source,
+                last_error=self._last_error,
+                trajectory_stage=self._trajectory_stage,
+                joints_valid=self._joints_valid,
+                tcp_valid=self._tcp_valid,
+                measurement_timestamp=self._measurement_timestamp,
+                telemetry_error=self._telemetry_error,
+            )
+
+    def _finish_motion(self, fault_generation: int) -> bool:
+        snapshot = self.get_state_snapshot()
+        if (not snapshot.joints_valid or not self._controller_status_valid
+                or self._fault_generation != fault_generation
+                or snapshot.motion_state != "IDLE"):
+            self._command_error = snapshot.last_error or snapshot.telemetry_error or "Motion completion not verified by controller"
+            self._last_error = self._command_error
+            self._motion_state = "ERROR"
+            return False
+        return True
 
     def set_trajectory_stage(self, stage: Optional[str]) -> None:
         """Set the authoritative trajectory stage (PREPOSITION, LIFT, TRANSIT, LAND, COMPLETE, IDLE)."""
@@ -500,6 +579,10 @@ class PhysicalFR3Backend(RobotBackend):
         if self._rpc is None:
             return False
 
+        if self._command_error or self._controller_fault:
+            self._last_error = self._controller_fault or self._command_error
+            return False
+        fault_generation = self._fault_generation
         self._motion_state = "MOVING"
         try:
             # MoveJ call signature for FAIRINO SDK
@@ -516,31 +599,13 @@ class PhysicalFR3Backend(RobotBackend):
                 offset_flag=0,
                 offset_pos=[0.0] * 6,
             )
-            # Auto-recovery: If code 14 (Servo disabled/E-stop latched), attempt error reset and retry once
-            if err == 14:
-                logger.warning("[PhysicalFR3Backend] Code 14 received: Attempting auto-recovery (ResetAllError + RobotEnable)...")
-                if self.recover_from_error():
-                    err = self._rpc.MoveJ(
-                        joint_pos=target_q,
-                        desc_pos=[0.0] * 6,
-                        tool=self.tool_num,
-                        user=self.user_num,
-                        vel=vel,
-                        acc=0.0,
-                        ovl=100.0,
-                        exaxis_pos=[0.0] * 4,
-                        blendT=-1.0,
-                        offset_flag=0,
-                        offset_pos=[0.0] * 6,
-                    )
             # Strict motion success check: only code 0 is authoritative success
             if not is_motion_success_code(err):
                 raise RuntimeError(f"MoveJ failed with return code {err}")
-            self._current_joints_deg = target_q
-            self._motion_state = "IDLE"
-            return True
+            return self._finish_motion(fault_generation)
         except Exception as exc:
             self._last_error = str(exc)
+            self._command_error = str(exc)
             self._motion_state = "ERROR"
             logger.error(f"[PhysicalFR3Backend] MoveJ error: {exc}")
             return False
@@ -574,6 +639,10 @@ class PhysicalFR3Backend(RobotBackend):
         if self._rpc is None:
             return False
 
+        if self._command_error or self._controller_fault:
+            self._last_error = self._controller_fault or self._command_error
+            return False
+        fault_generation = self._fault_generation
         self._motion_state = "MOVING"
         try:
             err = self._rpc.MoveCart(
@@ -589,11 +658,10 @@ class PhysicalFR3Backend(RobotBackend):
             # Strict motion success check: only code 0 is authoritative success
             if not is_motion_success_code(err):
                 raise RuntimeError(f"MoveCart failed with return code {err}")
-            self._current_tcp_pose_mm_deg = target_pose
-            self._motion_state = "IDLE"
-            return True
+            return self._finish_motion(fault_generation)
         except Exception as exc:
             self._last_error = str(exc)
+            self._command_error = str(exc)
             self._motion_state = "ERROR"
             logger.error(f"[PhysicalFR3Backend] MoveCart error: {exc}")
             return False
@@ -643,8 +711,11 @@ class PhysicalFR3Backend(RobotBackend):
 
     def stop(self) -> bool:
         """Emergency stop / halt current motion immediately and safe-idle gripper."""
-        self._motion_state = "IDLE"
-        if self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
+        self._fault_generation += 1
+        self._command_error = "Motion interrupted by stop"
+        self._last_error = self._command_error
+        self._motion_state = "ERROR"
+        if self._gripper_outputs_owned and self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
             try:
                 self.gripper_driver.safe_idle()
             except Exception:

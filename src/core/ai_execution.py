@@ -10,7 +10,21 @@ Enforces safety invariants:
 """
 
 from typing import Any, Optional, Tuple
+import inspect
 from src.core import xiangqi
+from src.core.game_state import GameState
+from src.domain.game_move import MoveActor
+
+
+def _context_keywords(callback, context):
+    """Pass new semantics only to callables that declare or accept them."""
+    if context is None:
+        return {}
+    parameters = inspect.signature(callback).parameters
+    accepts_extra = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters.values())
+    candidates = {"piece_id": context.piece_id, "captured_piece_id": context.captured_piece_id,
+                  "move_context": context}
+    return {key: value for key, value in candidates.items() if accepts_extra or key in parameters}
 
 
 def execute_ai_move(
@@ -28,6 +42,9 @@ def execute_ai_move(
         False if execution failed or was rejected due to safety invariants.
     """
     if not best_move:
+        return False
+    if isinstance(state, GameState) and state.move_sync_error:
+        state.set_status(state.move_sync_error, color=(180, 0, 0), duration=10.0)
         return False
 
     try:
@@ -52,9 +69,20 @@ def execute_ai_move(
             )
         return False
 
+    context = None
+    if isinstance(state, GameState):
+        try:
+            context = state.create_move_context(s, d, MoveActor.ROBOT)
+            state.mark_move_pending(context)
+        except Exception as exc:
+            state.mark_move_failed(str(exc))
+            state.move_sync_error = f"Robot move identity is not reconciled: {exc}"
+            return False
+
     # Robot is ready -> execute motion through structured pipeline
     mode_str = "DRY-RUN" if dry_run else "LIVE/VIRTUAL"
     print(f"[AI] Robot executing move ({mode_str}): {s}->{d}")
+    exec_result = None
     try:
         pick_targets = {"moving": None, "captured": None}
         if visual_pick_enabled and hasattr(hw, "get_visual_pick_targets"):
@@ -85,6 +113,7 @@ def execute_ai_move(
                 is_capture=is_cap,
                 moving_visual_target=pick_targets.get("moving"),
                 captured_visual_target=pick_targets.get("captured"),
+                **_context_keywords(hw.execute_piece_move, context),
             )
             if hasattr(exec_result, "success"):
                 robot_success = bool(exec_result.success)
@@ -96,6 +125,7 @@ def execute_ai_move(
                     s[0], s[1], d[0], d[1], is_cap,
                     moving_visual_target=pick_targets.get("moving"),
                     captured_visual_target=pick_targets.get("captured"),
+                    **_context_keywords(hw.move_piece, context),
                 )
             )
 
@@ -109,6 +139,10 @@ def execute_ai_move(
         robot_success = False
 
     if not robot_success:
+        if isinstance(state, GameState):
+            state.mark_move_failed(
+                getattr(exec_result, "message", None) or "Robot motion failed or was interrupted"
+            )
         print("❌ [SAFETY] Motion failed! Board state NOT updated. State remains recoverable.")
         if hasattr(state, "set_status"):
             state.set_status(
@@ -119,6 +153,13 @@ def execute_ai_move(
         return False
 
     # 2. COMMIT TO GAMESTATE
+    if context is not None:
+        try:
+            state.commit_piece_identity(context)
+        except Exception as exc:
+            state.mark_move_failed(str(exc))
+            state.move_sync_error = f"Robot completed but game identity changed: {exc}"
+            return False
     state.move_history.append({"turn": "b", "src": s, "dst": d})
     if is_cap and hasattr(state, "r_captured"):
         state.r_captured.append(cap_p)

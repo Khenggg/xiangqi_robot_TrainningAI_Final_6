@@ -4,6 +4,7 @@ from typing import Optional, Tuple, Dict, List, Any
 from src.core import xiangqi  # type: ignore
 from src.core.fen_utils import board_array_to_fen, fen_to_board_array, INITIAL_FEN  # type: ignore
 from src.api.simulation_client import TuongKyDaiSuClient  # type: ignore
+from src.domain.game_move import MoveActor, MoveContext, initial_piece_identities, piece_symbol_for_identity
 import config  # type: ignore
 
 class GameState:
@@ -23,6 +24,13 @@ class GameState:
         self.b_captured = []
         self.move_history = []
         self.move_number = 1
+        self.piece_ids = initial_piece_identities()
+        self._move_observer = None
+        self.move_sync_error: Optional[str] = None
+        self.pending_move: Optional[MoveContext] = None
+        self.last_committed_move: Optional[MoveContext] = None
+        self.move_execution_status = "IDLE"
+        self.move_execution_error: Optional[str] = None
         
         
         # AI ELO State
@@ -50,6 +58,67 @@ class GameState:
         # Hint State
         self.hint_move: Optional[Tuple[Tuple[int, int], Tuple[int, int]]] = None
         self.hint_expiry: float = 0.0
+
+    def set_move_observer(self, callback):
+        """Observe committed human moves. The observer must not actuate the robot."""
+        self._move_observer = callback
+
+    def create_move_context(self, src_col_row, dst_col_row, actor) -> MoveContext:
+        src = (int(src_col_row[1]), int(src_col_row[0]))
+        dst = (int(dst_col_row[1]), int(dst_col_row[0]))
+        piece_id = self.piece_ids.get(src)
+        if piece_id is None or piece_symbol_for_identity(piece_id) != self.board[src[0]][src[1]]:
+            raise ValueError(f"Piece identity is not reconciled at {src}")
+        captured_id = self.piece_ids.get(dst)
+        destination_symbol = self.board[dst[0]][dst[1]]
+        if (captured_id is None) != (destination_symbol == "."):
+            raise ValueError(f"Destination identity is not reconciled at {dst}")
+        if captured_id is not None and piece_symbol_for_identity(captured_id) != destination_symbol:
+            raise ValueError(f"Captured identity is not reconciled at {dst}")
+        return MoveContext(piece_id=piece_id, src=src, dst=dst, actor=actor,
+                           captured_piece_id=captured_id)
+
+    def commit_piece_identity(self, context: MoveContext):
+        if self.piece_ids.get(context.src) != context.piece_id:
+            raise ValueError("Moving piece identity changed before commit")
+        if self.piece_ids.get(context.dst) != context.captured_piece_id:
+            raise ValueError("Captured piece identity changed before commit")
+        self.piece_ids.pop(context.src)
+        self.piece_ids[context.dst] = context.piece_id
+        self.last_committed_move = context
+        self.pending_move = None
+        self.move_execution_status = "COMMITTED"
+        self.move_execution_error = None
+
+    def mark_move_pending(self, context: MoveContext):
+        self.pending_move = context
+        self.move_execution_status = "PENDING"
+        self.move_execution_error = None
+
+    def mark_move_failed(self, message: str):
+        self.move_execution_status = "FAILED"
+        self.move_execution_error = str(message)
+
+    def clear_move_sync_error(self):
+        """Call only after explicitly reconciling the game and physical scene."""
+        self.move_sync_error = None
+        self.pending_move = None
+        self.move_execution_status = "IDLE"
+        self.move_execution_error = None
+
+    def _require_scene_reconciliation(self, reason: str):
+        if self._move_observer is not None:
+            self.move_sync_error = reason
+            self.set_status(reason, color=(180, 0, 0), duration=10.0)
+
+    def _notify_human_commit(self, context: MoveContext):
+        if self._move_observer is None:
+            return
+        try:
+            if self._move_observer(context) is not True:
+                raise RuntimeError("Digital Twin rejected committed human move")
+        except Exception as exc:
+            self._require_scene_reconciliation(f"Digital Twin sync failed: {exc}")
 
     def get_legal_moves_for_selected(self) -> List[Tuple[int, int]]:
         """Trả về danh sách toạ độ (col, row) các ô hợp lệ mà quân cờ đang chọn có thể đi tới."""
@@ -108,6 +177,11 @@ class GameState:
         
         self.current_fen = INITIAL_FEN
         self.board, self.turn = fen_to_board_array(self.current_fen)
+        self.piece_ids = initial_piece_identities()
+        self.pending_move = None
+        self.last_committed_move = None
+        self.move_execution_status = "IDLE"
+        self.move_execution_error = None
         self.game_over = False
         self.winner = None
         self.last_move = None
@@ -126,6 +200,8 @@ class GameState:
         self.ai_thinking = False
         self.ai_think_start = 0.0
         self.manual_override_active = False
+
+        self._require_scene_reconciliation("New game requires Digital Twin scene reconciliation")
 
         print("[GAME] 🔄 New game started!")
         print(f"[FEN] {self.current_fen}")
@@ -160,6 +236,7 @@ class GameState:
     def save_rollback_state(self, baseline_occ=None, baseline_time=None):
         self._pre_space_state = {
             "board": [row[:] for row in self.board],
+            "piece_ids": dict(self.piece_ids),
             "turn": self.turn,
             "last_move": self.last_move,
             "current_fen": self.current_fen,
@@ -182,6 +259,7 @@ class GameState:
         print("[ROLLBACK] ↩️ Khôi phục trạng thái trước SPACE...")
         s = self._pre_space_state
         self.board = [row[:] for row in s["board"]]
+        self.piece_ids = dict(s["piece_ids"])
         self.turn = s["turn"]
         self.last_move = s["last_move"]
         self.current_fen = s["current_fen"]
@@ -200,6 +278,7 @@ class GameState:
         print(f"[ROLLBACK] ✅ Done. FEN: {self.current_fen}")
         
         self.manual_override_active = False
+        self._require_scene_reconciliation("Rollback requires Digital Twin scene reconciliation")
 
     def undo_round(self, hw_manager=None) -> bool:
         """Hoàn tác nước cờ gần nhất của người chơi và nước đáp trả của AI (phím U)."""
@@ -215,6 +294,7 @@ class GameState:
         print("[UNDO] ↩️ Đang hoàn tác nước cờ...")
         snap = self.history_snapshots.pop()
         self.board = [row[:] for row in snap["board"]]
+        self.piece_ids = dict(snap["piece_ids"])
         self.turn = snap["turn"]
         self.last_move = snap["last_move"]
         self.current_fen = snap["current_fen"]
@@ -237,15 +317,18 @@ class GameState:
 
         print(f"[UNDO] ✅ Hoàn tác thành công! FEN: {self.current_fen}")
         self.set_status("↩️ Đã hoàn tác nước cờ (Undo)! Đến lượt bạn đi.", color=(0, 150, 0), duration=4.0)
+        self._require_scene_reconciliation("Undo requires Digital Twin scene reconciliation")
         return True
 
     def process_human_move(self, src, dst, p_name):
+        context = self.create_move_context(src, dst, MoveActor.HUMAN)
         print(f"[HUMAN] ✅ Moved: {p_name} {src}->{dst}")
         self.set_status("✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
         
         # Lưu snapshot trạng thái trước nước đi để phục vụ Undo
         self.history_snapshots.append({
             "board": [row[:] for row in self.board],
+            "piece_ids": dict(self.piece_ids),
             "turn": self.turn,
             "last_move": self.last_move,
             "current_fen": self.current_fen,
@@ -266,6 +349,8 @@ class GameState:
         self.turn = "b"  # Chuyển lượt
         self.move_number += 1
         self.update_fen_from_board()
+        self.commit_piece_identity(context)
+        self._notify_human_commit(context)
         print(f"[FEN] {self.current_fen}")
         
         # [API] Đồng bộ nước đi lên máy chủ Simulation

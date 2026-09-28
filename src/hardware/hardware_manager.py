@@ -58,6 +58,7 @@ class HardwareManager:
         board_calibration_profile: Optional[BoardCalibrationProfile] = None,
         board_calibration_policy: Optional[BoardCalibrationTolerancePolicy] = None,
         simulation_runtime: Optional[Any] = None,
+        twin_bridge: Optional[Any] = None,
     ):
         self.config = config
         self.project_dir = project_dir
@@ -65,6 +66,7 @@ class HardwareManager:
         self.board_calibration_profile = board_calibration_profile
         self.board_calibration_policy = board_calibration_policy
         self.simulation_runtime = simulation_runtime
+        self.twin_bridge = twin_bridge
         
         # Hardware instances
         self.robot = FR5Robot()
@@ -161,6 +163,7 @@ class HardwareManager:
                     backend=self.backend,
                     payload_verifier=virtual_payload_verifier,
                     board_pose_provider=self.board_pose_provider,
+                    twin_bridge=self.twin_bridge,
                 )
                 self.motion_coordinator = MotionCoordinator(
                     backend=self.backend,
@@ -343,6 +346,7 @@ class HardwareManager:
                 backend=self.backend,
                 payload_verifier=None,
                 board_pose_provider=self.board_pose_provider,
+                twin_bridge=self.twin_bridge,
             )
             self.motion_coordinator = MotionCoordinator(
                 backend=self.backend,
@@ -672,6 +676,30 @@ class HardwareManager:
                 )
             return bool(self.robot and self.robot.connected and self.physical_motion_authorized)
 
+    def setup_digital_twin(self, telemetry=None, poll_hz: float = 25.0, start: bool = True):
+        """Instantiate and optionally start LiveTwinBridge using authoritative physical calibration."""
+        if self.board_pose_provider is None or self.backend is None:
+            print("⚠️ [HardwareManager] Cannot setup Digital Twin: backend or board_pose_provider missing.")
+            return None
+        from src.digital_twin.live_twin_bridge import LiveTwinBridge
+        self.twin_bridge = LiveTwinBridge(
+            backend=self.backend,
+            board_pose_provider=self.board_pose_provider,
+            telemetry=telemetry,
+            poll_hz=poll_hz,
+        )
+        if self.motion_executor is not None:
+            self.motion_executor.twin_bridge = self.twin_bridge
+        if start:
+            self.twin_bridge.start()
+        return self.twin_bridge
+
+    def reconcile_human_move(self, context) -> bool:
+        """Observe committed human moves and reconcile them in the Digital Twin without robot motion."""
+        if self.twin_bridge is not None:
+            return self.twin_bridge.reconcile_human_move(context)
+        return True
+
     def execute_piece_move(
         self,
         s_col: int,
@@ -683,6 +711,7 @@ class HardwareManager:
         captured_visual_target: Optional[object] = None,
         piece_id: Optional[str] = None,
         captured_piece_id: Optional[str] = None,
+        move_context: Optional[Any] = None,
     ) -> MotionExecutionResult:
         """
         Execute pick-and-place move through the authoritative MotionResolver and MotionExecutor.
@@ -755,6 +784,14 @@ class HardwareManager:
                 message=f"Plan resolution error: {e}",
             )
 
+        if self.twin_bridge is not None and move_context is not None:
+            if not self.twin_bridge.begin_robot_move(move_context):
+                return MotionExecutionResult.fail(
+                    failed_stage=MotionStage.PREPOSITION,
+                    category=ExecutionFailureCategory.ROBOT_BUSY,
+                    message=f"Digital Twin rejected robot move: {self.twin_bridge.last_error}",
+                )
+
         if self.simulation_runtime is not None and hasattr(self.simulation_runtime, "acquire_operation_state"):
             try:
                 from src.simulation.runtime import RuntimeOperationState
@@ -768,6 +805,16 @@ class HardwareManager:
                 )
         else:
             res = self.motion_executor.execute_plan(plan)
+
+        if self.twin_bridge is not None and move_context is not None:
+            if not self.twin_bridge.end_robot_move(move_context, res.success):
+                res = MotionExecutionResult.fail(
+                    failed_stage=res.failed_stage or MotionStage.LAND,
+                    category=ExecutionFailureCategory.PAYLOAD_STATE_UNCERTAIN,
+                    message=f"Digital Twin verification failed: {self.twin_bridge.last_error}",
+                    last_completed_stage=res.last_completed_stage,
+                    payload_state=res.payload_state,
+                )
 
         self._last_execution_result = res
         return res
@@ -783,6 +830,7 @@ class HardwareManager:
         captured_visual_target: Optional[object] = None,
         piece_id: Optional[str] = None,
         captured_piece_id: Optional[str] = None,
+        move_context: Optional[Any] = None,
     ) -> bool:
         """
         Legacy compatibility wrapper over execute_piece_move.
@@ -798,11 +846,15 @@ class HardwareManager:
             captured_visual_target=captured_visual_target,
             piece_id=piece_id,
             captured_piece_id=captured_piece_id,
+            move_context=move_context,
         )
         return bool(res.success)
 
     def cleanup(self):
         print("[CLEANUP] Đang dọn dẹp hardware...")
+        if getattr(self, "twin_bridge", None) is not None:
+            try: self.twin_bridge.close()
+            except: pass
         if self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
             try: self.gripper_driver.safe_idle()
             except: pass

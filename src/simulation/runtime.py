@@ -48,6 +48,7 @@ from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.placement import BoardPlacementAnalyzer, BoardPlacementState, canonical_cell_to_robot_xyz_m
 from src.simulation.virtual_fr3_backend import VirtualFR3Backend
 from src.domain.geometry import get_physical_geometry
+from src.digital_twin.world_sync import sync_world_from_robot_snapshot
 
 
 class RuntimeOperationState(str, Enum):
@@ -333,9 +334,7 @@ class VirtualXiangqiSimulation:
         if not hasattr(self.world, "client_id") or self.world.client_id < 0 or not p.isConnected(self.world.client_id):
             return
         # Blocker 3: Actual PyBullet articulated FR3 follows runtime execution samples (backend q == PyBullet q == Three.js q)
-        if hasattr(self.world, "sync_robot_runtime_configuration"):
-            self.world.sync_robot_runtime_configuration(snapshot.joints_rad)
-        self._sync_gripper_to_tcp(snapshot)
+        sync_world_from_robot_snapshot(self.world, snapshot, measured_tcp=True)
 
         # Detect gripper transition
         if snapshot.gripper_closed != self._last_gripper_closed:

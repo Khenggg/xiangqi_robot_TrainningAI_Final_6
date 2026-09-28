@@ -42,11 +42,13 @@ class MotionExecutor:
         board_pose_provider: Optional[BoardPoseProvider] = None,
         sleep_fn: Optional[Callable[[float], None]] = None,
         payload_verifier: Optional[Callable[[PayloadState], bool]] = None,
+        twin_bridge: Optional[Any] = None,
     ):
         self.backend = backend
         self.board_pose_provider = board_pose_provider
         self.sleep_fn = sleep_fn or time.sleep
         self.payload_verifier = payload_verifier
+        self.twin_bridge = twin_bridge
         self._current_payload_state: PayloadState = PayloadState.NONE
 
     @property
@@ -147,10 +149,44 @@ class MotionExecutor:
 
         # --- 4. Ordered Step Execution ---
         last_completed_stage: Optional[MotionStage] = None
+        close_index = 0
+        if plan.plan_type == "CAPTURE":
+            payload_ids = [plan.metadata.get("captured_piece_id"), plan.metadata.get("attacker_piece_id")]
+        else:
+            payload_ids = [plan.metadata.get("piece_id")]
+
+        if self.twin_bridge is not None:
+            close_count = sum(step.gripper_command == GripperCommand.CLOSE for step in plan.steps)
+            if close_count > len(payload_ids) or any(not pid for pid in payload_ids[:close_count]):
+                return MotionExecutionResult.fail(
+                    failed_stage=MotionStage.PREPOSITION,
+                    category=MotionFailureCategory.INVALID_PLAN,
+                    message="Digital Twin motion requires deterministic payload IDs for every grasp",
+                    payload_state=self._current_payload_state,
+                )
 
         for step in plan.steps:
+            # Re-read readiness between actions so an E-stop during a dwell cannot
+            # be followed by another motion/gripper command.
+            try:
+                current = self.backend.get_state_snapshot()
+                if (not current.connected or current.motion_state not in ("IDLE", "READY")
+                        or not getattr(current, "joints_valid", True)):
+                    raise RuntimeError(f"Backend interrupted: {current.motion_state}; {current.last_error or ''}")
+            except Exception as exc:
+                return MotionExecutionResult.fail(
+                    failed_stage=step.stage,
+                    category=MotionFailureCategory.ABORTED,
+                    message=str(exc),
+                    last_completed_stage=last_completed_stage,
+                    payload_state=self._current_payload_state,
+                )
+            expected_id = None
+            if step.gripper_command == GripperCommand.CLOSE:
+                expected_id = payload_ids[close_index] if close_index < len(payload_ids) else None
+                close_index += 1
             logger.debug(f"[MotionExecutor] Step {step.step_id} ({step.stage.name}): {step.description}")
-            step_result = self._execute_step(step, last_completed_stage)
+            step_result = self._execute_step(step, last_completed_stage, expected_id)
 
             if not step_result.success:
                 logger.warning(
@@ -169,7 +205,8 @@ class MotionExecutor:
         )
 
     def _execute_step(
-        self, step: MotionStep, last_completed_stage: Optional[MotionStage]
+        self, step: MotionStep, last_completed_stage: Optional[MotionStage],
+        expected_piece_id: Optional[str] = None,
     ) -> MotionExecutionResult:
         """Dispatch a single MotionStep to the RobotBackend."""
         # 1. Cartesian Linear or Point Movement
@@ -232,6 +269,10 @@ class MotionExecutor:
         elif step.motion_type == MotionType.GRIPPER:
             assert step.gripper_command is not None
             if step.gripper_command == GripperCommand.CLOSE:
+                if self.twin_bridge is not None:
+                    failure = self._notify_twin("set_expected_payload", step, last_completed_stage, expected_piece_id)
+                    if failure is not None:
+                        return failure
                 try:
                     ok = self.backend.set_gripper(closed=True)
                 except Exception as e:
@@ -254,6 +295,10 @@ class MotionExecutor:
                         error_code=str(last_err),
                     )
                 self._current_payload_state = PayloadState.EXPECTED_ATTACHED
+                if self.twin_bridge is not None:
+                    failure = self._notify_twin("on_gripper_closed", step, last_completed_stage, expected_piece_id)
+                    if failure is not None:
+                        return failure
                 if self.payload_verifier is not None:
                     try:
                         if self.payload_verifier(PayloadState.EXPECTED_ATTACHED):
@@ -284,6 +329,10 @@ class MotionExecutor:
                         error_code=str(last_err),
                     )
                 self._current_payload_state = PayloadState.EXPECTED_RELEASED
+                if self.twin_bridge is not None:
+                    failure = self._notify_twin("on_gripper_opened", step, last_completed_stage)
+                    if failure is not None:
+                        return failure
                 if self.payload_verifier is not None:
                     try:
                         if self.payload_verifier(PayloadState.EXPECTED_RELEASED):
@@ -360,3 +409,18 @@ class MotionExecutor:
             last_stage=step.stage,
             payload_state=self._current_payload_state,
         )
+
+    def _notify_twin(self, method, step, last_completed_stage, *args):
+        """Mirror command semantics without treating simulation as a hardware sensor."""
+        try:
+            if getattr(self.twin_bridge, method)(*args) is not True:
+                raise RuntimeError(f"Digital Twin rejected {method}")
+        except Exception as exc:
+            return MotionExecutionResult.fail(
+                failed_stage=step.stage,
+                category=MotionFailureCategory.PAYLOAD_STATE_UNCERTAIN,
+                message=f"Digital Twin synchronization failed: {exc}",
+                last_completed_stage=last_completed_stage,
+                payload_state=self._current_payload_state,
+            )
+        return None

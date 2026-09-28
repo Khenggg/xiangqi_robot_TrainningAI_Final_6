@@ -107,6 +107,7 @@ class VirtualPhysicalWorld:
         gripper_profile_path: Optional[Union[str, Path]] = None,
         start_layout_path: Optional[Union[str, Path]] = None,
         enable_gui: bool = False,
+        board_placement_state: Optional[BoardPlacementState] = None,
     ):
         shared_dir = Path(__file__).resolve().parent.parent.parent.parent / "shared"
         self.physics_config_path = Path(physics_config_path or (shared_dir / "virtual_physics.json"))
@@ -135,7 +136,7 @@ class VirtualPhysicalWorld:
         h_mm = float(self.board_cfg.get("board_height_offset_mm", 0.0))
         nom_surf_z = float(self.board_cfg.get("board_surface_height_m", 0.0105))
         nom_center = list(self.board_cfg.get("board_center_in_robot_base_m", [-0.360, 0.0, 0.0105]))
-        self.board_placement_state = BoardPlacementState.compute(
+        self.board_placement_state = board_placement_state or BoardPlacementState.compute(
             forward_shift_mm=d_mm,
             safe_transit_height_mm=float(self.board_cfg.get("safe_transit_height_mm", 70.0)),
             board_height_offset_mm=h_mm,
@@ -339,7 +340,7 @@ class VirtualPhysicalWorld:
             physicsClientId=self.client_id,
         )
 
-        box_center = list(self.board_placement_state.board_center_robot_m)
+        box_center = list(self.board_placement_state.board_local_to_robot(0.0, 0.0, -half_z))
         box_orn = list(self.board_placement_state.quat_robot_from_board)
 
         self.board_body_id = p.createMultiBody(
@@ -750,7 +751,7 @@ class VirtualPhysicalWorld:
                 baseMass=mass_kg,
                 baseCollisionShapeIndex=col_shape,
                 basePosition=pos.tolist(),
-                baseOrientation=[0.0, 0.0, 0.0, 1.0],  # Upright cylinder
+                baseOrientation=self.board_placement_state.quat_robot_from_board,
                 physicsClientId=self.client_id,
             )
 
@@ -963,6 +964,28 @@ class VirtualPhysicalWorld:
             gripper=self.gripper.to_state_dict(),
             pieces=piece_snapshots,
         )
+
+    def reconcile_piece_move(self, piece_id: str, dst: Tuple[int, int],
+                             captured_piece_id: Optional[str] = None) -> None:
+        """Apply a validated HUMAN move to bodies/colliders before publishing it."""
+        row, col = dst
+        if not (0 <= row < 10 and 0 <= col < 9):
+            raise ValueError("Destination is outside the board")
+        with self._physics_lock:
+            piece = self.pieces[piece_id]
+            captured = self.pieces[captured_piece_id] if captured_piece_id else None
+            if piece.attached_to_gripper or (captured and captured.attached_to_gripper):
+                raise ValueError("Human move conflicts with an attached robot payload")
+            if captured is piece:
+                raise ValueError("A piece cannot capture itself")
+            pos = self.board_placement_state.cell_to_robot_xyz(row, col, z_rel_m=piece.height_m / 2.0)
+            if captured is not None:
+                p.removeBody(captured.body_id, physicsClientId=self.client_id)
+                del self.pieces[captured.piece_id]
+            piece.set_pose_robot_base(pos, self.board_placement_state.quat_robot_from_board)
+            piece.set_velocity([0.0] * 3, [0.0] * 3)
+            piece.physical_state = PiecePhysicalState.RESTING
+            piece._consecutive_settled_steps = self.required_settled_steps
 
     def get_gripper_piece_contacts(self) -> List[Dict[str, Any]]:
         """
