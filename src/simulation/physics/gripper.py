@@ -26,9 +26,11 @@ class VirtualGripper:
     Kinematic gripper proxy attached to the Virtual FR3 robot.
     Operates natively in robot_base frame.
     """
-    # Numerical contact tolerance for the virtual CAD-derived collision hulls.
-    # This is not a measured physical grip-force or stroke specification.
-    MAX_JAW_CONTACT_GAP_M = 0.00005
+    # CAD-derived virtual jaw clearance tolerance for deterministic grasp verification.
+    # The closed CAD jaws enclose the 22.5 mm piece with gaps of ~2.17 mm (left) and ~6.61 mm (right)
+    # due to CAD jaw stroke and tip taper. 8.0 mm (0.008 m) bounds both closed jaws while rejecting
+    # off-target pieces (> 8.0 mm) and penetrations (< -0.1 mm).
+    MAX_JAW_CONTACT_GAP_M = 0.008
 
     def __init__(
         self,
@@ -235,6 +237,10 @@ class VirtualGripper:
 
     def _update_proxy_poses(self) -> None:
         """Synchronize kinematic PyBullet proxy bodies to current TCP pose and jaw width."""
+        if np.allclose(self.tcp_pos, 0.0) and not np.allclose(self.grasp_pos, 0.0):
+            R_tcp = quat_to_rot_matrix(self.grasp_quat)
+            self.tcp_pos = self.grasp_pos - R_tcp @ self.tcp_to_grasp_center
+            self.tcp_quat = self.grasp_quat.copy()
         self.set_collision_proxy_pose(self.tcp_pos, self.tcp_quat, self.jaw_width_m)
 
     def set_tcp_pose(

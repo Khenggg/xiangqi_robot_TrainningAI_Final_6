@@ -50,14 +50,6 @@ class Phase3FinalMasterTests(unittest.TestCase):
         self.sim = VirtualXiangqiSimulation(auto_sync_telemetry=False)
         self.sim.start()
         self.sim.clear_error()
-        # These tests exercise orchestration, stages, and recovery downstream
-        # of a grasp. Supply simulated bilateral contact explicitly. The real
-        # CAD jaw-to-piece gap is checked in test_grasp_contact_and_payload_guard.
-        contact_fixture = mock.patch.object(
-            self.sim.world.gripper, "_jaw_gap_to_piece_m", return_value=0.0,
-        )
-        contact_fixture.start()
-        self.addCleanup(contact_fixture.stop)
 
     def tearDown(self):
         self.sim.stop()
@@ -82,8 +74,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
         pos, quat = piece.get_pose_robot_base()
 
         # Place gripper directly at piece position and close it
-        world.gripper.grasp_pos = np.array(pos, dtype=float)
-        world.gripper.grasp_quat = np.array(quat, dtype=float)
+        world.gripper.set_tcp_pose(pos, quat)
         world.gripper.set_gripper_state(True)
 
         res = world.try_grasp(target_piece_id=first_piece_id)
@@ -106,8 +97,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
         pos, quat = piece.get_pose_robot_base()
 
         # Gripper is at first_piece_id, but we target other_piece_id
-        world.gripper.grasp_pos = np.array(pos, dtype=float)
-        world.gripper.grasp_quat = np.array(quat, dtype=float)
+        world.gripper.set_tcp_pose(pos, quat)
         world.gripper.set_gripper_state(True)
 
         res = world.try_grasp(target_piece_id=other_piece_id)

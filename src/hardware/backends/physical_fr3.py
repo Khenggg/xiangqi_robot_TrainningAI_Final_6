@@ -441,7 +441,9 @@ class PhysicalFR3Backend(RobotBackend):
                 if isinstance(res_md, (tuple, list)) and len(res_md) >= 2:
                     err_md, motion_done = res_md[0], res_md[1]
                     if isinstance(err_md, int) and err_md == 0 and isinstance(motion_done, (int, float)):
-                        if int(motion_done) == 1:
+                        if int(motion_done) == 0:
+                            self._motion_state = "MOVING"
+                        elif int(motion_done) == 1:
                             self._motion_state = "IDLE"
 
         except Exception as exc:

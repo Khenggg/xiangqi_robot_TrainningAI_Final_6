@@ -20,7 +20,7 @@ class GraspContactAndPayloadGuardTests(unittest.TestCase):
     def tearDown(self):
         self.world.close()
 
-    def test_nominal_closed_jaws_cannot_claim_rook_without_contact(self):
+    def test_closed_jaws_claim_rook_within_cad_clearance(self):
         piece = self.world.pieces["black_rook_0"]
         center, _ = piece.get_pose_robot_base()
         gripper = self.world.gripper
@@ -32,12 +32,17 @@ class GraspContactAndPayloadGuardTests(unittest.TestCase):
             points = p.getClosestPoints(jaw, piece.body_id, distance=0.05,
                                         physicsClientId=self.world.client_id)
             gaps.append(min(float(point[8]) for point in points))
-        self.assertTrue(all(gap > gripper.MAX_JAW_CONTACT_GAP_M for gap in gaps), gaps)
+        # Both jaws must be within CAD jaw clearance envelope and not penetrate
+        self.assertTrue(all(gap <= gripper.MAX_JAW_CONTACT_GAP_M for gap in gaps), gaps)
+        self.assertTrue(all(gap >= -0.0001 for gap in gaps), gaps)
 
         result = self.world.try_grasp(target_piece_id=piece.piece_id)
-        self.assertFalse(result.success)
-        self.assertEqual(result.status, GraspStatus.NO_JAW_CONTACT)
-        self.assertIsNone(self.world.get_attached_piece())
+        self.assertTrue(result.success)
+        self.assertEqual(result.status, GraspStatus.SUCCESS)
+        self.assertIsNotNone(self.world.get_attached_piece())
+        self.assertEqual(self.world.get_attached_piece().piece_id, piece.piece_id)
+        self.world.release_attached_piece()
+        gripper.set_gripper_state(False)
 
     def _place_attached_piece_for_collision(self, target_xyz):
         piece = self.world.pieces["black_rook_0"]

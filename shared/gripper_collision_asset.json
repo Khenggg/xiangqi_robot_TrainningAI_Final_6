@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "source_step_sha256": "bff720773cba7dd18bd7bf110c07b5b917b95bf95d4c11657b638ad6e1acbb56",
-  "source_visual_sha256": "96ccda89b81004aab0c0c8d9abe5b4b97673a92623caf9568bd88ba3fbb1036b",
+  "source_visual_sha256": "e39b3ddf1e763d8825c0279cf3f9a61be99e101e10de2abf0189ce1f29807e48",
   "source_profile_sha256": "89354be2ef7ea364904306e3c53a8cdaf1cdb5225fafc617b815948cb6d27a92",
   "source_gripper_profile_sha256": "5bb2ed8e68e27b4f6c9cbb266e9c85353b601e1e9ff36b59d4b76dee7261ed00",
   "reference_frame": "canonical_tcp_at_open_jaws",
