@@ -85,14 +85,15 @@ PLACE_TOOL_ROTATION = list(ROTATION)
 # --- ROBOT BACKEND EXECUTION SELECTION ---
 # Explicit backend selection: "PHYSICAL" or "VIRTUAL".
 # Rejects any unlisted backend type to prevent accidental execution fallbacks.
-ROBOT_BACKEND = _os.environ.get("ROBOT_BACKEND", "PHYSICAL").upper()
+ROBOT_BACKEND = _os.environ.get("ROBOT_BACKEND", "VIRTUAL").upper()
 if ROBOT_BACKEND not in ("PHYSICAL", "VIRTUAL"):
     raise ValueError(f"Invalid ROBOT_BACKEND='{ROBOT_BACKEND}'. Must be 'PHYSICAL' or 'VIRTUAL'.")
 
 # Kết nối Robot
 ROBOT_IP = "192.168.58.2"
 # DRY_RUN prevents real hardware actuation (mock/dry-run backend), NEVER bypasses motion architecture.
-DRY_RUN = _os.environ.get("DRY_RUN", "False").lower() in ("true", "1", "yes")
+# Mặc định True: Chơi cờ thuần túy bằng chuột & mô phỏng mà không cần kết nối camera hay bật robot thật.
+DRY_RUN = _os.environ.get("DRY_RUN", "True").lower() in ("true", "1", "yes")
 
 # --- PHYSICAL BOARD CALIBRATION CONFIGURATION ---
 # Chế độ hiệu chuẩn bàn cờ thực tế từ điểm dạy R1-R4:
