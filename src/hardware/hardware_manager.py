@@ -126,8 +126,10 @@ class HardwareManager:
 
             # Setup Board Pose Provider & Motion Pipeline for Virtual Backend
             forward_shift_mm = getattr(self.config, "FORWARD_SHIFT_MM", 0.0)
+            board_yaw_deg = float(getattr(self.config, "BOARD_YAW_DEG", 0.0))
             self.board_pose_provider = FixedBoardPoseProvider.from_forward_shift(
-                forward_shift_mm=forward_shift_mm
+                forward_shift_mm=forward_shift_mm,
+                board_yaw_deg=board_yaw_deg,
             )
             self.motion_profile = MotionProfile(
                 pick_tcp_height_above_board_mm=getattr(self.config, "PICK_TCP_HEIGHT_MM", 4.715),

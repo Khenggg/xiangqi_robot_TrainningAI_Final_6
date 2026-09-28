@@ -59,6 +59,11 @@ PLACE_TCP_HEIGHT_MM = 4.715
 SAFE_CLEARANCE_Z_MM = 40.0
 PICK_HEIGHT_PROVENANCE = "PROVISIONAL_SIMULATION"  # Đánh dấu nguồn gốc chưa qua kiểm chứng vật lý
 
+# --- CẤU HÌNH HƯỚNG BÀN CỜ (BOARD YAW ORIENTATION) ---
+# Hướng chuẩn 0.0 độ: Bàn cờ đặt thẳng đối diện robot, dòng sông nằm ngang, hàng quân Đen sát bệ robot.
+BOARD_YAW_DEG = 0.0
+
+
 # Cấu hình Kẹp (Gripper) - Tùy chỉnh theo loại van của bạn
 GRIPPER_CLOSE = 1
 GRIPPER_OPEN = 0

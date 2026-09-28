@@ -30,7 +30,7 @@ export async function fetchScenePlacement(url = "/shared/virtual_fr3_scene.json"
     boardCenterX: Number(worldCenter[0]),
     boardSurfaceY: Number(worldCenter[1]),
     boardCenterZ: Number(worldCenter[2]),
-    board_yaw_deg: Number(data.virtual_board_placement.board_yaw_deg ?? 90.0),
+    board_yaw_deg: Number(data.virtual_board_placement.board_yaw_deg ?? 0.0),
   };
   setScenePlacement(placement);
   return placement;
@@ -53,7 +53,7 @@ export function setScenePlacement(placement) {
     safeTransitHeightMm: Number(placement.safe_transit_height_mm ?? 70.0),
     boardHeightOffsetMm: Number(placement.board_height_offset_mm ?? 0.0),
     placementVersion: Number(placement.placement_version ?? 1),
-    boardYawDeg: Number(placement.board_yaw_deg ?? 90.0),
+    boardYawDeg: Number(placement.board_yaw_deg ?? 0.0),
     boardOrientationQuatWorld: placement.board_orientation_quat_world || placement.quat_world || null,
     TRobotFromBoard: placement.T_robot_from_board || null,
   };
@@ -135,7 +135,7 @@ export function boardPointToXYZ(rowOrCell, colOrGeometry = null, maybeGeometry =
   }
 
   // 2. Otherwise derive SE(3) transformation from authoritative boardYawDeg and center
-  const yawDeg = placement.boardYawDeg ?? 90.0;
+  const yawDeg = placement.boardYawDeg ?? 0.0;
   const theta = (yawDeg * Math.PI) / 180.0;
   const sinT = Math.sin(theta);
   const cosT = Math.cos(theta);

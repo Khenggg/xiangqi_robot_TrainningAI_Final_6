@@ -110,7 +110,7 @@ def rot_matrix_to_quat(R: np.ndarray) -> np.ndarray:
     return q
 
 
-DEFAULT_BOARD_YAW_DEG: float = 90.0
+DEFAULT_BOARD_YAW_DEG: float = 0.0
 
 
 def compute_rotation_matrix(board_yaw_deg: float) -> np.ndarray:
@@ -118,7 +118,7 @@ def compute_rotation_matrix(board_yaw_deg: float) -> np.ndarray:
     Compute canonical 3x3 rotation matrix R_robot_from_board.
 
     Convention:
-      yaw = 0.0 deg (legacy baseline):
+      yaw = 0.0 deg (canonical orientation facing robot):
         +u (column axis) -> +Y_robot
         +v (row axis)    -> -X_robot
         +z               -> +Z_robot
@@ -126,7 +126,7 @@ def compute_rotation_matrix(board_yaw_deg: float) -> np.ndarray:
                [1.0,  0.0, 0.0],
                [0.0,  0.0, 1.0]]
 
-      yaw = +90.0 deg (production 90° orientation):
+      yaw = +90.0 deg (alternate 90° orientation):
         R = R_z(+90) @ R_0 =
             [[-1.0,  0.0, 0.0],
              [ 0.0, -1.0, 0.0],
@@ -161,11 +161,12 @@ def load_nominal_scene_placement(scene_config_path: Optional[Path] = None) -> Di
         except Exception:
             pass
     return {
-        "grid_origin_in_robot_base_m": [-0.20, 0.18, 0.0105],
-        "board_center_in_robot_base_m": [-0.36, 0.0, 0.0105],
-        "grid_origin_in_3d_world_m": [-0.18, 0.0105, 0.20],
-        "board_center_in_3d_world_m": [0.0, 0.0105, 0.36],
+        "grid_origin_in_robot_base_m": [0.18, 0.20, 0.0105],
+        "board_center_in_robot_base_m": [0.0, 0.36, 0.0105],
+        "grid_origin_in_3d_world_m": [-0.20, 0.0105, -0.18],
+        "board_center_in_3d_world_m": [-0.36, 0.0105, 0.0],
         "board_surface_height_m": 0.0105,
+        "board_yaw_deg": 0.0,
     }
 
 
@@ -182,20 +183,20 @@ class BoardPlacementState:
     forward_shift_mm: float = 0.0
     safe_transit_height_mm: float = 40.0
     board_height_offset_mm: float = 0.0
-    board_yaw_deg: float = 90.0
+    board_yaw_deg: float = 0.0
 
     # Authoritative coordinates in robot base {B}
-    board_center_robot_m: List[float] = field(default_factory=lambda: [-0.360, 0.0, 0.00525])
+    board_center_robot_m: List[float] = field(default_factory=lambda: [0.0, 0.360, 0.00525])
     board_surface_z_robot_m: float = 0.0105
-    grid_origin_robot_m: List[float] = field(default_factory=lambda: [-0.200, 0.180, 0.0105])
+    grid_origin_robot_m: List[float] = field(default_factory=lambda: [0.180, 0.200, 0.0105])
 
     # 3D world representation
-    physical_board_center_world_m: List[float] = field(default_factory=lambda: [0.0, 0.00525, 0.360])
-    board_visual_root_world_m: List[float] = field(default_factory=lambda: [0.0, 0.0105, 0.360])
+    physical_board_center_world_m: List[float] = field(default_factory=lambda: [-0.360, 0.00525, 0.0])
+    board_visual_root_world_m: List[float] = field(default_factory=lambda: [-0.360, 0.0105, 0.0])
 
     # Backward compatible aliases
-    physical_board_center_robot_m: List[float] = field(default_factory=lambda: [-0.360, 0.0, 0.00525])
-    board_center_world_m: List[float] = field(default_factory=lambda: [0.0, 0.0105, 0.360])
+    physical_board_center_robot_m: List[float] = field(default_factory=lambda: [0.0, 0.360, 0.00525])
+    board_center_world_m: List[float] = field(default_factory=lambda: [-0.360, 0.0105, 0.0])
 
     # Optional explicit 3x3 orthonormal rotation matrix in SO(3)
     # When provided (e.g. from physical calibration), overrides board_yaw_deg computation.
@@ -390,7 +391,7 @@ class BoardPlacementState:
         forward_shift_mm: float,
         safe_transit_height_mm: float = 40.0,
         board_height_offset_mm: float = 0.0,
-        board_yaw_deg: float = 90.0,
+        board_yaw_deg: float = 0.0,
         nominal_board_center_robot_m: Optional[Sequence[float]] = None,
         nominal_board_surface_z_m: Optional[float] = None,
         placement_version: int = 1,
@@ -405,7 +406,7 @@ class BoardPlacementState:
             if nominal_board_surface_z_m is None:
                 nominal_board_surface_z_m = nom_cfg.get("board_surface_height_m", 0.0105)
             if nominal_board_center_robot_m is None:
-                bc = nom_cfg.get("board_center_in_robot_base_m", [-0.360, 0.0, 0.0105])
+                bc = nom_cfg.get("board_center_in_robot_base_m", [0.0, 0.360, 0.0105])
                 nominal_board_center_robot_m = [bc[0], bc[1], nominal_board_surface_z_m / 2.0]
 
         nom_cx, nom_cy, _ = nominal_board_center_robot_m
@@ -465,7 +466,7 @@ def canonical_cell_to_robot_xyz_m(
     nominal_y0: Optional[float] = None,
     row_spacing_m: float = 0.040,
     col_spacing_m: float = 0.040,
-    board_yaw_deg: float = 90.0,
+    board_yaw_deg: float = 0.0,
 ) -> Tuple[float, float, float]:
     """
     Authoritative cell coordinate mapping using BoardPlacementState.
@@ -484,13 +485,15 @@ def find_nearest_cell(
     row_spacing_m: float = 0.040,
     col_spacing_m: float = 0.040,
     forward_shift_mm: float = 0.0,
-    board_yaw_deg: float = 90.0,
+    board_yaw_deg: float = 0.0,
 ) -> Tuple[int, int]:
     """Map a 3D position in robot_base to nearest board grid (row, col)."""
     fwd = float(forward_shift_mm)
     if grid_origin_robot_m is not None and abs(fwd) < 1e-6:
-        # Inferred forward shift: x0 = -0.200 - fwd_m -> fwd_m = -0.200 - x0
-        fwd = (-0.200 - float(grid_origin_robot_m[0])) * 1000.0
+        if abs(board_yaw_deg) < 1.0:
+            fwd = (float(grid_origin_robot_m[1]) - 0.200) * 1000.0
+        else:
+            fwd = (-0.200 - float(grid_origin_robot_m[0])) * 1000.0
     state = BoardPlacementState.compute(
         forward_shift_mm=fwd,
         board_yaw_deg=board_yaw_deg,

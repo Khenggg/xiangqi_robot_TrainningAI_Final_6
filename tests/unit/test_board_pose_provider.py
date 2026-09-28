@@ -14,7 +14,7 @@ class BoardPoseProviderTests(unittest.TestCase):
         self.assertIsInstance(provider, BoardPoseProvider)
         state = provider.get_board_placement_state()
         self.assertIsInstance(state, BoardPlacementState)
-        self.assertEqual(state.board_yaw_deg, 90.0)
+        self.assertEqual(state.board_yaw_deg, 0.0)
 
     def test_from_teaching_points_calculation(self):
         # 4 corners in mm

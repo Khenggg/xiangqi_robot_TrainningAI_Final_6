@@ -802,7 +802,7 @@ class FixedBoardPoseProvider(BoardPoseProvider):
     def from_forward_shift(
         cls,
         forward_shift_mm: float = 0.0,
-        board_yaw_deg: float = 90.0,
+        board_yaw_deg: float = 0.0,
         safe_transit_height_mm: float = 40.0,
     ) -> "FixedBoardPoseProvider":
         state = BoardPlacementState.compute(
@@ -816,7 +816,7 @@ class FixedBoardPoseProvider(BoardPoseProvider):
     def from_teaching_points(
         cls,
         teaching_points: Dict[str, Any],
-        board_yaw_deg: float = 90.0,
+        board_yaw_deg: float = 0.0,
         safe_transit_height_mm: float = 40.0,
         calibration_profile: Optional[BoardCalibrationProfile] = None,
         tolerance_policy: Optional[BoardCalibrationTolerancePolicy] = None,
