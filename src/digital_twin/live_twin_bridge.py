@@ -176,6 +176,40 @@ class LiveTwinBridge:
             except (KeyError, ValueError) as exc:
                 return self._fail(exc, recovery=True)
 
+    def reconcile_new_game(self) -> bool:
+        """Reset digital twin physics world and cells to initial layout for a new game."""
+        with self._lock, self.world._physics_lock:
+            self.world.reset_pieces()
+            self._cells = {(int(p["row"]), int(p["col"])): p["id"]
+                           for p in self.world.layout_cfg["pieces"]}
+            self._committed.clear()
+            self.active_move = None
+            self.expected_payload_id = None
+            self._payload_sequence = []
+            self._released = []
+            self.last_error = None
+            self.recovery_required = False
+            self.world.step_until_settled(max_steps=60)
+            self._publish_world()
+            return True
+
+    def reconcile_to_board_cells(self, piece_cells: dict) -> bool:
+        """Reconcile digital twin physics pieces and cells to match arbitrary board state (e.g. on Undo)."""
+        with self._lock, self.world._physics_lock:
+            if hasattr(self.world, "reconcile_to_board_cells"):
+                self.world.reconcile_to_board_cells(piece_cells)
+            self._cells = dict(piece_cells)
+            self._committed.clear()
+            self.active_move = None
+            self.expected_payload_id = None
+            self._payload_sequence = []
+            self._released = []
+            self.last_error = None
+            self.recovery_required = False
+            self.world.step_until_settled(max_steps=60)
+            self._publish_world()
+            return True
+
     def begin_robot_move(self, context):
         if not self.poll_once():
             return False

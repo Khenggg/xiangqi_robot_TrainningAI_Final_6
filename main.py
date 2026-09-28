@@ -72,6 +72,30 @@ if hw.ai_ctrl:
     state.ai_elo, state.ai_elo_title = hw.ai_ctrl.get_elo_info()
 input_mgr = InputHandler(state, hw)
 
+# 3D Digital Twin WebSocket Telemetry & Live Synchronization
+telemetry = None
+try:
+    from src.hardware.telemetry_publisher import TelemetryPublisher
+    telemetry = TelemetryPublisher.get_instance(
+        host="127.0.0.1",
+        port=int(getattr(config, "TELEMETRY_PORT", 8765)),
+        robot_model="FR3",
+    )
+    telemetry.start()
+    print(f"[MAIN] 🌐 3D Digital Twin Telemetry Publisher started on ws://127.0.0.1:{telemetry.port}")
+except Exception as e:
+    print(f"[MAIN] ⚠️ Could not start TelemetryPublisher on port {getattr(config, 'TELEMETRY_PORT', 8765)}: {e}")
+    telemetry = None
+
+# Connect Digital Twin & Move Observer
+twin = hw.setup_digital_twin(telemetry=telemetry)
+if twin is not None:
+    state.set_move_observer(hw.reconcile_human_move)
+    hw.reconcile_new_game()
+    state.clear_move_sync_error()
+    print("[MAIN] 🪞 Digital Twin live reconciliation & move observer activated!")
+
+
 dashboard = None
 if getattr(config, "ENABLE_DEBUG_DASHBOARD", False):
     try:
@@ -84,6 +108,9 @@ def _cleanup_all():
     print("\n[CLEANUP] Đang dọn dẹp hệ thống...")
     if dashboard is not None:
         try: dashboard.close()
+        except: pass
+    if telemetry is not None:
+        try: telemetry.stop()
         except: pass
     # [API] Force Kết thúc trận đấu khi thoát chương trình
     try:

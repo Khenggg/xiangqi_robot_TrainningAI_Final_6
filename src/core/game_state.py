@@ -208,6 +208,12 @@ class GameState:
         
         if hw_manager:
             hw_manager.capture_baseline_if_needed(force_delay=1)
+            if hasattr(hw_manager, "reconcile_new_game"):
+                try:
+                    if hw_manager.reconcile_new_game():
+                        self.clear_move_sync_error()
+                except Exception as exc:
+                    print(f"[GAME] ⚠️ Digital twin new game reconciliation failed: {exc}")
         
         # [API] Tạo room mới (nếu không ở chế độ DRY_RUN)
         if not config.DRY_RUN:
@@ -318,6 +324,12 @@ class GameState:
         print(f"[UNDO] ✅ Hoàn tác thành công! FEN: {self.current_fen}")
         self.set_status("↩️ Đã hoàn tác nước cờ (Undo)! Đến lượt bạn đi.", color=(0, 150, 0), duration=4.0)
         self._require_scene_reconciliation("Undo requires Digital Twin scene reconciliation")
+        if hw_manager and hasattr(hw_manager, "reconcile_board"):
+            try:
+                if hw_manager.reconcile_board(self.piece_ids):
+                    self.clear_move_sync_error()
+            except Exception as exc:
+                print(f"[GAME] ⚠️ Digital twin undo reconciliation failed: {exc}")
         return True
 
     def process_human_move(self, src, dst, p_name):

@@ -497,6 +497,19 @@ export function buildPieces(geometry = null, layoutOrPieces = START_LAYOUT) {
 export function updatePiecesFromWorldState(piecesGroup, piecesDict, piecesList) {
   if (!piecesDict || !Array.isArray(piecesList)) return;
 
+  const activeIds = new Set();
+  for (const p of piecesList) {
+    activeIds.add(p.id);
+  }
+  for (const [id, mesh] of Object.entries(piecesDict)) {
+    const canId = mesh.userData?.id;
+    if (canId && !activeIds.has(canId)) {
+      mesh.visible = false;
+      mesh.userData.row = null;
+      mesh.userData.col = null;
+    }
+  }
+
   for (const p of piecesList) {
     const mesh = piecesDict[p.id];
     if (!mesh) continue;

@@ -681,6 +681,8 @@ class HardwareManager:
         if self.board_pose_provider is None or self.backend is None:
             print("⚠️ [HardwareManager] Cannot setup Digital Twin: backend or board_pose_provider missing.")
             return None
+        if hasattr(self.backend, "telemetry_publisher") and self.backend.telemetry_publisher is None and telemetry is not None:
+            self.backend.telemetry_publisher = telemetry
         from src.digital_twin.live_twin_bridge import LiveTwinBridge
         self.twin_bridge = LiveTwinBridge(
             backend=self.backend,
@@ -698,6 +700,18 @@ class HardwareManager:
         """Observe committed human moves and reconcile them in the Digital Twin without robot motion."""
         if self.twin_bridge is not None:
             return self.twin_bridge.reconcile_human_move(context)
+        return True
+
+    def reconcile_new_game(self) -> bool:
+        """Reset digital twin state when a new game starts."""
+        if self.twin_bridge is not None:
+            return self.twin_bridge.reconcile_new_game()
+        return True
+
+    def reconcile_board(self, piece_ids: dict) -> bool:
+        """Reconcile digital twin state to specific board piece mapping (e.g. on Undo)."""
+        if self.twin_bridge is not None:
+            return self.twin_bridge.reconcile_to_board_cells(piece_ids)
         return True
 
     def execute_piece_move(

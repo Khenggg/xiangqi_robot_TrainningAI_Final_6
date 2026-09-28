@@ -712,8 +712,16 @@ class VirtualPhysicalWorld:
                     physicsClientId=self.client_id,
                 )
 
-    def _spawn_pieces(self) -> None:
-        """Spawn 32 Xiangqi pieces as cylinder rigid bodies at initial intersections."""
+    def _spawn_piece_body(
+        self,
+        piece_id: str,
+        side: str,
+        p_type: str,
+        row: int,
+        col: int,
+        z_clearance_m: float = 0.0,
+    ) -> XiangqiPieceBody:
+        """Create and register a single XiangqiPieceBody in the PyBullet world."""
         piece_physics = self.physics_cfg.get("piece", {})
         mass_kg = float(piece_physics.get("mass_kg", 0.020))
         lat_fric = float(piece_physics.get("lateral_friction", 0.5))
@@ -723,9 +731,6 @@ class VirtualPhysicalWorld:
 
         radius_m = (self.geom.piece_diameter_mm / 2.0) / 1000.0  # 11.25 mm
         height_m = self.geom.piece_height_mm / 1000.0            # 9.43 mm
-
-        grid_origin = self.board_cfg["grid_origin_in_robot_base_m"]
-        x0, y0, z0 = grid_origin
         col_spacing_m = self.geom.grid_cell_width_mm / 1000.0
         row_spacing_m = self.geom.grid_cell_length_mm / 1000.0
 
@@ -736,53 +741,56 @@ class VirtualPhysicalWorld:
             physicsClientId=self.client_id,
         )
 
+        pos = self.board_placement_state.cell_to_robot_xyz(row, col, z_rel_m=(height_m / 2.0) + z_clearance_m)
+        body_id = p.createMultiBody(
+            baseMass=mass_kg,
+            baseCollisionShapeIndex=col_shape,
+            basePosition=pos.tolist(),
+            baseOrientation=self.board_placement_state.quat_robot_from_board,
+            physicsClientId=self.client_id,
+        )
+
+        p.changeDynamics(
+            body_id,
+            -1,
+            lateralFriction=lat_fric,
+            rollingFriction=roll_fric,
+            spinningFriction=spin_fric,
+            restitution=restitution,
+            physicsClientId=self.client_id,
+        )
+
+        piece_body = XiangqiPieceBody(
+            piece_id=piece_id,
+            side=side,
+            piece_type=p_type,
+            body_id=body_id,
+            client_id=self.client_id,
+            radius_m=radius_m,
+            height_m=height_m,
+            mass_kg=mass_kg,
+            grid_origin_robot=tuple(self.board_placement_state.grid_origin_robot_m),
+            col_spacing_m=col_spacing_m,
+            row_spacing_m=row_spacing_m,
+            board_placement_state=self.board_placement_state,
+        )
+        self.pieces[piece_id] = piece_body
+        return piece_body
+
+    def _spawn_pieces(self) -> None:
+        """Spawn 32 Xiangqi pieces as cylinder rigid bodies at initial intersections."""
         for p_info in self.layout_cfg.get("pieces", []):
-            piece_id = p_info["id"]
-            side = p_info["side"]
-            p_type = p_info["type"]
-            c = int(p_info["col"])
-            r = int(p_info["row"])
-
-            # Position on board grid from authoritative BoardPlacementState
-            # Spawn slightly above board surface for safe contact settling (1.0 mm clearance)
-            pos = self.board_placement_state.cell_to_robot_xyz(r, c, z_rel_m=(height_m / 2.0) + 0.001)
-
-            body_id = p.createMultiBody(
-                baseMass=mass_kg,
-                baseCollisionShapeIndex=col_shape,
-                basePosition=pos.tolist(),
-                baseOrientation=self.board_placement_state.quat_robot_from_board,
-                physicsClientId=self.client_id,
+            self._spawn_piece_body(
+                piece_id=p_info["id"],
+                side=p_info["side"],
+                p_type=p_info["type"],
+                row=int(p_info["row"]),
+                col=int(p_info["col"]),
+                z_clearance_m=0.001,
             )
-
-            p.changeDynamics(
-                body_id,
-                -1,
-                lateralFriction=lat_fric,
-                rollingFriction=roll_fric,
-                spinningFriction=spin_fric,
-                restitution=restitution,
-                physicsClientId=self.client_id,
-            )
-
-            piece_body = XiangqiPieceBody(
-                piece_id=piece_id,
-                side=side,
-                piece_type=p_type,
-                body_id=body_id,
-                client_id=self.client_id,
-                radius_m=radius_m,
-                height_m=height_m,
-                mass_kg=mass_kg,
-                grid_origin_robot=tuple(self.board_placement_state.grid_origin_robot_m),
-                col_spacing_m=col_spacing_m,
-                row_spacing_m=row_spacing_m,
-                board_placement_state=self.board_placement_state,
-            )
-            self.pieces[piece_id] = piece_body
 
     def reset_pieces(self) -> None:
-        """Reset all pieces to their initial canonical grid positions."""
+        """Reset all pieces to their initial canonical grid positions, respawning any missing."""
         with self._physics_lock:
             # First release any attached piece
             if self.gripper.attached_piece is not None:
@@ -792,29 +800,88 @@ class VirtualPhysicalWorld:
 
             for p_info in self.layout_cfg.get("pieces", []):
                 pid = p_info["id"]
-                p_body = self.pieces.get(pid)
-                if not p_body:
-                    continue
                 c = int(p_info["col"])
                 r = int(p_info["row"])
                 pos = self.board_placement_state.cell_to_robot_xyz(r, c, z_rel_m=height_m / 2.0)
 
-                p.resetBasePositionAndOrientation(
-                    p_body.body_id,
-                    pos.tolist(),
-                    [0.0, 0.0, 0.0, 1.0],
-                    physicsClientId=self.client_id,
-                )
-                p.resetBaseVelocity(
-                    p_body.body_id,
-                    [0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0],
-                    physicsClientId=self.client_id,
-                )
+                p_body = self.pieces.get(pid)
+                if p_body is None:
+                    p_body = self._spawn_piece_body(
+                        piece_id=pid,
+                        side=p_info["side"],
+                        p_type=p_info["type"],
+                        row=r,
+                        col=c,
+                        z_clearance_m=0.0,
+                    )
+                else:
+                    p.resetBasePositionAndOrientation(
+                        p_body.body_id,
+                        pos.tolist(),
+                        [0.0, 0.0, 0.0, 1.0],
+                        physicsClientId=self.client_id,
+                    )
+                    p.resetBaseVelocity(
+                        p_body.body_id,
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                        physicsClientId=self.client_id,
+                    )
                 p_body.physical_state = PiecePhysicalState.SETTLING
                 p_body._consecutive_settled_steps = 0
                 p_body.board_placement_state = self.board_placement_state
                 p_body.grid_origin_robot = tuple(self.board_placement_state.grid_origin_robot_m)
+
+    def reconcile_to_board_cells(self, piece_cells: Dict[Tuple[int, int], str]) -> None:
+        """Reconcile piece bodies in simulation to match the given cell-to-piece map (e.g. on Undo)."""
+        with self._physics_lock:
+            if self.gripper.attached_piece is not None:
+                self.release_attached_piece()
+
+            height_m = self.geom.piece_height_mm / 1000.0
+            p_lookup = {p["id"]: p for p in self.layout_cfg.get("pieces", [])}
+            target_ids = set(piece_cells.values())
+
+            # Remove pieces not in target cells (e.g. captured)
+            for pid in list(self.pieces.keys()):
+                if pid not in target_ids:
+                    p_body = self.pieces.pop(pid)
+                    try:
+                        p.removeBody(p_body.body_id, physicsClientId=self.client_id)
+                    except Exception:
+                        pass
+
+            # Position or respawn pieces at target cells
+            for (r, c), pid in piece_cells.items():
+                pos = self.board_placement_state.cell_to_robot_xyz(r, c, z_rel_m=height_m / 2.0)
+                p_body = self.pieces.get(pid)
+                if p_body is None:
+                    p_info = p_lookup.get(pid, {})
+                    side = p_info.get("side", "r" if "red" in pid else "b")
+                    p_type = p_info.get("type", "pawn")
+                    p_body = self._spawn_piece_body(
+                        piece_id=pid,
+                        side=side,
+                        p_type=p_type,
+                        row=r,
+                        col=c,
+                        z_clearance_m=0.0,
+                    )
+                else:
+                    p.resetBasePositionAndOrientation(
+                        p_body.body_id,
+                        pos.tolist(),
+                        [0.0, 0.0, 0.0, 1.0],
+                        physicsClientId=self.client_id,
+                    )
+                    p.resetBaseVelocity(
+                        p_body.body_id,
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                        physicsClientId=self.client_id,
+                    )
+                p_body.physical_state = PiecePhysicalState.RESTING
+                p_body._consecutive_settled_steps = self.required_settled_steps
 
     def step(self, num_steps: int = 1) -> None:
         """Step the simulation by fixed deterministic timesteps."""
