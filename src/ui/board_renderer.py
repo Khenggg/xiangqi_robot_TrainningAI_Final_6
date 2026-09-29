@@ -29,7 +29,13 @@ BTN_COLOR = (200, 50, 50)
 BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT - 60, 120, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(SCREEN_WIDTH / 2 + 30, SCREEN_HEIGHT - 60, 120, 40)
-BTN_CONTINUE_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 75, SCREEN_HEIGHT - 112, 150, 38)
+CLIENT_ACTION_X = 575
+CLIENT_ACTION_WIDTH = 205
+BTN_SCAN_FEN_RECT = pygame.Rect(CLIENT_ACTION_X, 148, CLIENT_ACTION_WIDTH, 42)
+BTN_CONFIRM_MOVE_RECT = pygame.Rect(CLIENT_ACTION_X, 198, CLIENT_ACTION_WIDTH, 42)
+BTN_EMERGENCY_RECT = pygame.Rect(CLIENT_ACTION_X, 248, CLIENT_ACTION_WIDTH, 42)
+BTN_ROLLBACK_RECT = pygame.Rect(CLIENT_ACTION_X, 298, CLIENT_ACTION_WIDTH, 42)
+BTN_CONTINUE_RECT = pygame.Rect(CLIENT_ACTION_X, 348, CLIENT_ACTION_WIDTH, 42)
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 330, 330, 68)
 HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 142, 22, 120, 38)
 SETTINGS_BACK_RECT = pygame.Rect(28, 22, 112, 38)
@@ -90,14 +96,6 @@ class BoardRenderer:
             txt_new = self.ui_font.render("NEW GAME", True, (255, 255, 255))
             self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
 
-            # A snapshot failure must never leave the operator with only a
-            # console-only recovery path.  This button is intentionally shown
-            # only after the snapshot pipeline has paused the game.
-            if game_state.get("snapshot_continue_required"):
-                pygame.draw.rect(self.screen, (47, 128, 78), BTN_CONTINUE_RECT, border_radius=8)
-                txt_continue = self.ui_font.render("CONTINUE", True, (255, 255, 255))
-                self.screen.blit(txt_continue, txt_continue.get_rect(center=BTN_CONTINUE_RECT.center))
-
             # Mode indicator
             mode_str = "MOUSE (DRY RUN)" if game_state.get("allow_mouse") else "CAMERA AI"
             mode_txt = self.ui_font.render(f"MODE: {mode_str}", True, (0, 0, 255))
@@ -107,10 +105,50 @@ class BoardRenderer:
             if game_state.get("turn") == "r" and not game_state.get("allow_mouse"):
                 hint = self.ui_font.render("⌨️ Bấm SPACE sau khi đi xong", True, (0, 100, 0))
                 self.screen.blit(hint, (SCREEN_WIDTH - 280, 10))
+
+            self._draw_client_actions(game_state)
         else:
             pygame.draw.rect(self.screen, BTN_NEW_GAME_COLOR, BTN_NEW_GAME_RECT, border_radius=8)
             txt_new = self.ui_font.render("NEW GAME", True, (255, 255, 255))
             self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
+
+    def _draw_client_actions(self, game_state):
+        """Draw the always-visible client control panel beside the board."""
+        panel = pygame.Rect(CLIENT_ACTION_X - 6, 103, CLIENT_ACTION_WIDTH + 12, 317)
+        pygame.draw.rect(self.screen, (50, 47, 43), panel, border_radius=10)
+        pygame.draw.rect(self.screen, (143, 121, 87), panel, width=1, border_radius=10)
+        title = self.ui_font.render("CLIENT CONTROLS", True, (255, 226, 167))
+        self.screen.blit(title, title.get_rect(center=(panel.centerx, 124)))
+
+        actions = (
+            (BTN_SCAN_FEN_RECT, "V", "QUÉT / ĐỐI SOÁT FEN", (49, 117, 166)),
+            (BTN_CONFIRM_MOVE_RECT, "SPACE", "XÁC NHẬN NƯỚC ĐỎ", (58, 133, 85)),
+            (BTN_EMERGENCY_RECT, "M", "EMERGENCY MODE", (169, 112, 42)),
+            (BTN_ROLLBACK_RECT, "Z", "ROLLBACK", (133, 77, 55)),
+        )
+        emergency_active = game_state.get("emergency_mode", False)
+        for rect, key, label, color in actions:
+            button_color = (185, 92, 32) if key == "M" and emergency_active else color
+            pygame.draw.rect(self.screen, button_color, rect, border_radius=7)
+            key_surf = self.ui_font.render(key, True, (255, 255, 255))
+            label_surf = self.ui_font.render(label, True, (255, 255, 255))
+            self.screen.blit(key_surf, (rect.x + 9, rect.y + 12))
+            self.screen.blit(label_surf, (rect.x + 49, rect.y + 12))
+
+        can_continue = game_state.get("snapshot_continue_required", False)
+        continue_color = (47, 128, 78) if can_continue else (89, 86, 80)
+        pygame.draw.rect(self.screen, continue_color, BTN_CONTINUE_RECT, border_radius=7)
+        continue_key = self.ui_font.render("▶", True, (255, 255, 255))
+        continue_label = self.ui_font.render(
+            "CONTINUE" if can_continue else "CONTINUE (KHI PAUSE)",
+            True, (255, 255, 255),
+        )
+        self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 11, BTN_CONTINUE_RECT.y + 12))
+        self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 38, BTN_CONTINUE_RECT.y + 12))
+
+        note = "M đang bật: đi tay Đỏ / Đen" if emergency_active else "Chọn phím hoặc bấm nút"
+        note_surf = self.ui_font.render(note, True, (238, 223, 192))
+        self.screen.blit(note_surf, note_surf.get_rect(center=(panel.centerx, 405)))
 
         # --- Vẽ lưới bàn cờ ---
         for r in range(NUM_ROWS):

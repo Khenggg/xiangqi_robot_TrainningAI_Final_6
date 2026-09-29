@@ -45,6 +45,7 @@ class GameState:
         self.ai_epoch: int = 0
         self.ai_job_token = None
         self.ai_results: Dict[Any, Any] = {}
+        self.ai_retry_requested: bool = False
         
         # Rollback State
         self._pre_space_state: Optional[Dict[str, Any]] = None
@@ -77,6 +78,7 @@ class GameState:
             "status_expiry": self.status_expiry,
             "manual_override_active": self.manual_override_active,
             "snapshot_continue_required": self.snapshot_continue_required,
+            "emergency_mode": self.emergency_mode,
         }
 
     def reset_game(self, hw_manager=None):
@@ -115,6 +117,7 @@ class GameState:
         self.ai_think_start = 0.0
         self.ai_job_token = None
         self.ai_results = {}
+        self.ai_retry_requested = False
         self.human_commit_generation = 0
         self.ai_started_for_human_commit_generation = 0
         self.manual_override_active = False
@@ -176,6 +179,7 @@ class GameState:
         self.ai_epoch += 1
         self.ai_job_token = None
         self.ai_results = {}
+        self.ai_retry_requested = False
         self.ai_thread = None
         self.ai_result = None
         self.ai_thinking = False
@@ -214,6 +218,45 @@ class GameState:
     def clear_pending_ai_move(self):
         self.pending_ai_move = None
         self.physical_sync_fault = False
+
+    def prepare_ai_retry_after_physical_miss(self):
+        """Re-open the current Black AI turn after a verified missed pickup.
+
+        The FEN board remains unchanged.  A dedicated retry flag lets the main
+        loop create one fresh AI job for that same human move; it never reuses
+        a potentially stale robot command.
+        """
+        if self.game_over or self.turn != "b":
+            return False
+        worker = self.ai_thread
+        is_alive = getattr(worker, "is_alive", None)
+        if callable(is_alive) and is_alive():
+            # Moonfish is a shared UCCI subprocess; never start a second
+            # request while an earlier worker is still using it.
+            return False
+        self.ai_epoch += 1
+        self.ai_job_token = None
+        self.ai_thread = None
+        self.ai_thinking = False
+        self.ai_results = {}
+        self.ai_retry_requested = True
+        return True
+
+    def can_start_ai_turn(self):
+        """Whether the main loop may create exactly one Black AI worker."""
+        return (
+            not self.ai_thinking
+            and self.ai_thread is None
+            and (
+                self.human_commit_generation > self.ai_started_for_human_commit_generation
+                or self.ai_retry_requested
+            )
+        )
+
+    def mark_ai_turn_started(self):
+        """Consume the normal-generation or one-shot retry start authority."""
+        self.ai_started_for_human_commit_generation = self.human_commit_generation
+        self.ai_retry_requested = False
 
     def commit_pending_ai_move(self):
         """Atomically commit a camera-verified physical AI move to the FEN board."""
@@ -293,6 +336,7 @@ class GameState:
         self.ai_thinking = False
         self.ai_thread = None
         self.ai_results = {}
+        self.ai_retry_requested = False
         self.update_fen_from_board()
         self.api_client.send_move_update_board(self.current_fen)
         self.set_status("✅ Emergency Black move accepted — Red to move.", color=(0, 120, 0), duration=6.0)

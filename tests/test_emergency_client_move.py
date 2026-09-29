@@ -5,6 +5,7 @@ import pygame
 
 from src.core import xiangqi
 from src.core.game_state import GameState
+from src.ui.board_renderer import BTN_CONTINUE_RECT, BTN_EMERGENCY_RECT
 from src.ui.input_handler import InputHandler
 
 
@@ -141,6 +142,68 @@ class EmergencyClientMoveTests(unittest.TestCase):
         handler = InputHandler(State(), type("Hardware", (), {})())
         handler.handle_keyboard(pygame.K_m)
         self.assertTrue(handler.state.emergency_mode)
+
+    def test_emergency_panel_button_dispatches_m_key(self):
+        class State:
+            allow_mouse_move = False
+            game_over = False
+            turn = "r"
+            manual_override_active = False
+            physical_sync_fault = False
+
+            def set_status(self, *args, **kwargs):
+                pass
+
+        state = State()
+        handler = InputHandler(state, type("Hardware", (), {})())
+        handler.handle_mouse_down(*BTN_EMERGENCY_RECT.center)
+
+        self.assertTrue(state.emergency_mode)
+        self.assertTrue(state.manual_override_active)
+
+    def test_disabled_continue_button_does_not_select_a_board_piece(self):
+        class State:
+            allow_mouse_move = False
+            game_over = False
+            turn = "r"
+            manual_override_active = True
+            snapshot_continue_required = False
+            physical_sync_fault = False
+            selected_pos = None
+            board = xiangqi.get_board()
+
+            def set_status(self, *args, **kwargs):
+                pass
+
+        state = State()
+        InputHandler(state, type("Hardware", (), {})()).handle_mouse_down(*BTN_CONTINUE_RECT.center)
+        self.assertIsNone(state.selected_pos)
+
+    def test_v_resume_exits_emergency_mode(self):
+        class State:
+            allow_mouse_move = False
+            game_over = False
+            turn = "r"
+            manual_override_active = True
+            emergency_mode = True
+            physical_sync_fault = False
+            board = xiangqi.get_board()
+
+            def set_status(self, *args, **kwargs):
+                pass
+
+        class Hardware:
+            yolo_detector = object()
+            cam_monitor = object()
+            board_reconciler = None
+
+            def capture_baseline_if_needed(self, force_delay=0.0):
+                return True
+
+        state = State()
+        InputHandler(state, Hardware()).handle_keyboard(pygame.K_v)
+        self.assertFalse(state.manual_override_active)
+        self.assertFalse(state.emergency_mode)
 
     def test_space_confirmation_exits_emergency_mode(self):
         class Detector:
@@ -291,6 +354,143 @@ class EmergencyClientMoveTests(unittest.TestCase):
         self.assertEqual({}, state.ai_results)
         self.assertIsNone(state.pending_ai_move)
         self.assertFalse(state.physical_sync_fault)
+
+    def test_verified_missed_pick_reopens_one_fresh_ai_turn(self):
+        state = GameState(allow_mouse_move=False)
+        state.api_client.send_move_update_board = lambda fen: None
+        state.turn = "b"
+        state.human_commit_generation = 4
+        state.ai_started_for_human_commit_generation = 4
+        state.ai_epoch = 7
+        state.ai_thread = object()
+        state.ai_thinking = True
+        state.ai_results = {"stale": "move"}
+
+        self.assertTrue(state.prepare_ai_retry_after_physical_miss())
+        self.assertEqual(4, state.ai_started_for_human_commit_generation)
+        self.assertEqual(8, state.ai_epoch)
+        self.assertTrue(state.ai_retry_requested)
+        self.assertIsNone(state.ai_thread)
+        self.assertFalse(state.ai_thinking)
+        self.assertEqual({}, state.ai_results)
+
+    def test_v_reconciliation_queues_retry_when_board_is_still_old_fen(self):
+        class State:
+            game_over = False
+            board = xiangqi.get_board()
+            pending_ai_move = {"expected_board": [["." for _ in range(9)] for _ in range(10)]}
+            snapshot_continue_required = True
+
+            def __init__(self):
+                self.cleared = False
+                self.retry_requested = False
+                self.statuses = []
+
+            def clear_pending_ai_move(self):
+                self.cleared = True
+                self.pending_ai_move = None
+
+            def prepare_ai_retry_after_physical_miss(self):
+                self.retry_requested = True
+                return True
+
+            def set_status(self, message, **kwargs):
+                self.statuses.append(message)
+
+        class Hardware:
+            def verify_physical_board(self, board):
+                return board == state.board
+
+        state = State()
+        handler = InputHandler(state, Hardware())
+        handler._reconcile_physical_sync_fault()
+
+        self.assertTrue(state.cleared)
+        self.assertTrue(state.retry_requested)
+        self.assertIn("AI đang tính lại", state.statuses[-1])
+
+    def test_v_partial_capture_shows_manual_completion_coordinates(self):
+        class State:
+            game_over = False
+            board = xiangqi.get_board()
+            pending_ai_move = {
+                "move": ((2, 2), (2, 5)),
+                "expected_board": [["." for _ in range(9)] for _ in range(10)],
+                "captured_piece": "r_P",
+            }
+
+            def __init__(self):
+                self.statuses = []
+
+            def set_status(self, message, **kwargs):
+                self.statuses.append(message)
+
+        class Hardware:
+            def verify_physical_board(self, board):
+                return False
+
+        state = State()
+        InputHandler(state, Hardware())._reconcile_physical_sync_fault()
+
+        self.assertIn("Nước ăn chưa hoàn tất", state.statuses[-1])
+        self.assertIn("(2,2)→(2,5)", state.statuses[-1])
+
+    def test_v_after_manual_capture_completion_commits_expected_fen(self):
+        state = GameState(allow_mouse_move=False)
+        sent_fens = []
+        state.api_client.send_move_update_board = sent_fens.append
+        expected_board = [row[:] for row in state.board]
+        expected_board[3][0] = "."
+        expected_board[6][0] = "b_P"
+        state.set_pending_ai_move(((0, 3), (0, 6)), expected_board, "r_P")
+        state.physical_sync_fault = True
+
+        class Hardware:
+            def __init__(self):
+                self.baseline_calls = 0
+
+            def verify_physical_board(self, board):
+                return board == expected_board
+
+            def capture_baseline_if_needed(self, force_delay=0.0):
+                self.baseline_calls += 1
+                return True
+
+        hardware = Hardware()
+        InputHandler(state, hardware)._reconcile_physical_sync_fault()
+
+        self.assertEqual(expected_board, state.board)
+        self.assertEqual("r", state.turn)
+        self.assertIn("r_P", state.r_captured)
+        self.assertIsNone(state.pending_ai_move)
+        self.assertFalse(state.physical_sync_fault)
+        self.assertEqual([state.current_fen], sent_fens)
+        self.assertEqual(1, hardware.baseline_calls)
+
+    def test_retry_start_authority_is_consumed_exactly_once(self):
+        state = GameState(allow_mouse_move=False)
+        state.turn = "b"
+        state.human_commit_generation = 5
+        state.ai_started_for_human_commit_generation = 5
+        state.ai_retry_requested = True
+
+        self.assertTrue(state.can_start_ai_turn())
+        state.mark_ai_turn_started()
+        self.assertFalse(state.ai_retry_requested)
+        self.assertFalse(state.can_start_ai_turn())
+
+    def test_retry_refuses_to_replace_a_live_ai_worker(self):
+        class Worker:
+            def is_alive(self):
+                return True
+
+        state = GameState(allow_mouse_move=False)
+        state.turn = "b"
+        state.ai_thread = Worker()
+
+        self.assertFalse(state.prepare_ai_retry_after_physical_miss())
+        self.assertFalse(state.ai_retry_requested)
+        self.assertIsInstance(state.ai_thread, Worker)
 
 
 if __name__ == "__main__":

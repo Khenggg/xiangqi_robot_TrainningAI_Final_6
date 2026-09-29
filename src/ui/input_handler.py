@@ -1,7 +1,8 @@
 import time
 from src.core import xiangqi  # type: ignore
 from src.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT,
-                                   BTN_CONTINUE_RECT, NUM_COLS, NUM_ROWS)  # type: ignore
+                                   BTN_CONTINUE_RECT, BTN_SCAN_FEN_RECT, BTN_CONFIRM_MOVE_RECT,
+                                   BTN_EMERGENCY_RECT, BTN_ROLLBACK_RECT, NUM_COLS, NUM_ROWS)  # type: ignore
 from src.vision.board_stability_monitor import BoardStabilityMonitor
 from src.vision.player_turn_arbiter import PlayerTurnArbiter
 from src.vision.player_turn_types import BoardObservation, CommitRequest, InteractionCapability, PlayerTurnMode, Visibility
@@ -82,10 +83,22 @@ class InputHandler:
         return self._unified_active
 
     def handle_mouse_down(self, mx, my):
-        if (BTN_CONTINUE_RECT.collidepoint(mx, my)
-                and getattr(self.state, "snapshot_continue_required", False)
-                and not self.state.game_over):
-            self._continue_after_snapshot_pause()
+        import pygame  # type: ignore
+        client_actions = (
+            (BTN_SCAN_FEN_RECT, pygame.K_v),
+            (BTN_CONFIRM_MOVE_RECT, pygame.K_SPACE),
+            (BTN_EMERGENCY_RECT, pygame.K_m),
+            (BTN_ROLLBACK_RECT, pygame.K_z),
+        )
+        for rect, key in client_actions:
+            if rect.collidepoint(mx, my) and not self.state.game_over:
+                self.handle_keyboard(key)
+                return
+
+        if BTN_CONTINUE_RECT.collidepoint(mx, my):
+            if (getattr(self.state, "snapshot_continue_required", False)
+                    and not self.state.game_over):
+                self._continue_after_snapshot_pause()
             return
 
         # Surrender Button
@@ -201,17 +214,21 @@ class InputHandler:
             return False
 
         self.state.manual_override_active = False
+        self.state.emergency_mode = False
         self._last_move_confirmation_failure = None
         self.state.set_status("✅ Đã tiếp tục tự động quét FEN.", color=(0, 120, 0), duration=6.0)
         return True
 
     def handle_keyboard(self, key):
         import pygame  # type: ignore
-        if key == pygame.K_v and self.state.physical_sync_fault:
-            self._reconcile_physical_sync_fault()
+        if self.state.game_over:
             return
 
-        if self.state.game_over:
+        if key == pygame.K_v:
+            if self.state.physical_sync_fault:
+                self._reconcile_physical_sync_fault()
+            else:
+                self.resume_automatic_scanning()
             return
 
         # Z KEY: Rollback
@@ -248,7 +265,17 @@ class InputHandler:
         if self.hw.verify_physical_board(self.state.board):
             self.state.clear_pending_ai_move()
             self.state.snapshot_continue_required = False
-            self.state.set_status("↩️ Bàn thật vẫn ở FEN cũ — có thể thử lại nước AI.", color=(0, 100, 180), duration=10.0)
+            retry = getattr(self.state, "prepare_ai_retry_after_physical_miss", None)
+            if callable(retry) and retry():
+                self.state.set_status(
+                    "↩️ Bàn thật vẫn ở FEN cũ — AI đang tính lại nước đi.",
+                    color=(0, 100, 180), duration=10.0,
+                )
+            else:
+                self.state.set_status(
+                    "↩️ Bàn thật vẫn ở FEN cũ, nhưng không thể khởi động lại lượt AI.",
+                    color=(180, 0, 0), duration=10.0,
+                )
             return
 
         if self.hw.verify_physical_board(pending["expected_board"]):
@@ -263,7 +290,18 @@ class InputHandler:
                     self.state.set_status("✅ Đã xác nhận bàn thật — đến lượt bạn.", color=(0, 100, 180), duration=8.0)
             return
 
-        self.state.set_status("❌ Bàn thật không khớp trước/sau nước đi. Chỉnh tay rồi nhấn V.", color=(180, 0, 0), duration=15.0)
+        src, dst = pending["move"]
+        if pending.get("captured_piece") != ".":
+            self.state.set_status(
+                "⚠️ Nước ăn chưa hoàn tất: chuyển quân Đen "
+                f"({src[0]},{src[1]})→({dst[0]},{dst[1]}) rồi nhấn V.",
+                color=(180, 100, 0), duration=20.0,
+            )
+        else:
+            self.state.set_status(
+                "❌ Bàn thật không khớp trước/sau nước đi. Chỉnh tay rồi nhấn V.",
+                color=(180, 0, 0), duration=15.0,
+            )
 
     def _handle_space_key(self, auto_retry=False):
         if self._player_turn_mode == PlayerTurnMode.UNIFIED:

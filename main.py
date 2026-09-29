@@ -207,11 +207,9 @@ try:
                 and not state.physical_sync_fault):
             
             # --- Khởi động Thread suy nghĩ ---
-            if (not state.ai_thinking and state.ai_thread is None
-                    and state.human_commit_generation
-                    > state.ai_started_for_human_commit_generation):
+            if state.can_start_ai_turn():
                 board_snapshot = [row[:] for row in state.board]
-                state.ai_started_for_human_commit_generation = state.human_commit_generation
+                state.mark_ai_turn_started()
                 ai_job_token = (state.game_epoch, state.ai_epoch, state.human_commit_generation)
                 state.ai_job_token = ai_job_token
                 state.ai_thinking = True
@@ -298,9 +296,19 @@ try:
                                                 robot_success = False
                                                 state.physical_sync_fault = True
                                                 state.snapshot_continue_required = True
-                                                state.snapshot_continue_can_commit_pending = True
+                                                # A half-completed capture has three physical
+                                                # states, so CONTINUE must not commit FEN blindly.
+                                                # The operator completes Black's move then V
+                                                # verifies the exact expected board.
+                                                state.snapshot_continue_can_commit_pending = not is_cap
+                                                recovery_hint = (
+                                                    "⚠️ Nước ăn chưa hoàn tất: chuyển quân Đen "
+                                                    f"({s[0]},{s[1]})→({d[0]},{d[1]}) rồi nhấn V."
+                                                    if is_cap else
+                                                    "⚠️ Không xác nhận được vị trí quân sau khi thả — FEN chưa được cập nhật."
+                                                )
                                                 state.set_status(
-                                                    "⚠️ Không xác nhận được vị trí quân sau khi thả — FEN chưa được cập nhật.",
+                                                    recovery_hint,
                                                     color=(180, 100, 0), duration=20.0,
                                                 )
                                 except Exception as e:
