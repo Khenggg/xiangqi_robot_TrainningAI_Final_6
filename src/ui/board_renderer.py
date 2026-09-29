@@ -29,8 +29,8 @@ BTN_COLOR = (200, 50, 50)
 BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT - 60, 120, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(SCREEN_WIDTH / 2 + 30, SCREEN_HEIGHT - 60, 120, 40)
-CLIENT_ACTION_X = 575
-CLIENT_ACTION_WIDTH = 205
+CLIENT_ACTION_X = 590
+CLIENT_ACTION_WIDTH = 190
 BTN_SCAN_FEN_RECT = pygame.Rect(CLIENT_ACTION_X, 148, CLIENT_ACTION_WIDTH, 42)
 BTN_CONFIRM_MOVE_RECT = pygame.Rect(CLIENT_ACTION_X, 198, CLIENT_ACTION_WIDTH, 42)
 BTN_EMERGENCY_RECT = pygame.Rect(CLIENT_ACTION_X, 248, CLIENT_ACTION_WIDTH, 42)
@@ -121,19 +121,25 @@ class BoardRenderer:
         self.screen.blit(title, title.get_rect(center=(panel.centerx, 124)))
 
         actions = (
-            (BTN_SCAN_FEN_RECT, "V", "QUÉT / ĐỐI SOÁT FEN", (49, 117, 166)),
-            (BTN_CONFIRM_MOVE_RECT, "SPACE", "XÁC NHẬN NƯỚC ĐỎ", (58, 133, 85)),
-            (BTN_EMERGENCY_RECT, "M", "EMERGENCY MODE", (169, 112, 42)),
-            (BTN_ROLLBACK_RECT, "Z", "ROLLBACK", (133, 77, 55)),
+            (BTN_SCAN_FEN_RECT, "V", ("QUÉT / ĐỐI SOÁT FEN",), (49, 117, 166)),
+            (BTN_CONFIRM_MOVE_RECT, "SPACE", ("XÁC NHẬN", "NƯỚC ĐỎ"), (58, 133, 85)),
+            (BTN_EMERGENCY_RECT, "M", ("EMERGENCY MODE",), (169, 112, 42)),
+            (BTN_ROLLBACK_RECT, "Z", ("ROLLBACK",), (133, 77, 55)),
         )
         emergency_active = game_state.get("emergency_mode", False)
-        for rect, key, label, color in actions:
+        for rect, key, label_lines, color in actions:
             button_color = (185, 92, 32) if key == "M" and emergency_active else color
             pygame.draw.rect(self.screen, button_color, rect, border_radius=7)
             key_surf = self.ui_font.render(key, True, (255, 255, 255))
-            label_surf = self.ui_font.render(label, True, (255, 255, 255))
             self.screen.blit(key_surf, (rect.x + 9, rect.y + 12))
-            self.screen.blit(label_surf, (rect.x + 49, rect.y + 12))
+            label_x = rect.x + 18 + key_surf.get_width()
+            if len(label_lines) == 1:
+                label_surf = self.ui_font.render(label_lines[0], True, (255, 255, 255))
+                self.screen.blit(label_surf, (label_x, rect.y + 12))
+            else:
+                for line_index, label in enumerate(label_lines):
+                    label_surf = self.ui_font.render(label, True, (255, 255, 255))
+                    self.screen.blit(label_surf, (label_x, rect.y + 3 + line_index * 19))
 
         can_continue = game_state.get("snapshot_continue_required", False)
         continue_color = (47, 128, 78) if can_continue else (89, 86, 80)
