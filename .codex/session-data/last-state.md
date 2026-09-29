@@ -1,0 +1,1 @@
+{"event": "Stop", "session_id": "01a0ebc3-8171-77d0-a9fe-371c69677493", "turn_id": "01a0ec0d-d62b-7391-9ff1-83715303dcab", "cwd": "E:\\Get Real\\OJT Xiangqi robot arm project\\main\\xiangqi_robot_TrainningAI_Final_6", "transcript_path": "C:\\Users\\HUY\\.codex\\sessions\\2026\\09\\29\\rollout-2026-09-29T13-04-13-01a0ebc3-8171-77d0-a9fe-371c69677493.jsonl", "saved_at": 1790666789}

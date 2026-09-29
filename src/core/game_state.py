@@ -21,6 +21,7 @@ class GameState:
         self.r_captured = []
         self.b_captured = []
         self.move_history = []
+        self.move_log = []
         self.move_number = 1
         
         
@@ -79,6 +80,7 @@ class GameState:
             "manual_override_active": self.manual_override_active,
             "snapshot_continue_required": self.snapshot_continue_required,
             "emergency_mode": self.emergency_mode,
+            "recent_moves": self.move_log[-8:],
         }
 
     def reset_game(self, hw_manager=None):
@@ -106,6 +108,7 @@ class GameState:
         self.r_captured = []
         self.b_captured = []
         self.move_history = []
+        self.move_log = []
         self.move_number = 1
         self.status_message = ""
         self.status_expiry = 0.0
@@ -162,6 +165,7 @@ class GameState:
             "r_captured": list(self.r_captured),
             "b_captured": list(self.b_captured),
             "move_history": list(self.move_history),
+            "move_log": list(self.move_log),
             "baseline_occ": baseline_occ,
             "baseline_time": baseline_time,
         }
@@ -192,6 +196,7 @@ class GameState:
         self.r_captured = list(s["r_captured"])
         self.b_captured = list(s["b_captured"])
         self.move_history = list(s["move_history"])
+        self.move_log = list(s.get("move_log", []))
 
         if hw_manager:
             hw_manager.restore_yolo_baseline(s.get("baseline_occ"), s.get("baseline_time"))
@@ -258,6 +263,13 @@ class GameState:
         self.ai_started_for_human_commit_generation = self.human_commit_generation
         self.ai_retry_requested = False
 
+    def _record_move(self, turn, src, dst, piece):
+        """Record a move for rules/history and the compact in-game move feed."""
+        if not hasattr(self, "move_log"):
+            self.move_log = []
+        self.move_history.append({"turn": turn, "src": src, "dst": dst})
+        self.move_log.append({"turn": turn, "src": src, "dst": dst, "piece": piece})
+
     def commit_pending_ai_move(self):
         """Atomically commit a camera-verified physical AI move to the FEN board."""
         if self.pending_ai_move is None:
@@ -265,7 +277,7 @@ class GameState:
         pending = self.pending_ai_move
         src, dst = pending["move"]
         captured_piece = pending["captured_piece"]
-        self.move_history.append({"turn": "b", "src": src, "dst": dst})
+        self._record_move("b", src, dst, self.board[src[1]][src[0]])
         if captured_piece != ".":
             self.r_captured.append(captured_piece)
         self.board = [row[:] for row in pending["expected_board"]]
@@ -280,7 +292,7 @@ class GameState:
         print(f"[HUMAN] ✅ Moved: {p_name} {src}->{dst}")
         self.set_status("✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
         
-        self.move_history.append({"turn": "r", "src": src, "dst": dst})
+        self._record_move("r", src, dst, p_name)
         
         cap_p = self.board[dst[1]][dst[0]]
         if cap_p != ".": self.b_captured.append(cap_p)
@@ -321,7 +333,7 @@ class GameState:
 
         print(f"[EMERGENCY] ✅ Manual Black move: {p_name} {src}->{dst}")
         captured_piece = self.board[dst[1]][dst[0]]
-        self.move_history.append({"turn": "b", "src": src, "dst": dst})
+        self._record_move("b", src, dst, p_name)
         if captured_piece != ".":
             self.r_captured.append(captured_piece)
         self.board, _ = xiangqi.make_temp_move(self.board, (src, dst))

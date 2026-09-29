@@ -3,6 +3,7 @@
 # === Hiển thị bàn cờ Tướng ảo trên Pygame ===
 # =============================================================================
 import time
+import os
 import pygame
 from src.core import xiangqi
 
@@ -23,6 +24,12 @@ MENU_TEXT_COLOR = (67, 45, 29)
 MENU_MUTED_TEXT_COLOR = (103, 78, 56)
 MENU_ACCENT_COLOR = (143, 47, 42)
 MENU_BORDER_COLOR = (119, 82, 48)
+RED_PIECE_COLOR = (220, 20, 60)
+BLACK_PIECE_COLOR = (0, 0, 0)
+MOVE_LOG_RECT = pygame.Rect(12, 112, 195, 208)
+MOVE_LOG_X = MOVE_LOG_RECT.x + 10
+MOVE_LOG_Y = MOVE_LOG_RECT.y + 30
+MOVE_LOG_LINE_HEIGHT = 21
 PIECE_RADIUS = SQUARE_SIZE // 2 - 4
 
 BTN_COLOR = (200, 50, 50)
@@ -54,6 +61,32 @@ PIECE_DISPLAY_NAMES = {
     "b_N": "馬", "b_C": "砲", "b_P": "卒",
 }
 
+PIECE_LOG_NAMES = {
+    "K": "Tướng", "A": "Sĩ", "E": "Tượng", "N": "Mã",
+    "R": "Xe", "C": "Pháo", "P": "Tốt",
+}
+
+UNSUPPORTED_UI_GLYPHS = {
+    "⌨": "", "️": "", "🤖": "AI ", "✅": "", "⚠": "", "❌": "",
+    "📸": "", "↩": "", "✋": "",
+}
+
+
+def unicode_ui_font(size, bold=False):
+    """Load Windows' Unicode UI font explicitly so Vietnamese glyphs are stable."""
+    font_name = "segoeuib.ttf" if bold else "segoeui.ttf"
+    font_path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", font_name)
+    if os.path.isfile(font_path):
+        return pygame.font.Font(font_path, size)
+    return pygame.font.SysFont("Segoe UI", size, bold=bold)
+
+
+def display_text(text):
+    """Remove emoji-only glyphs that SDL_ttf cannot reliably fall back for."""
+    for glyph, replacement in UNSUPPORTED_UI_GLYPHS.items():
+        text = text.replace(glyph, replacement)
+    return text
+
 
 class BoardRenderer:
     """Quản lý hiển thị bàn cờ Tướng trên Pygame."""
@@ -62,7 +95,8 @@ class BoardRenderer:
         self.screen = screen
         self.piece_font = pygame.font.SysFont("simsun", 20, bold=True)
         self.game_font = pygame.font.SysFont("times new roman", 36, bold=True)
-        self.ui_font = pygame.font.SysFont("arial", 16, bold=True)
+        self.ui_font = unicode_ui_font(16, bold=True)
+        self.log_font = unicode_ui_font(12, bold=True)
 
     # --- Chuyển đổi tọa độ ---
     @staticmethod
@@ -85,6 +119,8 @@ class BoardRenderer:
         """
         self.screen.fill(BOARD_COLOR)
 
+        self.draw_recent_moves(game_state.get("recent_moves", []))
+
         if not game_state.get("game_over"):
             # Nút SURRENDER
             pygame.draw.rect(self.screen, BTN_COLOR, BTN_SURRENDER_RECT, border_radius=8)
@@ -103,7 +139,7 @@ class BoardRenderer:
 
             # Hướng dẫn SPACE
             if game_state.get("turn") == "r" and not game_state.get("allow_mouse"):
-                hint = self.ui_font.render("⌨️ Bấm SPACE sau khi đi xong", True, (0, 100, 0))
+                hint = self.ui_font.render("Bấm SPACE sau khi đi xong", True, (0, 100, 0))
                 self.screen.blit(hint, (SCREEN_WIDTH - 280, 10))
 
             self._draw_client_actions(game_state)
@@ -175,9 +211,10 @@ class BoardRenderer:
         pygame.draw.line(self.screen, LINE_COLOR, self.grid_to_pixel(5, 0), self.grid_to_pixel(3, 2), 1)
         pygame.draw.line(self.screen, LINE_COLOR, self.grid_to_pixel(3, 7), self.grid_to_pixel(5, 9), 1)
         pygame.draw.line(self.screen, LINE_COLOR, self.grid_to_pixel(5, 7), self.grid_to_pixel(3, 9), 1)
+        self.draw_board_coordinates()
 
         # --- Status message ---
-        msg = game_state.get("status_message", "")
+        msg = display_text(game_state.get("status_message", ""))
         if msg and time.time() < game_state.get("status_expiry", 0):
             color = game_state.get("status_color", (200, 0, 0))
             msg_surf = self.ui_font.render(msg, True, (255, 255, 255))
@@ -194,7 +231,7 @@ class BoardRenderer:
             start = game_state.get("ai_think_start", time.time())
             dots = "." * (int(time.time() - start) % 4)
             elapsed = time.time() - start
-            think_msg = f"🤖  AI is thinking{dots}  ({elapsed:.1f}s)"
+            think_msg = f"AI is thinking{dots}  ({elapsed:.1f}s)"
             think_surf = self.ui_font.render(think_msg, True, (255, 255, 255))
             padding = 10
             bg_rect = think_surf.get_rect(centerx=SCREEN_WIDTH // 2, top=8)
@@ -203,6 +240,41 @@ class BoardRenderer:
             bg_surf.fill((20, 100, 20, 210))
             self.screen.blit(bg_surf, bg_rect.topleft)
             self.screen.blit(think_surf, think_surf.get_rect(center=bg_rect.center))
+
+    @staticmethod
+    def _format_move(entry):
+        piece = PIECE_LOG_NAMES.get(entry.get("piece", "")[-1:], "Piece")
+        src_col, src_row = entry["src"]
+        dst_col, dst_row = entry["dst"]
+        src = f"{chr(ord('a') + src_col)}{src_row}"
+        dst = f"{chr(ord('a') + dst_col)}{dst_row}"
+        return f"{piece} {src} -> {dst}"
+
+    def draw_recent_moves(self, moves):
+        """Draw the latest eight moves in their moving side's color."""
+        pygame.draw.rect(self.screen, MENU_BORDER_COLOR, MOVE_LOG_RECT, 1, border_radius=4)
+        title = self.log_font.render("LOG", True, MENU_TEXT_COLOR)
+        title_rect = title.get_rect(center=(MOVE_LOG_RECT.centerx, MOVE_LOG_RECT.y))
+        title_rect.inflate_ip(8, 0)
+        pygame.draw.rect(self.screen, BOARD_COLOR, title_rect)
+        self.screen.blit(title, title.get_rect(center=(MOVE_LOG_RECT.centerx, MOVE_LOG_RECT.y)))
+        for index, entry in enumerate(moves[-8:]):
+            color = RED_PIECE_COLOR if entry.get("turn") == "r" else BLACK_PIECE_COLOR
+            text = self.log_font.render(self._format_move(entry), True, color)
+            self.screen.blit(text, (MOVE_LOG_X, MOVE_LOG_Y + index * MOVE_LOG_LINE_HEIGHT))
+
+    def draw_board_coordinates(self):
+        """Label the board's compact internal a-i / 0-9 coordinate grid."""
+        for col in range(NUM_COLS):
+            label = self.log_font.render(chr(ord("a") + col), True, MENU_MUTED_TEXT_COLOR)
+            x, _ = self.grid_to_pixel(col, 0)
+            self.screen.blit(label, label.get_rect(
+                center=(x, int(START_Y) - PIECE_RADIUS - 10)
+            ))
+        for row in range(NUM_ROWS):
+            label = self.log_font.render(str(row), True, MENU_MUTED_TEXT_COLOR)
+            _, y = self.grid_to_pixel(0, row)
+            self.screen.blit(label, label.get_rect(center=(int(START_X) - PIECE_RADIUS - 9, y)))
 
     def draw_difficulty_menu(self, availability, message=""):
         """Overlay shown after camera calibration and before a game can begin."""
@@ -304,7 +376,7 @@ class BoardRenderer:
                 if name == ".":
                     continue
                 cx, cy = self.grid_to_pixel(c, r)
-                color = (220, 20, 60) if name.startswith("r") else (0, 0, 0)
+                color = RED_PIECE_COLOR if name.startswith("r") else BLACK_PIECE_COLOR
                 pygame.draw.circle(self.screen, (255, 255, 255), (cx, cy), PIECE_RADIUS)
                 pygame.draw.circle(self.screen, color, (cx, cy), PIECE_RADIUS, 2)
                 text_surf = self.piece_font.render(
