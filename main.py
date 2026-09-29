@@ -77,6 +77,19 @@ pygame.event.pump()
 
 # Khởi tạo các module quản lý SRP
 hw = HardwareManager(config, _BASE_DIR).initialize_all()
+
+# Cấp nguồn servo và cấu hình chế độ tự động cho robot thật sau khi đã calibrate thành công
+if not config.DRY_RUN and getattr(config, "ROBOT_BACKEND", "VIRTUAL").upper() == "PHYSICAL":
+    print("\n[MAIN] ⚡ Đang cấp nguồn servo cánh tay robot FR3 (RobotEnable & Mode 0)...")
+    try:
+        hw.set_operational_mode(0)
+        if not hw.enable_robot():
+            print("⚠️ [MAIN] CẢNH BÁO: Không thể cấp nguồn cho robot FR3! Vui lòng kiểm tra nút E-Stop hoặc nguồn tủ điện.")
+        else:
+            print("✅ [MAIN] Robot FR3 đã sẵn sàng chấp hành chuyển động (MOTION AUTHORIZED)!")
+    except Exception as e:
+        print(f"⚠️ [MAIN] Lỗi khi kích hoạt robot FR3: {e}")
+
 state = GameState(allow_mouse_move=config.DRY_RUN)
 renderer.draw_ui(state.get_render_state())
 renderer.draw_pieces(state.board)
@@ -89,17 +102,32 @@ self_play_ctrl = None
 
 # 3D Digital Twin WebSocket Telemetry & Live Synchronization
 telemetry = None
+target_port = int(getattr(config, "TELEMETRY_PORT", 8765))
 try:
     from src.hardware.telemetry_publisher import TelemetryPublisher
-    telemetry = TelemetryPublisher.get_instance(
-        host="127.0.0.1",
-        port=int(getattr(config, "TELEMETRY_PORT", 8765)),
-        robot_model="FR3",
-    )
-    telemetry.start()
+    try:
+        telemetry = TelemetryPublisher.get_instance(
+            host="127.0.0.1",
+            port=target_port,
+            robot_model="FR3",
+        )
+        telemetry.start()
+    except Exception as e_port:
+        if "10048" in str(e_port) or "address already in use" in str(e_port).lower():
+            fallback_port = target_port + 1
+            print(f"[MAIN] ⚠️ Cổng {target_port} bị bận -> Thử cổng dự phòng ws://127.0.0.1:{fallback_port}...")
+            TelemetryPublisher._instance = None
+            telemetry = TelemetryPublisher.get_instance(
+                host="127.0.0.1",
+                port=fallback_port,
+                robot_model="FR3",
+            )
+            telemetry.start()
+        else:
+            raise e_port
     print(f"[MAIN] 🌐 3D Digital Twin Telemetry Publisher started on ws://127.0.0.1:{telemetry.port}")
 except Exception as e:
-    print(f"[MAIN] ⚠️ Could not start TelemetryPublisher on port {getattr(config, 'TELEMETRY_PORT', 8765)}: {e}")
+    print(f"[MAIN] ⚠️ Could not start TelemetryPublisher: {e}")
     telemetry = None
 
 # Connect Digital Twin & Move Observer
@@ -302,13 +330,16 @@ try:
                                     s, d = best
 
                     if best:
-                        execute_ai_move(
+                        exec_ok = execute_ai_move(
                             state=state,
                             hw=hw,
                             best_move=best,
                             dry_run=bool(config.DRY_RUN),
                             visual_pick_enabled=bool(getattr(config, "VISUAL_PICK_ENABLED", False)),
                         )
+                        if not exec_ok:
+                            print(f"[AI] ⚠️ execute_ai_move không thành công. Giữ nguyên trạng thái để thử lại sau hoặc chờ người can thiệp.")
+                            time.sleep(1.0)
                     else:
                         is_chk = xiangqi.is_king_in_check("b", state.board)
                         reason = "CHIẾU BÍ" if is_chk else "TUYỆT SÁT"
