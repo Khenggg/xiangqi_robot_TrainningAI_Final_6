@@ -289,7 +289,7 @@ class GameState:
         return True
 
     def process_human_move(self, src, dst, p_name):
-        print(f"[HUMAN] ✅ Moved: {p_name} {src}->{dst}")
+        print(f"[HUMAN] ✅ Moved: {p_name} {xiangqi.format_move(src, dst)}")
         self.set_status("✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
         
         self._record_move("r", src, dst, p_name)
@@ -331,7 +331,7 @@ class GameState:
             self.process_human_move(src, dst, p_name)
             return
 
-        print(f"[EMERGENCY] ✅ Manual Black move: {p_name} {src}->{dst}")
+        print(f"[EMERGENCY] ✅ Manual Black move: {p_name} {xiangqi.format_move(src, dst)}")
         captured_piece = self.board[dst[1]][dst[0]]
         self._record_move("b", src, dst, p_name)
         if captured_piece != ".":

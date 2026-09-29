@@ -125,7 +125,7 @@ class EmergencyClientMoveTests(unittest.TestCase):
         handler.handle_keyboard(pygame.K_m)
 
         self.assertTrue(state.manual_override_active)
-        self.assertIn("Emergency client mode", state.statuses[-1])
+        self.assertIn("Manual/Emergency mode active", state.statuses[-1])
         self.assertFalse(handler.poll_board_stability())
 
     def test_m_key_is_available_in_dry_run_mode(self):
@@ -407,7 +407,7 @@ class EmergencyClientMoveTests(unittest.TestCase):
 
         self.assertTrue(state.cleared)
         self.assertTrue(state.retry_requested)
-        self.assertIn("AI đang tính lại", state.statuses[-1])
+        self.assertIn("AI retrying after a physical board mismatch", state.statuses[-1])
 
     def test_v_partial_capture_shows_manual_completion_coordinates(self):
         class State:

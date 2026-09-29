@@ -243,7 +243,7 @@ try:
                         if len(state.move_history) > 8:
                             last_srcs = [m['src'] for m in state.move_history[-6:]]
                             if last_srcs.count(s) >= 3:
-                                print(f"⚠️ AI LOOP DETECTED ({s}->{d}) -> PANIC MODE!")
+                                print(f"⚠️ AI LOOP DETECTED {xiangqi.format_move(s, d)} -> PANIC MODE!")
                                 valid_moves = xiangqi.find_all_valid_moves("b", state.board)
                                 if valid_moves:
                                     best = random.choice(valid_moves)
@@ -264,7 +264,7 @@ try:
                         robot_success = True
                         if not config.DRY_RUN:
                             if hw.robot.connected:
-                                print(f"[AI] Robot executing move: {s}->{d}")
+                                print(f"[AI] Robot executing move: {xiangqi.format_move(s, d)}")
                                 try:
                                     pick_targets = {"moving": None, "captured": None}
                                     # CChess creates the calibration matrix; best.pt measures
@@ -324,7 +324,7 @@ try:
                                         time.sleep(2)
                             else:
                                 print(f"\n{'='*50}")
-                                print(f"🤖 AI đi: {state.board[s[1]][s[0]]} ({s[0]},{s[1]}) → ({d[0]},{d[1]}) {'ĂN' if is_cap else ''}")
+                                print(f"🤖 AI đi: {state.board[s[1]][s[0]]} {xiangqi.format_move(s, d)} {'ĂN' if is_cap else ''}")
                                 print(f"👉 Hãy di quân này trên bàn thật, rồi bấm SPACE!")
                                 print(f"{'='*50}\n")
 

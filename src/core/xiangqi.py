@@ -31,6 +31,17 @@ initial_board = [
 def get_board():
     return [row[:] for row in initial_board]
 
+
+def format_square(square):
+    """Format an internal (column, row) board coordinate as a0 through i9."""
+    col, row = square
+    return f"{chr(ord('a') + col)}{row}"
+
+
+def format_move(src, dst):
+    """Format a chess move for human-readable console output."""
+    return f"{format_square(src)} -> {format_square(dst)}"
+
 def get_zobrist_key(board):
     h = 0
     for r in range(NUM_ROWS):

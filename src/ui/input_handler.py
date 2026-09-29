@@ -165,7 +165,7 @@ class InputHandler:
                             self.state.set_status("📸 Cập nhật Mắt Camera...", color=(0, 100, 180), duration=2.0)
                             self.hw.capture_baseline_if_needed(force_delay=1.0)
                     else:
-                        print(f"Invalid move: {src}->{dst}")
+                        print(f"Invalid move: {xiangqi.format_move(src, dst)}")
                         self.state.set_status("❌  Invalid move!", color=(180, 0, 0))
                         self.state.set_invalid_flash(dst[0], dst[1])
                         self.state.selected_pos = None
@@ -243,7 +243,7 @@ class InputHandler:
             self.state.manual_override_active = enabled
             self._board_stability_monitor.reset()
             self.state.set_status(
-                ("⚠️ Emergency client mode: đi quân đến lượt (Đỏ/Đen) trên client."
+                ("⚠️ Manual/Emergency mode active — automatic camera confirmation is paused."
                  if enabled else "✅ Đã tắt Emergency mode — tiếp tục quét camera."),
                 color=(180, 100, 0), duration=12.0,
             )
@@ -268,7 +268,7 @@ class InputHandler:
             retry = getattr(self.state, "prepare_ai_retry_after_physical_miss", None)
             if callable(retry) and retry():
                 self.state.set_status(
-                    "↩️ Bàn thật vẫn ở FEN cũ — AI đang tính lại nước đi.",
+                    "↩️ AI retrying after a physical board mismatch.",
                     color=(0, 100, 180), duration=10.0,
                 )
             else:
@@ -374,7 +374,7 @@ class InputHandler:
         
         if src:
             # Note: Vietnamese name resolution skipped here for brevity, handled by detector UI largely
-            print(f"[YOLO] 👉 Nhận diện đi từ Cột {src[0]} Hàng {src[1]} đến Cột {dst[0]} Hàng {dst[1]}")
+            print(f"[YOLO] 👉 Nhận diện nước đi: {xiangqi.format_move(src, dst)}")
             
         # Verify result
         if src is None:
@@ -384,13 +384,13 @@ class InputHandler:
             )
             if has_new_move:
                 self._last_move_confirmation_failure = "invalid"
-                message = "❌ NƯỚC ĐI KHÔNG HỢP LỆ"
+                message = "⚠️ Board changed, but one legal move could not be identified."
             else:
                 # In auto-retry mode, retain earlier positive evidence of a
                 # changed move rather than letting a later noisy frame erase it.
                 if not auto_retry or self._last_move_confirmation_failure != "invalid":
                     self._last_move_confirmation_failure = "missing"
-                message = "❌ KHÔNG NHẬN DIỆN ĐƯỢC NƯỚC ĐI MỚI"
+                message = "⚠️ No legal move could be identified."
             if not auto_retry:
                 self.state.set_status(message, color=(180, 0, 0), duration=8.0)
                 self.state.manual_override_active = True
@@ -400,10 +400,13 @@ class InputHandler:
             return False
             
         if not xiangqi.is_valid_move(src, dst, self.state.board, "r"):
-            print(f"[SPACE] ❌ YOLO báo nước đi không hợp lệ: {src}->{dst}")
+            print(f"[SPACE] ❌ YOLO báo nước đi không hợp lệ: {xiangqi.format_move(src, dst)}")
             self._last_move_confirmation_failure = "invalid"
             if not auto_retry:
-                self.state.set_status("❌ NƯỚC ĐI KHÔNG HỢP LỆ", color=(180, 0, 0), duration=8.0)
+                self.state.set_status(
+                    f"❌ Illegal move: {xiangqi.format_move(src, dst)} — move not accepted.",
+                    color=(180, 0, 0), duration=8.0,
+                )
                 self.state.set_invalid_flash(dst[0], dst[1])
                 self.state.manual_override_active = True
                 self.state.snapshot_continue_required = True
