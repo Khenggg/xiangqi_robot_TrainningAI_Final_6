@@ -19,6 +19,10 @@ START_X = (SCREEN_WIDTH - BOARD_WIDTH) / 2
 START_Y = (SCREEN_HEIGHT - ((NUM_ROWS - 1) * SQUARE_SIZE)) / 2 - 20
 LINE_COLOR = (0, 0, 0)
 BOARD_COLOR = (252, 230, 201)
+MENU_TEXT_COLOR = (67, 45, 29)
+MENU_MUTED_TEXT_COLOR = (103, 78, 56)
+MENU_ACCENT_COLOR = (143, 47, 42)
+MENU_BORDER_COLOR = (119, 82, 48)
 PIECE_RADIUS = SQUARE_SIZE // 2 - 4
 
 BTN_COLOR = (200, 50, 50)
@@ -180,27 +184,27 @@ class BoardRenderer:
 
     def draw_home_screen(self):
         """Draw the launcher shown before the player chooses a game mode."""
-        self.screen.fill((25, 20, 16))
+        self.screen.fill(BOARD_COLOR)
         accent = pygame.Rect(0, 0, SCREEN_WIDTH, 8)
-        pygame.draw.rect(self.screen, (194, 46, 46), accent)
+        pygame.draw.rect(self.screen, MENU_ACCENT_COLOR, accent)
 
-        title = self.game_font.render("XIANGQI ROBOT", True, (246, 225, 184))
+        title = self.game_font.render("XIANGQI ROBOT", True, MENU_TEXT_COLOR)
         self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 190)))
-        subtitle = self.ui_font.render("Choose a game mode to begin", True, (228, 214, 190))
+        subtitle = self.ui_font.render("Choose a game mode to begin", True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 235)))
 
         pygame.draw.rect(self.screen, (61, 73, 82), HOME_SETTINGS_RECT, border_radius=8)
         settings = self.ui_font.render("SETTINGS", True, (255, 255, 255))
         self.screen.blit(settings, settings.get_rect(center=HOME_SETTINGS_RECT.center))
 
-        pygame.draw.rect(self.screen, (159, 59, 55), HOME_VS_ROBOT_RECT, border_radius=12)
-        pygame.draw.rect(self.screen, (239, 218, 177), HOME_VS_ROBOT_RECT, 2, border_radius=12)
+        pygame.draw.rect(self.screen, MENU_ACCENT_COLOR, HOME_VS_ROBOT_RECT, border_radius=12)
+        pygame.draw.rect(self.screen, MENU_BORDER_COLOR, HOME_VS_ROBOT_RECT, 2, border_radius=12)
         button = self.game_font.render("VS ROBOT", True, (255, 255, 255))
         self.screen.blit(button, button.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery - 6)))
         detail = self.ui_font.render("Choose the robot difficulty next", True, (255, 224, 205))
         self.screen.blit(detail, detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery + 22)))
 
-        hint = self.ui_font.render("Click VS ROBOT or press Enter", True, (190, 181, 166))
+        hint = self.ui_font.render("Click VS ROBOT or press Enter", True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 465)))
 
     @staticmethod
@@ -213,14 +217,14 @@ class BoardRenderer:
 
     def draw_settings_menu(self, debug_enabled):
         """Draw the pre-game settings restored from the previous menu flow."""
-        self.screen.fill((25, 20, 16))
+        self.screen.fill(BOARD_COLOR)
         pygame.draw.rect(self.screen, (61, 73, 82), SETTINGS_BACK_RECT, border_radius=8)
         back = self.ui_font.render("< HOME", True, (255, 255, 255))
         self.screen.blit(back, back.get_rect(center=SETTINGS_BACK_RECT.center))
 
-        title = self.game_font.render("SETTINGS", True, (246, 225, 184))
+        title = self.game_font.render("SETTINGS", True, MENU_TEXT_COLOR)
         self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 118)))
-        label = self.ui_font.render("Debug dashboard", True, (235, 224, 205))
+        label = self.ui_font.render("Debug dashboard", True, MENU_TEXT_COLOR)
         self.screen.blit(label, label.get_rect(midleft=(126, DEBUG_STATUS_RECT.centery)))
 
         status = "ENABLED" if debug_enabled else "DISABLED"
@@ -229,7 +233,7 @@ class BoardRenderer:
         status_text = self.ui_font.render(status, True, (255, 255, 255))
         self.screen.blit(status_text, status_text.get_rect(center=DEBUG_STATUS_RECT.center))
 
-        note = self.ui_font.render("Opens a separate read-only robot telemetry window", True, (190, 181, 166))
+        note = self.ui_font.render("Opens a separate read-only robot telemetry window", True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 284)))
 
     @staticmethod
