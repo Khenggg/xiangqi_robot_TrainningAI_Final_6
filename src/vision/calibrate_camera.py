@@ -28,14 +28,14 @@ def calibrate_perspective_camera(cap, save_path):
     # --- WARM UP camera TRƯỚC khi bắt đầu thread ---
     # ⚠️ PHẢI warm-up TRƯỚC, KHÔNG ĐƯỢC chạy song song với capture thread
     #    vì race condition trên cv2.VideoCapture gây frame đen!
-    print("[CALIBRATE] ⏳ Đang chờ camera warm up...")
+    print("[CALIBRATE] ⏳ Đang chờ camera warm up...", flush=True)
     for i in range(60):  # Đọc ~60 frame để camera USB ổn định (bỏ frame đen)
         ret, _ = cap.read()
         if not ret:
             time.sleep(0.05)
         time.sleep(0.03)
     time.sleep(0.5)  # Chờ thêm cho camera ổn định hoàn toàn
-    print("[CALIBRATE] ✅ Camera warm up xong!")
+    print("[CALIBRATE] ✅ Camera warm up xong!", flush=True)
 
     # --- Thread đọc camera liên tục (bắt đầu SAU warm-up) ---
     cal_q = queue.Queue(maxsize=2)
@@ -59,20 +59,21 @@ def calibrate_perspective_camera(cap, save_path):
     def mouse_callback(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN and len(points) < 4:
             points.append((x, y))
-            print(f"  👉 Điểm {len(points)}: ({x}, {y})")
+            print(f"  👉 Điểm {len(points)}: ({x}, {y})", flush=True)
 
     window = "CALIBRATE"
     cv2.namedWindow(window)
     cv2.setMouseCallback(window, mouse_callback)
+    print("\n[CALIBRATE] 🖥️ CỬA SỔ 'CALIBRATE' ĐÃ MỞ TRÊN MÀN HÌNH!", flush=True)
 
-    print("\n=== HƯỚNG DẪN CLICK (QUAN TRỌNG) ===")
-    print("👉 Click lần lượt 4 góc bàn cờ thật trên màn hình:")
-    print("   1️⃣  Góc Xe Đen (Trái)")
-    print("   2️⃣  Góc Xe Đen (Phải)")
-    print("   3️⃣  Góc Xe Đỏ (Phải)")
-    print("   4️⃣  Góc Xe Đỏ (Trái)")
-    print("---------------------------------------------")
-    print("⌨️  Phím tắt: 'R'=Làm lại | 'S'=Lưu file | 'Q'=Thoát")
+    print("\n=== HƯỚNG DẪN CLICK (QUAN TRỌNG) ===", flush=True)
+    print("👉 Click lần lượt 4 góc bàn cờ thật trên màn hình:", flush=True)
+    print("   1️⃣  Góc Xe Đen (Trái)", flush=True)
+    print("   2️⃣  Góc Xe Đen (Phải)", flush=True)
+    print("   3️⃣  Góc Xe Đỏ (Phải)", flush=True)
+    print("   4️⃣  Góc Xe Đỏ (Trái)", flush=True)
+    print("---------------------------------------------", flush=True)
+    print("⌨️  Phím tắt: 'R'=Làm lại | 'S'=Lưu file (Dùng lưới cờ hiện tại) | 'Q'=Thoát", flush=True)
 
     import os
     M = None
