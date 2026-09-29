@@ -1,4 +1,5 @@
 import time
+from collections import Counter, defaultdict
 from typing import Optional, Tuple, Dict, List, Any
 
 from src.core import xiangqi  # type: ignore
@@ -26,6 +27,8 @@ class GameState:
         self.move_number = 1
         self.piece_ids = initial_piece_identities()
         self._move_observer = None
+        self._board_observer = None
+        self.turn_confirmation_required = False
         self.move_sync_error: Optional[str] = None
         self.pending_move: Optional[MoveContext] = None
         self.last_committed_move: Optional[MoveContext] = None
@@ -67,31 +70,26 @@ class GameState:
         """Observe committed human moves. The observer must not actuate the robot."""
         self._move_observer = callback
 
+    def set_board_observer(self, callback):
+        """Install the observer for a complete, camera-confirmed cell map."""
+        self._board_observer = callback
+
+    @property
+    def is_human_turn(self) -> bool:
+        mode = getattr(config, "GAME_MODE", "HUMAN_VS_ROBOT").upper()
+        return mode == "HUMAN_VS_HUMAN" or (mode == "HUMAN_VS_ROBOT" and self.turn == "r")
+
     def create_move_context(self, src_col_row, dst_col_row, actor) -> MoveContext:
         src = (int(src_col_row[1]), int(src_col_row[0]))
         dst = (int(dst_col_row[1]), int(dst_col_row[0]))
-        _rev_codes = {"R": "rook", "N": "knight", "E": "elephant", "A": "advisor",
-                      "K": "king", "C": "cannon", "P": "pawn"}
-        _rev_side = {"r": "red", "b": "black"}
-
         src_sym = self.board[src[0]][src[1]]
         piece_id = self.piece_ids.get(src)
-        if (piece_id is None or piece_symbol_for_identity(piece_id) != src_sym) and src_sym != ".":
-            side = _rev_side.get(src_sym[0], "red")
-            kind = _rev_codes.get(src_sym[2], "pawn")
-            piece_id = f"{side}_{kind}_{src[0]*10 + src[1]}"
-            self.piece_ids[src] = piece_id
 
         if piece_id is None or piece_symbol_for_identity(piece_id) != src_sym:
             raise ValueError(f"Piece identity is not reconciled at {src}")
 
         destination_symbol = self.board[dst[0]][dst[1]]
         captured_id = self.piece_ids.get(dst)
-        if (captured_id is None or piece_symbol_for_identity(captured_id) != destination_symbol) and destination_symbol != ".":
-            side = _rev_side.get(destination_symbol[0], "red")
-            kind = _rev_codes.get(destination_symbol[2], "pawn")
-            captured_id = f"{side}_{kind}_{dst[0]*10 + dst[1]}"
-            self.piece_ids[dst] = captured_id
 
         if (captured_id is None) != (destination_symbol == "."):
             raise ValueError(f"Destination identity is not reconciled at {dst}")
@@ -135,12 +133,134 @@ class GameState:
 
     def _notify_human_commit(self, context: MoveContext):
         if self._move_observer is None:
-            return
+            return True
         try:
             if self._move_observer(context) is not True:
                 raise RuntimeError("Digital Twin rejected committed human move")
         except Exception as exc:
             self._require_scene_reconciliation(f"Digital Twin sync failed: {exc}")
+            return False
+        return True
+
+    def apply_confirmed_board(self, observed_board) -> bool:
+        """Apply an approved complete camera board with canonical stable IDs.
+
+        Retain IDs for unchanged cells, then assign unmatched same-type pieces
+        from the remaining starting-layout IDs in sorted order. A full image
+        cannot distinguish two identical physical pawns, so this is a logical
+        deterministic identity assignment rather than visual re-identification.
+        """
+        from src.vision.cchess_recognizer import validate_board_sanity
+
+        # A failed robot command leaves a pending semantic move. An explicit
+        # complete rescan is the recovery path; the bridge itself rejects a
+        # moving arm or attached payload before accepting the new board.
+        if (not isinstance(observed_board, (list, tuple)) or len(observed_board) != 10
+                or any(not isinstance(row, (list, tuple)) or len(row) != 9 for row in observed_board)):
+            return False
+        canonical = initial_piece_identities()
+        allowed = Counter(piece_symbol_for_identity(pid) for pid in canonical.values())
+        if any(not isinstance(cell, str) or (cell != "." and cell not in allowed)
+               for row in observed_board for cell in row):
+            return False
+        seen = Counter(cell for row in observed_board for cell in row if cell != ".")
+        if any(symbol not in allowed or count > allowed[symbol] for symbol, count in seen.items()):
+            return False
+        sane, _ = validate_board_sanity(observed_board)
+        if not sane:
+            return False
+
+        # A full image says where pieces are, but not whose turn it is. Infer
+        # only a single legal transition from the previously known board.
+        # Interrupted robot motion may be observed at either endpoint.
+        old_turn = self.turn
+        board_changed = [list(row) for row in observed_board] != self.board
+        next_turn = old_turn
+        needs_turn_confirmation = False
+        if board_changed:
+            from src.vision.move_observation import derive_move_observation
+            observation = derive_move_observation(self.board, observed_board, player_color=self.turn)
+            if observation.success:
+                expected, _ = xiangqi.make_temp_move(self.board, (observation.src, observation.dst))
+                if expected == [list(row) for row in observed_board]:
+                    next_turn = "b" if self.turn == "r" else "r"
+                else:
+                    needs_turn_confirmation = True
+            else:
+                needs_turn_confirmation = True
+
+        remaining = defaultdict(list)
+        new_ids = {}
+        used = set()
+        for row in range(10):
+            for col in range(9):
+                symbol = observed_board[row][col]
+                old = self.piece_ids.get((row, col))
+                if symbol != "." and old in canonical.values() and old not in used and piece_symbol_for_identity(old) == symbol:
+                    new_ids[(row, col)] = old
+                    used.add(old)
+        for pid in sorted(canonical.values()):
+            if pid not in used:
+                remaining[piece_symbol_for_identity(pid)].append(pid)
+        for row in range(10):
+            for col in range(9):
+                symbol = observed_board[row][col]
+                if symbol != "." and (row, col) not in new_ids:
+                    if not remaining[symbol]:
+                        return False
+                    new_ids[(row, col)] = remaining[symbol].pop(0)
+        if self._board_observer is not None:
+            try:
+                if self._board_observer(new_ids) is not True:
+                    raise RuntimeError("Digital Twin rejected complete camera board")
+            except Exception as exc:
+                self._require_scene_reconciliation(f"Board scan sync failed: {exc}")
+                return False
+        self.board = [list(row) for row in observed_board]
+        self.piece_ids = new_ids
+        self.turn = next_turn
+        self.move_number += int(board_changed and next_turn != old_turn)
+        self.update_fen_from_board()
+        self.last_move = None
+        self.last_committed_move = None
+        self.pending_ai_move = None
+        self.history_snapshots.clear()
+        self.move_history.clear()
+        missing = allowed - seen
+        self.r_captured = [symbol for symbol in sorted(missing) if symbol.startswith("r_")
+                           for _ in range(missing[symbol])]
+        self.b_captured = [symbol for symbol in sorted(missing) if symbol.startswith("b_")
+                           for _ in range(missing[symbol])]
+        self.move_sync_error = None
+        self.physical_sync_fault = False
+        self.clear_move_sync_error()
+        self.turn_confirmation_required = needs_turn_confirmation
+        if needs_turn_confirmation:
+            self.move_sync_error = "Bàn đã đồng bộ; xác nhận lượt tiếp theo bằng phím 1 (Đỏ) hoặc 2 (Đen)."
+            self.set_status(self.move_sync_error, color=(180, 100, 0), duration=30.0)
+        if self.api_client and not needs_turn_confirmation:
+            try:
+                self.api_client.send_move_update_board(self.current_fen)
+            except Exception as exc:
+                print(f"[API] Full-board rescan update failed: {exc}")
+        return True
+
+    def confirm_turn_after_rescan(self, color: str) -> bool:
+        """Explicit operator confirmation after a multi-change recovery scan."""
+        if not self.turn_confirmation_required or color not in ("r", "b"):
+            return False
+        self.turn = color
+        self.update_fen_from_board()
+        self.turn_confirmation_required = False
+        self.move_sync_error = None
+        self.physical_sync_fault = False
+        if self.api_client:
+            try:
+                self.api_client.send_move_update_board(self.current_fen)
+            except Exception as exc:
+                print(f"[API] Confirmed-turn update failed: {exc}")
+        self.set_status("Đã xác nhận lượt tiếp theo.", color=(0, 120, 0), duration=5.0)
+        return True
 
     def get_legal_moves_for_selected(self) -> List[Tuple[int, int]]:
         """Trả về danh sách toạ độ (col, row) các ô hợp lệ mà quân cờ đang chọn có thể đi tới."""
@@ -193,6 +313,19 @@ class GameState:
         moving_color = pending.get("moving_color", "b")
         if self.turn != moving_color:
             return False
+        context = self.pending_move
+        if context is not None:
+            if (context.actor != MoveActor.ROBOT or context.src != (src[1], src[0])
+                    or context.dst != (dst[1], dst[0])
+                    or self.piece_ids.get(context.src) != context.piece_id
+                    or self.piece_ids.get(context.dst) != context.captured_piece_id):
+                self.mark_move_failed("Robot move identity changed before commit")
+                self.move_sync_error = self.move_execution_error
+                return False
+        elif self._move_observer is not None:
+            self.mark_move_failed("Robot move lacks a semantic identity")
+            self.move_sync_error = self.move_execution_error
+            return False
         self.move_history.append({"turn": moving_color, "src": src, "dst": dst})
         if captured_piece != ".":
             (self.b_captured if moving_color == "r" else self.r_captured).append(captured_piece)
@@ -201,11 +334,8 @@ class GameState:
         self.turn = "b" if moving_color == "r" else "r"
         self.move_number += 1
         self.update_fen_from_board()
-        if getattr(self, "pending_move", None) is not None and hasattr(self, "commit_piece_identity"):
-            try:
-                self.commit_piece_identity(self.pending_move)
-            except Exception as e:
-                print(f"[STATE] commit_piece_identity note: {e}")
+        if context is not None:
+            self.commit_piece_identity(context)
         self.pending_ai_move = None
         self.physical_sync_fault = False
         print(f"[FEN] {self.current_fen}")
@@ -234,6 +364,13 @@ class GameState:
         }
 
     def reset_game(self, hw_manager=None):
+        if (hw_manager is not None
+                and getattr(getattr(hw_manager, "config", None), "ROBOT_BACKEND", "VIRTUAL").upper() == "PHYSICAL"
+                and not getattr(hw_manager, "dry_run", True)):
+            expected, _ = fen_to_board_array(INITIAL_FEN)
+            if not hw_manager.verify_physical_board(expected):
+                self._require_scene_reconciliation("Reset blocked: physical board does not match initial layout")
+                return False
         # [API] Đóng room cũ trước khi tạo game mới
         if self.api_client.room_id:
             print("[GAME] 🔚 Đóng room cũ trước khi tạo game mới...")
@@ -251,6 +388,7 @@ class GameState:
         self.board, self.turn = fen_to_board_array(self.current_fen)
         self.piece_ids = initial_piece_identities()
         self.pending_move = None
+        self.turn_confirmation_required = False
         self.last_committed_move = None
         self.move_execution_status = "IDLE"
         self.move_execution_error = None
@@ -290,6 +428,7 @@ class GameState:
         # [API] Tạo room mới (nếu không ở chế độ DRY_RUN)
         if not config.DRY_RUN:
             self.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
+        return self.move_sync_error is None
 
     def set_status(self, msg, color=(200, 0, 0), duration=2.5):
         self.status_message = msg
@@ -334,6 +473,13 @@ class GameState:
             self.set_status("⚠️  Không có nước nào để rollback!", color=(180, 100, 0), duration=2.5)
             return
 
+        if (hw_manager is not None
+                and getattr(getattr(hw_manager, "config", None), "ROBOT_BACKEND", "VIRTUAL").upper() == "PHYSICAL"
+                and not getattr(hw_manager, "dry_run", True)):
+            if not hw_manager.verify_physical_board(self._pre_space_state["board"]):
+                self._require_scene_reconciliation("Rollback blocked: physical board differs from saved board")
+                return
+
         print("[ROLLBACK] ↩️ Khôi phục trạng thái trước SPACE...")
         s = self._pre_space_state
         self.board = [row[:] for row in s["board"]]
@@ -368,6 +514,13 @@ class GameState:
             print("[UNDO] ⚠️ Không có nước đi nào để Undo!")
             self.set_status("⚠️ Chưa có nước đi nào để hoàn tác!", color=(180, 100, 0), duration=2.5)
             return False
+
+        if (hw_manager is not None
+                and getattr(getattr(hw_manager, "config", None), "ROBOT_BACKEND", "VIRTUAL").upper() == "PHYSICAL"
+                and not getattr(hw_manager, "dry_run", True)):
+            if not hw_manager.verify_physical_board(self.history_snapshots[-1]["board"]):
+                self._require_scene_reconciliation("Undo blocked: physical board differs from saved board")
+                return False
 
         print("[UNDO] ↩️ Đang hoàn tác nước cờ...")
         snap = self.history_snapshots.pop()
@@ -405,9 +558,14 @@ class GameState:
         return True
 
     def process_human_move(self, src, dst, p_name):
+        if self.move_sync_error or self.pending_move is not None or self.pending_ai_move is not None or not self.is_human_turn:
+            return False
+        if not xiangqi.is_valid_move(src, dst, self.board, self.turn):
+            return False
         context = self.create_move_context(src, dst, MoveActor.HUMAN)
         print(f"[HUMAN] ✅ Moved: {p_name} {src}->{dst}")
-        self.set_status("✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
+        self.set_status("✅  Move accepted." if getattr(config, "GAME_MODE", "HUMAN_VS_ROBOT") == "HUMAN_VS_HUMAN"
+                        else "✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
         
         # Lưu snapshot trạng thái trước nước đi để phục vụ Undo
         self.history_snapshots.append({
@@ -422,36 +580,43 @@ class GameState:
             "move_history": list(self.move_history),
         })
 
-        self.move_history.append({"turn": "r", "src": src, "dst": dst})
+        moving_color = self.turn
+        self.move_history.append({"turn": moving_color, "src": src, "dst": dst})
         
         cap_p = self.board[dst[1]][dst[0]]
-        if cap_p != ".": self.b_captured.append(cap_p)
+        if cap_p != ".":
+            (self.b_captured if moving_color == "r" else self.r_captured).append(cap_p)
         
         self.board, _ = xiangqi.make_temp_move(self.board, (src, dst))
         self.last_move = (src, dst)
         
-        self.turn = "b"  # Chuyển lượt
+        self.turn = "b" if moving_color == "r" else "r"
         self.move_number += 1
         self.update_fen_from_board()
         self.commit_piece_identity(context)
-        self._notify_human_commit(context)
+        # A camera-confirmed human move has already happened in the real
+        # world. Preserve that game fact even if PyBullet rejects it; latch a
+        # synchronization fault and prevent any subsequent robot motion.
+        synchronized = self._notify_human_commit(context)
         print(f"[FEN] {self.current_fen}")
         
         # [API] Đồng bộ nước đi lên máy chủ Simulation
         self.api_client.send_move_update_board(self.current_fen)
         
         # Kiểm tra Chiếu bí / Tuyệt sát hoặc Chiếu tướng đối với AI
-        if xiangqi.is_checkmate("b", self.board):
-            is_chk = xiangqi.is_king_in_check("b", self.board)
+        opponent = self.turn
+        if xiangqi.is_checkmate(opponent, self.board):
+            is_chk = xiangqi.is_king_in_check(opponent, self.board)
             reason = "CHIẾU BÍ" if is_chk else "TUYỆT SÁT"
             print(f"[GAME] 🏆 BẠN ĐÃ THẮNG! AI bị {reason}!")
-            self.handle_game_over("r", reason=reason)
-            self.turn = "r"
+            self.handle_game_over(moving_color, reason=reason)
+            self.turn = moving_color
             if self.api_client:
                 try:
-                    self.api_client.end_match(winner="RED", reason="CHECKMATE")
+                    self.api_client.end_match(winner="RED" if moving_color == "r" else "BLACK", reason="CHECKMATE")
                 except Exception:
                     pass
-        elif xiangqi.is_king_in_check("b", self.board):
+        elif xiangqi.is_king_in_check(opponent, self.board):
             print("[GAME] ⚠️ ĐANG CHIẾU TƯỚNG AI!")
             self.set_status("⚠️ CHIẾU TƯỚNG! AI đang tìm cách chống đỡ...", color=(234, 88, 12), duration=3.0)
+        return synchronized

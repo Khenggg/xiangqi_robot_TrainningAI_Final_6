@@ -23,6 +23,7 @@ import pybullet as p
 from src.domain.geometry import get_physical_geometry, get_canonical_tool_geometry
 from src.simulation.tool_geometry import virtual_link_to_tcp_offset_m
 from src.simulation.placement import BoardPlacementState
+from src.domain.board_pose import rot_matrix_to_quat
 from src.simulation.physics.gripper import VirtualGripper
 from src.simulation.physics.piece import XiangqiPieceBody
 from src.simulation.physics.state import (
@@ -393,10 +394,7 @@ class VirtualPhysicalWorld:
         """
         shift_m = float(forward_shift_m)
         h_off_m = float(height_offset_m)
-        old_center = np.asarray(self.board_placement_state.board_center_robot_m, dtype=float)
-
-        # Recompute authoritative placement state
-        self.board_placement_state = BoardPlacementState.compute(
+        new_state = BoardPlacementState.compute(
             forward_shift_mm=shift_m * 1000.0,
             safe_transit_height_mm=self.board_placement_state.safe_transit_height_mm,
             board_height_offset_mm=h_off_m * 1000.0,
@@ -405,39 +403,137 @@ class VirtualPhysicalWorld:
             nominal_board_surface_z_m=self._nominal_surface_height,
             placement_version=self.board_placement_state.placement_version + 1,
         )
-        delta = np.asarray(self.board_placement_state.board_center_robot_m, dtype=float) - old_center
+        self.relocate_board_to_state(new_state)
+        return True
 
-        if self.board_body_id >= 0 and self.client_id >= 0:
+    def relocate_board_to_state(self, new_state: BoardPlacementState) -> None:
+        """Move the board and settled pieces by the same rigid board transform."""
+        with self._physics_lock:
+            old_state = self.board_placement_state
+            old_rotation = old_state.R_robot_from_board
+            new_rotation = new_state.R_robot_from_board
+            rotation_delta = new_rotation @ old_rotation.T
+            moved = []
+            for body in self.pieces.values():
+                if body.physical_state in (PiecePhysicalState.ON_BOARD, PiecePhysicalState.RESTING):
+                    position, orientation = body.get_pose_robot_base()
+                    local = old_state.robot_to_board_local(position)
+                    target = new_state.board_local_to_robot(*local)
+                    old_piece_rotation = np.array(p.getMatrixFromQuaternion(orientation)).reshape(3, 3)
+                    target_orientation = list(rot_matrix_to_quat(rotation_delta @ old_piece_rotation))
+                    moved.append((body, target, target_orientation))
+
+            self.board_placement_state = new_state
+            board_center = new_state.board_local_to_robot(0.0, 0.0, -self._board_half_z)
             p.resetBasePositionAndOrientation(
-                self.board_body_id,
-                self.board_placement_state.board_center_robot_m,
-                self.board_placement_state.quat_robot_from_board,
+                self.board_body_id, board_center.tolist(), new_state.quat_robot_from_board,
                 physicsClientId=self.client_id,
             )
+            corners = [new_state.board_local_to_robot(u, v) for u in (-self._board_half_u, self._board_half_u)
+                       for v in (-self._board_half_v, self._board_half_v)]
+            self.board_x_min, self.board_x_max = min(pt[0] for pt in corners), max(pt[0] for pt in corners)
+            self.board_y_min, self.board_y_max = min(pt[1] for pt in corners), max(pt[1] for pt in corners)
+            self.board_surface_z = new_state.board_surface_z_robot_m
+            for body, target, orientation in moved:
+                body.set_pose_robot_base(target, orientation)
+                body.set_velocity([0.0] * 3, [0.0] * 3)
+                body.physical_state = PiecePhysicalState.RESTING
+                body._consecutive_settled_steps = self.required_settled_steps
+            for body in self.pieces.values():
+                body.board_placement_state = new_state
+                body.grid_origin_robot = tuple(new_state.grid_origin_robot_m)
+            self.current_forward_shift_m = new_state.forward_shift_mm / 1000.0
+            self.current_height_offset_m = new_state.board_height_offset_mm / 1000.0
 
-        cx = self.board_placement_state.board_center_robot_m[0]
-        cy = self.board_placement_state.board_center_robot_m[1]
-        self.board_x_min = cx - self._board_half_x
-        self.board_x_max = cx + self._board_half_x
-        self.board_y_min = cy - self._board_half_y
-        self.board_y_max = cy + self._board_half_y
-        self.board_surface_z = self.board_placement_state.board_surface_z_robot_m
-
-        # Relocate resting/on-board pieces
-        for p_body in self.pieces.values():
-            if p_body.physical_state in (PiecePhysicalState.ON_BOARD, PiecePhysicalState.RESTING):
-                pos, orn = p_body.get_pose_robot_base()
-                new_pos = pos + delta
-                p_body.set_pose_robot_base(new_pos, orn)
-                p_body.set_velocity([0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
-                p_body.physical_state = PiecePhysicalState.RESTING
-                p_body._consecutive_settled_steps = self.required_settled_steps
-            p_body.board_placement_state = self.board_placement_state
-            p_body.grid_origin_robot = tuple(self.board_placement_state.grid_origin_robot_m)
-
-        self.current_forward_shift_m = shift_m
-        self.current_height_offset_m = h_off_m
-        return True
+    def check_board_pose_swept_volume_collision(
+        self, target: BoardPlacementState, step_size_m: float = 0.005, clearance_margin_m: float = 0.005,
+    ) -> SweptVolumeResult:
+        """Check the entire translated/rotated board sweep against robot and gripper bodies."""
+        with self._physics_lock:
+            old = self.board_placement_state
+            old_center = old.board_local_to_robot(0.0, 0.0, -self._board_half_z)
+            new_center = target.board_local_to_robot(0.0, 0.0, -self._board_half_z)
+            angular = math.acos(max(-1.0, min(1.0, (np.trace(old.R_robot_from_board.T @ target.R_robot_from_board) - 1.0) / 2.0)))
+            steps = max(2, int(math.ceil(max(np.linalg.norm(new_center - old_center) / step_size_m,
+                                              angular / math.radians(2.0)))) + 1)
+            if steps > 401:
+                reason = "Board relocation exceeds 2 m sweep budget; choose a reachable board pose"
+                report = SweptVolumeReport(False, reason, float("inf"), None, steps, "sweep_budget")
+                return SweptVolumeResult(False, reason, report)
+            original = p.getBasePositionAndOrientation(self.board_body_id, physicsClientId=self.client_id)
+            old_surface = old.board_local_to_robot(0.0, 0.0)
+            new_surface = target.board_local_to_robot(0.0, 0.0)
+            piece_poses = []
+            for body in self.pieces.values():
+                if body.physical_state in (PiecePhysicalState.ON_BOARD, PiecePhysicalState.RESTING):
+                    position, orientation = body.get_pose_robot_base()
+                    linear, angular_velocity = body.get_velocity()
+                    piece_poses.append((body, position, orientation, linear, angular_velocity,
+                                        old.robot_to_board_local(position)))
+            proxy_aabbs = [(body_id, p.getAABB(body_id, physicsClientId=self.client_id))
+                           for body_id in self.gripper.proxy_body_ids]
+            minimum = float("inf")
+            blocker = None
+            first_step = None
+            try:
+                for step in range(steps):
+                    alpha = step / (steps - 1)
+                    position = ((1 - alpha) * old_center + alpha * new_center).tolist()
+                    orientation = p.getQuaternionSlerp(old.quat_robot_from_board, target.quat_robot_from_board, alpha)
+                    p.resetBasePositionAndOrientation(self.board_body_id, position, orientation, physicsClientId=self.client_id)
+                    floor_contacts = p.getClosestPoints(self.board_body_id, self.floor_body_id,
+                                                        distance=0.002, physicsClientId=self.client_id)
+                    for contact in floor_contacts:
+                        if float(contact[8]) < -0.0005 and blocker is None:
+                            blocker, first_step = "floor", step
+                            minimum = min(minimum, float(contact[8]))
+                    bodies = [(self.robot_body_id, "robot") ] if self.robot_body_id >= 0 else []
+                    bodies += [(body_id, "gripper") for body_id in self.gripper.proxy_body_ids]
+                    for body_id, label in bodies:
+                        contacts = p.getClosestPoints(self.board_body_id, body_id,
+                                                      distance=max(0.05, clearance_margin_m + 0.01),
+                                                      physicsClientId=self.client_id)
+                        for contact in contacts:
+                            distance = float(contact[8])
+                            minimum = min(minimum, distance)
+                            if distance <= clearance_margin_m and blocker is None:
+                                blocker, first_step = f"{label}_{body_id}", step
+                    board_rotation = np.array(p.getMatrixFromQuaternion(orientation)).reshape(3, 3)
+                    surface = (1.0 - alpha) * old_surface + alpha * new_surface
+                    for body, original_piece_pos, original_piece_orn, _, _, local in piece_poses:
+                        piece_pos = surface + board_rotation @ local
+                        target_piece_rotation = board_rotation @ old.R_robot_from_board.T @ np.array(
+                            p.getMatrixFromQuaternion(original_piece_orn)).reshape(3, 3)
+                        piece_orn = rot_matrix_to_quat(target_piece_rotation).tolist()
+                        p.resetBasePositionAndOrientation(body.body_id, piece_pos.tolist(), piece_orn,
+                                                          physicsClientId=self.client_id)
+                        piece_bodies = [(self.robot_body_id, "robot") ] if self.robot_body_id >= 0 else []
+                        piece_aabb = p.getAABB(body.body_id, physicsClientId=self.client_id)
+                        for proxy_id, proxy_aabb in proxy_aabbs:
+                            if all(piece_aabb[0][axis] <= proxy_aabb[1][axis] + clearance_margin_m and
+                                   proxy_aabb[0][axis] <= piece_aabb[1][axis] + clearance_margin_m
+                                   for axis in range(3)):
+                                piece_bodies.append((proxy_id, "gripper"))
+                        for other_id, label in piece_bodies:
+                            for contact in p.getClosestPoints(body.body_id, other_id,
+                                                              distance=clearance_margin_m,
+                                                              physicsClientId=self.client_id):
+                                distance = float(contact[8])
+                                minimum = min(minimum, distance)
+                                if distance <= clearance_margin_m and blocker is None:
+                                    blocker, first_step = f"piece_{body.piece_id}_{label}_{other_id}", step
+                    if blocker is not None:
+                        break
+            finally:
+                p.resetBasePositionAndOrientation(self.board_body_id, *original, physicsClientId=self.client_id)
+                for body, position, orientation, linear, angular_velocity, _ in piece_poses:
+                    body.set_pose_robot_base(position, orientation)
+                    body.set_velocity(linear, angular_velocity)
+            reason = None if blocker is None else f"Board sweep too close to {blocker} at step {first_step}/{steps} ({minimum * 1000:.2f} mm)"
+            report = SweptVolumeReport(blocker is None, reason,
+                                       minimum * 1000 if math.isfinite(minimum) else 999.0,
+                                       first_step, steps, blocker)
+            return SweptVolumeResult(blocker is None, reason, report)
 
     def get_board_pose(self) -> Tuple[np.ndarray, np.ndarray]:
         """Return (position, quaternion) of board body in PyBullet base frame."""
@@ -833,32 +929,43 @@ class VirtualPhysicalWorld:
                 p_body.grid_origin_robot = tuple(self.board_placement_state.grid_origin_robot_m)
 
     def reconcile_to_board_cells(self, piece_cells: Dict[Tuple[int, int], str]) -> None:
-        """Reconcile piece bodies in simulation to match the given cell-to-piece map (e.g. on Undo)."""
+        """Apply a validated full observed board to rigid bodies and colliders.
+
+        Validate the entire mapping before mutation so bad camera/identity data
+        cannot remove pieces or release an in-flight payload as a side effect.
+        """
         with self._physics_lock:
             if self.gripper.attached_piece is not None:
-                self.release_attached_piece()
+                raise ValueError("Cannot reconcile a board while a payload is attached")
 
             height_m = self.geom.piece_height_mm / 1000.0
             p_lookup = {p["id"]: p for p in self.layout_cfg.get("pieces", [])}
+            for cell, pid in piece_cells.items():
+                if (not isinstance(cell, tuple) or len(cell) != 2
+                        or any(isinstance(v, bool) or not isinstance(v, int) for v in cell)
+                        or not (0 <= cell[0] < 10 and 0 <= cell[1] < 9)):
+                    raise ValueError(f"Invalid board cell: {cell}")
+                if pid not in p_lookup:
+                    raise ValueError(f"Unknown canonical piece identity: {pid}")
             target_ids = set(piece_cells.values())
+            if len(target_ids) != len(piece_cells):
+                raise ValueError("A piece identity cannot occupy two cells")
 
             # Remove pieces not in target cells (e.g. captured)
             for pid in list(self.pieces.keys()):
                 if pid not in target_ids:
-                    p_body = self.pieces.pop(pid)
-                    try:
-                        p.removeBody(p_body.body_id, physicsClientId=self.client_id)
-                    except Exception:
-                        pass
+                    p_body = self.pieces[pid]
+                    p.removeBody(p_body.body_id, physicsClientId=self.client_id)
+                    del self.pieces[pid]
 
             # Position or respawn pieces at target cells
             for (r, c), pid in piece_cells.items():
                 pos = self.board_placement_state.cell_to_robot_xyz(r, c, z_rel_m=height_m / 2.0)
                 p_body = self.pieces.get(pid)
                 if p_body is None:
-                    p_info = p_lookup.get(pid, {})
-                    side = p_info.get("side", "r" if "red" in pid else "b")
-                    p_type = p_info.get("type", "pawn")
+                    p_info = p_lookup[pid]
+                    side = p_info["side"]
+                    p_type = p_info["type"]
                     p_body = self._spawn_piece_body(
                         piece_id=pid,
                         side=side,
@@ -871,7 +978,7 @@ class VirtualPhysicalWorld:
                     p.resetBasePositionAndOrientation(
                         p_body.body_id,
                         pos.tolist(),
-                        [0.0, 0.0, 0.0, 1.0],
+                        self.board_placement_state.quat_robot_from_board,
                         physicsClientId=self.client_id,
                     )
                     p.resetBaseVelocity(

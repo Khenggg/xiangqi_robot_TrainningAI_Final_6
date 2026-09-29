@@ -777,6 +777,31 @@ function connectLive() {
       } else if (data.type === "board_placement") {
         // Authoritative runtime placement packet from Python backend
         applyAuthoritativeBoardPlacement(data);
+      } else if (data.type === "board_teaching_points") {
+        state.teachingBaseVersion = Number(data.placement_version);
+        for (const name of ["R1", "R2", "R3", "R4"]) {
+          const xyz = data.points?.[name];
+          if (!Array.isArray(xyz) || xyz.length !== 3) continue;
+          for (const [axis, index] of [["X", 0], ["Y", 1], ["Z", 2]]) {
+            const input = document.getElementById(`teach${name}${axis}`);
+            if (input) input.value = String(xyz[index]);
+          }
+        }
+        const status = document.getElementById("teachingPointsStatus");
+        if (status) status.textContent = `Đã nạp R1–R4 từ hình học mô phỏng, phiên bản ${data.placement_version}. Có thể sửa XYZ rồi áp dụng.`;
+      } else if (data.type === "board_teaching_result") {
+        if (data.success) state.teachingBaseVersion = Number(data.placement?.placement_version);
+        const status = document.getElementById("teachingPointsStatus");
+        if (status) status.textContent = data.success
+          ? `Đã áp dụng R1–R4, phiên bản ${data.placement?.placement_version}. Sai số RMS ${Number(data.residuals_mm?.RMS ?? 0).toFixed(2)} mm. Chạy kiểm tra đường đi trước khi chơi.`
+          : `Từ chối R1–R4: ${data.error || data.status}`;
+      } else if (data.type === "board_adjustment_state") {
+        const applyButton = document.getElementById("btnApplyTeachingPoints");
+        if (applyButton) applyButton.disabled = false;
+        const status = document.getElementById("teachingPointsStatus");
+        if (status) status.textContent = data.success
+          ? "Đã chuẩn bị SERVICE_SAFE. Có thể áp dụng R1–R4."
+          : `Chưa thể dời bàn: ${data.error || data.status}`;
       } else if (data.type === "placement_analysis") {
         applyPlacementAnalysisUI(data);
       } else if (data.type === "placement_validation_result") {
@@ -1148,6 +1173,8 @@ export function applyAuthoritativeBoardPlacement(packet) {
   state.boardHeightOffsetMm = zOff;
   state.boardSurfaceHeightM = Number(packet.board_surface_z_m ?? packet.board_surface_z_robot_m ?? (0.0105 + zOff / 1000.0));
   state.placementVersion = ver;
+  state.boardYawDeg = Number(packet.board_yaw_deg ?? state.boardYawDeg ?? 0);
+  state.placementSource = packet.placement_source ?? "NOMINAL_SIMULATION";
 
   // Sync placement control UI
   const shiftSlider = document.getElementById("boardShiftSlider");
@@ -1156,25 +1183,49 @@ export function applyAuthoritativeBoardPlacement(packet) {
   const transitNum = document.getElementById("safeTransitNum");
   const zOffsetNum = document.getElementById("boardZOffsetNum");
   const verBadge = document.getElementById("placementVersionBadge");
+  const fourPointPose = state.placementSource === "R1_R4_SIMULATION";
 
-  if (shiftSlider) shiftSlider.value = String(d);
-  if (shiftNum) shiftNum.value = String(d);
+  if (shiftSlider) shiftSlider.value = fourPointPose ? "0" : String(d);
+  if (shiftNum) {
+    shiftNum.value = fourPointPose ? "" : String(d);
+    shiftNum.placeholder = fourPointPose ? "R1–R4" : "";
+  }
   if (transitSlider) transitSlider.value = String(h);
   if (transitNum) transitNum.value = String(h);
-  if (zOffsetNum) zOffsetNum.value = String(zOff);
+  if (zOffsetNum) {
+    zOffsetNum.value = fourPointPose ? "" : String(zOff);
+    zOffsetNum.placeholder = fourPointPose ? "R1–R4" : "";
+  }
   if (verBadge) verBadge.textContent = `VER: ${ver}`;
+  for (const id of ["boardShiftSlider", "boardShiftNum", "boardZOffsetNum", "btnApplyPlacement"]) {
+    const control = document.getElementById(id);
+    if (control) control.disabled = fourPointPose;
+  }
 
   // Invalidate or reset stale validation badge when placement changes
   const valBadge = document.getElementById("valResultBadge");
   if (valBadge && valBadge.textContent !== "ĐANG KIỂM ĐỊNH 90 Ô...") {
-    if (d !== 0.0 || zOff !== 0.0) {
+    if (fourPointPose || d !== 0.0 || zOff !== 0.0) {
       valBadge.className = "badge-warn";
-      valBadge.textContent = `CHƯA KIỂM ĐỊNH CHO VỊ TRÍ d=${d.toFixed(1)}mm, z_off=${zOff.toFixed(1)}mm`;
+      valBadge.textContent = fourPointPose ? "R1–R4: CHƯA KIỂM ĐỊNH ĐƯỜNG ĐI" : `CHƯA KIỂM ĐỊNH CHO VỊ TRÍ d=${d.toFixed(1)}mm, z_off=${zOff.toFixed(1)}mm`;
     }
   }
 
   // Atomically update geometric precheck UI readouts
-  updateGeometricPrecheckUI(d, h, zOff, packet.board_yaw_deg ?? state.boardYawDeg);
+  if (fourPointPose) {
+    const badge = document.getElementById("geomPrecheckBadge");
+    if (badge) { badge.className = "badge-warn"; badge.textContent = "R1–R4: CHƯA KIỂM"; }
+    for (const id of ["readoutShiftD", "readoutNearGridDepth", "readoutFarGridDepth",
+      "readoutNearEdgeDist", "readoutCenterDist", "readoutFarEdgeDist", "readoutFarGraspDist",
+      "readoutFarAppDist", "readoutGraspMargin", "readoutAppMargin", "readoutDMax", "readoutHMax"]) {
+      const element = document.getElementById(id);
+      if (element) element.textContent = "—";
+    }
+    const yaw = document.getElementById("readoutBoardYaw");
+    if (yaw) yaw.textContent = `${state.boardYawDeg.toFixed(2)}° (R1–R4)`;
+  } else {
+    updateGeometricPrecheckUI(d, h, zOff, state.boardYawDeg);
+  }
 
   // 7 & 8. Atomically update board coordinate ruler edges and ruler labels
   if (coordinateRulerGroup?.updateBoardPlacement) {
@@ -1205,9 +1256,10 @@ export function applyAuthoritativeBoardPlacement(packet) {
 
     const u = (col - 4.0) * 0.040;
     const v = (row - 4.5) * 0.040;
-    const robX = -0.360 - (d / 1000.0) - u;
-    const robY = -v;
-    const robZ = 0.0105 + (zOff / 1000.0);
+    const T = getScenePlacement().TRobotFromBoard;
+    const robX = T ? T[0][0] * u + T[0][1] * v + T[0][3] : -pt.z;
+    const robY = T ? T[1][0] * u + T[1][1] * v + T[1][3] : -pt.x;
+    const robZ = T ? T[2][0] * u + T[2][1] * v + T[2][3] : pt.y;
 
     const worldX_mm = (pt.x * 1000).toFixed(1);
     const worldY_mm = (pt.y * 1000).toFixed(1);
@@ -1378,8 +1430,10 @@ function initServicePanelEvents() {
         cmdObj.speed_factor = getActiveSpeedFactor();
       }
       state.liveSocket.send(JSON.stringify(cmdObj));
+      return true;
     } else {
       handleBackendError("Chưa kết nối Backend: Bấm Connect live để gửi lệnh.");
+      return false;
     }
   };
 
@@ -1412,7 +1466,11 @@ function initServicePanelEvents() {
   });
 
   document.getElementById("btnPrepareBoardAdj")?.addEventListener("click", () => {
-    sendCmd({ command: "PREPARE_BOARD_ADJUSTMENT" });
+    if (!sendCmd({ command: "PREPARE_BOARD_ADJUSTMENT" })) return;
+    const applyButton = document.getElementById("btnApplyTeachingPoints");
+    if (applyButton) applyButton.disabled = true;
+    const status = document.getElementById("teachingPointsStatus");
+    if (status) status.textContent = "Đang chuẩn bị SERVICE_SAFE và chờ quân cờ đứng yên…";
   });
 
   // Cartesian Jog
@@ -1446,6 +1504,33 @@ function initServicePanelEvents() {
 }
 
 function initPlacementPanelEvents() {
+  const teachingStatus = document.getElementById("teachingPointsStatus");
+  const sendTeachingCommand = (payload) => {
+    if (!state.liveSocket || state.liveSocket.readyState !== WebSocket.OPEN) {
+      if (teachingStatus) teachingStatus.textContent = "Cần Connect live với simulator để đổi vị trí bàn.";
+      return false;
+    }
+    state.liveSocket.send(JSON.stringify(payload));
+    return true;
+  };
+  document.getElementById("btnLoadSimTeachingPoints")?.addEventListener("click", () => {
+    sendTeachingCommand({ command: "GET_BOARD_TEACHING_POINTS" });
+  });
+  document.getElementById("btnApplyTeachingPoints")?.addEventListener("click", () => {
+    const points = {};
+    for (const name of ["R1", "R2", "R3", "R4"]) {
+      const values = ["X", "Y", "Z"].map((axis) => document.getElementById(`teach${name}${axis}`)?.value.trim());
+      if (values.some((value) => value === "" || value === undefined) || !values.every((value) => Number.isFinite(Number(value)))) {
+        if (teachingStatus) teachingStatus.textContent = `${name}: nhập đủ X, Y, Z hữu hạn (mm).`;
+        return;
+      }
+      points[name] = values.map(Number);
+    }
+    if (sendTeachingCommand({ command: "APPLY_BOARD_TEACHING_POINTS", points,
+      expected_placement_version: state.teachingBaseVersion ?? state.placementVersion })) {
+      if (teachingStatus) teachingStatus.textContent = "Đang kiểm hình học và va chạm toàn đường dời bàn…";
+    }
+  });
   const shiftSlider = document.getElementById("boardShiftSlider");
   const shiftNum = document.getElementById("boardShiftNum");
   const transitSlider = document.getElementById("safeTransitSlider");

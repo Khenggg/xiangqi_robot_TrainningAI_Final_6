@@ -21,14 +21,17 @@ logger = logging.getLogger(__name__)
 
 class LiveTwinBridge:
     def __init__(self, backend, board_pose_provider, telemetry=None, *, world=None,
-                 poll_hz=25.0, max_snapshot_age_s=0.5):
+                 poll_hz=25.0, max_snapshot_age_s=0.5, physical=True,
+                 owns_world=True):
         if not 1.0 <= poll_hz <= 60.0:
             raise ValueError("Twin polling rate must be between 1 and 60 Hz")
         self.backend = backend
+        self.physical = physical
         self.board_pose_provider = board_pose_provider
         # No virtual scene placement fallback: use exactly the motion provider.
         self.placement = board_pose_provider.get_board_placement_state()
         self.world = world or VirtualPhysicalWorld(board_placement_state=self.placement)
+        self.owns_world = owns_world
         if self.world.board_placement_state is not self.placement:
             raise ValueError("Twin world and motion must share the same board placement")
         self.telemetry = telemetry
@@ -51,10 +54,12 @@ class LiveTwinBridge:
                        for p in self.world.layout_cfg["pieces"]}
         self.tcp_position_error_mm = None
         if telemetry is not None:
-            telemetry.source = "PHYSICAL" if not getattr(backend, "dry_run", False) else "PHYSICAL_DRY_RUN"
+            telemetry.source = (("PHYSICAL" if not getattr(backend, "dry_run", False) else "PHYSICAL_DRY_RUN")
+                                if physical else "VIRTUAL")
             telemetry.controller_ip = getattr(backend, "ip", None)
-            # The viewer has no physical motion authority in this mode.
-            telemetry.register_command_handler(self._reject_viewer_command)
+            # Only a physical mirror is read-only. A virtual runtime owns its viewer commands.
+            if physical:
+                telemetry.register_command_handler(self._reject_viewer_command)
             telemetry.broadcast_custom(self.placement.to_dict())
 
     def _reject_viewer_command(self, command):
@@ -63,6 +68,15 @@ class LiveTwinBridge:
                 "type": "trajectory_result", "success": False,
                 "error": "Physical Digital Twin is read-only; use the authorized game motion pipeline.",
             })
+
+    def adopt_virtual_board_placement(self, state):
+        """Advance the mirror with the simulator's authoritative board version."""
+        if self.physical:
+            raise RuntimeError("Physical mirror calibration cannot be changed by simulator commands")
+        with self._lock:
+            if self.world.board_placement_state is not state or self.board_pose_provider.get_board_placement_state() is not state:
+                raise ValueError("Virtual mirror placement is not shared with motion and physics")
+            self.placement = state
 
     def _fail(self, message, *, recovery=False):
         self.last_error = str(message)
@@ -88,7 +102,8 @@ class LiveTwinBridge:
                 return self._fail("Actual joint telemetry unavailable or stale", recovery=self.active_move is not None)
             if measured < self._last_measurement:
                 return False  # Out-of-order read must never restore an older joint pose.
-            if self.board_pose_provider.get_board_placement_state() is not self.placement:
+            if (self.board_pose_provider.get_board_placement_state() is not self.placement
+                    or self.world.board_placement_state is not self.placement):
                 return self._fail("Physical board calibration changed; restart/reconcile the twin", recovery=True)
             sync_world_from_robot_snapshot(self.world, snapshot)
             self._last_measurement = measured
@@ -140,7 +155,8 @@ class LiveTwinBridge:
 
     def close(self):
         self.stop()
-        self.world.close()
+        if self.owns_world:
+            self.world.close()
 
     def _validate_context(self, context):
         if self._cells.get(tuple(context.src)) != context.piece_id:
@@ -148,9 +164,8 @@ class LiveTwinBridge:
         if self._cells.get(tuple(context.dst)) != context.captured_piece_id:
             raise ValueError("Destination occupancy differs from the semantic move")
         piece = self.world.pieces[context.piece_id]
-        expected_side = "r" if context.actor == MoveActor.HUMAN else "b"
-        if piece.side != expected_side:
-            raise ValueError("Move actor does not match the moving piece")
+        # Actor describes who moved the piece, independently of its color.
+        # Humans can play either side; self-play manipulates both colors.
         if context.captured_piece_id and self.world.pieces[context.captured_piece_id].side == piece.side:
             raise ValueError("Cannot capture a piece on the same side")
 
@@ -159,7 +174,32 @@ class LiveTwinBridge:
         self._cells[tuple(context.dst)] = context.piece_id
         self._committed.add(context.move_id)
 
+    def _board_observation_ready(self):
+        """Require a fresh idle measurement before changing observed pieces.
+
+        Do not trust a cached IDLE state after telemetry has disconnected. This
+        read never commands hardware or advances physics, even on rejection.
+        """
+        try:
+            if (self.board_pose_provider.get_board_placement_state() is not self.placement
+                    or self.world.board_placement_state is not self.placement):
+                return self._fail("Board placement changed; restart/reconcile the twin", recovery=True)
+            with self._poll_lock:
+                snapshot = self.backend.get_state_snapshot()
+            measured = getattr(snapshot, "measurement_timestamp", None)
+            measured = snapshot.timestamp if measured is None else measured
+            age = time.time() - measured
+            if (not snapshot.connected or not getattr(snapshot, "joints_valid", True)
+                    or not math.isfinite(measured) or not 0 <= age <= self.max_snapshot_age_s
+                    or snapshot.motion_state not in ("IDLE", "READY")):
+                return self._fail("Board observation requires fresh, idle robot telemetry", recovery=True)
+        except Exception as exc:
+            return self._fail(f"Board observation telemetry unavailable: {exc}", recovery=True)
+        return True
+
     def reconcile_human_move(self, context):
+        if not self._board_observation_ready():
+            return False
         with self._lock, self.world._physics_lock:
             if context.actor != MoveActor.HUMAN:
                 return self._fail("Only HUMAN moves may reconcile piece positions")
@@ -178,26 +218,22 @@ class LiveTwinBridge:
 
     def reconcile_new_game(self) -> bool:
         """Reset digital twin physics world and cells to initial layout for a new game."""
-        with self._lock, self.world._physics_lock:
-            self.world.reset_pieces()
-            self._cells = {(int(p["row"]), int(p["col"])): p["id"]
-                           for p in self.world.layout_cfg["pieces"]}
-            self._committed.clear()
-            self.active_move = None
-            self.expected_payload_id = None
-            self._payload_sequence = []
-            self._released = []
-            self.last_error = None
-            self.recovery_required = False
-            self.world.step_until_settled(max_steps=60)
-            self._publish_world()
-            return True
+        cells = {(int(p["row"]), int(p["col"])): p["id"]
+                 for p in self.world.layout_cfg["pieces"]}
+        return self.reconcile_to_board_cells(cells)
 
     def reconcile_to_board_cells(self, piece_cells: dict) -> bool:
-        """Reconcile digital twin physics pieces and cells to match arbitrary board state (e.g. on Undo)."""
+        """Apply an explicitly confirmed complete board, never during manipulation."""
+        if not self._board_observation_ready():
+            return False
         with self._lock, self.world._physics_lock:
-            if hasattr(self.world, "reconcile_to_board_cells"):
+            if (self.active_move is not None or self.world.get_attached_piece() is not None
+                    ):
+                return self._fail("Cannot reconcile a board during robot motion or while holding a piece")
+            try:
                 self.world.reconcile_to_board_cells(piece_cells)
+            except (KeyError, TypeError, ValueError) as exc:
+                return self._fail(f"Board reconciliation rejected: {exc}")
             self._cells = dict(piece_cells)
             self._committed.clear()
             self.active_move = None
@@ -206,7 +242,6 @@ class LiveTwinBridge:
             self._released = []
             self.last_error = None
             self.recovery_required = False
-            self.world.step_until_settled(max_steps=60)
             self._publish_world()
             return True
 
@@ -271,7 +306,10 @@ class LiveTwinBridge:
 
     def end_robot_move(self, context, success):
         # Keep the latest actual joints even when the execution failed.
-        fresh = self.poll_once()
+        try:
+            fresh = self.poll_once()
+        except Exception as exc:
+            fresh = self._fail(f"Final joint read failed: {exc}", recovery=True)
         with self._lock, self.world._physics_lock:
             if self.active_move != context:
                 return self._fail("Pending robot move mismatch", recovery=True)

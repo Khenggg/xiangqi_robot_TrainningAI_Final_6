@@ -161,13 +161,21 @@ def load_nominal_scene_placement(scene_config_path: Optional[Path] = None) -> Di
         except Exception:
             pass
     return {
-        "grid_origin_in_robot_base_m": [0.18, 0.20, 0.0105],
-        "board_center_in_robot_base_m": [0.0, 0.36, 0.0105],
-        "grid_origin_in_3d_world_m": [-0.20, 0.0105, -0.18],
-        "board_center_in_3d_world_m": [-0.36, 0.0105, 0.0],
+        "grid_origin_in_robot_base_m": [-0.2112, 0.2101, 0.0105],
+        "board_center_in_robot_base_m": [-0.0238, 0.3770, 0.0105],
+        "grid_origin_in_3d_world_m": [-0.2101, 0.0105, 0.2112],
+        "board_center_in_3d_world_m": [-0.3770, 0.0105, 0.0238],
         "board_surface_height_m": 0.0105,
         "board_yaw_deg": 0.0,
     }
+
+
+DEFAULT_TEACHING_POINTS: Dict[str, List[float]] = {
+    "R1": [-211.171, 210.149, 10.5],
+    "R2": [-214.359, 544.595, 10.5],
+    "R3": [ 166.645, 538.109, 10.5],
+    "R4": [ 163.581, 215.261, 10.5],
+}
 
 
 @dataclass
@@ -186,21 +194,26 @@ class BoardPlacementState:
     board_yaw_deg: float = 0.0
 
     # Authoritative coordinates in robot base {B}
-    board_center_robot_m: List[float] = field(default_factory=lambda: [0.0, 0.360, 0.00525])
+    board_center_robot_m: List[float] = field(default_factory=lambda: [-0.0238, 0.3770, 0.00525])
     board_surface_z_robot_m: float = 0.0105
-    grid_origin_robot_m: List[float] = field(default_factory=lambda: [0.180, 0.200, 0.0105])
+    grid_origin_robot_m: List[float] = field(default_factory=lambda: [-0.2112, 0.2101, 0.0105])
 
     # 3D world representation
-    physical_board_center_world_m: List[float] = field(default_factory=lambda: [-0.360, 0.00525, 0.0])
-    board_visual_root_world_m: List[float] = field(default_factory=lambda: [-0.360, 0.0105, 0.0])
+    physical_board_center_world_m: List[float] = field(default_factory=lambda: [-0.3770, 0.00525, 0.0238])
+    board_visual_root_world_m: List[float] = field(default_factory=lambda: [-0.3770, 0.0105, 0.0238])
 
     # Backward compatible aliases
-    physical_board_center_robot_m: List[float] = field(default_factory=lambda: [0.0, 0.360, 0.00525])
-    board_center_world_m: List[float] = field(default_factory=lambda: [-0.360, 0.0105, 0.0])
+    physical_board_center_robot_m: List[float] = field(default_factory=lambda: [-0.0238, 0.3770, 0.00525])
+    board_center_world_m: List[float] = field(default_factory=lambda: [-0.3770, 0.0105, 0.0238])
 
     # Optional explicit 3x3 orthonormal rotation matrix in SO(3)
     # When provided (e.g. from physical calibration), overrides board_yaw_deg computation.
     rotation_matrix: Optional[List[List[float]]] = None
+
+    # Teaching points R1..R4 in robot base coordinates (mm) for exact bilinear surface interpolation
+    teaching_points: Optional[Dict[str, List[float]]] = field(
+        default_factory=lambda: {k: list(v) for k, v in DEFAULT_TEACHING_POINTS.items()}
+    )
 
     placement_version: int = 1
     timestamp: float = field(default_factory=time.time)
@@ -320,6 +333,22 @@ class BoardPlacementState:
         """
         if height_above_board_mm is not None:
             z_rel_m = float(height_above_board_mm) / 1000.0
+
+        if self.teaching_points and all(k in self.teaching_points for k in ("R1", "R2", "R3", "R4")):
+            col_ratio = max(0.0, min(1.0, float(col) / 8.0))
+            row_ratio = max(0.0, min(1.0, float(row) / 9.0))
+            r1 = np.array(self.teaching_points["R1"], dtype=float)
+            r2 = np.array(self.teaching_points["R2"], dtype=float)
+            r3 = np.array(self.teaching_points["R3"], dtype=float)
+            r4 = np.array(self.teaching_points["R4"], dtype=float)
+            if abs(r1[1]) > 10.0:  # coordinates in mm
+                r1, r2, r3, r4 = r1 / 1000.0, r2 / 1000.0, r3 / 1000.0, r4 / 1000.0
+            tx = r1 + (r2 - r1) * col_ratio
+            bx = r4 + (r3 - r4) * col_ratio
+            p_surf = tx + (bx - tx) * row_ratio
+            p_surf[2] += float(z_rel_m)
+            return p_surf
+
         u_m, v_m = self.cell_to_board_local(row, col)
         return self.board_local_to_robot(u_m, v_m, z_rel_m=z_rel_m)
 
@@ -331,6 +360,22 @@ class BoardPlacementState:
         Returns:
             (nearest_row, nearest_col, dist_m) in canonical Xiangqi order.
         """
+        if self.teaching_points and all(k in self.teaching_points for k in ("R1", "R2", "R3", "R4")):
+            best_dist = float("inf")
+            best_r = 0
+            best_c = 0
+            px = float(pos_robot_m[0])
+            py = float(pos_robot_m[1])
+            for r in range(10):
+                for c in range(9):
+                    p_cell = self.cell_to_robot_xyz(r, c, z_rel_m=0.0)
+                    dist = math.hypot(px - p_cell[0], py - p_cell[1])
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_r = r
+                        best_c = c
+            return best_r, best_c, best_dist
+
         p_local = self.robot_to_board_local(pos_robot_m)
         r_float, c_float = self.board_local_to_cell(p_local[0], p_local[1])
         nearest_r = max(0, min(9, int(round(r_float))))
@@ -379,6 +424,7 @@ class BoardPlacementState:
             "quat_world": [round(v, 5) for v in self.quat_world],
             "R_robot_from_board": [[round(float(v), 6) for v in row] for row in self.R_robot_from_board.tolist()],
             "T_robot_from_board": [[round(float(v), 5) for v in row] for row in self.T_robot_from_board.tolist()],
+            "teaching_points": self.teaching_points,
             "placement_version": self.placement_version,
             "timestamp": self.timestamp,
         }
@@ -401,13 +447,12 @@ class BoardPlacementState:
         h_offset_m = float(board_height_offset_mm) / 1000.0
         yaw_deg = float(board_yaw_deg)
 
-        if nominal_board_center_robot_m is None or nominal_board_surface_z_m is None:
-            nom_cfg = load_nominal_scene_placement()
-            if nominal_board_surface_z_m is None:
-                nominal_board_surface_z_m = nom_cfg.get("board_surface_height_m", 0.0105)
-            if nominal_board_center_robot_m is None:
-                bc = nom_cfg.get("board_center_in_robot_base_m", [0.0, 0.360, 0.0105])
-                nominal_board_center_robot_m = [bc[0], bc[1], nominal_board_surface_z_m / 2.0]
+        nom_cfg = load_nominal_scene_placement() if (nominal_board_center_robot_m is None or nominal_board_surface_z_m is None) else {}
+        if nominal_board_surface_z_m is None:
+            nominal_board_surface_z_m = nom_cfg.get("board_surface_height_m", 0.0105)
+        if nominal_board_center_robot_m is None:
+            bc = nom_cfg.get("board_center_in_robot_base_m", [-0.0238, 0.3770, 0.0105])
+            nominal_board_center_robot_m = [bc[0], bc[1], nominal_board_surface_z_m / 2.0]
 
         nom_cx, nom_cy, _ = nominal_board_center_robot_m
         nom_surface_z = float(nominal_board_surface_z_m)
@@ -438,6 +483,19 @@ class BoardPlacementState:
             round(-center_x, 6),
         ]
 
+        # Resolve teaching points
+        tp_raw = nom_cfg.get("teaching_points") if isinstance(nom_cfg, dict) else None
+        if tp_raw is None:
+            tp = {k: list(v) for k, v in DEFAULT_TEACHING_POINTS.items()}
+        else:
+            tp = {k: list(v) for k, v in tp_raw.items()}
+
+        if abs(forward_shift_mm) > 1e-6 or abs(h_offset_m) > 1e-6:
+            shift_x = 0.0 if abs(yaw_deg) < 1.0 else -d_m * 1000.0
+            shift_y = d_m * 1000.0 if abs(yaw_deg) < 1.0 else 0.0
+            shift_z = h_offset_m * 1000.0
+            tp = {k: [round(v[0] + shift_x, 3), round(v[1] + shift_y, 3), round(v[2] + shift_z, 3)] for k, v in tp.items()}
+
         instance = cls(
             forward_shift_mm=float(forward_shift_mm),
             safe_transit_height_mm=float(safe_transit_height_mm),
@@ -449,6 +507,7 @@ class BoardPlacementState:
             physical_board_center_world_m=physical_board_center_world_m,
             board_visual_root_world_m=board_visual_root_world_m,
             board_center_world_m=board_visual_root_world_m,
+            teaching_points=tp,
             placement_version=int(placement_version),
             timestamp=time.time(),
         )

@@ -152,6 +152,24 @@ def execute_ai_move(
             )
         return False
 
+    # Motion success is not proof that the real board changed as requested.
+    # In live physical mode the camera must confirm the complete resulting
+    # board before FEN and semantic identities advance.
+    physical_live = (getattr(getattr(hw, "config", None), "ROBOT_BACKEND", "VIRTUAL").upper() == "PHYSICAL"
+                     and not getattr(hw, "dry_run", True))
+    if physical_live:
+        expected_board, _ = xiangqi.make_temp_move(state.board, (s, d))
+        try:
+            confirmed = bool(hw.verify_physical_board(expected_board))
+        except Exception:
+            confirmed = False
+        if not confirmed:
+            if isinstance(state, GameState):
+                state.mark_move_failed("Camera did not confirm the robot's completed move")
+                state.move_sync_error = state.move_execution_error
+                state.physical_sync_fault = True
+            return False
+
     # 2. COMMIT TO GAMESTATE
     if context is not None:
         try:

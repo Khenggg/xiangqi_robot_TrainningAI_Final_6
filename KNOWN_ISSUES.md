@@ -1,5 +1,12 @@
 # KNOWN_ISSUES.md — COMPACT ISSUE & REGRESSION TRACKER
 
+## 2026-09-29 camera twin remaining verification
+
+- Full camera recognition has been exercised with synthetic quality-approved boards, but not verified against a live physical board. Camera quality and extrinsic calibration remain commissioning gates.
+- Current yaw-0 virtual black-cannon approach is blocked by the active collision guard at a gripper/base penetration of 0.18 mm. Keep rejection; plan and verify a collision-free route before enabling this move.
+- Re-scan infers the next turn only from one legal board transition. Multiple changes require operator confirmation with `1` (Red) or `2` (Black) before play resumes; an image alone cannot restore the exact move count in FEN.
+- Whole `tests/unit` regression remains red/incomplete on this base. Historical yaw-90 fixtures require separate rebaselining against the current yaw-0 scene. Focused camera/Game/Twin tests are recorded in `docs/CAMERA_GAME_TWIN_SYNC_2026-09-29.md`.
+
 ## 2026-09-26 current collision milestone
 
 - **OPEN - physical grip:** the declared closed CAD jaws remain roughly 2-7 mm from the nominal 22.5 mm rook in direct PyBullet queries. Simulator grasp now fails closed with NO_JAW_CONTACT; actual stroke, alignment, and force need measurement before a verified pick can be enabled.

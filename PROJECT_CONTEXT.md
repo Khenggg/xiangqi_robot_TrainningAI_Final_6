@@ -1,7 +1,8 @@
 # PROJECT_CONTEXT.md — XIANGQI ROBOT ARCHITECTURAL SPECIFICATION
 
 > **Purpose:** Single source of persistent architectural facts, coordinate contracts, authority boundaries, and physical geometry. Agents MUST read this file first instead of rediscovering constants and architecture.
-> **Last Verified HEAD:** 7ce5e71 (Branch: `feature/virtual-robot-3d-simulator`)
+> **Last Verified HEAD:** 7ce5e71 (Branch: `feature/virtual-robot-3d-simulator`; historical snapshot, not current HEAD)
+> **Current R1–R4 guidance:** `docs/R1_R4_BOARD_PLACEMENT_CURRENT.md`. The old constants and placement assumptions in this file are not current calibration data.
 
 ---
 

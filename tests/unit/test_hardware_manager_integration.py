@@ -52,19 +52,26 @@ class HardwareManagerIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(hw.motion_resolver)
         self.assertIsNotNone(hw.motion_executor)
         self.assertIsNotNone(hw.motion_coordinator)
+        # Motion is admitted only after the twin and the guard share one world.
+        self.assertFalse(hw.is_robot_ready)
+        twin = hw.setup_digital_twin(start=False)
+        self.assertIsNotNone(twin)
+        self.assertIs(hw.backend.collision_guard.world, twin.world)
         self.assertTrue(hw.is_robot_ready)
+        joints_before = hw.backend.get_state_snapshot().joints_deg
 
-        # Test structured execute_piece_move execution
+        # Anonymous calls cannot bypass the twin's semantic piece contract.
         res = hw.execute_piece_move(s_col=0, s_row=0, d_col=0, d_row=1, is_capture=False)
-        self.assertTrue(res.success)
+        self.assertFalse(res.success)
 
         # Test move piece execution via wrapper
         ok = hw.move_piece(s_col=0, s_row=0, d_col=0, d_row=1, is_capture=False)
-        self.assertTrue(ok)
+        self.assertFalse(ok)
 
         # Test capture move piece
         ok_cap = hw.move_piece(s_col=0, s_row=0, d_col=0, d_row=1, is_capture=True)
-        self.assertTrue(ok_cap)
+        self.assertFalse(ok_cap)
+        self.assertEqual(hw.backend.get_state_snapshot().joints_deg, joints_before)
 
         hw.cleanup()
 

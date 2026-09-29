@@ -24,6 +24,11 @@ class CaptureFenSyncTests(unittest.TestCase):
         state = self.make_state()
         state.board[5][0] = "r_C"
         state.board[2][0] = "b_N"
+        state.board[4][0] = "b_P"  # Cannon capture requires exactly one screen.
+        state.board[4][4] = "b_P"  # Keep the two kings from facing each other.
+        state.piece_ids = {(0, 4): "black_king_0", (9, 4): "red_king_0",
+                           (5, 0): "red_cannon_0", (2, 0): "black_knight_0",
+                           (4, 0): "black_pawn_0", (4, 4): "black_pawn_2"}
 
         state.process_human_move((0, 5), (0, 2), "r_C")
 

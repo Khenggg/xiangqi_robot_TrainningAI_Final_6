@@ -121,3 +121,17 @@ def test_self_play_motion_failure_transitions_to_fault():
     ctrl.tick()  # Motion failed -> FAULTED
     assert ctrl.status == SelfPlayStatus.FAULTED
     assert state.physical_sync_fault is True
+
+
+def test_self_play_restart_requires_explicit_board_reconciliation():
+    state = GameState(allow_mouse_move=True)
+    hw = DummyHardwareManager()
+    ctrl = SelfPlayController(state, hw)
+    assert ctrl.start(run_mode="step")
+    ctrl._fault("Interrupted motion")
+    assert not ctrl.start(run_mode="step")
+    assert ctrl.status == SelfPlayStatus.FAULTED
+    assert state.apply_confirmed_board(state.board)
+    assert ctrl.start(run_mode="step")
+    assert ctrl.status == SelfPlayStatus.READY
+    hw.execute_piece_move.assert_not_called()

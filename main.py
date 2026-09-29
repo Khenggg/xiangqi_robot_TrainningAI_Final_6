@@ -71,10 +71,17 @@ from src.ui.board_renderer import (
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption(f"Xiangqi Robot VIP - { _mode_label }")
 renderer = BoardRenderer(screen)
+renderer.draw_ui({})
+pygame.display.flip()
+pygame.event.pump()
 
 # Khởi tạo các module quản lý SRP
 hw = HardwareManager(config, _BASE_DIR).initialize_all()
 state = GameState(allow_mouse_move=config.DRY_RUN)
+renderer.draw_ui(state.get_render_state())
+renderer.draw_pieces(state.board)
+pygame.display.flip()
+pygame.event.pump()
 if hw.ai_ctrl:
     state.ai_elo, state.ai_elo_title = hw.ai_ctrl.get_elo_info()
 input_mgr = InputHandler(state, hw)
@@ -99,8 +106,9 @@ except Exception as e:
 twin = hw.setup_digital_twin(telemetry=telemetry)
 if twin is not None:
     state.set_move_observer(hw.reconcile_human_move)
-    hw.reconcile_new_game()
-    state.clear_move_sync_error()
+    state.set_board_observer(hw.reconcile_board)
+    if hw.reconcile_new_game():
+        state.clear_move_sync_error()
     print("[MAIN] 🪞 Digital Twin live reconciliation & move observer activated!")
 
 
@@ -141,17 +149,16 @@ atexit.register(_cleanup_all)
 running = True
 clock = pygame.time.Clock()
 
-print(f"\n[GAME] === GAME STARTED ===")
-print(f"[FEN] {state.current_fen}")
-
-hw.capture_baseline_if_needed(force_delay=1.0)
-
-# [API] Bắt đầu khởi tạo trận đấu truyền hình trực tiếp
-if not config.DRY_RUN:
-    state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
-
-# Khởi chạy main loop (Đã bỏ Chọn độ khó)
 try:
+    print(f"\n[GAME] === GAME STARTED ===")
+    print(f"[FEN] {state.current_fen}")
+
+    hw.capture_baseline_if_needed(force_delay=1.0)
+
+    # [API] Bắt đầu khởi tạo trận đấu truyền hình trực tiếp
+    if not config.DRY_RUN:
+        state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
+
     while running:
         # 2a. Vẽ khung hình
         ui_state = state.get_render_state()
@@ -178,7 +185,10 @@ try:
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
-                if self_play_ctrl is not None and self_play_ctrl.human_input_disabled:
+                if (state.turn_confirmation_required
+                        and event.key in (pygame.K_1, pygame.K_KP1, pygame.K_2, pygame.K_KP2)):
+                    input_mgr.handle_keyboard(event.key)
+                elif self_play_ctrl is not None and self_play_ctrl.human_input_disabled:
                     if event.key == pygame.K_n:
                         self_play_ctrl.request_next_move()
                     elif event.key == pygame.K_e:
@@ -188,7 +198,14 @@ try:
                     elif event.key == pygame.K_s:
                         self_play_ctrl.set_run_mode("step")
                     elif event.key == pygame.K_r:
-                        self_play_ctrl.end_match()
+                        if self_play_ctrl.status in {SelfPlayStatus.FAULTED, SelfPlayStatus.ENDED}:
+                            self_play_ctrl.start(
+                                red_difficulty=self_play_ctrl.red_difficulty or "medium",
+                                black_difficulty=self_play_ctrl.black_difficulty or "medium",
+                                run_mode=self_play_ctrl.run_mode,
+                            )
+                        else:
+                            self_play_ctrl.end_match()
                 else:
                     if event.key == pygame.K_r:
                         print("[MAIN] 🤖 Bắt đầu chế độ Tự đấu 2 AI (Self-Play Robot vs Robot)...")
@@ -230,18 +247,24 @@ try:
         if self_play_ctrl is not None:
             self_play_ctrl.tick()
 
-        # Optional Hand-Aware Auto Confirmation (when enabled in config and self-play is not active)
+        # Automatic Board Stability & Move Detection (Visual-Correction flow)
         if (self_play_ctrl is None or not self_play_ctrl.active):
-            if (state.turn == "r" and not state.game_over
-                    and getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False)
-                    and hw.hand_interaction_finished()):
-                input_mgr.try_auto_confirm_move(
-                    retries=getattr(config, "AUTO_MOVE_CONFIRM_RETRIES", 10),
-                    retry_seconds=getattr(config, "AUTO_MOVE_CONFIRM_RETRY_SECONDS", 0.2),
-                )
+            if state.is_human_turn and not state.game_over and getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False):
+                # 1. Primary: Direct board state stability monitor from camera
+                input_mgr.poll_board_stability()
+
+                # 2. Hand-interaction event fallback if hand model is active
+                if getattr(hw, "hand_model", None) is not None and hw.hand_interaction_finished():
+                    input_mgr.try_auto_confirm_move(
+                        retries=getattr(config, "AUTO_MOVE_CONFIRM_RETRIES", 10),
+                        retry_seconds=getattr(config, "AUTO_MOVE_CONFIRM_RETRY_SECONDS", 0.2),
+                    )
 
         # 2d. Xử lý AI Turn (Non-blocking) - Chế độ Người vs AI
-        if (self_play_ctrl is None or not self_play_ctrl.active) and state.turn == "b" and not state.game_over:
+        if (config.GAME_MODE == "HUMAN_VS_ROBOT"
+                and (self_play_ctrl is None or not self_play_ctrl.human_input_disabled)
+                and state.turn == "b" and not state.game_over
+                and not state.move_sync_error and not state.physical_sync_fault):
             
             # --- Khởi động Thread suy nghĩ ---
             if not state.ai_thinking and state.ai_thread is None:

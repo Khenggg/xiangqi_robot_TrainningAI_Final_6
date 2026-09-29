@@ -46,7 +46,10 @@ from src.simulation.physics.world import VirtualPhysicalWorld
 def bridge_setup():
     backend = PhysicalFR3Backend(ip="192.168.58.2", dry_run=True)
     backend.connect()
-    provider = FixedBoardPoseProvider.from_forward_shift(0.0)
+    # These recorded grasp joints target the historical 90-degree board pose.
+    # Pin that pose here so the test still measures attachment geometry after
+    # the product default board was rotated to yaw 0.
+    provider = FixedBoardPoseProvider.from_forward_shift(0.0, board_yaw_deg=90.0)
     world = VirtualPhysicalWorld(
         board_placement_state=provider.get_board_placement_state(),
         enable_gui=False,

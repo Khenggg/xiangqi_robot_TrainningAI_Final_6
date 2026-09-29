@@ -91,6 +91,9 @@ class HardwareManager:
         self.cchess_recognizer = None
         self.perspective_path = Path(project_dir) / "perspective.npy"
         self.camera_ready = False
+        self._difficulty_availability = {
+            "easy": True, "medium": True, "hard": True, "impossible": True
+        }
         
         self.class_id_to_name = {
             0: "b_A", 1: "b_C", 2: "b_R", 3: "b_E", 4: "b_K", 5: "b_N", 6: "b_P",
@@ -127,10 +130,15 @@ class HardwareManager:
             # Setup Board Pose Provider & Motion Pipeline for Virtual Backend
             forward_shift_mm = getattr(self.config, "FORWARD_SHIFT_MM", 0.0)
             board_yaw_deg = float(getattr(self.config, "BOARD_YAW_DEG", 0.0))
-            self.board_pose_provider = FixedBoardPoseProvider.from_forward_shift(
-                forward_shift_mm=forward_shift_mm,
-                board_yaw_deg=board_yaw_deg,
-            )
+            if self.simulation_runtime is not None:
+                self.board_pose_provider = FixedBoardPoseProvider(
+                    self.simulation_runtime.world.board_placement_state)
+                self.simulation_runtime.bind_board_pose_provider(self.board_pose_provider)
+            else:
+                self.board_pose_provider = FixedBoardPoseProvider.from_forward_shift(
+                    forward_shift_mm=forward_shift_mm,
+                    board_yaw_deg=board_yaw_deg,
+                )
             self.motion_profile = MotionProfile(
                 pick_tcp_height_above_board_mm=getattr(self.config, "PICK_TCP_HEIGHT_MM", 4.715),
                 place_tcp_height_above_board_mm=getattr(self.config, "PLACE_TCP_HEIGHT_MM", 4.715),
@@ -183,6 +191,7 @@ class HardwareManager:
                     dry_run=self.dry_run,
                     default_vel=float(getattr(self.config, "MOVE_SPEED", 20.0)),
                 )
+                self.backend.connect()
                 self.gripper_driver = TwoOutputGripperDriver(
                     set_do_fn=self.backend.set_tool_do,
                     dry_run=self.dry_run,
@@ -193,7 +202,6 @@ class HardwareManager:
                     deadtime_sec=getattr(self.config, "TOOL_DO_DEADTIME_SEC", 0.10),
                 )
                 self.backend.gripper_driver = self.gripper_driver
-                self.backend.connect()
                 if not self.dry_run:
                     print("[MAIN] ✅ Physical FR3 Backend connected (READ-ONLY).")
             except Exception as e:
@@ -290,9 +298,20 @@ class HardwareManager:
         else:
             warning_tilt = getattr(self.config, "BOARD_MAX_TILT_WARNING_DEG", 2.5)
             hard_fail_tilt = getattr(self.config, "BOARD_MAX_TILT_HARD_FAIL_DEG", 5.0)
+            max_dim_fail = getattr(self.config, "BOARD_MAX_DIMENSION_ERROR_HARD_FAIL_MM", 25.0)
+            max_edge_diff = getattr(self.config, "BOARD_MAX_EDGE_LENGTH_DIFF_MM", 20.0)
+            max_corner_fail = getattr(self.config, "BOARD_MAX_CORNER_RESIDUAL_HARD_FAIL_MM", 15.0)
+            max_rms_fail = getattr(self.config, "BOARD_MAX_RMS_RESIDUAL_HARD_FAIL_MM", 10.0)
+            max_diag_diff = getattr(self.config, "BOARD_MAX_DIAGONAL_DIFF_MM", 15.0)
             cal_policy = BoardCalibrationTolerancePolicy(
                 max_board_tilt_warning_deg=float(warning_tilt),
                 max_board_tilt_hard_fail_deg=float(hard_fail_tilt),
+                max_dimension_error_hard_fail_mm=float(max_dim_fail),
+                max_edge_length_diff_mm=float(max_edge_diff),
+                max_corner_residual_hard_fail_mm=float(max_corner_fail),
+                max_rms_residual_hard_fail_mm=float(max_rms_fail),
+                max_diagonal_diff_mm=float(max_diag_diff),
+                allow_wobj_ids=(0, 1),
             )
 
         try:
@@ -436,6 +455,47 @@ class HardwareManager:
 
         # 3. Giao cho AI Controller quản lý cả 2
         self.ai_ctrl = AIController(local_engine, cloud_engine, self.config)
+        self._difficulty_availability = {
+            difficulty_name: local_engine is not None and getattr(local_engine, "_ready", True)
+            for difficulty_name in ("easy", "medium", "hard", "impossible")
+        }
+
+    def difficulty_availability(self):
+        """Return which menu options can be selected without weakening a choice."""
+        return dict(getattr(self, "_difficulty_availability", {"easy": True, "medium": True, "hard": True, "impossible": True}))
+
+    def select_difficulty(self, difficulty):
+        """Switch engine only after its requested policy is usable."""
+        if difficulty not in ("easy", "medium", "hard", "impossible"):
+            return False, "Unknown difficulty"
+        if not self.difficulty_availability().get(difficulty, False):
+            return False, f"{difficulty.title()} is not ready on this machine"
+        def confirmation():
+            profile = getattr(self.config, "AI_DIFFICULTY_PROFILES", {}).get(difficulty, {})
+            if difficulty == "impossible":
+                return "Đã chọn IMPOSSIBLE — Moonfish nguyên gốc đang được sử dụng."
+            nodes = profile.get('nodes', 0)
+            nodes_str = f"≤{nodes:,} nodes" if nodes else ""
+            depth_str = f"Moonfish depth {profile.get('depth')}" if profile.get('depth') is not None else ""
+            think_str = f"≤{profile.get('think_ms', 0) / 1000:g}s" if profile.get('think_ms') else ""
+            parts = [p for p in [depth_str, nodes_str, think_str] if p]
+            details = f" — {', '.join(parts)}." if parts else "."
+            return f"Đã chọn {difficulty.upper()}{details}"
+
+        if difficulty == getattr(self.config, "AI_DIFFICULTY", "hard"):
+            message = confirmation()
+            print(f"[GAME] {message}")
+            return True, message
+        if self.ai_ctrl is not None:
+            if getattr(self.ai_ctrl, "local_engine", None) is not None:
+                self.ai_ctrl.local_engine.stop()
+            if getattr(self.ai_ctrl, "cloud_engine", None) is not None:
+                self.ai_ctrl.cloud_engine.stop()
+        self.config.AI_DIFFICULTY = difficulty
+        self._init_ai()
+        message = confirmation()
+        print(f"[GAME] {message}")
+        return True, message
 
     def _init_camera(self):
         # Initialize CChessRecognizer if ONNX models exist
@@ -668,6 +728,9 @@ class HardwareManager:
                 and self.board_pose_provider is not None
                 and self.motion_resolver is not None
                 and self.motion_executor is not None
+                and self.twin_bridge is not None
+                and getattr(self.backend, "collision_guard", None) is not None
+                and self.backend.collision_guard.world is self.twin_bridge.world
             )
         else:
             if self.backend is not None:
@@ -683,6 +746,8 @@ class HardwareManager:
         if self.board_pose_provider is None or self.backend is None:
             print("⚠️ [HardwareManager] Cannot setup Digital Twin: backend or board_pose_provider missing.")
             return None
+        if self.twin_bridge is not None:
+            return self.twin_bridge
         if hasattr(self.backend, "telemetry_publisher") and self.backend.telemetry_publisher is None and telemetry is not None:
             self.backend.telemetry_publisher = telemetry
         from src.digital_twin.live_twin_bridge import LiveTwinBridge
@@ -691,7 +756,19 @@ class HardwareManager:
             board_pose_provider=self.board_pose_provider,
             telemetry=telemetry,
             poll_hz=poll_hz,
+            physical=getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper() == "PHYSICAL",
+            world=(self.simulation_runtime.world if self.simulation_runtime is not None else None),
+            owns_world=self.simulation_runtime is None,
         )
+        if self.simulation_runtime is not None:
+            self.simulation_runtime.bind_board_pose_provider(self.board_pose_provider, self.twin_bridge)
+        if (getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper() == "VIRTUAL"
+                and self.simulation_runtime is None):
+            # Game-started virtual backend needs the same collision guard and
+            # PyBullet bodies as motion and viewer; runtime-owned worlds
+            # already install their own guard.
+            from src.simulation.physics.collision_guard import FR3CollisionGuard
+            self.backend.set_collision_guard(FR3CollisionGuard(self.twin_bridge.world))
         if self.motion_executor is not None:
             self.motion_executor.twin_bridge = self.twin_bridge
         if start:
@@ -714,6 +791,27 @@ class HardwareManager:
         """Reconcile digital twin state to specific board piece mapping (e.g. on Undo)."""
         if self.twin_bridge is not None:
             return self.twin_bridge.reconcile_to_board_cells(piece_ids)
+        return True
+
+    def verify_physical_board(self, expected_board) -> bool:
+        """Verify a completed move using fresh, quality-approved full recognition.
+
+        Occupancy alone cannot prove piece color/type after a capture. This
+        read-only check deliberately requires the full-board recognizer.
+        """
+        if self.cam_monitor is None or self.cchess_recognizer is None:
+            return False
+        try:
+            for _ in range(2):
+                frame, _detections = self.cam_monitor.get_fresh_snapshot()
+                if frame is None:
+                    return False
+                observed = self.recognize_board_state(frame)
+                if not (observed and observed.get("success") and observed.get("quality_ok")
+                        and observed.get("board") == expected_board):
+                    return False
+        except Exception:
+            return False
         return True
 
     def execute_piece_move(
@@ -739,6 +837,18 @@ class HardwareManager:
                 failed_stage=MotionStage.PREPOSITION,
                 category=ExecutionFailureCategory.PRECONDITION_FAILED,
                 message=f"Robot is not ready for motion (backend_type={backend_type}, dry_run={self.dry_run}).",
+            )
+
+        if self.twin_bridge is not None and (
+                move_context is None or move_context.piece_id != piece_id
+                or move_context.captured_piece_id != captured_piece_id
+                or tuple(move_context.src) != (s_row, s_col)
+                or tuple(move_context.dst) != (d_row, d_col)
+                or bool(captured_piece_id) != bool(is_capture)):
+            return MotionExecutionResult.fail(
+                failed_stage=MotionStage.PREPOSITION,
+                category=ExecutionFailureCategory.INVALID_PLAN,
+                message="Digital Twin execution requires a matching semantic move and piece identities.",
             )
 
         if is_capture and backend_type == "PHYSICAL":
@@ -808,19 +918,22 @@ class HardwareManager:
                     message=f"Digital Twin rejected robot move: {self.twin_bridge.last_error}",
                 )
 
-        if self.simulation_runtime is not None and hasattr(self.simulation_runtime, "acquire_operation_state"):
-            try:
+        try:
+            if self.simulation_runtime is not None and hasattr(self.simulation_runtime, "acquire_operation_state"):
                 from src.simulation.runtime import RuntimeOperationState
                 with self.simulation_runtime.acquire_operation_state(RuntimeOperationState.MOTION):
                     res = self.motion_executor.execute_plan(plan)
-            except Exception as e:
-                return MotionExecutionResult.fail(
-                    failed_stage=MotionStage.PREPOSITION,
-                    category=ExecutionFailureCategory.ROBOT_BUSY,
-                    message=f"Simulation runtime operation error: {e}",
-                )
-        else:
-            res = self.motion_executor.execute_plan(plan)
+            else:
+                res = self.motion_executor.execute_plan(plan)
+        except Exception as e:
+            # Always finish the twin transaction, including executor/runtime
+            # exceptions. Recovery remains latched; no retreat or fake commit.
+            res = MotionExecutionResult.fail(
+                failed_stage=MotionStage.PREPOSITION,
+                category=ExecutionFailureCategory.PAYLOAD_STATE_UNCERTAIN,
+                message=f"Motion execution interrupted: {e}",
+                payload_state=PayloadState.UNKNOWN,
+            )
 
         if self.twin_bridge is not None and move_context is not None:
             if not self.twin_bridge.end_robot_move(move_context, res.success):
@@ -871,9 +984,8 @@ class HardwareManager:
         if getattr(self, "twin_bridge", None) is not None:
             try: self.twin_bridge.close()
             except: pass
-        if self.gripper_driver is not None and hasattr(self.gripper_driver, "safe_idle"):
-            try: self.gripper_driver.safe_idle()
-            except: pass
+        # Backend disconnect owns cleanup of outputs actually used this session.
+        # An observation-only session must never pulse Tool DO during shutdown.
         if self.simulation_runtime is not None and hasattr(self.simulation_runtime, "stop"):
             try: self.simulation_runtime.stop()
             except: pass
@@ -942,7 +1054,14 @@ class HardwareManager:
     def capture_baseline_if_needed(self, force_delay=0.0):
         if self.cam_monitor and self.yolo_detector:
             if force_delay > 0:
-                time.sleep(force_delay)
+                t_end = time.time() + float(force_delay)
+                while time.time() < t_end:
+                    try:
+                        import pygame
+                        pygame.event.pump()
+                    except Exception:
+                        pass
+                    time.sleep(0.05)
             frame, detections = self.cam_monitor.get_fresh_snapshot()
             success = self.yolo_detector.capture_baseline(frame, detections)
             return success

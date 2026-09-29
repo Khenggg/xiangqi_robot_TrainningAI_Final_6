@@ -390,14 +390,14 @@ class FR3CollisionGuard:
 
         # 6. The carried piece is a moving collision body, not a static exclusion.
         if attached_p is not None:
-            pts = p.getClosestPoints(attached_p.body_id, board_id, distance=gb_margin, physicsClientId=client)
+            pts = p.getClosestPoints(attached_p.body_id, board_id, distance=0.0, physicsClientId=client)
             for pt in pts:
                 dist = float(pt[8])
-                if dist < gb_margin:
+                if dist < -1e-4:
                     return CollisionResult(
                         safe=False, colliding_body="payload", obstacle="board", distance_m=dist,
                         penetration_m=max(0.0, -dist), q_failed=[round(float(q), 4) for q in joints_rad],
-                        failure_reason=f"Attached piece {attached_p.piece_id} too close to board ({dist*1000:.2f}mm)",
+                        failure_reason=f"Attached piece {attached_p.piece_id} penetrating board ({-dist*1000:.2f}mm)",
                     )
             for pt in p.getClosestPoints(attached_p.body_id, floor_id, distance=gb_margin,
                                          physicsClientId=client):

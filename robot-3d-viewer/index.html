@@ -205,6 +205,26 @@
             </div>
           </div>
           <div id="placementTabContent" class="tab-content">
+            <section class="joint-item" aria-label="R1 R4 board teaching" style="border: 1px solid #3b82f6; padding: 10px; margin-bottom: 12px;">
+              <strong>R1–R4 · đặt bàn theo 4 điểm (robot_base, mm)</strong>
+              <p style="font-size: 11px; color: #aab7c8; margin: 6px 0;">
+                R1 (0,0) → R2 (0,8) → R3 (9,8) → R4 (9,0). Điểm là giao lưới trên mặt bàn.
+                Số lấy từ mô phỏng không phải số đo đầu kẹp chạm bàn thật.
+                Trước khi áp dụng, dùng tab Service để chuẩn bị dời bàn và đưa tay ảo về SERVICE_SAFE.
+              </p>
+              <div style="display: grid; grid-template-columns: 35px repeat(3, minmax(0, 1fr)); gap: 5px; align-items: center;">
+                <span></span><span>X mm</span><span>Y mm</span><span>Z mm</span>
+                <label for="teachR1X">R1</label><input id="teachR1X" aria-label="R1 X mm" type="number" step="0.001" /><input id="teachR1Y" aria-label="R1 Y mm" type="number" step="0.001" /><input id="teachR1Z" aria-label="R1 Z mm" type="number" step="0.001" />
+                <label for="teachR2X">R2</label><input id="teachR2X" aria-label="R2 X mm" type="number" step="0.001" /><input id="teachR2Y" aria-label="R2 Y mm" type="number" step="0.001" /><input id="teachR2Z" aria-label="R2 Z mm" type="number" step="0.001" />
+                <label for="teachR3X">R3</label><input id="teachR3X" aria-label="R3 X mm" type="number" step="0.001" /><input id="teachR3Y" aria-label="R3 Y mm" type="number" step="0.001" /><input id="teachR3Z" aria-label="R3 Z mm" type="number" step="0.001" />
+                <label for="teachR4X">R4</label><input id="teachR4X" aria-label="R4 X mm" type="number" step="0.001" /><input id="teachR4Y" aria-label="R4 Y mm" type="number" step="0.001" /><input id="teachR4Z" aria-label="R4 Z mm" type="number" step="0.001" />
+              </div>
+              <div class="panel-actions" style="margin-top: 8px;">
+                <button id="btnLoadSimTeachingPoints" class="action-btn">Lấy 4 điểm từ bàn mô phỏng</button>
+                <button id="btnApplyTeachingPoints" class="action-btn primary-action">Áp dụng R1–R4</button>
+              </div>
+              <div id="teachingPointsStatus" role="status" style="font-size: 11px; margin-top: 6px; color: #aab7c8;">Kết nối live để nạp bốn điểm hiện tại.</div>
+            </section>
             <div class="panel-section-header">
               <strong>📐 THIẾT LẬP VỊ TRÍ BÀN CỜ (DYNAMIC PLACEMENT)</strong>
             </div>

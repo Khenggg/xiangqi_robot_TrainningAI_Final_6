@@ -1,5 +1,7 @@
 # PHYSICAL GEOMETRY & COORDINATE CONTRACT
 
+> **Placement update (2026-09-29):** Use `R1_R4_BOARD_PLACEMENT_CURRENT.md` for the current FR3 board pose workflow. The R1, config and viewer coordinates quoted below document an older phase and are not today's physical measurements. Intrinsic 40 mm grid dimensions remain a separate geometry contract.
+
 **Repository:** `Khenggg/xiangqi_robot_TrainningAI_Final_6`  
 **Branch:** `feature/virtual-robot-3d-simulator`  
 **Phase:** P1  

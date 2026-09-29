@@ -167,6 +167,8 @@ class BoardCalibrationTolerancePolicy:
     max_board_tilt_warning_deg: float = 2.5
     max_board_tilt_hard_fail_deg: float = 5.0
     min_normal_z: Optional[float] = None  # Deprecated alias; if set, acts as secondary constraint
+    enforce_wobj_consistency: bool = True
+    allow_wobj_ids: Tuple[int, ...] = (0,)
 
     @classmethod
     def permissive_se3(cls) -> "BoardCalibrationTolerancePolicy":
@@ -316,47 +318,50 @@ def calibrate_board_from_teaching_points(
         )
 
     wobjs = {pt: observations[pt].user_or_wobj_id for pt in required_points if observations[pt].user_or_wobj_id is not None}
-    if len(wobjs) > 1 and len(set(wobjs.values())) > 1:
-        return BoardCalibrationResult(
-            success=False,
-            state=None,
-            error_r1_mm=float("inf"),
-            error_r2_mm=float("inf"),
-            error_r3_mm=float("inf"),
-            error_r4_mm=float("inf"),
-            rms_error_mm=float("inf"),
-            max_error_mm=float("inf"),
-            measured_width_mm=0.0,
-            measured_length_mm=0.0,
-            error_message=(
-                f"Teaching point frame mismatch: "
-                f"R1 wobj={observations['R1'].user_or_wobj_id}, R2 wobj={observations['R2'].user_or_wobj_id}, "
-                f"R3 wobj={observations['R3'].user_or_wobj_id}, R4 wobj={observations['R4'].user_or_wobj_id}"
-            ),
-            calibration_profile=profile,
-            tolerance_policy=policy,
-        )
+    allowed_wobjs = getattr(policy, "allow_wobj_ids", (0,))
+    if getattr(policy, "enforce_wobj_consistency", True):
+        if len(wobjs) > 1 and len(set(wobjs.values())) > 1:
+            if not all(w in allowed_wobjs for w in wobjs.values()):
+                return BoardCalibrationResult(
+                    success=False,
+                    state=None,
+                    error_r1_mm=float("inf"),
+                    error_r2_mm=float("inf"),
+                    error_r3_mm=float("inf"),
+                    error_r4_mm=float("inf"),
+                    rms_error_mm=float("inf"),
+                    max_error_mm=float("inf"),
+                    measured_width_mm=0.0,
+                    measured_length_mm=0.0,
+                    error_message=(
+                        f"Teaching point frame mismatch: "
+                        f"R1 wobj={observations['R1'].user_or_wobj_id}, R2 wobj={observations['R2'].user_or_wobj_id}, "
+                        f"R3 wobj={observations['R3'].user_or_wobj_id}, R4 wobj={observations['R4'].user_or_wobj_id}"
+                    ),
+                    calibration_profile=profile,
+                    tolerance_policy=policy,
+                )
 
-    # Validate that user frame is robot base frame (wobj 0 in FAIRINO)
-    if any(w is not None and w != 0 for w in wobjs.values()):
-        return BoardCalibrationResult(
-            success=False,
-            state=None,
-            error_r1_mm=float("inf"),
-            error_r2_mm=float("inf"),
-            error_r3_mm=float("inf"),
-            error_r4_mm=float("inf"),
-            rms_error_mm=float("inf"),
-            max_error_mm=float("inf"),
-            measured_width_mm=0.0,
-            measured_length_mm=0.0,
-            error_message=(
-                f"Teaching points are in user frame {list(wobjs.values())[0]} != 0 (robot base). "
-                "FAIRINO base coordinate system (user frame 0) required for canonical board pose."
-            ),
-            calibration_profile=profile,
-            tolerance_policy=policy,
-        )
+        # Validate that user frame is in allowed_wobjs (default: robot base frame wobj 0)
+        if any(w is not None and w not in allowed_wobjs for w in wobjs.values()):
+            return BoardCalibrationResult(
+                success=False,
+                state=None,
+                error_r1_mm=float("inf"),
+                error_r2_mm=float("inf"),
+                error_r3_mm=float("inf"),
+                error_r4_mm=float("inf"),
+                rms_error_mm=float("inf"),
+                max_error_mm=float("inf"),
+                measured_width_mm=0.0,
+                measured_length_mm=0.0,
+                error_message=(
+                    f"Teaching points are in user frame {list(wobjs.values())[0]} not in {allowed_wobjs} (robot base). "
+                    "FAIRINO base coordinate system (user frame 0) required for canonical board pose."
+                ),
+                calibration_profile=profile,
+                tolerance_policy=policy,
+            )
 
     # 3. Apply calibration contact profile offset (Mode A vs Mode B)
     contact_pts_mm = {}
@@ -570,13 +575,33 @@ def calibrate_board_from_teaching_points(
     P_meas = P_meas_mm / 1000.0
     p_center_m = p_center_mm / 1000.0
 
-    # Canonical corner coordinates in board-local frame (meters) centered at (0, 0, 0)
-    P_can = np.array([
-        [-0.160, -0.180, 0.0],  # R1 (row 0, col 0)
-        [+0.160, -0.180, 0.0],  # R2 (row 0, col 8)
-        [+0.160, +0.180, 0.0],  # R3 (row 9, col 8)
-        [-0.160, +0.180, 0.0],  # R4 (row 9, col 0)
-    ], dtype=float)
+    # Determine board axis orientation relative to robot base:
+    # v_col connects R1 (col 0, row 0) -> R2 (col 8, row 0)
+    # v_row connects R1 (col 0, row 0) -> R4 (col 0, row 9)
+    v_col = P_meas[1] - P_meas[0]
+    v_row = P_meas[3] - P_meas[0]
+    n_cross = np.cross(v_col, v_row)
+
+    if n_cross[2] < 0.0:
+        # Col x Row points downward in robot base {B}, meaning Row x Col points upward (+Z).
+        # Physical board layout: Axis 0 = Row (-0.180 to +0.180) and Axis 1 = Col (-0.160 to +0.160).
+        P_can = np.array([
+            [-0.180, -0.160, 0.0],  # R1 (row 0, col 0)
+            [-0.180, +0.160, 0.0],  # R2 (row 0, col 8)
+            [+0.180, +0.160, 0.0],  # R3 (row 9, col 8)
+            [+0.180, -0.160, 0.0],  # R4 (row 9, col 0)
+        ], dtype=float)
+        R_0 = np.eye(3, dtype=float)
+    else:
+        # Col x Row points upward in robot base {B}.
+        # Alternate 90° orientation where Axis 0 = Col and Axis 1 = Row.
+        P_can = np.array([
+            [-0.160, -0.180, 0.0],  # R1 (row 0, col 0)
+            [+0.160, -0.180, 0.0],  # R2 (row 0, col 8)
+            [+0.160, +0.180, 0.0],  # R3 (row 9, col 8)
+            [-0.160, +0.180, 0.0],  # R4 (row 9, col 0)
+        ], dtype=float)
+        R_0 = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=float)
 
     P_meas_centered = P_meas - p_center_m
     H = P_can.T @ P_meas_centered
@@ -689,7 +714,6 @@ def calibrate_board_from_teaching_points(
     ]
 
     # Compute effective board yaw for telemetry / backward compatibility
-    R_0 = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=float)
     R_z = R @ R_0.T
     effective_yaw_deg = math.degrees(math.atan2(R_z[1, 0], R_z[0, 0]))
 
@@ -719,6 +743,7 @@ def calibrate_board_from_teaching_points(
             round(-p_center_m[0], 6),
         ],
         rotation_matrix=[[round(float(v), 6) for v in row] for row in R.tolist()],
+        teaching_points=pts_mm_dict,
         placement_version=1,
     )
 

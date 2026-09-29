@@ -93,22 +93,22 @@ assert.throws(() => boardPointToXYZ(NaN, 0), /Invalid board coordinates/);
 assert.throws(() => boardPointToXYZ(0, undefined), /Invalid board coordinates/);
 
 // 2. Asymmetric cell (2, 7) vs (7, 2) to prevent transpose / swap regressions
-// Under canonical 90°:
+// Under current canonical 0°:
 // u = (col - 4.0) * 0.040
 // v = (row - 4.5) * 0.040
 // For (row=2, col=7): u = +0.120 m, v = -0.100 m
-// World: X = 0.0 + v = -0.100 m, Y = 0.0105 m, Z = 0.360 + u = 0.480 m
-// Robot: X_rob = -0.480 m, Y_rob = +0.100 m, Z_rob = 0.0105 m
+// Robot: X_rob = -v = +0.100 m, Y_rob = 0.360 + u = +0.480 m.
+// Viewer: X = -0.480 m, Y = 0.0105 m, Z = -0.100 m.
 const p27 = boardPointToXYZ(2, 7, geometry);
-assert.ok(Math.abs(p27.x - (-0.100)) < 1e-6, `Expected X=-0.100, got ${p27.x}`);
+assert.ok(Math.abs(p27.x - (-0.480)) < 1e-6, `Expected X=-0.480, got ${p27.x}`);
 assert.ok(Math.abs(p27.y - 0.0105) < 1e-6, `Expected Y=0.0105, got ${p27.y}`);
-assert.ok(Math.abs(p27.z - 0.480) < 1e-6, `Expected Z=0.480, got ${p27.z}`);
+assert.ok(Math.abs(p27.z - (-0.100)) < 1e-6, `Expected Z=-0.100, got ${p27.z}`);
 
 // For transposed (row=7, col=2): u = -0.080 m, v = +0.100 m
-// World: X = +0.100 m, Y = 0.0105 m, Z = 0.280 m
+// Viewer: X = -0.280 m, Y = 0.0105 m, Z = +0.100 m.
 const p72 = boardPointToXYZ(7, 2, geometry);
-assert.ok(Math.abs(p72.x - 0.100) < 1e-6, `Expected X=0.100, got ${p72.x}`);
-assert.ok(Math.abs(p72.z - 0.280) < 1e-6, `Expected Z=0.280, got ${p72.z}`);
+assert.ok(Math.abs(p72.x - (-0.280)) < 1e-6, `Expected X=-0.280, got ${p72.x}`);
+assert.ok(Math.abs(p72.z - 0.100) < 1e-6, `Expected Z=0.100, got ${p72.z}`);
 
 assert.notEqual(p27.x, p72.x, "p27.x and p72.x must not be equal");
 assert.notEqual(p27.z, p72.z, "p27.z and p72.z must not be equal");
@@ -125,9 +125,11 @@ for (let r = 0; r < 10; r++) {
 
     const u = (c - 4.0) * 0.040;
     const v = (r - 4.5) * 0.040;
-    const robX = -0.360 - u;
-    const robY = -v;
-    const robZ = 0.0105;
+    const theta = sceneJson.virtual_board_placement.board_yaw_deg * Math.PI / 180;
+    const center = sceneJson.virtual_board_placement.board_center_in_robot_base_m;
+    const robX = center[0] - Math.sin(theta) * u - Math.cos(theta) * v;
+    const robY = center[1] + Math.cos(theta) * u - Math.sin(theta) * v;
+    const robZ = center[2];
 
     // Check transformation identity:
     const expectedX_world = -robY;
@@ -187,23 +189,23 @@ const testMesh = pieces[piecesList[0].id];
 movePieceTo(testMesh, 2, 7, geometry);
 assert.equal(testMesh.userData.row, 2);
 assert.equal(testMesh.userData.col, 7);
-assert.ok(Math.abs(testMesh.position.x - (-0.100)) < 1e-6);
-assert.ok(Math.abs(testMesh.position.z - 0.480) < 1e-6);
+assert.ok(Math.abs(testMesh.position.x - p27.x) < 1e-6);
+assert.ok(Math.abs(testMesh.position.z - p27.z) < 1e-6);
 
 // Test with object argument
 movePieceTo(testMesh, { row: 7, col: 2 }, geometry);
 assert.equal(testMesh.userData.row, 7);
 assert.equal(testMesh.userData.col, 2);
-assert.ok(Math.abs(testMesh.position.x - 0.100) < 1e-6);
-assert.ok(Math.abs(testMesh.position.z - 0.280) < 1e-6);
+assert.ok(Math.abs(testMesh.position.x - p72.x) < 1e-6);
+assert.ok(Math.abs(testMesh.position.z - p72.z) < 1e-6);
 console.log("  [PASS] movePieceTo supports both (row, col) and { row, col } contracts.");
 
 // 6. Dynamic board placement shift translation invariance
 // Apply forward shift d = +15 mm and vertical offset zOff = +30 mm
 setScenePlacement({
-  boardCenterX: 0.0,
+  boardCenterX: defaultCenter[0],
   boardSurfaceY: 0.0105 + 0.030,
-  boardCenterZ: 0.360 + 0.015,
+  boardCenterZ: defaultCenter[2] + 0.015,
   forward_shift_mm: 15.0,
   safe_transit_height_mm: 50.0,
   board_height_offset_mm: 30.0,
@@ -211,9 +213,9 @@ setScenePlacement({
 });
 
 const shiftedP27 = boardPointToXYZ(2, 7, geometry);
-assert.ok(Math.abs(shiftedP27.x - (-0.100)) < 1e-6, "Shift along Z must not alter X");
+assert.ok(Math.abs(shiftedP27.x - p27.x) < 1e-6, "Shift along Z must not alter X");
 assert.ok(Math.abs(shiftedP27.y - (0.0105 + 0.030)) < 1e-6, "Shift Y must reflect +30mm offset");
-assert.ok(Math.abs(shiftedP27.z - (0.480 + 0.015)) < 1e-6, "Shift Z must reflect +15mm forward shift");
+assert.ok(Math.abs(shiftedP27.z - (p27.z + 0.015)) < 1e-6, "Shift Z must reflect +15mm forward shift");
 
 console.log("  [PASS] Dynamic board placement shift is translation-invariant across axes.");
 

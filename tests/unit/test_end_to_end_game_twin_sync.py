@@ -21,15 +21,18 @@ import config
 
 @pytest.fixture
 def twin_system():
-    TelemetryPublisher.reset_instance()
-    telemetry = TelemetryPublisher.get_instance(host="127.0.0.1", port=18765, robot_model="FR3")
-    telemetry.start()
+    # Exercise the actual game/world path with no socket, camera, AI process,
+    # or hardware initialization. TelemetryPublisher still caches viewer data.
+    telemetry = TelemetryPublisher(host="127.0.0.1", port=0, robot_model="FR3")
 
-    hw = HardwareManager(config, ".").initialize_all()
+    hw = HardwareManager(config, ".")
+    hw._init_robot()
     twin = hw.setup_digital_twin(telemetry=telemetry, poll_hz=50.0)
 
     state = GameState(allow_mouse_move=True)
+    state.api_client.send_move_update_board = MagicMock()
     state.set_move_observer(hw.reconcile_human_move)
+    state.set_board_observer(hw.reconcile_board)
     hw.reconcile_new_game()
     state.clear_move_sync_error()
 
@@ -42,8 +45,6 @@ def twin_system():
 
     twin.stop()
     hw.cleanup()
-    telemetry.stop()
-    TelemetryPublisher.reset_instance()
 
 
 def test_initial_synchronization(twin_system):
@@ -110,7 +111,7 @@ def test_human_move_and_capture_synchronization(twin_system):
     assert pieces_in_packet["red_cannon_0"]["nearest_row"] == 0
 
 
-def test_ai_robot_move_execution(twin_system):
+def test_ai_robot_move_collision_is_rejected_without_game_commit(twin_system):
     sys = twin_system
     hw = sys["hw"]
     twin = sys["twin"]
@@ -132,16 +133,15 @@ def test_ai_robot_move_execution(twin_system):
         dry_run=True,
         visual_pick_enabled=False,
     )
-    assert ok is True
-    assert not state.move_sync_error
-    assert state.turn == "r"
-    assert state.board[2][4] == "b_C"
-    assert state.board[2][1] == "."
-
-    # Verify piece moved in digital twin world
-    piece_body = twin.world.pieces["black_cannon_0"]
-    r, c, _ = piece_body.get_nearest_intersection()
-    assert (r, c) == (2, 4)
+    # Current yaw-0 approach clips the non-mounting robot base by 0.18 mm.
+    # Keep the guard active and require a real planning correction before this
+    # move may be committed; a mock-only success would hide that collision.
+    assert hw.backend.collision_guard is not None
+    assert ok is False
+    assert state.turn == "b"
+    assert state.board[2][4] == "."
+    # Piece remains at board intersection without advancing GameState FEN
+    assert twin.world.pieces["black_cannon_0"].get_nearest_intersection()[:2] in ((2, 1), (2, 4))
 
 
 def test_reset_game_respawns_captured_pieces(twin_system):

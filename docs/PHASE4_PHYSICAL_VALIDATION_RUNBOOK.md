@@ -226,6 +226,8 @@ Proposed Initial Test Ladder:
 
 ---
 
+> **Current teaching method (2026-09-29):** See `R1_R4_BOARD_PLACEMENT_CURRENT.md`. The operator plans to use the gripper itself as the contact tool. Pointer-specific steps and the 150 mm estimate above are historical alternatives; neither identifies the currently measured gripper contact point. Do not interpret flange XYZ as board-surface XYZ without a verified tool-to-contact transform. Today's simulated R1–R4 are not physical measurements.
+
 ## Section 5: R1–R4 Teaching Procedure
 
 ### 5.1 Physical Meaning of R1–R4 Fiducials

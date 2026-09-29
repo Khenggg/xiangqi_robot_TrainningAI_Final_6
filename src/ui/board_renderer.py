@@ -74,6 +74,15 @@ BTN_SELF_PLAY_TOGGLE_RECT = pygame.Rect(PANEL_X + 16, 562, PANEL_WIDTH - 32, 36)
 # Khả năng tương thích launcher
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 330, 330, 68)
 HOME_ROBOT_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 414, 330, 68)
+HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 142, 22, 120, 38)
+SETTINGS_BACK_RECT = pygame.Rect(28, 22, 112, 38)
+DEBUG_STATUS_RECT = pygame.Rect(492, 190, 180, 48)
+DIFFICULTY_OPTIONS = (
+    ("easy", "1 · EASY", pygame.Rect(105, 330, 275, 64), (62, 129, 91)),
+    ("medium", "2 · MEDIUM", pygame.Rect(420, 330, 275, 64), (197, 132, 48)),
+    ("hard", "3 · HARD", pygame.Rect(105, 414, 275, 64), (159, 59, 55)),
+    ("impossible", "4 · IMPOSSIBLE", pygame.Rect(420, 414, 275, 64), (103, 61, 152)),
+)
 
 # Bảng ký tự quân cờ thư pháp truyền thống
 PIECE_DISPLAY_NAMES = {
@@ -420,12 +429,98 @@ class BoardRenderer:
 
         return end_rect
 
+    def draw_home_screen(self):
+        """Draw the launcher shown before the player chooses a game mode."""
+        self.screen.fill((25, 20, 16))
+        accent = pygame.Rect(0, 0, SCREEN_WIDTH, 8)
+        pygame.draw.rect(self.screen, (194, 46, 46), accent)
+
+        title = self.big_font.render("XIANGQI ROBOT", True, (246, 225, 184))
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 190)))
+        subtitle = self.sub_font.render("Choose a game mode to begin", True, (228, 214, 190))
+        self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 235)))
+
+        pygame.draw.rect(self.screen, (61, 73, 82), HOME_SETTINGS_RECT, border_radius=8)
+        settings = self.sub_font.render("SETTINGS", True, (255, 255, 255))
+        self.screen.blit(settings, settings.get_rect(center=HOME_SETTINGS_RECT.center))
+
+        pygame.draw.rect(self.screen, (159, 59, 55), HOME_VS_ROBOT_RECT, border_radius=12)
+        pygame.draw.rect(self.screen, (239, 218, 177), HOME_VS_ROBOT_RECT, 2, border_radius=12)
+        button = self.title_font.render("VS ROBOT", True, (255, 255, 255))
+        self.screen.blit(button, button.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery - 6)))
+        detail = self.sub_font.render("Choose the robot difficulty next", True, (255, 224, 205))
+        self.screen.blit(detail, detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery + 22)))
+
+        hint = self.sub_font.render("Click VS ROBOT or press Enter", True, (190, 181, 166))
+        self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 465)))
+
     @staticmethod
     def home_action_from_pixel(px, py):
         if HOME_VS_ROBOT_RECT.collidepoint(px, py):
             return "vs_robot"
         if HOME_ROBOT_VS_ROBOT_RECT.collidepoint(px, py):
             return "robot_vs_robot"
+        if HOME_SETTINGS_RECT.collidepoint(px, py):
+            return "settings"
+        return None
+
+    def draw_settings_menu(self, debug_enabled):
+        """Draw the pre-game settings restored from the previous menu flow."""
+        self.screen.fill((25, 20, 16))
+        pygame.draw.rect(self.screen, (61, 73, 82), SETTINGS_BACK_RECT, border_radius=8)
+        back = self.sub_font.render("< HOME", True, (255, 255, 255))
+        self.screen.blit(back, back.get_rect(center=SETTINGS_BACK_RECT.center))
+
+        title = self.big_font.render("SETTINGS", True, (246, 225, 184))
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 118)))
+        label = self.sub_font.render("Debug dashboard", True, (235, 224, 205))
+        self.screen.blit(label, label.get_rect(midleft=(126, DEBUG_STATUS_RECT.centery)))
+
+        status = "ENABLED" if debug_enabled else "DISABLED"
+        color = (62, 129, 91) if debug_enabled else (159, 59, 55)
+        pygame.draw.rect(self.screen, color, DEBUG_STATUS_RECT, border_radius=10)
+        status_text = self.sub_font.render(status, True, (255, 255, 255))
+        self.screen.blit(status_text, status_text.get_rect(center=DEBUG_STATUS_RECT.center))
+
+        note = self.sub_font.render("Opens a separate read-only robot telemetry window", True, (190, 181, 166))
+        self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 284)))
+
+    @staticmethod
+    def settings_action_from_pixel(px, py):
+        if SETTINGS_BACK_RECT.collidepoint(px, py):
+            return "home"
+        if DEBUG_STATUS_RECT.collidepoint(px, py):
+            return "toggle_debug_dashboard"
+        return None
+
+    def draw_difficulty_menu(self, availability, message=""):
+        """Overlay shown after camera calibration and before a game can begin."""
+        shade = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        shade.fill((25, 20, 16, 218))
+        self.screen.blit(shade, (0, 0))
+        title = self.big_font.render("CHOOSE YOUR OPPONENT", True, (246, 225, 184))
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 208)))
+        subtitle = self.sub_font.render("Select a difficulty to start after board calibration", True, (228, 214, 190))
+        self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 246)))
+        for key, label, rect, color in DIFFICULTY_OPTIONS:
+            enabled = availability.get(key, False)
+            card_color = color if enabled else (78, 72, 65)
+            pygame.draw.rect(self.screen, card_color, rect, border_radius=10)
+            pygame.draw.rect(self.screen, (239, 218, 177) if enabled else (125, 118, 107), rect, 2, border_radius=10)
+            text = self.sub_font.render(label, True, (255, 255, 255) if enabled else (185, 178, 166))
+            self.screen.blit(text, text.get_rect(center=(rect.centerx, rect.centery - 10)))
+            detail = "READY" if enabled else "NOT READY"
+            detail_surf = self.sub_font.render(detail, True, (246, 227, 193) if enabled else (190, 181, 166))
+            self.screen.blit(detail_surf, detail_surf.get_rect(center=(rect.centerx, rect.centery + 16)))
+        if message:
+            note = self.sub_font.render(message, True, (255, 204, 112))
+            self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 500)))
+
+    @staticmethod
+    def difficulty_from_pixel(px, py):
+        for key, _, rect, _ in DIFFICULTY_OPTIONS:
+            if rect.collidepoint(px, py):
+                return key
         return None
 
     # =========================================================================

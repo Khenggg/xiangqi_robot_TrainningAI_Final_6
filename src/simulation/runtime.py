@@ -7,7 +7,7 @@ Coordinates:
 - TelemetryPublisher (WebSocket streaming to Three.js viewer)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import logging
 import math
@@ -48,6 +48,7 @@ from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.placement import BoardPlacementAnalyzer, BoardPlacementState, canonical_cell_to_robot_xyz_m
 from src.simulation.virtual_fr3_backend import VirtualFR3Backend
 from src.domain.geometry import get_physical_geometry
+from src.domain.board_pose_provider import BoardCalibrationProfile, calibrate_board_from_teaching_points
 from src.digital_twin.world_sync import sync_world_from_robot_snapshot
 
 
@@ -135,6 +136,9 @@ class VirtualXiangqiSimulation:
         self._test_hook_motion_owned: Optional[Callable[[], None]] = None
         self._test_hook_service_move_owned: Optional[Callable[[], None]] = None
         self._board_adjustment_ready: bool = False
+        self.board_pose_provider = None
+        self.twin_bridge = None
+        self.placement_source = "NOMINAL_SIMULATION"
 
         # Register listener with backend
         self.backend.add_state_listener(self._on_robot_state_update)
@@ -207,15 +211,7 @@ class VirtualXiangqiSimulation:
                 pass
 
         # Authoritative dynamic placement state and analyzer
-        self.placement_state = BoardPlacementState.compute(
-            forward_shift_mm=0.0,
-            safe_transit_height_mm=70.0,
-            board_height_offset_mm=0.0,
-            board_yaw_deg=self.board_yaw_deg,
-            nominal_board_center_robot_m=self.nominal_board_center_robot,
-            nominal_board_surface_z_m=self.nominal_board_surface_z,
-            placement_version=1,
-        )
+        self.placement_state = self.world.board_placement_state
         self.placement_analyzer = BoardPlacementAnalyzer(
             kinematics=self.backend.kinematics,
             board_surface_nominal_m=self.board_surface_z,
@@ -391,6 +387,8 @@ class VirtualXiangqiSimulation:
         ok = self.backend.connect()
         self.world.step_until_settled(max_steps=60)
         if self.telemetry and self.auto_sync_telemetry:
+            self.telemetry.broadcast_custom({**self.placement_state.to_dict(),
+                                             "placement_source": self.placement_source})
             self.telemetry.update_from_snapshot(self.backend.get_state_snapshot())
             self.telemetry.update_world_state(self.world.get_snapshot())
         return ok
@@ -1220,6 +1218,98 @@ class VirtualXiangqiSimulation:
         p = self.placement_state.cell_to_robot_xyz(row=row, col=col, z_rel_m=z_rel)
         return [round(float(p[0]), 5), round(float(p[1]), 5), round(float(p[2]), 5)]
 
+    def bind_board_pose_provider(self, provider, twin_bridge=None) -> None:
+        """Share the live placement with game motion and, when present, its mirror."""
+        self.board_pose_provider = provider
+        self.twin_bridge = twin_bridge
+        provider.set_board_placement_state(self.placement_state)
+        if twin_bridge is not None and not twin_bridge.physical:
+            twin_bridge.adopt_virtual_board_placement(self.placement_state)
+
+    def _commit_board_placement_state(self, state: BoardPlacementState, source: str = "LEGACY_AXIS") -> None:
+        self.world.relocate_board_to_state(state)
+        self.placement_state = state
+        self.grid_origin_robot = list(state.grid_origin_robot_m)
+        self.board_surface_z = state.board_surface_z_robot_m
+        if self.board_pose_provider is not None:
+            self.board_pose_provider.set_board_placement_state(state)
+        if self.twin_bridge is not None and not self.twin_bridge.physical:
+            self.twin_bridge.adopt_virtual_board_placement(state)
+        self.backend.set_placement_version(state.placement_version)
+        self.placement_source = source
+        self._board_adjustment_ready = False
+        if self.telemetry is not None:
+            self.telemetry.broadcast_custom({**state.to_dict(), "placement_source": source})
+            self.telemetry.update_world_state(self.world.get_snapshot())
+
+    def get_board_teaching_points(self) -> Dict[str, Any]:
+        """Return exact current simulated intersections, never physical contact measurements."""
+        cells = {"R1": (0, 0), "R2": (0, 8), "R3": (9, 8), "R4": (9, 0)}
+        return {
+            "type": "board_teaching_points", "source": "SIMULATOR_BOARD_GEOMETRY",
+            "placement_version": self.placement_state.placement_version,
+            "frame": "robot_base", "unit": "mm",
+            "points": {name: [round(float(v) * 1000.0, 3) for v in self.placement_state.cell_to_robot_xyz(*cell)]
+                       for name, cell in cells.items()},
+        }
+
+    def apply_board_teaching_points(self, points: Dict[str, Any], expected_placement_version=None) -> Dict[str, Any]:
+        """Fit R1–R4 and atomically publish one simulated pose to motion, physics and viewer."""
+        if not isinstance(points, dict):
+            return {"success": False, "status": "BOARD_TEACHING_POINTS_INVALID",
+                    "error": "R1–R4 must be a mapping of four robot_base XYZ points in mm"}
+        try:
+            with self.acquire_operation_state(RuntimeOperationState.BOARD_ADJUSTMENT):
+                with self._command_lock:
+                    if expected_placement_version is not None and expected_placement_version != self.placement_state.placement_version:
+                        return {"success": False, "status": "BOARD_TEACHING_POINTS_STALE",
+                                "error": f"Board version changed to {self.placement_state.placement_version}; reload R1–R4 before applying."}
+                    snapshot = self.backend.get_state_snapshot()
+                    if snapshot.motion_state == "MOVING" or snapshot.trajectory_stage not in ("IDLE", None, ""):
+                        return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ROBOT_MOVING"}
+                    if self.world.get_attached_piece() is not None or self.backend.get_attached_piece_id() is not None:
+                        return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ATTACHED_PIECE"}
+                    transient = [body.piece_id for body in self.world.pieces.values()
+                                 if body.physical_state in (PiecePhysicalState.ATTACHED_TO_GRIPPER,
+                                                            PiecePhysicalState.FALLING, PiecePhysicalState.SETTLING)]
+                    if transient:
+                        return {"success": False, "status": "BOARD_RELOCATION_REJECTED_WORLD_NOT_SETTLED",
+                                "transient_pieces": transient}
+                    if not self._board_adjustment_ready:
+                        return {"success": False, "status": "BOARD_RELOCATION_REJECTED_NOT_READY",
+                                "error": "Prepare board adjustment and park the virtual arm in SERVICE_SAFE before applying R1–R4."}
+                    service_report = self.evaluate_service_safety()
+                    if not service_report.service_safe:
+                        self._board_adjustment_ready = False
+                        return {"success": False, "status": "BOARD_RELOCATION_REJECTED_SERVICE_UNSAFE",
+                                "error": ", ".join(service_report.reasons),
+                                "service_safety": service_report.to_dict()}
+                    result = calibrate_board_from_teaching_points(
+                        points, safe_transit_height_mm=self.placement_state.safe_transit_height_mm,
+                        calibration_profile=BoardCalibrationProfile(
+                            provenance="SIMULATOR_BOARD_SURFACE_POINT",
+                            description="Four explicit board-surface intersections in robot_base; no physical TCP inferred",
+                        ),
+                    )
+                    if not result.success or result.state is None:
+                        return {"success": False, "status": "BOARD_TEACHING_POINTS_INVALID",
+                                "error": result.error_message, "residuals_mm": result.residuals}
+                    state = replace(result.state,
+                                    placement_version=self.placement_state.placement_version + 1,
+                                    safe_transit_height_mm=self.placement_state.safe_transit_height_mm,
+                                    timestamp=time.time())
+                    sweep = self.world.check_board_pose_swept_volume_collision(state)
+                    if not sweep.is_safe:
+                        return {"success": False, "status": "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR",
+                                "error": sweep.reason, "details": sweep.details}
+                    self._commit_board_placement_state(state, source="R1_R4_SIMULATION")
+                    return {"success": True, "status": "BOARD_TEACHING_POINTS_APPLIED",
+                            "placement": {**state.to_dict(), "placement_source": self.placement_source},
+                            "residuals_mm": result.residuals,
+                            "source": "SIMULATION_ONLY"}
+        except RuntimeOperationBusy as exc:
+            return {"success": False, "status": "BOARD_RELOCATION_REJECTED_BUSY", "error": str(exc)}
+
     def set_board_placement(
         self,
         forward_shift_mm: Optional[float] = None,
@@ -1236,6 +1326,9 @@ class VirtualXiangqiSimulation:
         try:
             with self.acquire_operation_state(RuntimeOperationState.BOARD_ADJUSTMENT):
                 with self._command_lock:
+                    if self.placement_source == "R1_R4_SIMULATION" and not internal_reset:
+                        return {"success": False, "status": "BOARD_RELOCATION_REJECTED_USE_R1_R4",
+                                "error": "Use R1–R4 to edit a four-point board pose; reset nominal explicitly to use the axis slider."}
                     snap = self.backend.get_state_snapshot()
                     if snap.motion_state == "MOVING":
                         err = "Cannot change board placement while robot is MOVING"
@@ -1276,19 +1369,6 @@ class VirtualXiangqiSimulation:
                     cur_h = self.placement_state.safe_transit_height_mm if safe_transit_height_mm is None else float(safe_transit_height_mm)
                     cur_z_off = self.placement_state.board_height_offset_mm if board_height_offset_mm is None else float(board_height_offset_mm)
 
-                    # Swept volume collision check between current and candidate placement against arm links
-                    swept_res = self.world.check_board_swept_volume_collision(
-                        new_forward_shift_m=cur_fwd / 1000.0,
-                        new_height_offset_m=cur_z_off / 1000.0,
-                    )
-                    if not swept_res.is_safe:
-                        return {
-                            "success": False,
-                            "status": "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR",
-                            "error": f"Board swept volume collision: {swept_res.reason}",
-                            "details": swept_res.details,
-                        }
-
                     if not internal_reset:
                         if not self._board_adjustment_ready:
                             return {
@@ -1316,18 +1396,16 @@ class VirtualXiangqiSimulation:
                         nominal_board_surface_z_m=self.nominal_board_surface_z,
                         placement_version=new_version,
                     )
+                    swept_res = self.world.check_board_pose_swept_volume_collision(new_state)
+                    if not swept_res.is_safe:
+                        return {
+                            "success": False,
+                            "status": "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR",
+                            "error": f"Board swept volume collision: {swept_res.reason}",
+                            "details": swept_res.details,
+                        }
 
-                    # Relocate in PyBullet world
-                    self.world.relocate_board(
-                        forward_shift_m=new_state.forward_shift_mm / 1000.0,
-                        height_offset_m=new_state.board_height_offset_mm / 1000.0,
-                    )
-
-                    self.placement_state = new_state
-                    self.grid_origin_robot = list(new_state.grid_origin_robot_m)
-                    self.board_surface_z = new_state.board_surface_z_robot_m
-                    self.backend.set_placement_version(new_version)
-                    self._board_adjustment_ready = False
+                    self._commit_board_placement_state(new_state)
 
                     packet = new_state.to_dict()
                     analysis_packet = self.placement_analyzer.compute_geometric_precheck(
@@ -1338,9 +1416,7 @@ class VirtualXiangqiSimulation:
                         placement_version=new_version,
                     )
                     if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
-                        self.telemetry.broadcast_custom(packet)
                         self.telemetry.broadcast_custom(analysis_packet)
-                        self.telemetry.update_world_state(self.world.get_snapshot())
 
                     return {"success": True, "placement": packet, "analysis": analysis_packet}
         except RuntimeOperationBusy as e:
@@ -1823,6 +1899,9 @@ class VirtualXiangqiSimulation:
                                 "error": f"Failed to reach SERVICE_SAFE pose: {self.backend._last_error}",
                             }
                         self.backend.set_trajectory_stage("IDLE")
+                        # Motion advances PyBullet; recheck settled pieces at the
+                        # final service pose before granting board adjustment.
+                        self.world.step_until_settled(max_steps=80)
                         report = self.evaluate_service_safety()
                         if not report.service_safe:
                             return {
@@ -2544,23 +2623,63 @@ class VirtualXiangqiSimulation:
 
                         seed_info = self.reachability_dataset.get((r, c))
                         seed_app = np.deg2rad(seed_info["approach_joints_deg"]) if seed_info and "approach_joints_deg" in seed_info else None
-                        seed_gr = np.deg2rad(seed_info["grasp_joints_deg"]) if seed_info and "grasp_joints_deg" in seed_info else None
-
                         # Resolve explicit piece ID for candidate cell
                         target_piece_id = self._get_piece_at_cell(r, c)
-
-                        ik_gr = self.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
-                        ik_ap = self.backend.solve_tcp_ik(pose_ap_mm, seed_joints=seed_app, allow_multi_seed=True)
-
+                        ik_ap = None
+                        ik_gr = None
                         lift_plan = None
-                        if ik_gr.success:
-                            lift_plan = self.backend.plan_cartesian(
-                                start_q=ik_gr.joints_rad,
-                                target_pose_mm_deg=pose_ap_mm,
-                                samples=15,
+                        # Match the local-cell validator: choose an approach branch
+                        # whose LAND and LIFT both clear collision. A standalone grasp
+                        # IK can reject a feasible cell on a different wrist branch.
+                        candidates = self.backend.solve_tcp_ik_candidates(
+                            pose_ap_mm,
+                            seed_joints=seed_app,
+                            ref_joints=backend_q_orig,
+                            allow_alternate_yaw=True,
+                            allowed_grasp_piece_id=target_piece_id,
+                        )
+                        for candidate in candidates:
+                            if not self.collision_guard.validate_configuration(
+                                candidate.joints_rad, restore_state=True,
+                            ).safe:
+                                continue
+                            rpy = self.backend._compute_tcp_pose_mm_deg(candidate.joints_rad)[3:]
+                            pose_gr_candidate = pose_gr_mm[:3] + list(rpy)
+                            pose_ap_candidate = pose_ap_mm[:3] + list(rpy)
+                            land = self.backend.plan_cartesian(
+                                start_q=candidate.joints_rad,
+                                target_pose_mm_deg=pose_gr_candidate,
+                                samples=20,
                                 allowed_grasp_piece_id=target_piece_id,
                                 check_collision=True,
                             )
+                            if not land.success:
+                                continue
+                            grasp = self.backend.solve_tcp_ik(
+                                pose_gr_candidate,
+                                seed_joints=land.final_q,
+                                ref_joints=candidate.joints_rad,
+                                allow_multi_seed=True,
+                                allow_alternate_yaw=True,
+                                allowed_grasp_piece_id=target_piece_id,
+                            )
+                            if not grasp.success or not self.collision_guard.validate_configuration(
+                                grasp.joints_rad, allowed_grasp_piece_id=target_piece_id,
+                                restore_state=True,
+                            ).safe:
+                                continue
+                            lift = self.backend.plan_cartesian(
+                                start_q=land.final_q,
+                                target_pose_mm_deg=pose_ap_candidate,
+                                samples=20,
+                                allowed_grasp_piece_id=target_piece_id,
+                                check_collision=True,
+                            )
+                            if not lift.success:
+                                continue
+                            ik_ap, ik_gr, lift_plan = candidate, grasp, lift
+                            pose_ap_mm, pose_gr_mm = pose_ap_candidate, pose_gr_candidate
+                            break
 
                         cell_plans[(r, c)] = {
                             "ik_gr": ik_gr,
@@ -2816,14 +2935,16 @@ class VirtualXiangqiSimulation:
             self.telemetry.register_command_handler(self._handle_client_command)
             # Broadcast initial authoritative board placement and placement analysis
             if hasattr(self.telemetry, "broadcast_custom"):
-                self.telemetry.broadcast_custom(self.placement_state.to_dict())
-                analysis_packet = self.placement_analyzer.compute_geometric_precheck(
-                    forward_shift_mm=self.placement_state.forward_shift_mm,
-                    safe_transit_height_mm=self.placement_state.safe_transit_height_mm,
-                    board_surface_mm=self.board_surface_z * 1000.0,
-                    placement_version=self.placement_state.placement_version,
-                )
-                self.telemetry.broadcast_custom(analysis_packet)
+                self.telemetry.broadcast_custom({**self.placement_state.to_dict(),
+                                                 "placement_source": self.placement_source})
+                if self.placement_source != "R1_R4_SIMULATION":
+                    analysis_packet = self.placement_analyzer.compute_geometric_precheck(
+                        forward_shift_mm=self.placement_state.forward_shift_mm,
+                        safe_transit_height_mm=self.placement_state.safe_transit_height_mm,
+                        board_surface_mm=self.board_surface_z * 1000.0,
+                        placement_version=self.placement_state.placement_version,
+                    )
+                    self.telemetry.broadcast_custom(analysis_packet)
 
     def _handle_client_command(self, cmd: Dict[str, Any]) -> None:
         """Handle incoming command from viewer or external WebSocket client."""
@@ -2887,6 +3008,7 @@ class VirtualXiangqiSimulation:
             def _task_prep():
                 res = self.prepare_board_adjustment(speed_factor=speed)
                 if not res.get("success") and self.telemetry and hasattr(self.telemetry, "broadcast_custom"):
+                    self.telemetry.broadcast_custom({"type": "board_adjustment_state", **res})
                     self.telemetry.broadcast_custom({"type": "error", "message": res.get("error", "Prepare Board Adjustment rejected")})
             threading.Thread(target=_task_prep, daemon=True).start()
         elif action == "JOG_TCP":
@@ -2924,6 +3046,13 @@ class VirtualXiangqiSimulation:
                 })
         elif action == "RESET_BOARD_PLACEMENT":
             self.reset_board_placement()
+        elif action == "GET_BOARD_TEACHING_POINTS":
+            if self.telemetry is not None:
+                self.telemetry.broadcast_custom(self.get_board_teaching_points())
+        elif action == "APPLY_BOARD_TEACHING_POINTS":
+            res = self.apply_board_teaching_points(cmd.get("points", {}), cmd.get("expected_placement_version"))
+            if self.telemetry is not None:
+                self.telemetry.broadcast_custom({"type": "board_teaching_result", **res})
         elif action == "VALIDATE_BOARD_PLACEMENT":
             threading.Thread(target=self.validate_board_placement, daemon=True).start()
         elif action == "VALIDATE_FULL_BOARD_ROUTES":

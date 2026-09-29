@@ -1,5 +1,11 @@
 # CURRENT_STATE.md — ACTIVE MACHINE-READABLE REPOSITORY STATE
 
+> **R1–R4 placement:** See `docs/R1_R4_BOARD_PLACEMENT_CURRENT.md`. Simulator-generated points are provisional; no physical four-point measurement has been entered. Fixed-axis formulas below are historical, not a general board transform.
+
+## 2026-09-29 camera/GameState/PyBullet/Three.js worktree update
+
+On `feature/unified-robot-vs-robot` at base `b6acba6`, camera-confirmed red/black moves, captures, full-board rescan, semantic robot contexts, and viewer world-state parity have been implemented in an isolated worktree. A one-move rescan infers the next turn; ambiguous multi-change rescans require operator confirmation (`1` Red, `2` Black) before play resumes. Focused Game/Twin regression: 115 passed; Three.js reconciliation: PASS. No physical robot actuation or live-camera accuracy test. Virtual collision guard rejects a black-cannon approach at yaw 0° with gripper/base contact (-0.18 mm); game state stays unchanged. The full `tests/unit` regression was stopped at 92% after multiple failures, many historical yaw-90 tests are stale. Details: `docs/CAMERA_GAME_TWIN_SYNC_2026-09-29.md`. The historical `LAST_REVIEWED_HEAD` below is unchanged until a complete review of the branch is performed.
+
 ## 2026-09-26 collision worktree update
 
 This section describes **uncommitted, simulation-only work** on `integration/unified-fr3-system` at `fab750a918c1457ae14bfda900572fb16f846e26`. The historical G90 metrics and test counts below apply to an older checkout; they must not be used as evidence for the current yaw 0° scene. `LAST_REVIEWED_HEAD` below remains historical because the entire dirty worktree has not been reviewed.

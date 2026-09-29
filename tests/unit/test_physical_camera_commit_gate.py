@@ -1,0 +1,40 @@
+"""A successful robot command alone cannot advance the real-board game."""
+
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+from src.core.ai_execution import execute_ai_move
+from src.core.game_state import GameState
+from src.hardware.hardware_manager import HardwareManager
+
+
+def test_live_robot_success_without_camera_confirmation_does_not_commit():
+    state = GameState()
+    state.turn = "b"
+    state.api_client.send_move_update_board = Mock()
+    before = [row[:] for row in state.board]
+    execute = Mock(return_value=SimpleNamespace(success=True))
+    hw = SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND="PHYSICAL"), dry_run=False,
+                         is_robot_ready=True, execute_piece_move=execute,
+                         verify_physical_board=Mock(return_value=False))
+
+    assert not execute_ai_move(state, hw, ((0, 3), (0, 4)), dry_run=False)
+    assert execute.call_args.kwargs["move_context"].piece_id == "black_pawn_0"
+    assert state.board == before
+    assert state.turn == "b"
+    assert state.physical_sync_fault
+    assert state.move_sync_error
+    state.api_client.send_move_update_board.assert_not_called()
+
+
+def test_physical_board_verifier_requires_two_fresh_quality_approved_frames():
+    expected = [["."] * 9 for _ in range(10)]
+    wrong = [["."] * 9 for _ in range(10)]
+    wrong[6][0] = "r_P"
+    snapshots = Mock(side_effect=[(object(), []), (object(), [])])
+    observed = iter([{"success": True, "quality_ok": True, "board": expected},
+                     {"success": True, "quality_ok": True, "board": wrong}])
+    hw = SimpleNamespace(cam_monitor=SimpleNamespace(get_fresh_snapshot=snapshots),
+                         cchess_recognizer=object(), recognize_board_state=lambda frame: next(observed))
+    assert not HardwareManager.verify_physical_board(hw, expected)
+    assert snapshots.call_count == 2

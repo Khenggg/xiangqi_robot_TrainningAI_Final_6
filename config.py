@@ -69,9 +69,9 @@ GRIPPER_CLOSE = 1
 GRIPPER_OPEN = 0
 
 # Tốc độ thực thi cánh tay robot (Giảm tốc độ an toàn - Safety First)
-# MOVE_SPEED (FAIRINO SDK velocity %): Giảm từ 50% xuống 20% giúp robot di chuyển cực kỳ êm ái, tránh giật và va chạm.
-MOVE_SPEED = 20.0
-ROBOT_SPEED_FACTOR = 0.25  # 25% tốc độ tối đa cho cả MotionResolver và Virtual Simulation (chậm & an toàn)
+# MOVE_SPEED (FAIRINO SDK velocity %): Giữ ở 15% an toàn tuyệt đối cho chế độ thực.
+MOVE_SPEED = 15.0
+ROBOT_SPEED_FACTOR = 0.15  # 15% tốc độ tối đa cho cả MotionResolver và Virtual Simulation (chậm & an toàn)
 
 # Cổng điều khiển Tool DO cho TwoOutputGripperDriver
 TOOL_DO_OPEN = 1
@@ -94,6 +94,12 @@ ROBOT_BACKEND = _os.environ.get("ROBOT_BACKEND", "VIRTUAL").upper()
 if ROBOT_BACKEND not in ("PHYSICAL", "VIRTUAL"):
     raise ValueError(f"Invalid ROBOT_BACKEND='{ROBOT_BACKEND}'. Must be 'PHYSICAL' or 'VIRTUAL'.")
 
+# In HUMAN_VS_HUMAN both colors are confirmed through camera/mouse, with no AI motion.
+# Robot self-play remains an explicit operator action in the existing UI.
+GAME_MODE = _os.environ.get("GAME_MODE", "HUMAN_VS_ROBOT").upper()
+if GAME_MODE not in ("HUMAN_VS_ROBOT", "HUMAN_VS_HUMAN"):
+    raise ValueError(f"Invalid GAME_MODE='{GAME_MODE}'")
+
 # Kết nối Robot
 ROBOT_IP = "192.168.58.2"
 # DRY_RUN prevents real hardware actuation (mock/dry-run backend), NEVER bypasses motion architecture.
@@ -104,13 +110,17 @@ DRY_RUN = _os.environ.get("DRY_RUN", "True").lower() in ("true", "1", "yes")
 # Chế độ hiệu chuẩn bàn cờ thực tế từ điểm dạy R1-R4:
 # "POINTER_CONTACT": Dạy bằng bút đo/pointer tiếp xúc trực tiếp mặt bàn tại R1-R4 (offset = [0, 0, 0]).
 # "KNOWN_OFFSET": Dạy bằng TCP có khoảng cách xác định tới mặt bàn. Yêu cầu khai báo OFFSET_MM, OFFSET_FRAME, PROVENANCE.
-#
-# CHẾ ĐỘ MẶC ĐỊNH: None (FAIL-CLOSED)
-# Bắt buộc người vận hành phải cấu hình rõ ràng trước khi robot được phép chuyển động.
-BOARD_CALIBRATION_MODE = None  # None / "UNCONFIGURED" / "POINTER_CONTACT" / "KNOWN_OFFSET"
-BOARD_CALIBRATION_OFFSET_MM = [0.0, 0.0, 0.0]
+BOARD_CALIBRATION_MODE = _os.environ.get("BOARD_CALIBRATION_MODE", "KNOWN_OFFSET")
+BOARD_CALIBRATION_OFFSET_MM = [0.0, 0.0, -209.5]
 BOARD_CALIBRATION_OFFSET_FRAME = "ROBOT_BASE"  # "ROBOT_BASE" hoặc "TOOL"
-BOARD_CALIBRATION_PROVENANCE = "CALIBRATED_POINTER_CONTACT"
+BOARD_CALIBRATION_PROVENANCE = "TAUGHT_APPROACH_PLANE_TO_SURFACE"
+
+# Dung sai hiệu chuẩn bàn cờ thực tế (Physical Board Calibration Tolerances):
+BOARD_MAX_DIMENSION_ERROR_HARD_FAIL_MM = 25.0
+BOARD_MAX_EDGE_LENGTH_DIFF_MM = 20.0
+BOARD_MAX_CORNER_RESIDUAL_HARD_FAIL_MM = 15.0
+BOARD_MAX_RMS_RESIDUAL_HARD_FAIL_MM = 10.0
+BOARD_MAX_DIAGONAL_DIFF_MM = 15.0
 
 # Giới hạn độ nghiêng mặt bàn cờ cho phép (Physical Board Tilt Policy):
 # Bàn cờ Xiangqi thực tế yêu cầu mặt phẳng gần như nằm ngang.
@@ -129,8 +139,19 @@ VISUAL_PICK_MIN_CONFIDENCE = 0.45
 VISUAL_PICK_MAX_OFFSET_CELLS = 0.25
 VISUAL_PICK_FOOT_RATIO = 0.85
 
-# --- HAND-AWARE AUTO MOVE CONFIRMATION ---
-AUTO_MOVE_CONFIRM_ENABLED = False
+# --- BOARD-STABILITY & AUTO MOVE CONFIRMATION ---
+AUTO_MOVE_CONFIRM_ENABLED = _os.environ.get("AUTO_MOVE_CONFIRM_ENABLED", "True").lower() in ("true", "1", "yes")
+BOARD_STABILITY_SECONDS = 1.2
+BOARD_STABILITY_MIN_SAMPLES = 3
+BOARD_STABILITY_SAMPLE_INTERVAL_SECONDS = 0.10
+PLAYER_TURN_MODE = _os.environ.get("PLAYER_TURN_MODE", "SHADOW")  # "LEGACY" | "SHADOW" | "UNIFIED"
+PLAYER_TURN_CLEAR_SECONDS = 0.8
+PLAYER_TURN_CLEAR_SAMPLES = 3
+PLAYER_TURN_INTERACTION_SETTLE_SECONDS = 1.2
+PLAYER_TURN_IDLE_SETTLE_SECONDS = 3.0
+PLAYER_TURN_IDLE_SETTLE_SAMPLES = 5
+PLAYER_TURN_INTERACTION_CAPABILITY = "UNAVAILABLE"
+
 HAND_MODEL_PATH = "models/hand_best_egohands.pt"
 HAND_CONFIDENCE = 0.45
 HAND_ABSENCE_SECONDS = 0.8

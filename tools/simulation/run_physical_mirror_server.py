@@ -6,9 +6,10 @@ Connects to physical FAIRINO FR3 controller over Ethernet RPC (READ-ONLY)
 and streams live joint angles, TCP coordinates, and motion state
 over WebSocket ws://127.0.0.1:8765 to robot-3d-viewer (Three.js Digital Twin).
 
-CRITICAL SAFETY INVARIANT:
-This server is 100% READ-ONLY. It never energizes motors, never switches controller
-modes, and never commands physical motion.
+Default mode streams read-only telemetry. The optional --enable-control flag
+permits physical actuation and is outside the simulator-only R1-R4 workflow.
+Do not use this legacy server as a source of board calibration without verified
+gripper contact frame and a current four-point measurement.
 """
 
 import argparse
@@ -85,19 +86,18 @@ def main():
     corner_pts = {}
     for name in ["R1", "R2", "R3", "R4"]:
         err, data = backend.get_teaching_point(name)
-        if err == 0 and len(data) >= 3:
+        if err == 0 and data is not None and len(data) >= 3:
             corner_pts[name] = [float(data[0]), float(data[1]), float(data[2])]
             print(f"   📌 {name}: X={data[0]:.2f}, Y={data[1]:.2f}, Z={data[2]:.2f} mm")
         else:
             print(f"   ⚠️ Could not read {name} from controller (err={err})")
 
-    # High-reliability physical corner fallback (verified physical coordinates)
+    # Never substitute coordinates from an earlier board position.
     if len(corner_pts) < 4:
-        print("   ⚠️ Incomplete teaching points on controller. Using verified physical calibration.")
-        corner_pts["R1"] = [-211.171, 210.149, 219.994]
-        corner_pts["R2"] = [-214.359, 544.595, 220.000]
-        corner_pts["R3"] = [166.645, 538.109, 220.349]
-        corner_pts["R4"] = [163.581, 215.261, 220.001]
+        missing = sorted({"R1", "R2", "R3", "R4"} - corner_pts.keys())
+        print(f"[ERROR] Missing board teaching points: {', '.join(missing)}. Refusing stale fallback coordinates.")
+        backend.disconnect()
+        sys.exit(2)
 
     r1 = np.array(corner_pts["R1"], dtype=float)
     r2 = np.array(corner_pts["R2"], dtype=float)

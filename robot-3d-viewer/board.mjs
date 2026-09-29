@@ -11,9 +11,9 @@ export { fetchStartLayout, parseStartLayout, START_LAYOUT, LABEL_RED, LABEL_BLAC
 // Canonical source: shared/virtual_fr3_scene.json
 // ---------------------------------------------------------------------------
 let _activeScenePlacement = {
-  boardCenterX: 0.0,
+  boardCenterX: -0.3770,
   boardSurfaceY: 0.0105,
-  boardCenterZ: 0.36,
+  boardCenterZ: 0.0238,
 };
 
 export async function fetchScenePlacement(url = "/shared/virtual_fr3_scene.json") {
@@ -31,6 +31,7 @@ export async function fetchScenePlacement(url = "/shared/virtual_fr3_scene.json"
     boardSurfaceY: Number(worldCenter[1]),
     boardCenterZ: Number(worldCenter[2]),
     board_yaw_deg: Number(data.virtual_board_placement.board_yaw_deg ?? 0.0),
+    teaching_points: data.virtual_board_placement?.teaching_points || null,
   };
   setScenePlacement(placement);
   return placement;
@@ -41,10 +42,11 @@ let _activeBoardGroup = null;
 export function setScenePlacement(placement) {
   if (!placement) throw new Error("placement cannot be null or undefined");
   const centerWorld = placement.board_center_world_m || [
-    placement.boardCenterX ?? 0.0,
+    placement.boardCenterX ?? -0.3770,
     placement.boardSurfaceY ?? 0.0105,
-    placement.boardCenterZ ?? 0.36
+    placement.boardCenterZ ?? 0.0238
   ];
+  const teachingPoints = placement.teaching_points || placement.teachingPoints || null;
   _activeScenePlacement = {
     boardCenterX: Number(centerWorld[0]),
     boardSurfaceY: Number(centerWorld[1]),
@@ -56,6 +58,7 @@ export function setScenePlacement(placement) {
     boardYawDeg: Number(placement.board_yaw_deg ?? 0.0),
     boardOrientationQuatWorld: placement.board_orientation_quat_world || placement.quat_world || null,
     TRobotFromBoard: placement.T_robot_from_board || null,
+    teachingPoints: teachingPoints,
   };
 
   if (_activeBoardGroup) {
@@ -64,8 +67,28 @@ export function setScenePlacement(placement) {
       _activeScenePlacement.boardSurfaceY,
       _activeScenePlacement.boardCenterZ
     );
-    const yawOffsetRad = ((_activeScenePlacement.boardYawDeg - 90.0) * Math.PI) / 180.0;
-    _activeBoardGroup.rotation.y = yawOffsetRad;
+    applyBoardRootPlacement(_activeBoardGroup, _activeScenePlacement);
+  }
+}
+
+export function applyBoardRootPlacement(group, placement) {
+  group.position.set(placement.boardCenterX, placement.boardSurfaceY, placement.boardCenterZ);
+  if (placement.teachingPoints || placement.teaching_points) {
+    group.rotation.set(0, ((placement.boardYawDeg + 90.0) * Math.PI) / 180.0, 0);
+    return;
+  }
+  const T = placement.TRobotFromBoard;
+  if (T) {
+    // Mesh axes (x,y,z) are board (v,normal,u); robot -> viewer is (-y,z,-x).
+    const matrix = new THREE.Matrix4().set(
+      -T[1][1], -T[1][2], -T[1][0], 0,
+       T[2][1],  T[2][2],  T[2][0], 0,
+      -T[0][1], -T[0][2], -T[0][0], 0,
+      0, 0, 0, 1,
+    );
+    group.quaternion.setFromRotationMatrix(matrix).normalize();
+  } else {
+    group.rotation.set(0, ((placement.boardYawDeg + 90.0) * Math.PI) / 180.0, 0);
   }
 }
 
@@ -117,6 +140,44 @@ export function boardPointToXYZ(rowOrCell, colOrGeometry = null, maybeGeometry =
 
   const geo = geometry || getActiveGeometry();
   const placement = getScenePlacement();
+
+  // Authoritative physical teaching points interpolation
+  const tp = placement.teachingPoints || placement.teaching_points;
+  if (tp && tp.R1 && tp.R2 && tp.R3 && tp.R4) {
+    const colRatio = Math.max(0.0, Math.min(1.0, col / 8.0));
+    const rowRatio = Math.max(0.0, Math.min(1.0, row / 9.0));
+
+    let r1 = tp.R1.slice();
+    let r2 = tp.R2.slice();
+    let r3 = tp.R3.slice();
+    let r4 = tp.R4.slice();
+
+    if (Math.abs(r1[1]) > 10.0) {
+      r1 = r1.map((v) => v / 1000.0);
+      r2 = r2.map((v) => v / 1000.0);
+      r3 = r3.map((v) => v / 1000.0);
+      r4 = r4.map((v) => v / 1000.0);
+    }
+
+    const tx = [
+      r1[0] + (r2[0] - r1[0]) * colRatio,
+      r1[1] + (r2[1] - r1[1]) * colRatio,
+      r1[2] + (r2[2] - r1[2]) * colRatio,
+    ];
+    const bx = [
+      r4[0] + (r3[0] - r4[0]) * colRatio,
+      r4[1] + (r3[1] - r4[1]) * colRatio,
+      r4[2] + (r3[2] - r4[2]) * colRatio,
+    ];
+    const robX = tx[0] + (bx[0] - tx[0]) * rowRatio;
+    const robY = tx[1] + (bx[1] - tx[1]) * rowRatio;
+    const robZ = tx[2] + (bx[2] - tx[2]) * rowRatio;
+
+    // Map from robot base frame to Three.js world frame:
+    // X_world = -Y_robot, Y_world = +Z_robot, Z_world = -X_robot
+    return new THREE.Vector3(-robY, robZ, -robX);
+  }
+
   const colM = geo.cellM || 0.040;
   const rowM = geo.rowSpacingM || 0.040;
   const u = (col - 4.0) * colM;
@@ -183,7 +244,7 @@ function createBoardTexture(geometry = null) {
   const stepY = (canvas.height - paddingY * 2) / (geo.columns - 1);
 
   const getX = (row) => paddingX + row * stepX;
-  const getY = (col) => paddingY + col * stepY;
+  const getY = (col) => paddingY + (geo.columns - 1 - col) * stepY;
 
   // 1. Vẽ 10 đường hàng (nối col 0 đến col 8 ở mỗi row r)
   for (let r = 0; r < 10; r++) {
@@ -286,7 +347,7 @@ function createBoardTexture(geometry = null) {
 
   // Thước dọc dọc theo col (0 đến 320mm): biên trái & biên phải canvas
   for (let mm = 0; mm <= playableW; mm += 1) {
-    const y = paddingY + mm * pxPerMmY;
+    const y = canvas.height - paddingY - mm * pxPerMmY;
     if (mm % 40 === 0) {
       ctx.lineWidth = 2.5;
       ctx.beginPath();
@@ -374,7 +435,7 @@ export function buildBoardGrid(geometry = null) {
   group.add(boardTop);
 
   group.position.set(center.x, center.y, center.z);
-  group.rotation.y = ((placement.boardYawDeg - 90.0) * Math.PI) / 180.0;
+  applyBoardRootPlacement(group, placement);
   _activeBoardGroup = group;
   return group;
 }

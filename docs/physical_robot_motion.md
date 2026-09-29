@@ -1,5 +1,7 @@
 # Physical FR5 motion model
 
+> **Legacy FR5 document.** Do not use its bilinear board mapping or historical R1–R4 values to place the current FR3 board. See `R1_R4_BOARD_PLACEMENT_CURRENT.md`.
+
 ## What determines a real robot pose
 
 Each commanded FR5 Cartesian pose has six values:
