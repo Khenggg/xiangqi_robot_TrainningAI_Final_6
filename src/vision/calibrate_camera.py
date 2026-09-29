@@ -11,12 +11,13 @@ import queue
 import config
 
 
-def calibrate_perspective_camera(cap, save_path):
+def calibrate_perspective_camera(cap, save_path, skip_warmup=False):
     """Hiệu chỉnh perspective camera bằng cách click 4 góc bàn cờ.
     
     Args:
         cap: cv2.VideoCapture object đã mở
         save_path: đường dẫn lưu file .npy (perspective matrix)
+        skip_warmup: Nếu True, bỏ qua warm-up vì đã warm-up ở bước trước
     
     Returns:
         M: perspective transform matrix (3x3), hoặc None nếu hủy
@@ -25,17 +26,20 @@ def calibrate_perspective_camera(cap, save_path):
         print("[CALIBRATE] DRY_RUN: bỏ qua calibration.")
         return None
 
-    # --- WARM UP camera TRƯỚC khi bắt đầu thread ---
+    # --- WARM UP camera TRƯỚC khi bắt đầu thread (nếu chưa warm-up) ---
     # ⚠️ PHẢI warm-up TRƯỚC, KHÔNG ĐƯỢC chạy song song với capture thread
     #    vì race condition trên cv2.VideoCapture gây frame đen!
-    print("[CALIBRATE] ⏳ Đang chờ camera warm up...", flush=True)
-    for i in range(60):  # Đọc ~60 frame để camera USB ổn định (bỏ frame đen)
-        ret, _ = cap.read()
-        if not ret:
-            time.sleep(0.05)
-        time.sleep(0.03)
-    time.sleep(0.5)  # Chờ thêm cho camera ổn định hoàn toàn
-    print("[CALIBRATE] ✅ Camera warm up xong!", flush=True)
+    if not skip_warmup:
+        print("[CALIBRATE] ⏳ Đang chờ camera warm up...", flush=True)
+        for i in range(10):  # Đọc ~10 frame để camera USB ổn định
+            ret, _ = cap.read()
+            if not ret:
+                time.sleep(0.02)
+            time.sleep(0.01)
+        time.sleep(0.1)  # Chờ thêm cho camera ổn định hoàn toàn
+        print("[CALIBRATE] ✅ Camera warm up xong!", flush=True)
+    else:
+        print("[CALIBRATE] ✅ Camera đã warm up từ trước, mở giao diện ngay...", flush=True)
 
     # --- Thread đọc camera liên tục (bắt đầu SAU warm-up) ---
     cal_q = queue.Queue(maxsize=2)

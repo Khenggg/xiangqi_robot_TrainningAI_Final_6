@@ -163,17 +163,17 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
         return None
 
     # --- BƯỚC 1: WARM UP CAMERA (Đồng nhất, không race condition) ---
-    print("\n[CALIBRATE] Dang on dinh Camera USB...")
-    for _ in range(40):
+    print("\n[CALIBRATE] Dang on dinh Camera USB...", flush=True)
+    for _ in range(10):
         ret, _ = cap.read()
         if not ret:
-            time.sleep(0.05)
-        time.sleep(0.02)
-    time.sleep(0.3)
+            time.sleep(0.02)
+        time.sleep(0.01)
+    time.sleep(0.1)
 
     ret, warm_frame = cap.read()
     if not ret or warm_frame is None:
-        print("[CALIBRATE] Khong lay duoc frame sau warm-up!")
+        print("[CALIBRATE] Khong lay duoc frame sau warm-up!", flush=True)
         return None
 
     # --- BƯỚC 2: THỬ AUTO-CALIBRATION (Multi-frame Sampling) ---
@@ -253,8 +253,8 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
         print("[CALIBRATE] Auto-Calibration khong dat do tin cay. Chuyen sang Manual Fallback...")
 
     # --- BƯỚC 3: FALLBACK CLICK TAY NẾU CHƯA CÓ MODEL HOẶC AUTO THẤT BẠI ---
-    print("[CALIBRATE] Mo giao dien Click 4 goc thu cong...")
-    return calibrate_perspective_camera(cap, str(perspective_path))
+    print("[CALIBRATE] Mo giao dien Click 4 goc thu cong...", flush=True)
+    return calibrate_perspective_camera(cap, str(perspective_path), skip_warmup=True)
 
 
 def check_drift(frame, current_M, calibrator, threshold_px=8.0):
