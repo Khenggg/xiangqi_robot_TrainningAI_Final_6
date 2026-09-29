@@ -88,9 +88,21 @@ def calibrate_perspective_camera(cap, save_path, skip_warmup=False):
         except Exception:
             M = None
 
+    import time as _t
+    cal_opened_time = _t.time()
+    auto_proceed_timeout_sec = 6.0  # Tự động vào game sau 6s nếu đã có M, không bắt treo chờ 'S'
+
     while True:
+        # 1. Bơm sự kiện Pygame để cửa sổ chính không bao giờ bị Windows báo (Not Responding)
         try:
-            frame = cal_q.get(timeout=0.1)
+            import pygame
+            if pygame.get_init():
+                pygame.event.pump()
+        except Exception:
+            pass
+
+        try:
+            frame = cal_q.get(timeout=0.05)
         except queue.Empty:
             continue
 
@@ -134,9 +146,17 @@ def calibrate_perspective_camera(cap, save_path, skip_warmup=False):
                     cv2.line(display, (int(p1[0]), int(p1[1])),
                              (int(p2[0]), int(p2[1])), (0, 255, 255), 1)
 
-                prompt_text = "OK? Bam 'S' de Luu / Dung lai"
+                elapsed = _t.time() - cal_opened_time
+                remaining = max(0, int(auto_proceed_timeout_sec - elapsed))
+                prompt_text = f"Bam 'S' de Luu / Tu dong vao game sau {remaining}s"
                 cv2.putText(display, prompt_text, (20, 45),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+                # Tự động tiếp tục nếu người dùng không bấm gì sau timeout
+                if elapsed >= auto_proceed_timeout_sec:
+                    np.save(save_path, M)
+                    print(f"✅ Tự động tiếp tục vào game với ma trận: {save_path}", flush=True)
+                    break
             except:
                 pass
 
@@ -149,6 +169,7 @@ def calibrate_perspective_camera(cap, save_path, skip_warmup=False):
         elif key == ord('r'):
             points.clear()
             M = None
+            cal_opened_time = _t.time() + 60.0  # Reset timer để người dùng thoải mái click lại
             print("🔄 Đã xóa điểm, hãy click lại.")
         elif key == ord('s') and M is not None:
             np.save(save_path, M)

@@ -525,25 +525,74 @@ class HardwareManager:
             print(f"⚠️ Warning: Could not load YOLO model: {e}")
             
         cam_index = int(os.environ.get("VIDEO_INDEX", str(self.config.VIDEO_SOURCE)))
-        for idx in [cam_index] + [i for i in [0, 1, 2] if i != cam_index]:
-            cap_try = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-            if cap_try.isOpened():
-                self.cap = cap_try
-                print(f"✅ Camera opened at index {idx}")
+        candidate_indices = [cam_index] + [i for i in [0, 1, 2, 3] if i != cam_index]
+        candidate_backends = [
+            ("DSHOW", cv2.CAP_DSHOW),
+            ("MSMF", cv2.CAP_MSMF),
+            ("DEFAULT", cv2.CAP_ANY),
+        ]
+
+        print(f"[INIT] 📷 Scanning cameras (Preferred index: {cam_index})...")
+        best_cap = None
+        best_info = ""
+
+        for idx in candidate_indices:
+            for b_name, backend in candidate_backends:
+                try:
+                    cap_try = cv2.VideoCapture(idx, backend)
+                    if not cap_try.isOpened():
+                        cap_try.release()
+                        continue
+
+                    # Thử đọc 1 frame để kiểm tra tín hiệu thực tế
+                    ret, test_frm = cap_try.read()
+                    if ret and test_frm is not None:
+                        brightness = float(np.mean(test_frm))
+                        w = int(cap_try.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        h = int(cap_try.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        print(f"  🔍 Camera {idx} [{b_name}]: {w}x{h}, brightness={brightness:.1f}")
+
+                        # Nếu có ánh sáng (không phải frame đen xì toàn 0)
+                        if brightness > 1.0:
+                            best_cap = cap_try
+                            best_info = f"Index {idx} [{b_name}] ({w}x{h}, brightness={brightness:.1f})"
+                            break
+                    cap_try.release()
+                except Exception as e_cam:
+                    pass
+            if best_cap is not None:
                 break
-            else:
-                cap_try.release()
-                
-        if self.cap is None:
-            print("❌ Lỗi: Không mở được Camera!")
-            sys.exit()
-            
+
+        # Nếu không có camera nào có ánh sáng > 1.0, lấy camera đầu tiên mở được
+        if best_cap is None:
+            for idx in candidate_indices:
+                cap_try = cv2.VideoCapture(idx)
+                if cap_try.isOpened():
+                    best_cap = cap_try
+                    best_info = f"Index {idx} [Fallback Default]"
+                    break
+
+        if best_cap is None:
+            print("❌ Lỗi: Không thể mở bất kỳ Camera nào!")
+            sys.exit(1)
+
+        self.cap = best_cap
+        print(f"✅ Camera đã chọn thành công: {best_info}")
+
+        # Thử nâng độ phân giải lên 720p/MJPG an toàn
         try:
             self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            # Kiểm tra xem sau khi đổi format có bị driver làm đen ảnh không
+            ret_chk, frm_chk = self.cap.read()
+            if ret_chk and frm_chk is not None and np.mean(frm_chk) < 1.0:
+                print("  ⚠️ Format MJPG làm đen frame -> Khôi phục cấu hình tự động của camera.")
+                # Mở lại mà không ép FOURCC
+                self.cap.release()
+                self.cap = cv2.VideoCapture(idx)
         except Exception:
             pass
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
         # Calibrate Vision (RTMPose ONNX Auto-Calibration + Manual Fallback)
         print("\n" + "=" * 60)
@@ -555,9 +604,17 @@ class HardwareManager:
         )
         
         if calib_matrix is None:
+            # Fallback an toàn cuối cùng: Sử dụng perspective matrix đã lưu nếu có
+            if self.perspective_path.exists():
+                try:
+                    calib_matrix = np.load(str(self.perspective_path))
+                    print(f"ℹ️ [RECOVERY] Đã nạp lại ma trận perspective có sẵn từ: {self.perspective_path}")
+                except Exception:
+                    calib_matrix = None
+
+        if calib_matrix is None:
             print("\n" + "=" * 60)
-            print("❌ [CRITICAL] Camera calibration thất bại hoặc bị hủy!")
-            print("   Không thể tái sử dụng perspective matrix cũ một cách ngầm định.")
+            print("❌ [CRITICAL] Camera calibration thất bại và không có file perspective.npy!")
             print("   Hệ thống Vision không thể khởi động an toàn. Thao tác bị dừng.")
             print("=" * 60 + "\n")
             if self.cap is not None:

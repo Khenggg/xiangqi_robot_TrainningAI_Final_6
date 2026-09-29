@@ -165,6 +165,12 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
     # --- BƯỚC 1: WARM UP CAMERA (Đồng nhất, không race condition) ---
     print("\n[CALIBRATE] Dang on dinh Camera USB...", flush=True)
     for _ in range(10):
+        try:
+            import pygame
+            if pygame.get_init():
+                pygame.event.pump()
+        except Exception:
+            pass
         ret, _ = cap.read()
         if not ret:
             time.sleep(0.02)
@@ -187,6 +193,12 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
 
         # Lấy mẫu 5 frame liên tiếp để chọn frame có độ tin cậy cao nhất, tránh nhiễu/bóng/tay che
         for attempt in range(5):
+            try:
+                import pygame
+                if pygame.get_init():
+                    pygame.event.pump()
+            except Exception:
+                pass
             ret, frame = cap.read()
             if ret and frame is not None:
                 corners, score = calibrator.predict_corners(frame)
@@ -250,10 +262,23 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
 
             return M
 
-        print("[CALIBRATE] Auto-Calibration khong dat do tin cay. Chuyen sang Manual Fallback...")
+        print("[CALIBRATE] Auto-Calibration khong dat do tin cay.", flush=True)
 
-    # --- BƯỚC 3: FALLBACK CLICK TAY NẾU CHƯA CÓ MODEL HOẶC AUTO THẤT BẠI ---
-    print("[CALIBRATE] Mo giao dien Click 4 goc thu cong...", flush=True)
+    # --- BƯỚC 3: FALLBACK — ƯU TIÊN SỬ DỤNG MA TRẬN ĐÃ LƯU TRƯỚC ĐÓ ---
+    from pathlib import Path
+    p_path = Path(perspective_path)
+    if p_path.exists():
+        try:
+            M_saved = np.load(str(p_path))
+            if M_saved is not None and M_saved.shape == (3, 3):
+                print(f"[CALIBRATE] ℹ️ Đã tự động nạp ma trận perspective đã lưu: {p_path.name}")
+                print("[CALIBRATE] ✅ Sẵn sàng vào game ngay lập tức (không treo giao diện)!", flush=True)
+                return M_saved
+        except Exception as e_load:
+            print(f"[CALIBRATE] ⚠️ File {p_path.name} bị lỗi ({e_load}), mở giao diện chỉnh tay...", flush=True)
+
+    # Chỉ mở giao diện click tay khi máy CHƯA HỀ có file perspective.npy nào:
+    print("[CALIBRATE] Chưa có file hiệu chỉnh hợp lệ. Mở giao diện Click 4 góc thủ công...", flush=True)
     return calibrate_perspective_camera(cap, str(perspective_path), skip_warmup=True)
 
 
