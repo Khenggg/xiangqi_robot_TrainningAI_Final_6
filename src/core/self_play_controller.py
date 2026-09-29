@@ -52,10 +52,10 @@ class SelfPlayController:
             return self._start_fault("Choose Step or Continuous mode.")
         if not self.hw.difficulty_availability().get(red_difficulty) or not self.hw.difficulty_availability().get(black_difficulty):
             return self._start_fault("Both selected engine difficulties must be ready.")
-        # Give the camera a fresh baseline before requiring its strict board/FEN check.
-        self.hw.capture_baseline_if_needed(force_delay=1.0)
-        if not self.hw.verify_physical_board(self.state.board):
-            return self._start_fault("Camera board check failed. Arrange all pieces, then recalibrate/retry self-play.")
+        # Self-play owns every move, so the logical FEN is the match source of
+        # truth.  Do not pause the turn loop for camera/CChess board matching.
+        # Camera-based pick offsets and capture-clear checks remain enabled in
+        # ``move_robot`` because they protect the physical motion itself.
         self.state.physical_sync_fault = False
         self.red_difficulty, self.black_difficulty, self.run_mode = red_difficulty, black_difficulty, run_mode
         self.status = SelfPlayStatus.READY
@@ -100,8 +100,8 @@ class SelfPlayController:
                 else:
                     self._fault("Engine failed to produce a legal move")
                 return
-            if not xiangqi.is_valid_move(move[0], move[1], snapshot, color) or not self.hw.verify_physical_board(snapshot):
-                self._fault("Pre-dispatch board verification failed")
+            if not xiangqi.is_valid_move(move[0], move[1], snapshot, color):
+                self._fault("Engine produced an illegal move")
                 return
             destination = snapshot[move[1][1]][move[1][0]]
             expected_after, _ = xiangqi.make_temp_move(snapshot, move)
@@ -138,13 +138,12 @@ class SelfPlayController:
                 self.state.set_status("Self-play ended after motion; reconcile the physical board before continuing.", color=(180, 0, 0), duration=30.0)
                 self.status = SelfPlayStatus.ENDED
                 return
-            if error or not isinstance(result, MotionResult) or not result.success or not self.hw.verify_physical_board(expected_after):
-                self._fault("Robot motion or final board verification failed")
+            if error or not isinstance(result, MotionResult) or not result.success:
+                self._fault("Robot motion failed")
                 return
             if not self.state.commit_pending_physical_move():
                 self._fault("Physical move commit rejected")
                 return
-            self.hw.capture_baseline_if_needed(force_delay=1.0)
             if xiangqi.get_king_pos(self.state.turn, self.state.board) is None:
                 self.state.handle_game_over(color)
                 self.status = SelfPlayStatus.FINISHED
