@@ -279,19 +279,30 @@ class InputHandler:
             return
 
         if self.hw.verify_physical_board(pending["expected_board"]):
-            if self.state.commit_pending_ai_move():
-                self.state.snapshot_continue_required = False
-                self.state.api_client.send_move_update_board(self.state.current_fen)
-                if xiangqi.get_king_pos("r", self.state.board) is None:
-                    self.state.handle_game_over("b")
-                    self.state.api_client.end_match(winner="BLACK", reason="CHECKMATE")
-                else:
-                    self.hw.capture_baseline_if_needed(force_delay=1.0)
-                    self.state.set_status("✅ Đã xác nhận bàn thật — đến lượt bạn.", color=(0, 100, 180), duration=8.0)
+            self._finalize_pending_ai_move(
+                "✅ Đã xác nhận bàn thật — đến lượt bạn.", (0, 100, 180)
+            )
             return
 
         src, dst = pending["move"]
         if pending.get("captured_piece") != ".":
+            # CChess can misclassify unrelated pieces, making a whole-board
+            # FEN comparison too strict for the supervised capture recovery.
+            # V is pressed only after the operator has completed this known
+            # pending move, so the source/destination occupancy check is the
+            # relevant physical evidence here.
+            verify_geometry = getattr(self.hw, "verify_visual_move", None)
+            geometry_matches = False
+            if callable(verify_geometry):
+                try:
+                    geometry_matches = verify_geometry(src, dst)
+                except Exception as exc:
+                    print(f"[BOARD SYNC] Manual-capture geometry check failed: {exc}")
+            if geometry_matches:
+                self._finalize_pending_ai_move(
+                    "✅ Đã xác nhận nước ăn thủ công — FEN đã cập nhật.", (0, 120, 0)
+                )
+                return
             self.state.set_status(
                 "⚠️ Nước ăn chưa hoàn tất: chuyển quân Đen "
                 f"({src[0]},{src[1]})→({dst[0]},{dst[1]}) rồi nhấn V.",
@@ -302,6 +313,20 @@ class InputHandler:
                 "❌ Bàn thật không khớp trước/sau nước đi. Chỉnh tay rồi nhấn V.",
                 color=(180, 0, 0), duration=15.0,
             )
+
+    def _finalize_pending_ai_move(self, status_message, status_color):
+        """Commit the one pending AI move after a verified recovery path."""
+        if not self.state.commit_pending_ai_move():
+            return False
+        self.state.snapshot_continue_required = False
+        self.state.api_client.send_move_update_board(self.state.current_fen)
+        if xiangqi.get_king_pos("r", self.state.board) is None:
+            self.state.handle_game_over("b")
+            self.state.api_client.end_match(winner="BLACK", reason="CHECKMATE")
+        else:
+            self.hw.capture_baseline_if_needed(force_delay=1.0)
+            self.state.set_status(status_message, color=status_color, duration=8.0)
+        return True
 
     def _handle_space_key(self, auto_retry=False):
         if self._player_turn_mode == PlayerTurnMode.UNIFIED:

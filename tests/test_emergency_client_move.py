@@ -467,6 +467,42 @@ class EmergencyClientMoveTests(unittest.TestCase):
         self.assertEqual([state.current_fen], sent_fens)
         self.assertEqual(1, hardware.baseline_calls)
 
+    def test_v_manual_capture_uses_move_geometry_when_full_fen_check_is_noisy(self):
+        state = GameState(allow_mouse_move=False)
+        sent_fens = []
+        state.api_client.send_move_update_board = sent_fens.append
+        expected_board = [row[:] for row in state.board]
+        expected_board[2][1] = "."
+        expected_board[7][1] = "b_C"
+        state.set_pending_ai_move(((1, 2), (1, 7)), expected_board, "r_C")
+        state.physical_sync_fault = True
+
+        class Hardware:
+            def __init__(self):
+                self.baseline_calls = 0
+                self.geometry_calls = []
+
+            def verify_physical_board(self, board):
+                return False  # Unrelated CChess cells are misclassified.
+
+            def verify_visual_move(self, src, dst):
+                self.geometry_calls.append((src, dst))
+                return True
+
+            def capture_baseline_if_needed(self, force_delay=0.0):
+                self.baseline_calls += 1
+                return True
+
+        hardware = Hardware()
+        InputHandler(state, hardware)._reconcile_physical_sync_fault()
+
+        self.assertEqual([((1, 2), (1, 7))], hardware.geometry_calls)
+        self.assertEqual(expected_board, state.board)
+        self.assertEqual("r", state.turn)
+        self.assertFalse(state.physical_sync_fault)
+        self.assertEqual([state.current_fen], sent_fens)
+        self.assertEqual(1, hardware.baseline_calls)
+
     def test_retry_start_authority_is_consumed_exactly_once(self):
         state = GameState(allow_mouse_move=False)
         state.turn = "b"
