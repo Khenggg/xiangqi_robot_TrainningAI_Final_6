@@ -109,11 +109,12 @@ class InputHandler:
         if self._board_warning_samples < minimum:
             return
         illegal_move = self._single_observed_red_move(layout)
-        message = (
-            f"❌ Illegal move: {xiangqi.format_move(*illegal_move)} — move not accepted."
-            if illegal_move is not None
-            else "⚠️ Board does not match the expected position."
-        )
+        if illegal_move is not None and illegal_move[0] == illegal_move[1]:
+            message = f"⚠️ Unstable FEN detection at {xiangqi.format_square(illegal_move[0])}"
+        elif illegal_move is not None:
+            message = f"❌ Illegal move: {xiangqi.format_move(*illegal_move)} — move not accepted."
+        else:
+            message = "⚠️ Board does not match the expected position."
         self.state.set_status(message, color=(180, 100, 0), duration=5.0)
         self._board_warning_message = message
 

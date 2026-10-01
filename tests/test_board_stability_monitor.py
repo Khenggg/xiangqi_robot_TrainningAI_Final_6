@@ -168,6 +168,36 @@ class BoardStabilityMonitorTests(unittest.TestCase):
             "❌ Illegal move: a6 -> b5 — move not accepted.", state.statuses[-1]
         )
 
+    def test_stable_same_square_piece_flip_shows_unstable_fen_warning(self):
+        class State:
+            board = xiangqi.get_board()
+            game_epoch = 0
+            human_commit_generation = 0
+
+            def __init__(self):
+                self.statuses = []
+
+            def set_status(self, message, **kwargs):
+                self.statuses.append(message)
+
+        class Config:
+            BOARD_WARNING_CHECK_INTERVAL_SECONDS = 0.0
+            BOARD_WARNING_MIN_STABLE_SAMPLES = 2
+
+        class Hardware:
+            config = Config()
+
+        state = State()
+        state.board[4][2] = "r_P"
+        observed = xiangqi.get_board()
+        observed[4][2] = "r_C"
+        handler = InputHandler(state, Hardware())
+
+        handler._check_board_warning({"success": True, "board": observed}, now=1.0)
+        handler._check_board_warning({"success": True, "board": observed}, now=1.1)
+
+        self.assertEqual("⚠️ Unstable FEN detection at c4", state.statuses[-1])
+
     def test_legal_layout_clears_only_the_checker_warning(self):
         class State:
             board = xiangqi.get_board()
