@@ -1,4 +1,5 @@
 import time
+import math
 from src.core import xiangqi  # type: ignore
 from src.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT,
                                    BTN_CONTINUE_RECT, BTN_SCAN_FEN_RECT, BTN_CONFIRM_MOVE_RECT,
@@ -23,6 +24,10 @@ class InputHandler:
         )
         self._observed_baseline_time = None
         self._last_stability_poll_at = 0.0
+        self._last_board_warning_check_at = 0.0
+        self._board_warning_candidate = None
+        self._board_warning_samples = 0
+        self._board_warning_message = None
         configured_mode = getattr(stability_config, "PLAYER_TURN_MODE", "LEGACY")
         try:
             self._player_turn_mode = PlayerTurnMode(configured_mode.upper())
@@ -57,6 +62,90 @@ class InputHandler:
                                                         self._player_turn_arbiter.turn_token),
                                          "move": (src, dst), "source": source})()
         return self._human_commit_coordinator.try_commit(request, piece) == "ACCEPTED"
+
+    def _check_board_warning(self, cchess_result, now):
+        """Surface unexplained full-board changes without mutating game state."""
+        try:
+            interval = float(getattr(
+                getattr(self.hw, "config", None), "BOARD_WARNING_CHECK_INTERVAL_SECONDS", 2.0
+            ))
+        except (TypeError, ValueError):
+            interval = 2.0
+        interval = max(0.1, interval) if math.isfinite(interval) else 2.0
+        if now - self._last_board_warning_check_at < interval:
+            return
+        self._last_board_warning_check_at = now
+
+        occluded = getattr(self.hw, "is_board_occluded", None)
+        if callable(occluded) and occluded():
+            self._clear_board_warning()
+            return
+
+        layout = cchess_result.get("board") if cchess_result and cchess_result.get("success") else None
+        if layout is None:
+            self._clear_board_warning()
+            return
+        match = LegalSuccessorMatcher(self.state.board).match(layout)
+        if match.kind in (MatchKind.BASELINE_EQUAL, MatchKind.UNIQUE, MatchKind.UNAVAILABLE):
+            self._clear_board_warning()
+            return
+        try:
+            candidate = (match.kind, tuple(tuple(row) for row in layout))
+        except TypeError:
+            self._board_warning_candidate = None
+            self._board_warning_samples = 0
+            return
+        if candidate != self._board_warning_candidate:
+            self._board_warning_candidate = candidate
+            self._board_warning_samples = 1
+            return
+        self._board_warning_samples += 1
+        try:
+            minimum = max(1, int(getattr(
+                getattr(self.hw, "config", None), "BOARD_WARNING_MIN_STABLE_SAMPLES", 2
+            )))
+        except (TypeError, ValueError):
+            minimum = 2
+        if self._board_warning_samples < minimum:
+            return
+        illegal_move = self._single_observed_red_move(layout)
+        message = (
+            f"❌ Illegal move: {xiangqi.format_move(*illegal_move)} — move not accepted."
+            if illegal_move is not None
+            else "⚠️ Board does not match the expected position."
+        )
+        self.state.set_status(message, color=(180, 100, 0), duration=5.0)
+        self._board_warning_message = message
+
+    def _clear_board_warning(self):
+        self._board_warning_candidate = None
+        self._board_warning_samples = 0
+        set_status = getattr(self.state, "set_status", None)
+        if (self._board_warning_message is not None
+                and getattr(self.state, "status_message", None) == self._board_warning_message
+                and callable(set_status)):
+            set_status("", duration=0)
+        self._board_warning_message = None
+
+    def _single_observed_red_move(self, layout):
+        """Return one observed Red source/destination pair, if unambiguous."""
+        sources, destinations = [], []
+        try:
+            for row in range(10):
+                for col in range(9):
+                    expected = self.state.board[row][col]
+                    observed = layout[row][col]
+                    if not isinstance(observed, str):
+                        return None
+                    if expected.startswith("r") and observed != expected:
+                        sources.append((col, row))
+                    if observed.startswith("r") and observed != expected:
+                        destinations.append((col, row))
+        except (IndexError, TypeError):
+            return None
+        if len(sources) == 1 and len(destinations) == 1:
+            return sources[0], destinations[0]
+        return None
 
     def _maybe_activate_unified_turn(self):
         current_epoch = getattr(self.state, "game_epoch", 0)
@@ -545,6 +634,8 @@ class InputHandler:
                 cchess_result = self.hw.recognize_board_state(frame)
             except Exception as exc:
                 print(f"[STABILITY] CChess recognition error: {exc}")
+
+        self._check_board_warning(cchess_result, now)
 
         # UNIFIED only consumes a fully recognized layout.  A missing red
         # piece while being held is deliberately incomplete, never a move.

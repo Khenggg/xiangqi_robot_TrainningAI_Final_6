@@ -103,6 +103,10 @@ AUTO_MOVE_CONFIRM_ENABLED = True
 BOARD_STABILITY_SECONDS = 1.2
 BOARD_STABILITY_MIN_SAMPLES = 3
 BOARD_STABILITY_SAMPLE_INTERVAL_SECONDS = 0.10
+# Read-only full-board warning check. This never changes FEN, move history,
+# AI scheduling, or robot control; it only surfaces unexplained camera layouts.
+BOARD_WARNING_CHECK_INTERVAL_SECONDS = 2.0
+BOARD_WARNING_MIN_STABLE_SAMPLES = 2
 
 # --- THÔNG SỐ AI ---
 # --- UNIFIED PLAYER-TURN STATE MACHINE ---
