@@ -40,6 +40,10 @@ PLACE_Z = 180.0   # Hạ xuống đặt
 # Verified wiring: DO1 chạy hướng MỞ, DO0 chạy hướng ĐÓNG. Không bao giờ bật cả hai cùng lúc.
 GRIPPER_ACTION_OPEN = "open"
 GRIPPER_ACTION_CLOSE = "close"
+# Use only when the gripper is known to be empty.  It first drives closed for
+# a fixed reference pulse, then opens for GRIPPER_OPEN_TO_GAP_PULSE_SEC to create the
+# repeatable pre-pick jaw gap.
+GRIPPER_ACTION_OPEN_TO_GAP = "open_to_gap"
 GRIPPER_OPEN_DO_ID = 1
 GRIPPER_CLOSE_DO_ID = 0
 GRIPPER_IDLE_STATUS = 0
@@ -48,11 +52,19 @@ GRIPPER_ACTIVE_STATUS = 1
 # Motor không có công tắc hành trình: chỉ cấp điện theo xung ngắn rồi tắt cả hai DO.
 # Tinh chỉnh hai PULSE riêng sau khi thử với tay robot đứng yên và không có quân cờ.
 GRIPPER_DIRECTION_DEADTIME_SEC = 0.10
-GRIPPER_OPEN_PULSE_SEC = 0.3
-GRIPPER_CLOSE_PULSE_SEC = 0.3
+# Normal release pulse.  Keep this long enough to release a held piece.
+GRIPPER_OPEN_PULSE_SEC = 0.2
+GRIPPER_CLOSE_PULSE_SEC = 0.2
+# Closing reference used only by GRIPPER_ACTION_OPEN_TO_GAP.  Set this to the
+# shortest duration that reliably closes an empty gripper; it may hit a hard
+# stop because this gripper has no closed-position sensor.
+GRIPPER_OPEN_TO_GAP_REFERENCE_CLOSE_PULSE_SEC = 0.3
+# Desired empty-gripper pre-pick gap: increase for a wider gap and decrease
+# for a narrower gap. It is time-based, not position feedback.
+GRIPPER_OPEN_TO_GAP_PULSE_SEC = 0.17
 GRIPPER_OPEN_SETTLE_SEC = 0.25
 GRIPPER_CLOSE_SETTLE_SEC = 0.25
-MOVE_SPEED = 60 #Percentage based
+MOVE_SPEED = 70 #Percentage based
 
 # Góc xoay của đầu Robot (Rx, Ry, Rz)
 ROTATION = [179.861, 0.555, -42] 
