@@ -33,8 +33,8 @@ CAPTURE_BIN_Z = 291.68  # [QUAN TRỌNG] Độ cao khi thả quân vào thùng
 
 # Độ cao an toàn (mm)
 SAFE_Z  = 210.0    # Độ cao an toàn khi di chuyển giữa các ô (tăng lên để tránh hất quân)
-PICK_Z  = 178.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
-PLACE_Z = 178.0   # Hạ xuống đặt
+PICK_Z  = 180.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
+PLACE_Z = 180.0   # Hạ xuống đặt
 
 # Cấu hình kẹp: motor 2 chiều dùng Tool DO trên đầu robot.
 # Verified wiring: DO1 chạy hướng MỞ, DO0 chạy hướng ĐÓNG. Không bao giờ bật cả hai cùng lúc.
@@ -55,7 +55,7 @@ GRIPPER_CLOSE_SETTLE_SEC = 0.25
 MOVE_SPEED = 60 #Percentage based
 
 # Góc xoay của đầu Robot (Rx, Ry, Rz)
-ROTATION = [179.861, 0.555, -44.464] 
+ROTATION = [179.861, 0.555, -42]
 
 # --- PHYSICAL PICK / PLACE MOTION PROFILE ---
 # Các pose Cartesian FR5 gồm [X, Y, Z, Rx, Ry, Rz]. XY được nội suy từ R1-R4;
@@ -103,6 +103,10 @@ AUTO_MOVE_CONFIRM_ENABLED = True
 BOARD_STABILITY_SECONDS = 1.2
 BOARD_STABILITY_MIN_SAMPLES = 3
 BOARD_STABILITY_SAMPLE_INTERVAL_SECONDS = 0.10
+# Read-only full-board warning check. This never changes FEN, move history,
+# AI scheduling, or robot control; it only surfaces unexplained camera layouts.
+BOARD_WARNING_CHECK_INTERVAL_SECONDS = 2.0
+BOARD_WARNING_MIN_STABLE_SAMPLES = 2
 
 # --- THÔNG SỐ AI ---
 # --- UNIFIED PLAYER-TURN STATE MACHINE ---

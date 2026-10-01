@@ -79,3 +79,121 @@ class BoardStabilityMonitorTests(unittest.TestCase):
         self.assertFalse(handler.poll_board_stability())
         self.assertFalse(state.committed)
         self.assertEqual(1, handler._board_stability_monitor._sample_count)
+
+    def test_full_board_desync_shows_a_warning_without_committing_a_move(self):
+        class State:
+            board = xiangqi.get_board()
+            game_epoch = 0
+            human_commit_generation = 0
+
+            def __init__(self):
+                self.statuses = []
+
+            def set_status(self, message, **kwargs):
+                self.statuses.append(message)
+
+        class Config:
+            BOARD_WARNING_CHECK_INTERVAL_SECONDS = 0.0
+            BOARD_WARNING_MIN_STABLE_SAMPLES = 2
+
+        class Hardware:
+            config = Config()
+
+        state = State()
+        handler = InputHandler(state, Hardware())
+        observed = xiangqi.get_board()
+        observed[4][8] = "r_R"  # Extra Red Rook at i4 is not a legal successor.
+
+        handler._check_board_warning({"success": True, "board": observed}, now=1.0)
+        handler._check_board_warning({"success": True, "board": observed}, now=1.1)
+
+        self.assertEqual(
+            "⚠️ Board does not match the expected position.", state.statuses[-1]
+        )
+
+    def test_legal_successor_does_not_show_a_desync_warning(self):
+        class State:
+            board = xiangqi.get_board()
+            game_epoch = 0
+            human_commit_generation = 0
+
+            def __init__(self):
+                self.statuses = []
+
+            def set_status(self, message, **kwargs):
+                self.statuses.append(message)
+
+        class Config:
+            BOARD_WARNING_CHECK_INTERVAL_SECONDS = 0.0
+            BOARD_WARNING_MIN_STABLE_SAMPLES = 2
+
+        class Hardware:
+            config = Config()
+
+        state = State()
+        handler = InputHandler(state, Hardware())
+        observed, _ = xiangqi.make_temp_move(state.board, ((0, 6), (0, 5)))
+
+        handler._check_board_warning({"success": True, "board": observed}, now=1.0)
+
+        self.assertEqual([], state.statuses)
+
+    def test_stable_illegal_red_move_shows_its_coordinate_warning(self):
+        class State:
+            board = xiangqi.get_board()
+            game_epoch = 0
+            human_commit_generation = 0
+
+            def __init__(self):
+                self.statuses = []
+
+            def set_status(self, message, **kwargs):
+                self.statuses.append(message)
+
+        class Config:
+            BOARD_WARNING_CHECK_INTERVAL_SECONDS = 0.0
+            BOARD_WARNING_MIN_STABLE_SAMPLES = 2
+
+        class Hardware:
+            config = Config()
+
+        state = State()
+        handler = InputHandler(state, Hardware())
+        observed, _ = xiangqi.make_temp_move(state.board, ((0, 6), (1, 5)))
+
+        handler._check_board_warning({"success": True, "board": observed}, now=1.0)
+        handler._check_board_warning({"success": True, "board": observed}, now=1.1)
+
+        self.assertEqual(
+            "❌ Illegal move: a6 -> b5 — move not accepted.", state.statuses[-1]
+        )
+
+    def test_legal_layout_clears_only_the_checker_warning(self):
+        class State:
+            board = xiangqi.get_board()
+            game_epoch = 0
+            human_commit_generation = 0
+
+            def __init__(self):
+                self.status_message = ""
+
+            def set_status(self, message, **kwargs):
+                self.status_message = message
+
+        class Config:
+            BOARD_WARNING_CHECK_INTERVAL_SECONDS = 0.0
+            BOARD_WARNING_MIN_STABLE_SAMPLES = 1
+
+        class Hardware:
+            config = Config()
+
+        state = State()
+        handler = InputHandler(state, Hardware())
+        mismatched = xiangqi.get_board()
+        mismatched[4][8] = "r_R"
+        handler._check_board_warning({"success": True, "board": mismatched}, now=1.0)
+        handler._check_board_warning({"success": True, "board": mismatched}, now=1.1)
+        self.assertIn("Board does not match", state.status_message)
+
+        handler._check_board_warning({"success": True, "board": state.board}, now=1.3)
+        self.assertEqual("", state.status_message)

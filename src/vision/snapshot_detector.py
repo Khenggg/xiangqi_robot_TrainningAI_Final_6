@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import os
 import time
+from src.core import xiangqi
 
 
 class SnapshotDetector:
@@ -97,7 +98,7 @@ class SnapshotDetector:
             if rec_board:
                 s, d, p = self._detect_move_from_cchess(board, rec_board)
                 if s is not None and d is not None:
-                    print(f"[SNAPSHOT] CChess ONNX Direct Move: {p} {s}->{d}")
+                    print(f"[SNAPSHOT] CChess ONNX Direct Move: {p} {xiangqi.format_move(s, d)}")
                     return s, d, p
 
         # === 2. FALLBACK: YOLO OCCUPANCY GRID COMPARISON ===
@@ -565,11 +566,11 @@ class SnapshotDetector:
                     dst_piece = board[dst[1]][dst[0]]
                     move_type = "ăn quân" if dst_piece.startswith("b") else "di chuyển"
                     valid_moves.append((src, dst, piece, move_type))
-                    print(f"  ✅ Valid: {piece} {src}→{dst} ({move_type})")
+                    print(f"  ✅ Valid: {piece} {xiangqi.format_move(src, dst)} ({move_type})")
 
         if len(valid_moves) == 1:
             src, dst, piece, move_type = valid_moves[0]
-            print(f"[SNAPSHOT] ✅ Detected ({move_type}): {piece} {src}→{dst}")
+            print(f"[SNAPSHOT] ✅ Detected ({move_type}): {piece} {xiangqi.format_move(src, dst)}")
             return src, dst, piece
 
         if len(valid_moves) > 1:
@@ -584,7 +585,7 @@ class SnapshotDetector:
                     ]
                     if len(cchess_matched) == 1:
                         s, d, p, mt = cchess_matched[0]
-                        print(f"[SNAPSHOT] ✅ Detected ({mt}, CChess ONNX tiebreaker): {p} {s}→{d}")
+                        print(f"[SNAPSHOT] ✅ Detected ({mt}, CChess ONNX tiebreaker): {p} {xiangqi.format_move(s, d)}")
                         return s, d, p
 
             # 2. Pixel absdiff tiebreaker
@@ -595,12 +596,12 @@ class SnapshotDetector:
                 matched = [(s, d, p, mt) for s, d, p, mt in valid_moves if d == best_dst]
                 if matched:
                     src, dst, piece, move_type = matched[0]
-                    print(f"[SNAPSHOT] ✅ Detected ({move_type}, pixel absdiff of {len(valid_moves)}): {piece} {src}→{dst}")
+                    print(f"[SNAPSHOT] ✅ Detected ({move_type}, pixel absdiff of {len(valid_moves)}): {piece} {xiangqi.format_move(src, dst)}")
                     return src, dst, piece
             # Fallback về Manhattan nếu pixel absdiff thất bại
             best = min(valid_moves, key=lambda m: abs(m[0][0]-m[1][0]) + abs(m[0][1]-m[1][1]))
             src, dst, piece, move_type = best
-            print(f"[SNAPSHOT] ✅ Detected ({move_type}, Manhattan fallback of {len(valid_moves)}): {piece} {src}→{dst}")
+            print(f"[SNAPSHOT] ✅ Detected ({move_type}, Manhattan fallback of {len(valid_moves)}): {piece} {xiangqi.format_move(src, dst)}")
             return src, dst, piece
 
         # === FALLBACK 1: Không có valid move qua occupancy grid ===
@@ -614,7 +615,7 @@ class SnapshotDetector:
             if len(black_disappeared) == 1:
                 dst = black_disappeared[0]
                 if xiangqi and xiangqi.is_valid_move(src, dst, board, "r"):
-                    print(f"[SNAPSHOT] ✅ Fallback (ăn quân, cả 2 biến mất): {piece} {src}→{dst}")
+                    print(f"[SNAPSHOT] ✅ Fallback (ăn quân, cả 2 biến mất): {piece} {xiangqi.format_move(src, dst)}")
                     return src, dst, piece
 
             # Dùng pixel absdiff để tìm ô quân đen có thay đổi nhiều nhất
@@ -628,7 +629,7 @@ class SnapshotDetector:
             if black_candidates:
                 best = self._resolve_capture_ambiguity(black_candidates, frame)
                 if best is not None:
-                    print(f"[SNAPSHOT] ✅ Fallback (pixel absdiff capture): {piece} {src}→{best}")
+                    print(f"[SNAPSHOT] ✅ Fallback (pixel absdiff capture): {piece} {xiangqi.format_move(src, best)}")
                     return src, best, piece
 
         # === FALLBACK 2: CCHESS RECOVERY (So sánh trực tiếp memory board vs CChess ONNX layout) ===
@@ -649,7 +650,7 @@ class SnapshotDetector:
                 for (s_c, s_r), p_src in candidates_src:
                     for (d_c, d_r), p_dst in candidates_dst:
                         if p_src == p_dst and xiangqi.is_valid_move((s_c, s_r), (d_c, d_r), board, "r"):
-                            print(f"[SNAPSHOT] ✅ Fallback (CChess ONNX Recovery): {p_src} ({s_c},{s_r})→({d_c},{d_r})")
+                            print(f"[SNAPSHOT] ✅ Fallback (CChess ONNX Recovery): {p_src} {xiangqi.format_move((s_c, s_r), (d_c, d_r))}")
                             return (s_c, s_r), (d_c, d_r), p_src
 
         print("[SNAPSHOT] ❌ Không tìm được nước đi hợp lệ.")

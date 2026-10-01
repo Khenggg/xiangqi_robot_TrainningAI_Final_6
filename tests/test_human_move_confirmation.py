@@ -108,11 +108,14 @@ class HumanMoveConfirmationTests(unittest.TestCase):
 
         missing_state = State()
         self.assertFalse(InputHandler(missing_state, Hardware(False))._handle_space_key())
-        self.assertEqual(missing_state.statuses[-1], "❌ KHÔNG NHẬN DIỆN ĐƯỢC NƯỚC ĐI MỚI")
+        self.assertEqual(missing_state.statuses[-1], "⚠️ No legal move could be identified.")
 
         invalid_state = State()
         self.assertFalse(InputHandler(invalid_state, Hardware(True))._handle_space_key())
-        self.assertEqual(invalid_state.statuses[-1], "❌ NƯỚC ĐI KHÔNG HỢP LỆ")
+        self.assertEqual(
+            invalid_state.statuses[-1],
+            "⚠️ Board changed, but one legal move could not be identified.",
+        )
 
         retry_state = State()
         retry_handler = InputHandler(retry_state, Hardware([True, False]))

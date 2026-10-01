@@ -3,6 +3,7 @@
 # === Hiển thị bàn cờ Tướng ảo trên Pygame ===
 # =============================================================================
 import time
+import os
 import pygame
 from src.core import xiangqi
 
@@ -19,13 +20,29 @@ START_X = (SCREEN_WIDTH - BOARD_WIDTH) / 2
 START_Y = (SCREEN_HEIGHT - ((NUM_ROWS - 1) * SQUARE_SIZE)) / 2 - 20
 LINE_COLOR = (0, 0, 0)
 BOARD_COLOR = (252, 230, 201)
+MENU_TEXT_COLOR = (67, 45, 29)
+MENU_MUTED_TEXT_COLOR = (103, 78, 56)
+MENU_ACCENT_COLOR = (143, 47, 42)
+MENU_BORDER_COLOR = (119, 82, 48)
+RED_PIECE_COLOR = (220, 20, 60)
+BLACK_PIECE_COLOR = (0, 0, 0)
+MOVE_LOG_RECT = pygame.Rect(12, 112, 195, 208)
+MOVE_LOG_X = MOVE_LOG_RECT.x + 10
+MOVE_LOG_Y = MOVE_LOG_RECT.y + 30
+MOVE_LOG_LINE_HEIGHT = 21
 PIECE_RADIUS = SQUARE_SIZE // 2 - 4
 
 BTN_COLOR = (200, 50, 50)
 BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT - 60, 120, 40)
 BTN_NEW_GAME_RECT = pygame.Rect(SCREEN_WIDTH / 2 + 30, SCREEN_HEIGHT - 60, 120, 40)
-BTN_RESUME_SCAN_RECT = pygame.Rect(SCREEN_WIDTH / 2 - 78, SCREEN_HEIGHT - 108, 156, 36)
+CLIENT_ACTION_X = 590
+CLIENT_ACTION_WIDTH = 190
+BTN_SCAN_FEN_RECT = pygame.Rect(CLIENT_ACTION_X, 148, CLIENT_ACTION_WIDTH, 42)
+BTN_CONFIRM_MOVE_RECT = pygame.Rect(CLIENT_ACTION_X, 198, CLIENT_ACTION_WIDTH, 42)
+BTN_EMERGENCY_RECT = pygame.Rect(CLIENT_ACTION_X, 248, CLIENT_ACTION_WIDTH, 42)
+BTN_ROLLBACK_RECT = pygame.Rect(CLIENT_ACTION_X, 298, CLIENT_ACTION_WIDTH, 42)
+BTN_CONTINUE_RECT = pygame.Rect(CLIENT_ACTION_X, 348, CLIENT_ACTION_WIDTH, 42)
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 330, 330, 68)
 HOME_ROBOT_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 414, 330, 68)
 HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 142, 22, 120, 38)
@@ -45,6 +62,32 @@ PIECE_DISPLAY_NAMES = {
     "b_N": "馬", "b_C": "砲", "b_P": "卒",
 }
 
+PIECE_LOG_NAMES = {
+    "K": "Tướng", "A": "Sĩ", "E": "Tượng", "N": "Mã",
+    "R": "Xe", "C": "Pháo", "P": "Tốt",
+}
+
+UNSUPPORTED_UI_GLYPHS = {
+    "⌨": "", "️": "", "🤖": "AI ", "✅": "", "⚠": "", "❌": "",
+    "📸": "", "↩": "", "✋": "",
+}
+
+
+def unicode_ui_font(size, bold=False):
+    """Load Windows' Unicode UI font explicitly so Vietnamese glyphs are stable."""
+    font_name = "segoeuib.ttf" if bold else "segoeui.ttf"
+    font_path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", font_name)
+    if os.path.isfile(font_path):
+        return pygame.font.Font(font_path, size)
+    return pygame.font.SysFont("Segoe UI", size, bold=bold)
+
+
+def display_text(text):
+    """Remove emoji-only glyphs that SDL_ttf cannot reliably fall back for."""
+    for glyph, replacement in UNSUPPORTED_UI_GLYPHS.items():
+        text = text.replace(glyph, replacement)
+    return text
+
 
 class BoardRenderer:
     """Quản lý hiển thị bàn cờ Tướng trên Pygame."""
@@ -53,7 +96,8 @@ class BoardRenderer:
         self.screen = screen
         self.piece_font = pygame.font.SysFont("simsun", 20, bold=True)
         self.game_font = pygame.font.SysFont("times new roman", 36, bold=True)
-        self.ui_font = pygame.font.SysFont("arial", 16, bold=True)
+        self.ui_font = unicode_ui_font(16, bold=True)
+        self.log_font = unicode_ui_font(12, bold=True)
 
     # --- Chuyển đổi tọa độ ---
     @staticmethod
@@ -76,6 +120,8 @@ class BoardRenderer:
         """
         self.screen.fill(BOARD_COLOR)
 
+        self.draw_recent_moves(game_state.get("recent_moves", []))
+
         if not game_state.get("game_over"):
             # Nút SURRENDER
             pygame.draw.rect(self.screen, BTN_COLOR, BTN_SURRENDER_RECT, border_radius=8)
@@ -87,13 +133,6 @@ class BoardRenderer:
             txt_new = self.ui_font.render("NEW GAME", True, (255, 255, 255))
             self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
 
-            # A failed FEN comparison intentionally pauses automatic scanning.
-            # Keep recovery explicit, but make it possible without a keyboard.
-            if game_state.get("manual_override_active") and not game_state.get("allow_mouse"):
-                pygame.draw.rect(self.screen, (46, 125, 92), BTN_RESUME_SCAN_RECT, border_radius=8)
-                resume = self.ui_font.render("RESUME SCAN", True, (255, 255, 255))
-                self.screen.blit(resume, resume.get_rect(center=BTN_RESUME_SCAN_RECT.center))
-
             # Mode indicator
             mode_str = "MOUSE (DRY RUN)" if game_state.get("allow_mouse") else "CAMERA AI"
             mode_txt = self.ui_font.render(f"MODE: {mode_str}", True, (0, 0, 255))
@@ -101,12 +140,58 @@ class BoardRenderer:
 
             # Hướng dẫn SPACE
             if game_state.get("turn") == "r" and not game_state.get("allow_mouse"):
-                hint = self.ui_font.render("⌨️ Bấm SPACE sau khi đi xong", True, (0, 100, 0))
+                hint = self.ui_font.render("Bấm SPACE sau khi đi xong", True, (0, 100, 0))
                 self.screen.blit(hint, (SCREEN_WIDTH - 280, 10))
+
+            self._draw_client_actions(game_state)
         else:
             pygame.draw.rect(self.screen, BTN_NEW_GAME_COLOR, BTN_NEW_GAME_RECT, border_radius=8)
             txt_new = self.ui_font.render("NEW GAME", True, (255, 255, 255))
             self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
+
+    def _draw_client_actions(self, game_state):
+        """Draw the always-visible client control panel beside the board."""
+        panel = pygame.Rect(CLIENT_ACTION_X - 6, 103, CLIENT_ACTION_WIDTH + 12, 317)
+        pygame.draw.rect(self.screen, (50, 47, 43), panel, border_radius=10)
+        pygame.draw.rect(self.screen, (143, 121, 87), panel, width=1, border_radius=10)
+        title = self.ui_font.render("CLIENT CONTROLS", True, (255, 226, 167))
+        self.screen.blit(title, title.get_rect(center=(panel.centerx, 124)))
+
+        actions = (
+            (BTN_SCAN_FEN_RECT, "V", ("QUÉT / ĐỐI SOÁT FEN",), (49, 117, 166)),
+            (BTN_CONFIRM_MOVE_RECT, "SPACE", ("XÁC NHẬN", "NƯỚC ĐỎ"), (58, 133, 85)),
+            (BTN_EMERGENCY_RECT, "M", ("EMERGENCY MODE",), (169, 112, 42)),
+            (BTN_ROLLBACK_RECT, "Z", ("ROLLBACK",), (133, 77, 55)),
+        )
+        emergency_active = game_state.get("emergency_mode", False)
+        for rect, key, label_lines, color in actions:
+            button_color = (185, 92, 32) if key == "M" and emergency_active else color
+            pygame.draw.rect(self.screen, button_color, rect, border_radius=7)
+            key_surf = self.ui_font.render(key, True, (255, 255, 255))
+            self.screen.blit(key_surf, (rect.x + 9, rect.y + 12))
+            label_x = rect.x + 18 + key_surf.get_width()
+            if len(label_lines) == 1:
+                label_surf = self.ui_font.render(label_lines[0], True, (255, 255, 255))
+                self.screen.blit(label_surf, (label_x, rect.y + 12))
+            else:
+                for line_index, label in enumerate(label_lines):
+                    label_surf = self.ui_font.render(label, True, (255, 255, 255))
+                    self.screen.blit(label_surf, (label_x, rect.y + 3 + line_index * 19))
+
+        can_continue = game_state.get("snapshot_continue_required", False)
+        continue_color = (47, 128, 78) if can_continue else (89, 86, 80)
+        pygame.draw.rect(self.screen, continue_color, BTN_CONTINUE_RECT, border_radius=7)
+        continue_key = self.ui_font.render("▶", True, (255, 255, 255))
+        continue_label = self.ui_font.render(
+            "CONTINUE" if can_continue else "CONTINUE (KHI PAUSE)",
+            True, (255, 255, 255),
+        )
+        self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 11, BTN_CONTINUE_RECT.y + 12))
+        self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 38, BTN_CONTINUE_RECT.y + 12))
+
+        note = "M đang bật: đi tay Đỏ / Đen" if emergency_active else "Chọn phím hoặc bấm nút"
+        note_surf = self.ui_font.render(note, True, (238, 223, 192))
+        self.screen.blit(note_surf, note_surf.get_rect(center=(panel.centerx, 405)))
 
         # --- Vẽ lưới bàn cờ ---
         for r in range(NUM_ROWS):
@@ -127,9 +212,10 @@ class BoardRenderer:
         pygame.draw.line(self.screen, LINE_COLOR, self.grid_to_pixel(5, 0), self.grid_to_pixel(3, 2), 1)
         pygame.draw.line(self.screen, LINE_COLOR, self.grid_to_pixel(3, 7), self.grid_to_pixel(5, 9), 1)
         pygame.draw.line(self.screen, LINE_COLOR, self.grid_to_pixel(5, 7), self.grid_to_pixel(3, 9), 1)
+        self.draw_board_coordinates()
 
         # --- Status message ---
-        msg = game_state.get("status_message", "")
+        msg = display_text(game_state.get("status_message", ""))
         if msg and time.time() < game_state.get("status_expiry", 0):
             color = game_state.get("status_color", (200, 0, 0))
             msg_surf = self.ui_font.render(msg, True, (255, 255, 255))
@@ -146,7 +232,7 @@ class BoardRenderer:
             start = game_state.get("ai_think_start", time.time())
             dots = "." * (int(time.time() - start) % 4)
             elapsed = time.time() - start
-            think_msg = f"🤖  AI is thinking{dots}  ({elapsed:.1f}s)"
+            think_msg = f"AI is thinking{dots}  ({elapsed:.1f}s)"
             think_surf = self.ui_font.render(think_msg, True, (255, 255, 255))
             padding = 10
             bg_rect = think_surf.get_rect(centerx=SCREEN_WIDTH // 2, top=8)
@@ -155,6 +241,41 @@ class BoardRenderer:
             bg_surf.fill((20, 100, 20, 210))
             self.screen.blit(bg_surf, bg_rect.topleft)
             self.screen.blit(think_surf, think_surf.get_rect(center=bg_rect.center))
+
+    @staticmethod
+    def _format_move(entry):
+        piece = PIECE_LOG_NAMES.get(entry.get("piece", "")[-1:], "Piece")
+        src_col, src_row = entry["src"]
+        dst_col, dst_row = entry["dst"]
+        src = f"{chr(ord('a') + src_col)}{src_row}"
+        dst = f"{chr(ord('a') + dst_col)}{dst_row}"
+        return f"{piece} {src} -> {dst}"
+
+    def draw_recent_moves(self, moves):
+        """Draw the latest eight moves in their moving side's color."""
+        pygame.draw.rect(self.screen, MENU_BORDER_COLOR, MOVE_LOG_RECT, 1, border_radius=4)
+        title = self.log_font.render("LOG", True, MENU_TEXT_COLOR)
+        title_rect = title.get_rect(center=(MOVE_LOG_RECT.centerx, MOVE_LOG_RECT.y))
+        title_rect.inflate_ip(8, 0)
+        pygame.draw.rect(self.screen, BOARD_COLOR, title_rect)
+        self.screen.blit(title, title.get_rect(center=(MOVE_LOG_RECT.centerx, MOVE_LOG_RECT.y)))
+        for index, entry in enumerate(moves[-8:]):
+            color = RED_PIECE_COLOR if entry.get("turn") == "r" else BLACK_PIECE_COLOR
+            text = self.log_font.render(self._format_move(entry), True, color)
+            self.screen.blit(text, (MOVE_LOG_X, MOVE_LOG_Y + index * MOVE_LOG_LINE_HEIGHT))
+
+    def draw_board_coordinates(self):
+        """Label the board's compact internal a-i / 0-9 coordinate grid."""
+        for col in range(NUM_COLS):
+            label = self.log_font.render(chr(ord("a") + col), True, MENU_MUTED_TEXT_COLOR)
+            x, _ = self.grid_to_pixel(col, 0)
+            self.screen.blit(label, label.get_rect(
+                center=(x, int(START_Y) - PIECE_RADIUS - 10)
+            ))
+        for row in range(NUM_ROWS):
+            label = self.log_font.render(str(row), True, MENU_MUTED_TEXT_COLOR)
+            _, y = self.grid_to_pixel(0, row)
+            self.screen.blit(label, label.get_rect(center=(int(START_X) - PIECE_RADIUS - 9, y)))
 
     def draw_difficulty_menu(self, availability, message=""):
         """Overlay shown after camera calibration and before a game can begin."""
@@ -181,21 +302,21 @@ class BoardRenderer:
 
     def draw_home_screen(self):
         """Draw the launcher shown before the player chooses a game mode."""
-        self.screen.fill((25, 20, 16))
+        self.screen.fill(BOARD_COLOR)
         accent = pygame.Rect(0, 0, SCREEN_WIDTH, 8)
-        pygame.draw.rect(self.screen, (194, 46, 46), accent)
+        pygame.draw.rect(self.screen, MENU_ACCENT_COLOR, accent)
 
-        title = self.game_font.render("XIANGQI ROBOT", True, (246, 225, 184))
+        title = self.game_font.render("XIANGQI ROBOT", True, MENU_TEXT_COLOR)
         self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 190)))
-        subtitle = self.ui_font.render("Choose a game mode to begin", True, (228, 214, 190))
+        subtitle = self.ui_font.render("Choose a game mode to begin", True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 235)))
 
         pygame.draw.rect(self.screen, (61, 73, 82), HOME_SETTINGS_RECT, border_radius=8)
         settings = self.ui_font.render("SETTINGS", True, (255, 255, 255))
         self.screen.blit(settings, settings.get_rect(center=HOME_SETTINGS_RECT.center))
 
-        pygame.draw.rect(self.screen, (159, 59, 55), HOME_VS_ROBOT_RECT, border_radius=12)
-        pygame.draw.rect(self.screen, (239, 218, 177), HOME_VS_ROBOT_RECT, 2, border_radius=12)
+        pygame.draw.rect(self.screen, MENU_ACCENT_COLOR, HOME_VS_ROBOT_RECT, border_radius=12)
+        pygame.draw.rect(self.screen, MENU_BORDER_COLOR, HOME_VS_ROBOT_RECT, 2, border_radius=12)
         button = self.game_font.render("VS ROBOT", True, (255, 255, 255))
         self.screen.blit(button, button.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery - 6)))
         detail = self.ui_font.render("Choose the robot difficulty next", True, (255, 224, 205))
@@ -208,7 +329,7 @@ class BoardRenderer:
         self_play_detail = self.ui_font.render("Physical calibration self-play", True, (238, 220, 250))
         self.screen.blit(self_play_detail, self_play_detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_ROBOT_VS_ROBOT_RECT.centery + 16)))
 
-        hint = self.ui_font.render("Click VS ROBOT or press Enter", True, (190, 181, 166))
+        hint = self.ui_font.render("Click VS ROBOT or press Enter", True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 525)))
 
     @staticmethod
@@ -246,14 +367,14 @@ class BoardRenderer:
 
     def draw_settings_menu(self, debug_enabled):
         """Draw the pre-game settings restored from the previous menu flow."""
-        self.screen.fill((25, 20, 16))
+        self.screen.fill(BOARD_COLOR)
         pygame.draw.rect(self.screen, (61, 73, 82), SETTINGS_BACK_RECT, border_radius=8)
         back = self.ui_font.render("< HOME", True, (255, 255, 255))
         self.screen.blit(back, back.get_rect(center=SETTINGS_BACK_RECT.center))
 
-        title = self.game_font.render("SETTINGS", True, (246, 225, 184))
+        title = self.game_font.render("SETTINGS", True, MENU_TEXT_COLOR)
         self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 118)))
-        label = self.ui_font.render("Debug dashboard", True, (235, 224, 205))
+        label = self.ui_font.render("Debug dashboard", True, MENU_TEXT_COLOR)
         self.screen.blit(label, label.get_rect(midleft=(126, DEBUG_STATUS_RECT.centery)))
 
         status = "ENABLED" if debug_enabled else "DISABLED"
@@ -262,7 +383,7 @@ class BoardRenderer:
         status_text = self.ui_font.render(status, True, (255, 255, 255))
         self.screen.blit(status_text, status_text.get_rect(center=DEBUG_STATUS_RECT.center))
 
-        note = self.ui_font.render("Opens a separate read-only robot telemetry window", True, (190, 181, 166))
+        note = self.ui_font.render("Opens a separate read-only robot telemetry window", True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 284)))
 
     @staticmethod
@@ -288,7 +409,7 @@ class BoardRenderer:
                 if name == ".":
                     continue
                 cx, cy = self.grid_to_pixel(c, r)
-                color = (220, 20, 60) if name.startswith("r") else (0, 0, 0)
+                color = RED_PIECE_COLOR if name.startswith("r") else BLACK_PIECE_COLOR
                 pygame.draw.circle(self.screen, (255, 255, 255), (cx, cy), PIECE_RADIUS)
                 pygame.draw.circle(self.screen, color, (cx, cy), PIECE_RADIUS, 2)
                 text_surf = self.piece_font.render(

@@ -295,11 +295,9 @@ try:
                 and not state.physical_sync_fault and (self_play_controller is None or not self_play_controller.active)):
             
             # --- Khởi động Thread suy nghĩ ---
-            if (not state.ai_thinking and state.ai_thread is None
-                    and state.human_commit_generation
-                    > state.ai_started_for_human_commit_generation):
+            if state.can_start_ai_turn():
                 board_snapshot = [row[:] for row in state.board]
-                state.ai_started_for_human_commit_generation = state.human_commit_generation
+                state.mark_ai_turn_started()
                 ai_job_token = (state.game_epoch, state.ai_epoch, state.human_commit_generation)
                 state.ai_job_token = ai_job_token
                 state.ai_thinking = True
@@ -333,7 +331,7 @@ try:
                         if len(state.move_history) > 8:
                             last_srcs = [m['src'] for m in state.move_history[-6:]]
                             if last_srcs.count(s) >= 3:
-                                print(f"⚠️ AI LOOP DETECTED ({s}->{d}) -> PANIC MODE!")
+                                print(f"⚠️ AI LOOP DETECTED {xiangqi.format_move(s, d)} -> PANIC MODE!")
                                 valid_moves = xiangqi.find_all_valid_moves("b", state.board)
                                 if valid_moves:
                                     best = random.choice(valid_moves)
@@ -354,7 +352,7 @@ try:
                         robot_success = True
                         if not config.DRY_RUN:
                             if hw.robot.connected:
-                                print(f"[AI] Robot executing move: {s}->{d}")
+                                print(f"[AI] Robot executing move: {xiangqi.format_move(s, d)}")
                                 try:
                                     pick_targets = {"moving": None, "captured": None}
                                     # CChess creates the calibration matrix; best.pt measures
@@ -392,8 +390,20 @@ try:
                                             if not hw.verify_visual_move(s, d):
                                                 robot_success = False
                                                 state.physical_sync_fault = True
+                                                state.snapshot_continue_required = True
+                                                # A half-completed capture has three physical
+                                                # states, so CONTINUE must not commit FEN blindly.
+                                                # The operator completes Black's move then V
+                                                # verifies the exact expected board.
+                                                state.snapshot_continue_can_commit_pending = not is_cap
+                                                recovery_hint = (
+                                                    "⚠️ Nước ăn chưa hoàn tất: chuyển quân Đen "
+                                                    f"({s[0]},{s[1]})→({d[0]},{d[1]}) rồi nhấn V."
+                                                    if is_cap else
+                                                    "⚠️ Không xác nhận được vị trí quân sau khi thả — FEN chưa được cập nhật."
+                                                )
                                                 state.set_status(
-                                                    "⚠️ Không xác nhận được vị trí quân sau khi thả — FEN chưa được cập nhật.",
+                                                    recovery_hint,
                                                     color=(180, 100, 0), duration=20.0,
                                                 )
                                 except Exception as e:
@@ -405,10 +415,11 @@ try:
                                         print("❌ [CRITICAL] Robot critical error, stopping game.")
                                         robot_success = False
                                         state.physical_sync_fault = True
+                                        state.snapshot_continue_required = True
                                         time.sleep(2)
                             else:
                                 print(f"\n{'='*50}")
-                                print(f"🤖 AI đi: {state.board[s[1]][s[0]]} ({s[0]},{s[1]}) → ({d[0]},{d[1]}) {'ĂN' if is_cap else ''}")
+                                print(f"🤖 AI đi: {state.board[s[1]][s[0]]} {xiangqi.format_move(s, d)} {'ĂN' if is_cap else ''}")
                                 print(f"👉 Hãy di quân này trên bàn thật, rồi bấm SPACE!")
                                 print(f"{'='*50}\n")
 

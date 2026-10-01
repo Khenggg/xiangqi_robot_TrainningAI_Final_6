@@ -120,7 +120,7 @@ def run_window():
     pygame.display.set_caption("Xiangqi Robot - Debug Dashboard")
     title_font = pygame.font.SysFont("Segoe UI", 24, bold=True)
     label_font = pygame.font.SysFont("Segoe UI", 14, bold=True)
-    value_font = pygame.font.SysFont("Consolas", 16)
+    value_font = pygame.font.SysFont("Segoe UI", 16)
     inbox, fields = queue.Queue(maxsize=1), {}
 
     def receive():
