@@ -115,8 +115,9 @@ class FR5Robot:
 
             self._validate_gripper_config()
             self._set_gripper_safe_idle()
-            # Establish a known jaw state before HardwareManager moves to HOMECHESS.
-            self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
+            # The gripper is empty at startup, so establish the configured
+            # pre-pick gap from a closed reference before moving the arm.
+            self.gripper_ctrl(config.GRIPPER_ACTION_OPEN_TO_GAP)
 
             # Load teaching points để tránh Singularity
             self._load_teaching_points()
@@ -467,6 +468,8 @@ class FR5Robot:
             config.GRIPPER_DIRECTION_DEADTIME_SEC,
             config.GRIPPER_OPEN_PULSE_SEC,
             config.GRIPPER_CLOSE_PULSE_SEC,
+            config.GRIPPER_OPEN_TO_GAP_REFERENCE_CLOSE_PULSE_SEC,
+            config.GRIPPER_OPEN_TO_GAP_PULSE_SEC,
             config.GRIPPER_OPEN_SETTLE_SEC,
             config.GRIPPER_CLOSE_SETTLE_SEC,
         )
@@ -497,6 +500,22 @@ class FR5Robot:
     def gripper_ctrl(self, action):
         """Pulse one gripper motor direction, then leave both Tool DO outputs LOW."""
         self._validate_gripper_config()
+        if action == config.GRIPPER_ACTION_OPEN_TO_GAP:
+            # This establishes a repeatable pre-pick gap only when no piece is
+            # between the jaws.  Do not use it to release a held piece.
+            with self._gripper_lock:
+                self._pulse_gripper_direction(
+                    self.gripper_close_do_id,
+                    config.GRIPPER_OPEN_TO_GAP_REFERENCE_CLOSE_PULSE_SEC,
+                    "REFERENCE CLOSE",
+                )
+                self._pulse_gripper_direction(
+                    self.gripper_open_do_id,
+                    config.GRIPPER_OPEN_TO_GAP_PULSE_SEC,
+                    "OPEN TO GAP",
+                )
+                time.sleep(config.GRIPPER_OPEN_SETTLE_SEC)
+            return 0
         if action == config.GRIPPER_ACTION_OPEN:
             target_id = self.gripper_open_do_id
             pulse_seconds = config.GRIPPER_OPEN_PULSE_SEC
@@ -511,16 +530,20 @@ class FR5Robot:
             raise GripperCommandError(f"Unknown gripper action: {action!r}")
 
         with self._gripper_lock:
-            self._set_gripper_safe_idle()
-            time.sleep(config.GRIPPER_DIRECTION_DEADTIME_SEC)
-            try:
-                print(f"[ROBOT] Gripper {label}: DO{target_id} ON for {pulse_seconds:.2f}s")
-                self._set_tool_do(target_id, config.GRIPPER_ACTIVE_STATUS)
-                time.sleep(pulse_seconds)
-            finally:
-                self._set_gripper_safe_idle()
+            self._pulse_gripper_direction(target_id, pulse_seconds, label)
             time.sleep(settle_seconds)
         return 0
+
+    def _pulse_gripper_direction(self, target_id, pulse_seconds, label):
+        """Interlocked single-direction pulse; callers must hold _gripper_lock."""
+        self._set_gripper_safe_idle()
+        time.sleep(config.GRIPPER_DIRECTION_DEADTIME_SEC)
+        try:
+            print(f"[ROBOT] Gripper {label}: DO{target_id} ON for {pulse_seconds:.2f}s")
+            self._set_tool_do(target_id, config.GRIPPER_ACTIVE_STATUS)
+            time.sleep(pulse_seconds)
+        finally:
+            self._set_gripper_safe_idle()
 
     # -------------------------------------------------------------------------
     # QUY TRÌNH GẮP / ĐẶT / ĂN QUÂN
@@ -548,7 +571,7 @@ class FR5Robot:
             pose_pick = self.board_to_pose(col, row, config.PICK_Z, rotation=pick_rotation)
         print(f"[ROBOT] 🤏 Gắp tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
-        self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
+        self.gripper_ctrl(config.GRIPPER_ACTION_OPEN_TO_GAP)
         self.move_safe_pose(pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
         self.movel_pose(pose_pick)                # Hạ xuống
         self.gripper_ctrl(config.GRIPPER_ACTION_CLOSE)

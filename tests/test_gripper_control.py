@@ -74,6 +74,27 @@ class GripperControlTests(unittest.TestCase):
         )
 
     @patch("src.hardware.robot_VIP.time.sleep")
+    def test_open_to_gap_closes_empty_gripper_then_opens_configured_gap(self, sleep):
+        robot = self.make_gripper()
+        robot.gripper_ctrl(config.GRIPPER_ACTION_OPEN_TO_GAP)
+
+        self.assertEqual(robot.robot.calls, [
+            (config.GRIPPER_OPEN_DO_ID, 0, 0), (config.GRIPPER_CLOSE_DO_ID, 0, 0),
+            (config.GRIPPER_CLOSE_DO_ID, 1, 0),
+            (config.GRIPPER_OPEN_DO_ID, 0, 0), (config.GRIPPER_CLOSE_DO_ID, 0, 0),
+            (config.GRIPPER_OPEN_DO_ID, 0, 0), (config.GRIPPER_CLOSE_DO_ID, 0, 0),
+            (config.GRIPPER_OPEN_DO_ID, 1, 0),
+            (config.GRIPPER_OPEN_DO_ID, 0, 0), (config.GRIPPER_CLOSE_DO_ID, 0, 0),
+        ])
+        self.assertEqual(
+            [call.args[0] for call in sleep.call_args_list],
+            [config.GRIPPER_DIRECTION_DEADTIME_SEC,
+             config.GRIPPER_OPEN_TO_GAP_REFERENCE_CLOSE_PULSE_SEC,
+             config.GRIPPER_DIRECTION_DEADTIME_SEC, config.GRIPPER_OPEN_TO_GAP_PULSE_SEC,
+             config.GRIPPER_OPEN_SETTLE_SEC],
+        )
+
+    @patch("src.hardware.robot_VIP.time.sleep")
     def test_enable_failure_never_attempts_other_direction(self, _sleep):
         robot = self.make_gripper()
         robot.robot.failing_call = (config.GRIPPER_CLOSE_DO_ID, 1, 0)
@@ -102,6 +123,9 @@ class GripperControlTests(unittest.TestCase):
         with patch.object(config, "GRIPPER_OPEN_PULSE_SEC", float("nan")):
             with self.assertRaises(GripperCommandError):
                 robot.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
+        with patch.object(config, "GRIPPER_OPEN_TO_GAP_PULSE_SEC", -0.1):
+            with self.assertRaises(GripperCommandError):
+                robot.gripper_ctrl(config.GRIPPER_ACTION_OPEN_TO_GAP)
         self.assertEqual(robot.robot.calls, [])
 
     @patch("src.hardware.robot_VIP.time.sleep")
@@ -120,7 +144,7 @@ class GripperControlTests(unittest.TestCase):
         ])
 
     @patch("src.hardware.robot_VIP.time.sleep")
-    def test_connect_opens_gripper_before_loading_teaching_points(self, _sleep):
+    def test_connect_sets_pre_pick_gap_before_loading_teaching_points(self, _sleep):
         robot = FR5Robot()
         events = []
         fake_sdk = type("FakeSdk", (), {"RPC": lambda _ip: FakeConnection()})
@@ -132,7 +156,7 @@ class GripperControlTests(unittest.TestCase):
                 patch.object(robot, "_load_teaching_points", side_effect=lambda: events.append("teaching")):
             robot.connect()
 
-        self.assertEqual(events, ["validate", "idle", config.GRIPPER_ACTION_OPEN, "teaching"])
+        self.assertEqual(events, ["validate", "idle", config.GRIPPER_ACTION_OPEN_TO_GAP, "teaching"])
 
 
 if __name__ == "__main__":
