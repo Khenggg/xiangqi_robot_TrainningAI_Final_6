@@ -32,8 +32,8 @@ class MoveLogTests(unittest.TestCase):
         self.assertEqual("Xe a0 -> a1", BoardRenderer._format_move(
             {"piece": "b_R", "src": (0, 0), "dst": (0, 1)}
         ))
-        self.assertEqual((220, 20, 60), RED_PIECE_COLOR)
-        self.assertEqual((0, 0, 0), BLACK_PIECE_COLOR)
+        self.assertEqual((192, 54, 46), RED_PIECE_COLOR)
+        self.assertEqual((34, 40, 36), BLACK_PIECE_COLOR)
 
     def test_render_state_limits_the_feed_to_the_last_eight_moves(self):
         state = self.make_state()
