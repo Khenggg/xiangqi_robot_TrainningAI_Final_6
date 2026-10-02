@@ -11,6 +11,12 @@ from src.core.human_move_commit_coordinator import HumanMoveCommitCoordinator
 from src.vision.legal_successor_matcher import LegalSuccessorMatcher
 from src.vision.player_turn_types import MatchKind
 
+CHECK_STATUS_MESSAGE = (
+    "⚠️ CHECK — Your General is in check. "
+    "Block, capture, or move your General."
+)
+
+
 class InputHandler:
     """Manages Pygame Key/Mouse events and bridges them to GameState and HardwareManager."""
     def __init__(self, game_state, hw_manager):
@@ -63,6 +69,12 @@ class InputHandler:
                                          "move": (src, dst), "source": source})()
         return self._human_commit_coordinator.try_commit(request, piece) == "ACCEPTED"
 
+    def _rejected_red_move_status(self, src, dst):
+        """Explain an invalid Red move without hiding an active check threat."""
+        if xiangqi.is_king_in_check("r", self.state.board):
+            return CHECK_STATUS_MESSAGE
+        return f"❌ Illegal move: {xiangqi.format_move(src, dst)} — move not accepted."
+
     def _check_board_warning(self, cchess_result, now):
         """Surface unexplained full-board changes without mutating game state."""
         try:
@@ -112,10 +124,11 @@ class InputHandler:
         if illegal_move is not None and illegal_move[0] == illegal_move[1]:
             message = f"⚠️ Unstable FEN detection at {xiangqi.format_square(illegal_move[0])}"
         elif illegal_move is not None:
-            message = f"❌ Illegal move: {xiangqi.format_move(*illegal_move)} — move not accepted."
+            message = self._rejected_red_move_status(*illegal_move)
         else:
             message = "⚠️ Board does not match the expected position."
-        self.state.set_status(message, color=(180, 100, 0), duration=5.0)
+        color = (180, 0, 0) if message == CHECK_STATUS_MESSAGE else (180, 100, 0)
+        self.state.set_status(message, color=color, duration=5.0)
         self._board_warning_message = message
 
     def _clear_board_warning(self):
@@ -256,7 +269,10 @@ class InputHandler:
                             self.hw.capture_baseline_if_needed(force_delay=1.0)
                     else:
                         print(f"Invalid move: {xiangqi.format_move(src, dst)}")
-                        self.state.set_status("❌  Invalid move!", color=(180, 0, 0))
+                        self.state.set_status(
+                            self._rejected_red_move_status(src, dst),
+                            color=(180, 0, 0),
+                        )
                         self.state.set_invalid_flash(dst[0], dst[1])
                         self.state.selected_pos = None
 
@@ -494,7 +510,7 @@ class InputHandler:
             self._last_move_confirmation_failure = "invalid"
             if not auto_retry:
                 self.state.set_status(
-                    f"❌ Illegal move: {xiangqi.format_move(src, dst)} — move not accepted.",
+                    self._rejected_red_move_status(src, dst),
                     color=(180, 0, 0), duration=8.0,
                 )
                 self.state.set_invalid_flash(dst[0], dst[1])
