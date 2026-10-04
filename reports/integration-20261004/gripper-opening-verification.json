@@ -10,5 +10,6 @@
   "final_geometry_contract_gate": {"passed": 9, "exit_code": 0, "runner_seconds": 11.29},
   "node_viewer_test": "passed",
   "main_mjs_syntax_check": "passed",
+  "live_game_replay": {"source_commit": "2234141", "engine_reply": "e2e1", "motion_state": "IDLE", "trajectory_stage": "COMPLETE", "last_error": null, "piece_count": 26, "red_advisor_0_present": false, "rook_row": 8, "rook_col": 4},
   "limits": "Simulation geometry only. Full regression not rerun. No physical actuation or new physical closed-stroke calibration."
 }

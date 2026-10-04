@@ -99,6 +99,7 @@ The retained profile declares TCP offset 168.3 mm, while the visual mesh's exten
 - Regenerated `shared/gripper_collision_asset.json` with updated source fingerprints. The viewer applies the same CAD open inset; its closed CAD displacement remains 6.5 CAD mm total. No collision margins or filtering rules changed.
 - Focused Python gate (gripper proxies, geometry contract, scene/tool orientation, actual capture sequences, direct contact checks): initial 39 passed / 1 failed because the old probe used an AABB face centre rather than the tapered hull. Corrected probe uses a real tip surface vertex; final geometry-contract gate **9 passed**, exit 0, 11.29 s. The other 31 cases passed on the final production geometry in the preceding gate. Node viewer/telemetry test and main.mjs syntax check passed. Full repository regression was not rerun.
 - Updated the old 37.2 mm open-clearance test to check 27.5 mm and reject a 30 mm obstacle even when open. The adjacent-capture test continues to require successful checked descent and physical completion, without assuming the narrower new opening must reject the old nominal candidate.
+- Actual visible-game replay on `2234141` with the new asset: Moonfish e2e1 completed. Read-only telemetry: IDLE / COMPLETE / no error, gripper open without payload, 26 pieces, advisor removed, rook resting at (8,4). Game left open. No browser/native screenshot inspection was available.
 
 ### First offline AI approach recovery
 
