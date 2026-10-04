@@ -4,6 +4,9 @@
 import sys
 import os
 
+# Set SDL's DPI policy before pygame initializes the Windows display.
+os.environ.setdefault("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2")
+
 # Đảm bảo in tiếng Việt không bị lỗi font/crash UnicodeEncodeError trên Windows console
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     try:
@@ -63,7 +66,9 @@ pygame.init()
 pygame.font.init()
 
 from src.ui.board_renderer import BoardRenderer, SCREEN_WIDTH, SCREEN_HEIGHT  # type: ignore
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+from src.ui.game_window import GameWindow
+game_window = GameWindow((SCREEN_WIDTH, SCREEN_HEIGHT))
+screen = game_window.canvas
 pygame.display.set_caption(f"Xiangqi Robot VIP - { _mode_label }")
 renderer = BoardRenderer(screen)
 
@@ -150,6 +155,9 @@ try:
 
         # 2b. Xử lý Input
         for event in pygame.event.get():
+            event = game_window.map_event(event)
+            if event is None:
+                continue
             if event.type == pygame.QUIT:
                 running = False
             elif home_screen_active:
@@ -314,7 +322,7 @@ try:
                         else:
                             state.set_status("Engine failed; board unchanged. Check engine, then F5 to retry.", duration=30)
 
-        pygame.display.flip()
+        game_window.present()
         clock.tick(30)
 
 except (KeyboardInterrupt, SystemExit):

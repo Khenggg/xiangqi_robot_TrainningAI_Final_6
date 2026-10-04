@@ -1,3 +1,9 @@
+## 2026-10-04 game window sizing
+
+- Added a resizable, aspect-preserving display around the existing 1440×1080 logical canvas, fit-to-desktop startup and SDL Windows DPI policy. F11 switches fullscreen; Esc restores the previous window size. Mouse positions are mapped before all menu/game handlers; letterbox margins are ignored.
+- Scoped gate: 22 passed via `tools/test_fast.ps1` (window, offline mouse confirmation, difficulty menu), exit 0. Direct Windows SDL probe: 1152×864 → 1920×1080 fullscreen → 1152×864, exit 0. New GUI observed fully within screen bounds.
+- Computer Use screen capture works but automated input remains unconfirmed; no complete GUI game was played. Details: `docs/GAME_WINDOW_DISPLAY.md`. Historical whole-repo review baseline remains unchanged.
+
 ## 2026-10-04 gripper opening correction
 
 - User-selected open inner surface gap is 27.5 mm. Viewer CAD finger offsets and generated PyBullet hulls share the same offset helper. Direct hull query measures 27.500 mm; fixed shapes, closed CAD vertices and tool frame/length are unchanged.

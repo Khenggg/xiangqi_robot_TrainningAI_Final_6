@@ -1,5 +1,11 @@
 # KNOWN_ISSUES.md — COMPACT ISSUE & REGRESSION TRACKER
 
+## 2026-10-04 oversized game window
+
+- Fixed fixed-size display overflow with DPI-aware startup sizing, RESIZABLE display, aspect-preserving canvas scaling and matching mouse mapping. Added F11 fullscreen / Esc return.
+- 22 scoped GUI/input tests passed. Native Windows fullscreen/restoration probe passed; the revised window is visible in full on desktop.
+- Remaining verification: Computer Use has not successfully driven a game move or F11 through GUI input, despite working screen capture and responsive manual mouse input. Full-game verification remains open; this is separate from display sizing.
+
 ## 2026-10-04 gripper open inner clearance
 
 - Applied user-selected 27.5 mm inner open clearance to CAD viewer and generated collision hulls. Direct PyBullet closest-surface query verifies 27.500 mm; closed CAD vertices, fixed body and tool frame/length are unchanged.
