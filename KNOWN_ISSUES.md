@@ -1,5 +1,11 @@
 # KNOWN_ISSUES.md — COMPACT ISSUE & REGRESSION TRACKER
 
+## 2026-10-04 offline AI approach
+
+- RESOLVED for the reproduced first reply `h7e7`: the lifted joint interpolation swept within 1.37 mm of red_rook_0, below the unchanged 2.00 mm guard margin. SERVICE_SAFE fallback previously ran only for a J5 branch flip; it now also handles collision rejections without that flip, with every segment still validated.
+- Actual PyBullet pick/place and pre-commit destination verification pass; blocking the service route stops the move without changing FEN/turn. Final targeted gate: 14 passed, exit 0. The older collision entries below are historical and do not establish current all-route coverage.
+- OPEN: collision-free routes for every board placement and every legal chess move are not established. Virtual captures still require the separate validated disposal route. Physical hardware remains unverified.
+
 ## 2026-09-29 camera twin remaining verification
 
 - Full camera recognition has been exercised with synthetic quality-approved boards, but not verified against a live physical board. Camera quality and extrinsic calibration remain commissioning gates.

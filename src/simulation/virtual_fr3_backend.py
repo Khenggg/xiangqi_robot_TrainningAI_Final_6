@@ -701,9 +701,12 @@ class VirtualFR3Backend(RobotBackend):
         logger.info("[COLLISION RECOVERY] Arm successfully lifted. Adjusting pose to target from safe altitude...")
         target_ok = self.move_joint(target_joints_deg, speed_factor=speed_factor)
 
-        # Strategy C: If target move failed and requires branch switch, reconfigure at SERVICE_SAFE
-        if not target_ok and abs(target_joints_deg[4] - curr_snap.joints_deg[4]) > 90.0:
-            logger.info("[COLLISION RECOVERY] Elevated move rejected due to branch flip. Reconfiguring at SERVICE_SAFE...")
+        # Strategy C: The joint interpolation can sweep through pieces even
+        # without a wrist branch flip. Reorient via the checked SERVICE_SAFE
+        # configuration in either case; every segment still uses move_joint's
+        # full trajectory collision validation and fails closed.
+        if not target_ok and self._motion_state == "COLLISION_REJECTED":
+            logger.info("[COLLISION RECOVERY] Elevated move rejected. Routing via collision-checked SERVICE_SAFE...")
             q_safe_curr = list(self.SERVICE_SAFE_JOINTS_DEG)
             q_safe_curr[4] = curr_snap.joints_deg[4]
             if self.move_joint(q_safe_curr, speed_factor=speed_factor):

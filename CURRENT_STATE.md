@@ -1,3 +1,9 @@
+## 2026-10-04 scoped AI approach correction
+
+- Baseline: `e5e3b74`. First human move `e6 -> e5` followed by AI UCCI `h7e7` reproduced an approach rejection: gripper/red_rook_0 clearance 1.37 mm versus the existing required 2.00 mm.
+- `move_joint_with_lift_recovery` now tries the existing SERVICE_SAFE route after a collision-rejected elevated approach even when J5 does not flip. Every segment retains the full MoveJ collision guard; non-collision failures do not trigger this fallback.
+- Final targeted gate: 14 passed, exit 0. Actual PyBullet pick/place verified the cannon at cell (2,4) BEFORE logical-board reconciliation. A blocked service route leaves the AI move uncommitted and recovery required. Prior broader run: 96 passed, 2 failed due only to the new test incorrectly expecting a truthy return from `process_human_move`; corrected tests pass. This is a scoped fix, not a whole-branch re-review or proof of every legal route.
+
 # CURRENT_STATE.md — ACTIVE MACHINE-READABLE REPOSITORY STATE
 
 > **R1–R4 placement:** See `docs/R1_R4_BOARD_PLACEMENT_CURRENT.md`. Simulator-generated points are provisional; no physical four-point measurement has been entered. Fixed-axis formulas below are historical, not a general board transform.
