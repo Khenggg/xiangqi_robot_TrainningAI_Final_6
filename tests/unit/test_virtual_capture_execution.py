@@ -170,6 +170,56 @@ def test_elephant_capture_with_running_live_poll(capture_game, monkeypatch, neve
     assert "red_elephant_1" not in runtime.world.pieces
 
 
+@pytest.mark.parametrize("block_all_descents", [False, True])
+def test_adjacent_rook_capture_chooses_checked_grasp_yaw(capture_game, monkeypatch, block_all_descents):
+    from dataclasses import replace
+    runtime, state = capture_game
+    state.board, state.turn = fen_to_board_array(
+        "rnbakab2/9/1c7/p1p1n1p1p/9/9/P1P3P1P/Rc2r4/4A4/1NB1KA1NR b - - 0 18")
+    state.piece_ids = GameState().piece_ids
+    for cell in ((7,7), (7,1), (6,4), (3,4), (9,6)):
+        state.piece_ids.pop(cell)
+    for src, dst in [((2,7),(7,1)), ((0,7),(3,4)), ((0,8),(7,4)),
+                     ((9,0),(7,0)), ((9,3),(8,4))]:
+        state.piece_ids[dst] = state.piece_ids.pop(src)
+    assert state.sync_current_board()
+    bridge = state._board_observer.__self__
+    bridge.start()
+    original_plan = runtime.backend.plan_cartesian
+    checked_descents = []
+    def plan(*args, **kwargs):
+        result = original_plan(*args, **kwargs)
+        if kwargs.get("allowed_grasp_piece_id") == "red_advisor_0":
+            checked_descents.append(result.success)
+            if block_all_descents:
+                return replace(result, success=False, failure_reason="Test blocks all grasp orientations")
+        return result
+    monkeypatch.setattr(runtime.backend, "plan_cartesian", plan)
+    before_joints = runtime.backend.get_state_snapshot().joints_deg.copy()
+    evidence = []
+    def execute(**kwargs):
+        result = execute_virtual_move(runtime, **kwargs)
+        if result.success:
+            assert not runtime.placement_state.is_in_bounds_robot(
+                runtime.world.pieces["red_advisor_0"].get_position_robot())
+            assert runtime.find_nearest_cell(runtime.world.pieces["black_rook_1"].get_position_robot()) == (8,4)
+            evidence.append(True)
+        return result
+    hw = SimpleNamespace(is_robot_ready=True, simulation_runtime=runtime, execute_piece_move=execute)
+    result = execute_ai_move(state, hw, ((4,7),(4,8)))
+    if block_all_descents:
+        assert not result and "No collision-free grasp descent" in state.move_sync_error
+        np.testing.assert_allclose(runtime.backend.get_state_snapshot().joints_deg, before_joints)
+        assert runtime.world.get_attached_piece() is None
+        assert state.board[8][4] == "r_A" and state.turn == "b"
+    else:
+        assert result, state.move_sync_error
+        assert False in checked_descents and True in checked_descents
+        assert evidence == [True] and state.turn == "r"
+        assert state.board[8][4] == "b_R" and state.board[7][4] == "."
+        assert "red_advisor_0" not in runtime.world.pieces
+
+
 def test_batch_excludes_other_threads_but_allows_owned_pick_steps(capture_game):
     runtime, _ = capture_game
     rejected = []

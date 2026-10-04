@@ -1,5 +1,10 @@
 # KNOWN_ISSUES.md — COMPACT ISSUE & REGRESSION TRACKER
 
+## 2026-10-04 adjacent capture orientation
+
+- Actual e7→e8 rook capture rejected while descending over the advisor because the open gripper approached within 0.74 mm of the attacking rook (required margin 2.00 mm). Pick now chooses among existing alternate-yaw IK candidates using full descent preflight, rather than hover clearance alone. Neighbour collision checks remain active.
+- Exact-board PyBullet capture and all-orientations-blocked rejection verified; focused capture/Phase 3/Home recovery gate passes 27 cases. Arbitrary positions can still be unreachable and must reject; this is not an all-moves or physical safety guarantee.
+
 ## 2026-10-04 elephant capture follow-up
 
 - Reproduced a premature `PAYLOAD_UNSAFE_WORLD_NOT_SETTLED` rejection on the recorded g9→e7 / h2e2 board: an unrelated knight was still accumulating resting samples at the fixed 60-step limit. Payload clearance now waits up to the existing configured settling budget and still rejects persistent movement.

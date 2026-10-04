@@ -515,6 +515,39 @@ class VirtualXiangqiSimulation:
                             requires_recovery=False,
                         )
 
+                    # Hover clearance alone does not establish that the open
+                    # jaws fit between neighbouring pieces at grasp height.
+                    # Select a yaw/IK branch using a complete checked descent,
+                    # without moving the arm or excluding neighbouring bodies.
+                    def descent_for(candidate):
+                        orientation = self.backend._compute_tcp_pose_mm_deg(candidate.joints_rad)[3:]
+                        target = [px * 1000.0, py * 1000.0, pz * 1000.0] + list(orientation)
+                        return self.backend.plan_cartesian(
+                            candidate.joints_rad, target, samples=20,
+                            allowed_grasp_piece_id=piece_id,
+                        )
+
+                    descent_plan = descent_for(ik_hover)
+                    if not descent_plan.success:
+                        candidates = self.backend.solve_tcp_ik_candidates(
+                            hover_pose, seed_joints=seed_joints, ref_joints=curr_q_rad,
+                            allow_alternate_yaw=True,
+                        )
+                        for candidate in candidates:
+                            candidate_plan = descent_for(candidate)
+                            if candidate_plan.success:
+                                ik_hover = candidate
+                                descent_plan = candidate_plan
+                                break
+                    if not descent_plan.success:
+                        self.backend.set_trajectory_stage("FAILED")
+                        return PickResult(
+                            success=False, status="DESCENT_REJECTED",
+                            error=f"No collision-free grasp descent: {descent_plan.failure_reason}",
+                            piece_id=piece_id, piece_grasped=False,
+                            payload_clear=False, requires_recovery=False,
+                        )
+
                     # Safe branch switching check:
                     # If target hover pose requires a different wrist branch (|Delta J5| > 90 deg)
                     # and arm is currently at low Z (near board), elevate to SERVICE_SAFE first.
