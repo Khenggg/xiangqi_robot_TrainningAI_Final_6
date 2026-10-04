@@ -82,6 +82,7 @@ The retained profile declares TCP offset 168.3 mm, while the visual mesh's exten
 - Independently corrected a verified ownership bug: a borrowed virtual LiveTwinBridge no longer writes joints/gripper or steps the runtime-owned world from polling snapshots. Physical mirrors and bridge-owned worlds retain their previous behavior. A queued old snapshot regression checks joints, TCP and simulation time remain unchanged.
 - AI execution failures are printed to the log and retained in the GUI after the temporary status expires.
 - Targeted command: `tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_virtual_capture_execution.py,tests/unit/test_live_twin_physical_mirror.py,tests/unit/test_visual_unified_game_boundary.py,tests/unit/test_offline_mouse_confirmation.py`: **29 passed**, exit 0, 23 s. Before the settling correction, this gate failed with 27 passed / 1 failed. The earlier 732-pass full run predates this correction; it was not rerun for this scoped change.
+- Actual GUI restart on `f711c74` reproduced a second settling failure: `[AI MOVE STOPPED] Physical service safety predicate failed after retreat: SERVICE_UNSAFE_WORLD_NOT_SETTLED`. Telemetry showed the released elephant still SETTLING on the floor, rook at source. Placement now also uses the bounded configured settling wait after retreat before evaluating SERVICE_SAFE. Expanded Home/Service Safe and persistent-disturbance cases: **31 passed**, exit 0, 32.62 s. Collision and service predicates remain mandatory.
 
 ### First offline AI approach recovery
 

@@ -5,6 +5,7 @@
 - Reproduced a premature `PAYLOAD_UNSAFE_WORLD_NOT_SETTLED` rejection on the recorded g9→e7 / h2e2 board: an unrelated knight was still accumulating resting samples at the fixed 60-step limit. Payload clearance now waits up to the existing configured settling budget and still rejects persistent movement.
 - Fixed independent borrowed-world polling ownership: the virtual bridge observes the runtime world without rewinding joints or stepping physics. Physical mirrors are unchanged.
 - 29 focused tests passed, including actual pre-commit capture physics, persistent-disturbance rejection and retained GUI errors. Exact cause of the original live failure remains unconfirmed because its expired error was not logged; subsequent failures are now retained and logged.
+- GUI checkpoint replay then confirmed `SERVICE_UNSAFE_WORLD_NOT_SETTLED` after victim disposal/retreat. Added the configured bounded settling wait before SERVICE_SAFE evaluation; expanded gate passes 31 cases, including Home and Service Safe starting poses and rejection of persistent disturbance.
 
 ## 2026-10-04 simulated captures
 

@@ -1050,6 +1050,10 @@ class VirtualXiangqiSimulation:
                         )
 
                     # 8. Physical SERVICE_SAFE verification using Pass B predicate
+                    # Retreat advances physics after the release settling gate.
+                    # Wait for resting samples again before evaluating service;
+                    # do not treat a transient SETTLING frame as completion.
+                    self.world.step_until_settled(max_steps=self.world.max_settle_steps)
                     rep = self.evaluate_service_safety()
                     if not rep.service_safe:
                         self.backend.set_trajectory_stage("FAILED")

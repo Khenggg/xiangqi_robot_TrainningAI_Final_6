@@ -120,7 +120,8 @@ def test_live_poll_cannot_rewind_borrowed_runtime_world(capture_game):
 
 
 @pytest.mark.parametrize("never_settles", [False, True])
-def test_elephant_capture_with_running_live_poll(capture_game, monkeypatch, never_settles):
+@pytest.mark.parametrize("start_from_home", [False, True])
+def test_elephant_capture_with_running_live_poll(capture_game, monkeypatch, never_settles, start_from_home):
     runtime, state = capture_game
     state.board, state.turn = fen_to_board_array(
         "rnbakab2/9/1c7/p1p1n1p1p/9/9/P1P3P1P/Rc2B2r1/9/1NBAKA1NR b - - 0 16")
@@ -130,6 +131,8 @@ def test_elephant_capture_with_running_live_poll(capture_game, monkeypatch, neve
     for src, dst in [((2,7),(7,1)), ((0,7),(3,4)), ((0,8),(7,7)), ((9,0),(7,0)), ((9,6),(7,4))]:
         state.piece_ids[dst] = state.piece_ids.pop(src)
     assert state.sync_current_board()
+    if start_from_home:
+        assert runtime.backend.move_joint(runtime.backend.DEFAULT_HOME_JOINTS_DEG)
     bridge = state._board_observer.__self__
     bridge.start()
     if never_settles:
