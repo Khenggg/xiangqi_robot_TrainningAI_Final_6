@@ -1,0 +1,12 @@
+{
+  "source_commit": "c429181",
+  "backend": "VIRTUAL",
+  "dry_run": true,
+  "pre_reply_fen": "rnbakab2/9/1c7/p1p1n1p1p/9/9/P1P3P1P/Rc2B2r1/9/1NBAKA1NR b - - 0 16",
+  "engine_reply_ucci": "h2e2",
+  "telemetry_endpoint": "ws://127.0.0.1:8878",
+  "observed_robot": {"motion_state": "IDLE", "trajectory_stage": "COMPLETE", "last_error": null, "source": "VIRTUAL"},
+  "observed_world": {"piece_count": 27, "red_elephant_1_present": false, "black_rook_1": {"nearest_row": 7, "nearest_col": 4, "physical_state": "RESTING", "attached": false}},
+  "targeted_tests": {"passed": 31, "exit_code": 0, "runner_seconds": 32.62},
+  "limits": "CLI telemetry and actual visible game process; no browser/native screenshot available. Full regression was not rerun for this correction. No physical hardware exercised."
+}
