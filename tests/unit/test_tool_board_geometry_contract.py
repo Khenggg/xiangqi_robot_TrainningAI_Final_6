@@ -67,8 +67,11 @@ class ToolBoardGeometryContractTests(unittest.TestCase):
             self.assertTrue(sim.runtime_go_service_safe()["success"])
             gripper = sim.world.gripper
             left = gripper.collision_asset["finger_boxes"][0]
-            local = np.array(left["center_m"], dtype=float)
-            local[0] += left["half_extents_m"][0] + gripper.collision_asset["finger_travel_m"] / 2.0
+            # Use an actual inward hull surface vertex. The AABB face centre
+            # may lie outside a tapered jaw, especially with a short stroke.
+            tip_vertices = [vertex for vertex in left["vertices_m"] if vertex[2] > -0.012]
+            local = np.array(max(tip_vertices, key=lambda vertex: vertex[0]), dtype=float)
+            local[0] += gripper.collision_asset["finger_travel_m"] / 2.0
             world_pos = gripper.tcp_pos + quat_to_rot_matrix(gripper.tcp_quat) @ local
             client = sim.world.client_id
             shape = p.createCollisionShape(p.GEOM_SPHERE, radius=0.001, physicsClientId=client)

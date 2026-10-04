@@ -26,6 +26,14 @@ export function parseGripperVisualAsset(data) {
   if (!Number.isFinite(data.scale_to_m) || data.scale_to_m <= 0) {
     throw new Error(`Invalid 'scale_to_m': ${data.scale_to_m} (must be positive finite number)`);
   }
+  const openInset = data.finger_open_inset_mm ?? 0;
+  const fingerTravel = data.finger_travel_mm ?? 16.0;
+  if (!Number.isFinite(openInset) || openInset < 0) {
+    throw new Error("Invalid 'finger_open_inset_mm': expected nonnegative finite number");
+  }
+  if (!Number.isFinite(fingerTravel) || fingerTravel <= 0) {
+    throw new Error("Invalid 'finger_travel_mm': expected positive finite number");
+  }
   if (
     !Array.isArray(data.cad_flange_origin) ||
     data.cad_flange_origin.length !== 3 ||
@@ -59,10 +67,15 @@ export function parseGripperVisualAsset(data) {
     assetBasePath: data.asset_base_path || "./assets/fr3_v6/",
     scaleToM: Number(data.scale_to_m),
     cadUnits: data.cad_units || "millimeter",
-    fingerTravelMm: Number(data.finger_travel_mm || 16.0),
+    fingerOpenInsetMm: openInset,
+    fingerTravelMm: fingerTravel,
     animationDurationMs: Number(data.animation_duration_ms || 220),
     cadFlangeOrigin: data.cad_flange_origin.map(Number),
     fingerSourceColorHex: data.finger_source_color_hex || "#694d3b",
     profiles: data.profiles,
   };
+}
+
+export function fingerOffsetCadMm(asset, direction, closed) {
+  return direction * (asset.fingerOpenInsetMm + (closed ? asset.fingerTravelMm : 0));
 }

@@ -1,5 +1,11 @@
 # KNOWN_ISSUES.md — COMPACT ISSUE & REGRESSION TRACKER
 
+## 2026-10-04 gripper open inner clearance
+
+- Applied user-selected 27.5 mm inner open clearance to CAD viewer and generated collision hulls. Direct PyBullet closest-surface query verifies 27.500 mm; closed CAD vertices, fixed body and tool frame/length are unchanged.
+- Tapered surfaces differ from projected AABB gaps. `open_inner_surface_gap_m` describes the requested inner clearance; `open_width_m` remains the projected articulation envelope gap. This setting is user-selected, not a new hardware measurement.
+- Actual capture cases and contact tests passed; corrected geometry-contract probe gate passes 9 cases after the preceding 39-pass / 1-fixture-failure gate. Viewer parity validation passes. Physical closed stroke/force remain unverified.
+
 ## 2026-10-04 adjacent capture orientation
 
 - Actual e7→e8 rook capture rejected while descending over the advisor because the open gripper approached within 0.74 mm of the attacking rook (required margin 2.00 mm). Pick now chooses among existing alternate-yaw IK candidates using full descent preflight, rather than hover clearance alone. Neighbour collision checks remain active.

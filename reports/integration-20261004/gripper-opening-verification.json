@@ -1,0 +1,14 @@
+{
+  "requested_open_inner_gap_mm": 27.5,
+  "measured_pybullet_open_inner_gap_mm": 27.49999999997922,
+  "projected_open_envelope_gap_mm": 23.83153228989686,
+  "closed_cad_vertices_max_difference_m": 1e-12,
+  "fixed_geometry_unchanged": true,
+  "cad_inset_per_finger_mm": 6.155917318814463,
+  "cad_open_to_closed_travel_per_finger_mm": 0.34408268118553664,
+  "python_combined_gate": {"passed": 39, "failed": 1, "failure": "Probe fixture touched palm instead of tip surface; corrected to actual tip hull vertex."},
+  "final_geometry_contract_gate": {"passed": 9, "exit_code": 0, "runner_seconds": 11.29},
+  "node_viewer_test": "passed",
+  "main_mjs_syntax_check": "passed",
+  "limits": "Simulation geometry only. Full regression not rerun. No physical actuation or new physical closed-stroke calibration."
+}

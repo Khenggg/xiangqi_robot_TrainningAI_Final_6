@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseGripperVisualAsset, fingerOffsetCadMm } from "../../robot-3d-viewer/gripper_asset.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const require = createRequire(import.meta.url);
@@ -20,6 +21,7 @@ const visualBytes = readFileSync(visualPath);
 const profileBytes = readFileSync(profilePath);
 const gripperProfileBytes = readFileSync(gripperProfilePath);
 const visual = JSON.parse(visualBytes);
+const parsedVisual = parseGripperVisualAsset(visual);
 const profile = JSON.parse(profileBytes);
 const cfg = visual.profiles.fr3;
 const stepPath = join(root, "robot-3d-viewer/assets/fr3_v6", visual.asset_file);
@@ -93,6 +95,13 @@ for (const mesh of result.meshes) {
 }
 if (fingers.length !== 2) throw new Error(`Expected two pinza meshes, got ${fingers.length}`);
 fingers.sort((a, b) => a.center_m[0] - b.center_m[0]);
+// Apply exactly the same open-state CAD translation as the viewer. Preserve
+// the solid finger shape; only its articulated position changes.
+for (const [index, finger] of fingers.entries()) {
+  const offset = fingerOffsetCadMm(parsedVisual, index === 0 ? 1 : -1, false) * scale;
+  finger.center_m[0] += offset;
+  for (const vertex of finger.vertices_m) vertex[0] += offset;
+}
 const collarHeight = target[2] - cfg.robot_flange_origin_m[2];
 if (collarHeight <= 0) throw new Error("Adapter collar height must be positive");
 fixed.push({

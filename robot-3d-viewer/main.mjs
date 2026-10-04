@@ -5,7 +5,7 @@ import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget } fr
 import { fetchPhysicalGeometry } from "./geometry.mjs";
 import { nearestBoardIntersection } from "./board_picker.mjs";
 import { fetchVirtualGripperProfile } from "./gripper_profile.mjs";
-import { fetchGripperVisualAsset } from "./gripper_asset.mjs";
+import { fetchGripperVisualAsset, fingerOffsetCadMm } from "./gripper_asset.mjs";
 import { fetchStartLayout } from "./layout.mjs";
 import {
   buildBoardGrid,
@@ -294,10 +294,13 @@ async function loadSharedGripper() {
         const bounds = new THREE.Box3().setFromBufferAttribute(
           mesh.geometry.getAttribute("position"),
         );
+        const direction = bounds.getCenter(new THREE.Vector3()).x < 40 ? 1 : -1;
+        const cadPosition = mesh.position.clone();
+        mesh.position.x += fingerOffsetCadMm(visualAsset, direction, false);
         gripperVisual.fingers.push({
           mesh,
-          openPosition: mesh.position.clone(),
-          direction: bounds.getCenter(new THREE.Vector3()).x < 40 ? 1 : -1,
+          cadPosition,
+          direction,
         });
       }
       mesh.castShadow = true;
@@ -318,10 +321,9 @@ async function setGripperClosed(closed) {
     return;
   }
   const visualAsset = await getGripperVisualAsset();
-  const fingerTravel = visualAsset.fingerTravelMm;
-  for (const { mesh, openPosition, direction } of gripperVisual.fingers) {
-    mesh.position.copy(openPosition);
-    if (closed) mesh.position.x += direction * fingerTravel;
+  for (const { mesh, cadPosition, direction } of gripperVisual.fingers) {
+    mesh.position.copy(cadPosition);
+    mesh.position.x += fingerOffsetCadMm(visualAsset, direction, closed);
   }
   gripperVisual.closed = closed;
 }

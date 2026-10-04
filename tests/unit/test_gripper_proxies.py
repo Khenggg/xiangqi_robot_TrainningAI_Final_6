@@ -3,7 +3,7 @@ Unit tests for PyBullet gripper collision proxies and attached piece filtering (
 
 Verifies:
 1. Gripper spawns exactly 4 kinematic collision proxy bodies: 2 fixed chunks, left jaw, right jaw.
-2. Jaw proxies translate symmetrically along travel_axis (X) on open/close (5.2 mm each).
+2. Jaw proxies translate symmetrically along travel_axis (X) using the configured stroke.
 3. Attached piece has collision filtering disabled against all proxy bodies.
 4. Detaching or dropping the piece re-enables collision filtering with proxies.
 5. get_gripper_piece_contacts() accurately reports contact pairs across all proxy bodies.
@@ -33,6 +33,22 @@ class GripperCollisionProxiesTests(unittest.TestCase):
     def tearDown(self):
         self.world.close()
 
+    def test_user_selected_open_inner_gap_matches_actual_colliders(self):
+        self.assertAlmostEqual(self.gripper.profile["stroke"]["open_inner_surface_gap_m"], 0.0275, places=7)
+        self.assertAlmostEqual(self.gripper.closed_width_m, 0.023281, places=7)
+        self.gripper.set_tcp_pose([0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0])
+        self.gripper.set_gripper_state(False)
+        left = p.getAABB(self.gripper.left_jaw_body_id, physicsClientId=self.world.client_id)
+        right = p.getAABB(self.gripper.right_jaw_body_id, physicsClientId=self.world.client_id)
+        # Check actual tapered convex surfaces, not merely the projected AABB
+        # gap (the latter is smaller and is only an articulation parameter).
+        contacts = p.getClosestPoints(self.gripper.left_jaw_body_id,
+                                      self.gripper.right_jaw_body_id, 0.1,
+                                      physicsClientId=self.world.client_id)
+        self.assertTrue(contacts)
+        self.assertAlmostEqual(min(point[8] for point in contacts), 0.0275, delta=0.0001)
+        self.assertLess(right[0][0] - left[1][0], 0.0276)
+
     def test_gripper_proxy_bodies_exist(self):
         proxies = self.gripper.proxy_body_ids
         # CAD-derived proxy decomposes fixed components into chunks of <= 12 shapes
@@ -53,7 +69,7 @@ class GripperCollisionProxiesTests(unittest.TestCase):
         Verify jaw motion along canonical X travel axis:
         - In open state, finger mesh frames sit at TCP origin (open spacing is in mesh vertices).
         - In closed state, left finger translates +5.2mm along X, right finger translates -5.2mm along X.
-        - Physical gap between jaw meshes narrows from ~37.2mm to ~27.0mm.
+        - Physical gap between jaw meshes narrows from 27.5mm to ~27.0mm.
         """
         tcp = [0.0, 0.360, 0.150]
         quat = self.tool_down_quat

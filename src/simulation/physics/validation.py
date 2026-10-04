@@ -263,6 +263,12 @@ def validate_gripper_visual_asset(cfg: Dict[str, Any]) -> None:
     scale = cfg.get("scale_to_m")
     if not _is_finite_num(scale) or float(scale) <= 0.0:
         raise ValueError(f"Invalid 'scale_to_m': {scale} (must be positive finite number)")
+    inset = cfg.get("finger_open_inset_mm", 0.0)
+    travel = cfg.get("finger_travel_mm", 16.0)
+    if not _is_finite_num(inset) or float(inset) < 0.0:
+        raise ValueError("Invalid 'finger_open_inset_mm': expected nonnegative finite number")
+    if not _is_finite_num(travel) or float(travel) <= 0.0:
+        raise ValueError("Invalid 'finger_travel_mm': expected positive finite number")
 
     flange_orig = cfg.get("cad_flange_origin")
     if not isinstance(flange_orig, (list, tuple)) or len(flange_orig) != 3 or not all(_is_finite_num(v) for v in flange_orig):

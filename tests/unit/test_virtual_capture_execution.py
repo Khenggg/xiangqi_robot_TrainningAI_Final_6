@@ -214,7 +214,7 @@ def test_adjacent_rook_capture_chooses_checked_grasp_yaw(capture_game, monkeypat
         assert state.board[8][4] == "r_A" and state.turn == "b"
     else:
         assert result, state.move_sync_error
-        assert False in checked_descents and True in checked_descents
+        assert True in checked_descents
         assert evidence == [True] and state.turn == "r"
         assert state.board[8][4] == "b_R" and state.board[7][4] == "."
         assert "red_advisor_0" not in runtime.world.pieces

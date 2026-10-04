@@ -8,7 +8,9 @@
   "scale_to_m": 0.0008,
   "scale_calibration_notes": "Tessellated STEP mesh from occt-import-js requires scale 0.0008 to align with visual FR3 wrist3 flange geometry. Marked as VISUAL_CALIBRATION_PROVISIONAL.",
   "finger_source_color_hex": "#694d3b",
-  "finger_travel_mm": 6.5,
+  "finger_open_inset_mm": 6.155917318814463,
+  "finger_travel_mm": 0.34408268118553664,
+  "finger_opening_notes": "CAD-unit inward inset per finger gives 27.5 mm minimum inner surface clearance, measured between the PyBullet CAD convex hulls. The projected envelope gap is smaller because faces taper. Closed CAD geometry is retained; this is not a measured physical closed-stroke calibration.",
   "animation_duration_ms": 220,
   "cad_flange_origin": [
     37.555,

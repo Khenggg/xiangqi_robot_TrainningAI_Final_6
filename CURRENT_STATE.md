@@ -1,3 +1,9 @@
+## 2026-10-04 gripper opening correction
+
+- User-selected open inner surface gap is 27.5 mm. Viewer CAD finger offsets and generated PyBullet hulls share the same offset helper. Direct hull query measures 27.500 mm; fixed shapes, closed CAD vertices and tool frame/length are unchanged.
+- Focused verification: 39 passed / 1 fixture failure, then corrected tip-surface obstacle fixture gate 9 passed; the other 31 cases passed with final production geometry. Node viewer/telemetry and syntax checks passed. Evidence: `reports/integration-20261004/gripper-opening-verification.json`. Full regression and physical hardware were not exercised for this change.
+- Historical LAST_REVIEWED_HEAD remains unchanged; this is a scoped geometry correction.
+
 ## 2026-10-04 simulation capture follow-up
 
 - Baseline b0afeb2: visual physical R_Trash capture already existed; the simulation adapter had a deliberate blanket capture interlock. Replaced it with identity-checked victim pick → floor-slot place/settle → attacker pick/place → game commit.

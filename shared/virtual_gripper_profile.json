@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "SIMULATION_ONLY_UNVERIFIED_PHYSICAL_GEOMETRY",
-  "comment": "Simulation-only jaw gap from STEP: 33.681 mm open and 23.281 mm closed at 6.5 CAD mm inward travel per finger. Physical finger travel and grip force are unverified.",
+  "comment": "User-selected 27.5 mm minimum inner surface clearance when open, verified between PyBullet CAD convex hulls. stroke.open_width_m/closed_width_m are projected envelope gaps used for articulation, not surface clearance: tapered CAD faces differ. Closed CAD pose is retained; physical closed stroke and grip force remain unverified.",
   "gripper_model": "PROCEDURAL_2JAW_V1",
   "palm": {
     "dimensions_m": [0.060, 0.040, 0.1333]
@@ -10,8 +10,9 @@
     "dimensions_m": [0.008, 0.025, 0.035]
   },
   "stroke": {
-    "open_width_m": 0.033681,
+    "open_width_m": 0.02383153228989686,
     "closed_width_m": 0.023281,
+    "open_inner_surface_gap_m": 0.0275,
     "travel_axis": "X"
   },
   "tcp_to_grasp_center_m": [0.0, 0.0, 0.0],

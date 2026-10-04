@@ -16,12 +16,24 @@ import {
 } from "../../robot-3d-viewer/gripper_profile.mjs";
 import { validateWorldStatePacket } from "../../robot-3d-viewer/live_state.mjs";
 import { parseStartLayout } from "../../robot-3d-viewer/layout.mjs";
-import { parseGripperVisualAsset } from "../../robot-3d-viewer/gripper_asset.mjs";
+import { parseGripperVisualAsset, fingerOffsetCadMm } from "../../robot-3d-viewer/gripper_asset.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
 
 console.log("Running Viewer Gripper & Telemetry Functional Tests (Node.js)...");
+
+const visualConfig = JSON.parse(fs.readFileSync(path.join(repoRoot, "shared/gripper_visual_asset.json"), "utf8"));
+const visualProfile = parseGripperVisualAsset(visualConfig);
+const collisionConfig = JSON.parse(fs.readFileSync(path.join(repoRoot, "shared/gripper_collision_asset.json"), "utf8"));
+assert.equal(fingerOffsetCadMm(visualProfile, 1, false), visualConfig.finger_open_inset_mm);
+assert.equal(fingerOffsetCadMm(visualProfile, -1, false), -visualConfig.finger_open_inset_mm);
+assert.equal(fingerOffsetCadMm(visualProfile, 1, true), 6.5, "Closed CAD position must be retained");
+assert.ok(Math.abs((fingerOffsetCadMm(visualProfile, 1, true) - fingerOffsetCadMm(visualProfile, 1, false))
+  * visualProfile.scaleToM - collisionConfig.finger_travel_m) < 1e-12);
+for (const invalid of [-1, NaN, "3.8"]) {
+  assert.throws(() => parseGripperVisualAsset({ ...visualConfig, finger_open_inset_mm: invalid }), /finger_open_inset_mm/);
+}
 
 // ============================================================================
 // 1. CANONICAL PROFILE -> PARSED PROFILE -> GEOMETRY PARAMETERS

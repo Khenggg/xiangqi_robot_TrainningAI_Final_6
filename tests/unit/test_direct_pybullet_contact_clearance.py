@@ -285,12 +285,10 @@ class DirectPyBulletContactClearanceTests(unittest.TestCase):
     def test_direct_pybullet_jaw_closure_and_obstacle_contact(self):
         """
         Verify PyBullet kinematic jaw motion and closest points distance between the two closing jaws:
-        - Open jaw-to-jaw distance: ~37.2 mm.
+        - Open jaw-to-jaw distance: 27.5 mm (user-selected).
         - Closed jaw-to-jaw distance: ~27.0 mm.
-        - Difference reflects 2 * finger_travel_m (2 * 5.2mm = 10.4mm).
-        - Clamping contact on an obstacle body of width 30mm:
-          When open (gap > 30mm), obstacle clearance is positive (> 0).
-          When closed (gap < 30mm), jaws press/penetrate obstacle (distance <= 0).
+        - Difference follows the configured inward finger travel.
+        - A 30mm obstacle exceeds both openings and must collide in both states.
         """
         tcp = [0.0, 0.360, 0.150]
 
@@ -308,7 +306,7 @@ class DirectPyBulletContactClearanceTests(unittest.TestCase):
         )
         self.assertGreater(len(pts_open), 0)
         dist_open = pts_open[0][8]
-        self.assertAlmostEqual(dist_open, 0.0372, places=3, msg="Open jaw-to-jaw distance should be ~37.2mm")
+        self.assertAlmostEqual(dist_open, 0.0275, delta=0.0001, msg="Open inner surface gap must be 27.5mm")
 
         # 2. Verify closed positions and jaw-to-jaw distance
         self.gripper.set_gripper_state(True)
@@ -341,13 +339,13 @@ class DirectPyBulletContactClearanceTests(unittest.TestCase):
             physicsClientId=self.world.client_id,
         )
         try:
-            # Jaws open: 37.2mm gap clears 30mm obstacle (clearance > 0)
+            # A 30mm obstacle cannot fit through the 27.5mm opening.
             self.gripper.set_gripper_state(False)
             self.gripper.set_tcp_pose(tcp, self.tool_down_quat)
             pts_l = p.getClosestPoints(self.gripper.left_jaw_body_id, obs_body, distance=0.05, physicsClientId=self.world.client_id)
             pts_r = p.getClosestPoints(self.gripper.right_jaw_body_id, obs_body, distance=0.05, physicsClientId=self.world.client_id)
             min_dist_open = min(min([pt[8] for pt in pts_l], default=1.0), min([pt[8] for pt in pts_r], default=1.0))
-            self.assertGreater(min_dist_open, 0.001, f"Open jaws must clear 30mm obstacle, got {min_dist_open}")
+            self.assertLessEqual(min_dist_open, 0.0, f"Open jaws must detect oversized 30mm obstacle, got {min_dist_open}")
 
             # Jaws closed: 27.0mm gap collides with 30mm obstacle (clearance <= 0)
             self.gripper.set_gripper_state(True)
