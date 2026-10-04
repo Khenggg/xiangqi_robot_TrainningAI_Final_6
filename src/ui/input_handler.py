@@ -553,6 +553,17 @@ class InputHandler:
 
     def _handle_space_key(self, auto_retry=False):
         import config
+        # Offline mouse moves commit immediately. SPACE must not enter camera
+        # confirmation or commit the same move a second time.
+        backend = getattr(getattr(self.hw, "config", None), "ROBOT_BACKEND", "")
+        if backend == "VIRTUAL" and getattr(self.hw, "dry_run", False) is True:
+            if not (getattr(self.state, "physical_sync_fault", False)
+                    or getattr(self.state, "move_sync_error", False)):
+                self.state.set_status(
+                    "Đi bằng chuột được xác nhận tự động; không cần SPACE.",
+                    color=(0, 100, 180), duration=5.0,
+                )
+            return False
         if str(getattr(config, "GAME_MODE", "HUMAN_VS_ROBOT")).upper() == "HUMAN_VS_HUMAN":
             return self._confirm_human_camera_move()
         if self._player_turn_mode == PlayerTurnMode.UNIFIED:

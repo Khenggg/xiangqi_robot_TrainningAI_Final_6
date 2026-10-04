@@ -66,5 +66,11 @@ The retained profile declares TCP offset 168.3 mm, while the visual mesh's exten
 
 ### Local work preservation
 
+### Offline SPACE correction
+
+- In VIRTUAL + DRY_RUN, selecting a piece and destination with the mouse commits the human move immediately. SPACE and the confirmation button now give an informational message without invoking camera recognition or submitting a duplicate move. Existing sync faults are preserved.
+- The client controls and default turn status describe mouse input and show the robot turn correctly. Physical camera confirmation remains unchanged.
+- Targeted verification: `tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_offline_mouse_confirmation.py,tests/test_human_move_confirmation.py,tests/test_emergency_client_move.py,tests/unit/test_camera_observation_integrity.py,tests/unit/test_visual_unified_game_boundary.py`: **43 passed**, exit 0. Includes actual mouse event handling, repeated SPACE/button confirmation, both human colors, sync fault preservation, renderer output and physical recognition requirements. No physical hardware was exercised.
+
 Before updating the primary checkout, its original uncommitted files are preserved in a Git stash named `pre-visual-unified-integration-20261004`. Do not blindly reapply it: its camera/game changes belong to the replaced application. Recover individual files only after comparing ownership and current integration contracts.
 

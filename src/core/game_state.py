@@ -84,6 +84,7 @@ class GameState:
             "game_over": self.game_over,
             "turn": self.turn,
             "allow_mouse": self.allow_mouse_move,
+            "game_mode": config.GAME_MODE,
             "ai_thinking": self.ai_thinking,
             "ai_think_start": self.ai_think_start,
             "status_message": self.status_message,

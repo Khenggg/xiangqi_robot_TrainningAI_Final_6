@@ -252,9 +252,11 @@ class BoardRenderer:
         title = self.ui_font.render("CLIENT CONTROLS", True, JADE_DARK)
         self.screen.blit(title, title.get_rect(center=(panel.centerx, 274)))
 
+        confirm_label = (("ĐI CHUỘT", "TỰ XÁC NHẬN") if game_state.get("allow_mouse")
+                         else ("XÁC NHẬN", "NƯỚC ĐI"))
         actions = (
             (BTN_SCAN_FEN_RECT, "V", ("QUÉT / ĐỐI SOÁT FEN",), JADE_COLOR),
-            (BTN_CONFIRM_MOVE_RECT, "SPACE", ("XÁC NHẬN", "NƯỚC ĐỎ"), JADE_DARK),
+            (BTN_CONFIRM_MOVE_RECT, "SPACE", confirm_label, JADE_DARK),
             (BTN_EMERGENCY_RECT, "M", ("EMERGENCY MODE",), VERMILION_COLOR),
             (BTN_ROLLBACK_RECT, "Z", ("ROLLBACK",), AMBER_COLOR),
         )
@@ -281,7 +283,9 @@ class BoardRenderer:
         self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 18, BTN_CONTINUE_RECT.y + 17))
         self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 66, BTN_CONTINUE_RECT.y + 17))
 
-        note = "M đang bật: đi tay Đỏ / Đen" if emergency_active else "Chọn phím hoặc bấm nút"
+        note = ("M đang bật: đi tay Đỏ / Đen" if emergency_active else
+                "Đi chuột; không cần SPACE" if game_state.get("allow_mouse") else
+                "Chọn phím hoặc bấm nút")
         note_surf = self.log_font.render(note, True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(note_surf, note_surf.get_rect(center=(panel.centerx, 816)))
 
@@ -333,7 +337,16 @@ class BoardRenderer:
             if "CHECK" in message.upper():
                 accent = VERMILION_COLOR
         else:
-            message = "Your turn — move, then confirm with SPACE"
+            mode = game_state.get("game_mode", "HUMAN_VS_ROBOT")
+            if mode == "ROBOT_VS_ROBOT":
+                message = "Robot vs robot — F7: nước tiếp, F8: dừng"
+            elif mode == "HUMAN_VS_ROBOT" and game_state.get("turn") == "b":
+                message = "Lượt robot — đang chờ thực hiện nước đi"
+            else:
+                side = "Đỏ" if game_state.get("turn", "r") == "r" else "Đen"
+                instruction = ("chọn quân và ô đến bằng chuột" if game_state.get("allow_mouse")
+                               else "đi quân rồi xác nhận bằng SPACE")
+                message = f"Lượt {side} — {instruction}"
             accent = JADE_COLOR
 
         self._draw_panel(AI_STATUS_RECT, fill=(249, 245, 232), border=accent, radius=12)
