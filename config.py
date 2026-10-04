@@ -1,135 +1,100 @@
 # =============================================================================
 # === FILE: config.py (CẤU HÌNH TOÀN HỆ THỐNG) ===
 # =============================================================================
-import os as _os
 
-# --- [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH] ---
-# Các biến dưới đây chỉ phục vụ tương thích ngược với robot_VIP.py cũ.
-# Luồng di chuyển mới (MotionCoordinator -> BoardPlacementState) hoàn toàn KHÔNG phụ thuộc vào chúng.
-BOARD_ORIGIN_X = 200.0   # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-BOARD_ORIGIN_Y = -100.0  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+# --- THÔNG SỐ ROBOT BÀN CỜ (HARDCODED TOẠ ĐỘ TOÁN HỌC) ---
+# Tọa độ gốc (Điểm R1 - tương ứng Xe Đen Trái, ô col=0, row=0)
+# Tọa độ này sẽ được hệ thống Robot tự động ghi đè lúc khởi động bằng lệnh GetRobotTeachingPoint("R1")
+BOARD_ORIGIN_X = 200.0  
+BOARD_ORIGIN_Y = -100.0 
 
-# Offset điều chỉnh (mm) - [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-OFFSET_X = 5.0   # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-OFFSET_Y = 0.0   # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+# Offset điều chỉnh (mm) - Dùng để tinh chỉnh vị trí gắp
+# Nếu robot gắp lệch, điều chỉnh các giá trị này:
+# - OFFSET_X: Dương = dịch xuống dưới (về phía row=9), Âm = dịch lên trên (về phía row=0)
+# - OFFSET_Y: Dương = dịch sang phải (về phía col=8), Âm = dịch sang trái (về phía col=0)
+OFFSET_X = 5.0   # Robot gắp lệch lên trên 5mm → cần dịch xuống 5mm
+OFFSET_Y = 0.0   # Không lệch ngang
 
-# Chiều hướng di chuyển so với gốc R1 - [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-ROBOT_DIR_X = 1  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-ROBOT_DIR_Y = 1  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+# Chiều hướng di chuyển so với gốc R1 (1 hoặc -1)
+# LƯU Ý: Hệ tọa độ robot: X=dọc (row), Y=ngang (col)
+# 1: row tăng thì X tăng, col tăng thì Y tăng
+ROBOT_DIR_X = 1  
+ROBOT_DIR_Y = 1  
 
-# Kích thước vật lý bàn cờ & quân cờ (nguồn chuẩn hóa từ shared/physical_geometry.json)
-from src.domain.geometry import get_physical_geometry as _get_physical_geometry
-_geo = _get_physical_geometry()
+# Kích thước vật lý từng ô bàn cờ (mm)
+CELL_SIZE_X = 40.75  # 326mm chia cho 8 khoảng cột (ngang)
+CELL_SIZE_Y = 41.00  # 370mm chia cho 9 khoảng hàng (dọc)
+RIVER_GAP_Y = 1.00   # Bù thêm 1mm khe hở của con Sông (Nằm giữa row 4 và row 5)
 
-CELL_SIZE_X = _geo.board.column_spacing   # [LEGACY ALIAS] Cạnh ô cờ 40.0mm (ngang)
-CELL_SIZE_Y = _geo.board.row_spacing      # [LEGACY ALIAS] Cạnh ô cờ 40.0mm (dọc)
-RIVER_GAP_Y = 0.00                        # [LEGACY ALIAS] Bù sông (0mm khi dùng cạnh ô 40mm đều)
+# Tọa độ bãi chứa quân bị ăn (X, Y, Z)
+CAPTURE_BIN_X = -226.123
+CAPTURE_BIN_Y = 225.024
+CAPTURE_BIN_Z = 291.68  # [QUAN TRỌNG] Độ cao khi thả quân vào thùng
 
-BOARD_WIDTH_MM = _geo.board.outer_width   # Chiều ngang bàn cờ: 367.0 mm
-BOARD_LENGTH_MM = _geo.board.outer_length # Chiều dài bàn cờ: 410.0 mm
-PIECE_DIAMETER_MM = _geo.piece.diameter   # Đường kính quân cờ: 22.5 mm
-PIECE_HEIGHT_MM = _geo.piece.height       # Chiều cao quân cờ: 9.43 mm
-PLAYABLE_WIDTH_MM = _geo.board.playable_grid_width_mm   # Chiều ngang vùng chơi: 320.0 mm
-PLAYABLE_LENGTH_MM = _geo.board.playable_grid_length_mm # Chiều dài vùng chơi: 360.0 mm
-BOARD_MARGIN_X_MM = _geo.board.margin_horizontal_mm     # Lề trái/phải: 23.5 mm
-BOARD_MARGIN_Y_MM = _geo.board.margin_vertical_mm       # Lề trên/dưới: 25.0 mm
+# Độ cao an toàn (mm)
+SAFE_Z  = 210.0    # Độ cao an toàn khi di chuyển giữa các ô (tăng lên để tránh hất quân)
+PICK_Z  = 178.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
+PLACE_Z = 178.0   # Hạ xuống đặt
 
-# --- CAPTURE BIN PHYSICAL PROVENANCE & POSE ---
-# Physical capture bin pose [X, Y, Z (mm), Rx, Ry, Rz (deg)].
-# Gated by CAPTURE_BIN_VALIDATED: must remain False until Phase 4 physical validation.
-CAPTURE_BIN_POSE_MM_DEG = [-226.123, 225.024, 291.68, -179.164, -3.047, -26.304]
-CAPTURE_BIN_PROVENANCE = "LEGACY_UNVERIFIED"
-CAPTURE_BIN_VALIDATED = False
+# Cấu hình kẹp: motor 2 chiều dùng Tool DO trên đầu robot.
+# Verified wiring: DO1 chạy hướng MỞ, DO0 chạy hướng ĐÓNG. Không bao giờ bật cả hai cùng lúc.
+GRIPPER_ACTION_CLOSE = "close"
+# There is no jaw-position sensor: each state below is established only by
+# calibrated motor timing on the real gripper.
+GRIPPER_ACTION_OPEN_MAX = "open_max"
+GRIPPER_ACTION_CLOSE_TO_SAFE_GAP = "close_to_safe_gap"
+GRIPPER_OPEN_DO_ID = 1
+GRIPPER_CLOSE_DO_ID = 0
+GRIPPER_IDLE_STATUS = 0
+GRIPPER_ACTIVE_STATUS = 1
 
-# Legacy aliases for backward compatibility
-CAPTURE_BIN_X = CAPTURE_BIN_POSE_MM_DEG[0]
-CAPTURE_BIN_Y = CAPTURE_BIN_POSE_MM_DEG[1]
-CAPTURE_BIN_Z = CAPTURE_BIN_POSE_MM_DEG[2]
+# Motor không có công tắc hành trình: chỉ cấp điện theo xung ngắn rồi tắt cả hai DO.
+# Tinh chỉnh hai PULSE riêng sau khi thử với tay robot đứng yên và không có quân cờ.
+GRIPPER_DIRECTION_DEADTIME_SEC = 0.10
+# Open fully before a release or before establishing the safe travelling gap.
+# Tune this to the shortest pulse that reaches the physical open limit.
+GRIPPER_OPEN_MAX_PULSE_SEC = 0.3
+GRIPPER_CLOSE_PULSE_SEC = 0.8
+# Starting from fully open, close only to the travelling/pre-pick safe gap.
+# Increase to narrow the gap; decrease to widen it. Do not drive into hard stop.
+GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC = 0.06
+GRIPPER_OPEN_SETTLE_SEC = 0.25
+GRIPPER_CLOSE_SETTLE_SEC = 0.25
+MOVE_SPEED = 70 #Percentage based
 
-# Độ cao an toàn (mm) - [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-# Unified Motion Coordinator sử dụng độ cao tương đối so với mặt bàn (PICK_TCP_HEIGHT_MM, SAFE_CLEARANCE_Z_MM)
-SAFE_Z  = 290.0    # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-PICK_Z  = 190.0    # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-PLACE_Z = 195.0    # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-
-# --- UNIFIED PHYSICAL MOTION PROFILE (RELATIVE TO BOARD SURFACE) ---
-# Tọa độ gắp/thả và clearance được tính tương đối so với mặt phẳng bàn cờ (BoardPlacementState)
-PICK_TCP_HEIGHT_MM = 4.715      # piece_height / 2 (PROVISIONAL_SIMULATION)
-PLACE_TCP_HEIGHT_MM = 4.715
-SAFE_CLEARANCE_Z_MM = 40.0
-PICK_HEIGHT_PROVENANCE = "PROVISIONAL_SIMULATION"  # Đánh dấu nguồn gốc chưa qua kiểm chứng vật lý
-
-# --- CẤU HÌNH HƯỚNG BÀN CỜ (BOARD YAW ORIENTATION) ---
-# Hướng chuẩn 0.0 độ: Bàn cờ đặt thẳng đối diện robot, dòng sông nằm ngang, hàng quân Đen sát bệ robot.
-BOARD_YAW_DEG = 0.0
-
-
-# Cấu hình Kẹp (Gripper) - Tùy chỉnh theo loại van của bạn
-GRIPPER_CLOSE = 1
-GRIPPER_OPEN = 0
-
-# Tốc độ thực thi cánh tay robot (Giảm tốc độ an toàn - Safety First)
-# MOVE_SPEED (FAIRINO SDK velocity %): Giữ ở 15% an toàn tuyệt đối cho chế độ thực.
-MOVE_SPEED = 15.0
-ROBOT_SPEED_FACTOR = 0.15  # 15% tốc độ tối đa cho cả MotionResolver và Virtual Simulation (chậm & an toàn)
-
-# Cổng điều khiển Tool DO cho TwoOutputGripperDriver
-TOOL_DO_OPEN = 1
-TOOL_DO_CLOSE = 0
-TOOL_DO_OPEN_PULSE_SEC = 0.35
-TOOL_DO_CLOSE_PULSE_SEC = 0.30
-TOOL_DO_DEADTIME_SEC = 0.10
-
-# Góc xoay của đầu Robot (Rx, Ry, Rz) - Historical taught orientation
-ROTATION = [-179.164, -3.047, -26.304] 
+# Góc xoay của đầu Robot (Rx, Ry, Rz)
+ROTATION = [-179, -1.5, -11.3]
 
 # --- PHYSICAL PICK / PLACE MOTION PROFILE ---
+# Các pose Cartesian FR5 gồm [X, Y, Z, Rx, Ry, Rz]. XY được nội suy từ R1-R4;
+# ba góc dưới đây là tư thế tool đã được dạy để ngàm kẹp hướng đúng xuống quân.
+#
+# Để đổi hướng ngàm thật: đưa robot đến một ô trống ở SAFE_Z bằng pendant,
+# xoay wrist/tool tới hướng kẹp đúng và chép Rx/Ry/Rz hiển thị vào PICK_TOOL_ROTATION.
+# Không sửa tool frame/TCP trong code. Khi chưa dạy lại, giữ nguyên ROTATION hiện tại.
 PICK_TOOL_ROTATION = list(ROTATION)
+# Thông thường đặt dùng cùng hướng với gắp; tách biến để có thể hiệu chỉnh sau này.
 PLACE_TOOL_ROTATION = list(ROTATION)
-
-# --- ROBOT BACKEND EXECUTION SELECTION ---
-# Explicit backend selection: "PHYSICAL" or "VIRTUAL".
-# Rejects any unlisted backend type to prevent accidental execution fallbacks.
-ROBOT_BACKEND = _os.environ.get("ROBOT_BACKEND", "VIRTUAL").upper()
-if ROBOT_BACKEND not in ("PHYSICAL", "VIRTUAL"):
-    raise ValueError(f"Invalid ROBOT_BACKEND='{ROBOT_BACKEND}'. Must be 'PHYSICAL' or 'VIRTUAL'.")
-
-# In HUMAN_VS_HUMAN both colors are confirmed through camera/mouse, with no AI motion.
-# Robot self-play remains an explicit operator action in the existing UI.
-GAME_MODE = _os.environ.get("GAME_MODE", "HUMAN_VS_ROBOT").upper()
-if GAME_MODE not in ("HUMAN_VS_ROBOT", "HUMAN_VS_HUMAN"):
-    raise ValueError(f"Invalid GAME_MODE='{GAME_MODE}'")
 
 # Kết nối Robot
 ROBOT_IP = "192.168.58.2"
-# DRY_RUN prevents real hardware actuation (mock/dry-run backend), NEVER bypasses motion architecture.
-# Mặc định True: Chơi cờ thuần túy bằng chuột & mô phỏng mà không cần kết nối camera hay bật robot thật.
-DRY_RUN = _os.environ.get("DRY_RUN", "True").lower() in ("true", "1", "yes")
-
-# --- PHYSICAL BOARD CALIBRATION CONFIGURATION ---
-# Chế độ hiệu chuẩn bàn cờ thực tế từ điểm dạy R1-R4:
-# "POINTER_CONTACT": Dạy bằng bút đo/pointer tiếp xúc trực tiếp mặt bàn tại R1-R4 (offset = [0, 0, 0]).
-# "KNOWN_OFFSET": Dạy bằng TCP có khoảng cách xác định tới mặt bàn. Yêu cầu khai báo OFFSET_MM, OFFSET_FRAME, PROVENANCE.
-BOARD_CALIBRATION_MODE = _os.environ.get("BOARD_CALIBRATION_MODE", "KNOWN_OFFSET")
-BOARD_CALIBRATION_OFFSET_MM = [0.0, 0.0, -209.5]
-BOARD_CALIBRATION_OFFSET_FRAME = "ROBOT_BASE"  # "ROBOT_BASE" hoặc "TOOL"
-BOARD_CALIBRATION_PROVENANCE = "TAUGHT_APPROACH_PLANE_TO_SURFACE"
-
-# Dung sai hiệu chuẩn bàn cờ thực tế (Physical Board Calibration Tolerances):
-BOARD_MAX_DIMENSION_ERROR_HARD_FAIL_MM = 25.0
-BOARD_MAX_EDGE_LENGTH_DIFF_MM = 20.0
-BOARD_MAX_CORNER_RESIDUAL_HARD_FAIL_MM = 15.0
-BOARD_MAX_RMS_RESIDUAL_HARD_FAIL_MM = 10.0
-BOARD_MAX_DIAGONAL_DIFF_MM = 15.0
-
-# Giới hạn độ nghiêng mặt bàn cờ cho phép (Physical Board Tilt Policy):
-# Bàn cờ Xiangqi thực tế yêu cầu mặt phẳng gần như nằm ngang.
-BOARD_MAX_TILT_WARNING_DEG = 2.5    # Cảnh báo khi độ nghiêng vượt quá 2.5°
-BOARD_MAX_TILT_HARD_FAIL_DEG = 5.0   # Từ chối hiệu chuẩn & khóa chuyển động khi độ nghiêng >= 5.0°
+import os as _runtime_os
+ROBOT_BACKEND = _runtime_os.environ.get("ROBOT_BACKEND", "VIRTUAL").upper()
+if ROBOT_BACKEND not in ("VIRTUAL", "PHYSICAL"):
+    raise ValueError("ROBOT_BACKEND must be VIRTUAL or PHYSICAL")
+DRY_RUN = _runtime_os.environ.get("DRY_RUN", "1").strip().lower() not in ("0", "false", "no")
+SIMULATION_SPEED_FACTOR = 0.2
+TELEMETRY_HOST = "127.0.0.1"
+TELEMETRY_PORT = 8765
+# Physical teaching poses are not assumed to be board-surface contact points.
+# Configure these from the recorded calibration before enabling a physical mirror.
+BOARD_CALIBRATION_OFFSET_MM = None
+BOARD_CALIBRATION_OFFSET_FRAME = "ROBOT_BASE"
+BOARD_CALIBRATION_PROVENANCE = ""
 
 # Camera index (0 = built-in webcam, 1 = USB cam, 2 = DroidCam, etc.)
-# main.py will auto-try configured index first, then others if it fails.
-VIDEO_SOURCE = 2
+# VIDEO_INDEX overrides this explicitly; startup never substitutes another camera.
+VIDEO_SOURCE = 1
 
 # --- VISUAL PICK CORRECTION ---
 # Chỉ bù vị trí gắp khi snapshot mới từ camera xác nhận quân nằm gần ô logic.
@@ -138,62 +103,119 @@ VISUAL_PICK_ENABLED = True
 VISUAL_PICK_MIN_CONFIDENCE = 0.45
 VISUAL_PICK_MAX_OFFSET_CELLS = 0.25
 VISUAL_PICK_FOOT_RATIO = 0.85
+VISUAL_PICK_SAMPLE_COUNT = 3
+VISUAL_PICK_MIN_STABLE_SAMPLES = 2
+VISUAL_CENTER_PICK_ATTEMPTS = 3
+VISUAL_CENTER_PICK_MAX_JITTER_CELLS = 0.12
+# Occupancy checks use the whole calibrated square, not the narrower safe-pick radius.
+VISUAL_OCCUPANCY_CELL_HALF_WIDTH = 0.50
+# When enabled, physical robot moves require CChess layout identity checks to
+# match the in-memory FEN before the gripper may pick.  Set False only for
+# supervised fallback operation when the layout model is unavailable.
+# This toggle applies to legacy/manual verification calls. Physical motion
+# always requires fresh full-board identity verification before and after motion.
+VISUAL_BOARD_SYNC_REQUIRED = False
 
-# --- BOARD-STABILITY & AUTO MOVE CONFIRMATION ---
-AUTO_MOVE_CONFIRM_ENABLED = _os.environ.get("AUTO_MOVE_CONFIRM_ENABLED", "True").lower() in ("true", "1", "yes")
+# --- BOARD-STABILITY AUTO MOVE CONFIRMATION ---
+# The board must show the same legal move in several observations before it is
+# accepted. This works whether a piece is moved by hand or another object.
+AUTO_MOVE_CONFIRM_ENABLED = True
 BOARD_STABILITY_SECONDS = 1.2
 BOARD_STABILITY_MIN_SAMPLES = 3
 BOARD_STABILITY_SAMPLE_INTERVAL_SECONDS = 0.10
-PLAYER_TURN_MODE = _os.environ.get("PLAYER_TURN_MODE", "SHADOW")  # "LEGACY" | "SHADOW" | "UNIFIED"
+# Read-only full-board warning check. This never changes FEN, move history,
+# AI scheduling, or robot control; it only surfaces unexplained camera layouts.
+BOARD_WARNING_CHECK_INTERVAL_SECONDS = 2.0
+BOARD_WARNING_MIN_STABLE_SAMPLES = 2
+
+# --- UNIFIED PLAYER-TURN STATE MACHINE ---
+# SHADOW is safe until a real detector can continuously see hands *and* other
+# stationary obstructions over the board.  UNIFIED refuses to auto-commit
+# without that producer; LEGACY preserves the old polling/SPACE flow.
+PLAYER_TURN_MODE = "SHADOW"  # "LEGACY" | "SHADOW" | "UNIFIED"
 PLAYER_TURN_CLEAR_SECONDS = 0.8
 PLAYER_TURN_CLEAR_SAMPLES = 3
 PLAYER_TURN_INTERACTION_SETTLE_SECONDS = 1.2
 PLAYER_TURN_IDLE_SETTLE_SECONDS = 3.0
 PLAYER_TURN_IDLE_SETTLE_SAMPLES = 5
+# Hardware integration must override this to AVAILABLE only after it can see a
+# stationary hand, sleeve, and non-hand object on the board continuously.
 PLAYER_TURN_INTERACTION_CAPABILITY = "UNAVAILABLE"
-
-HAND_MODEL_PATH = "models/hand_best_egohands.pt"
-HAND_CONFIDENCE = 0.45
-HAND_ABSENCE_SECONDS = 0.8
-HAND_MIN_PRESENT_SECONDS = 0.25
-AUTO_MOVE_CONFIRM_RETRIES = 10
-AUTO_MOVE_CONFIRM_RETRY_SECONDS = 0.20
 
 # --- THÔNG SỐ AI ---
 AI_THINK_TIME = 10  # Time per move in seconds — AI gets 10s after subtracting TIME_BUFFER (0.5)
 AI_DEPTH = 30          # Độ sâu mặc định (sẽ bị ghi đè bởi logic tự động)
 
 # --- AI ENGINE CONFIGURATION ---
-ENGINE_TYPE = "LOCAL" # "LOCAL" (Ưu tiên Pikafish với đầy đủ ELO), "HYBRID" (Ưu tiên Cloud), "CLOUD" (Chỉ Cloud)
+ENGINE_TYPE = "LOCAL" # "HYPrefixBRID" (Ưu tiên Cloud), "CLOUD" (Chỉ Cloud), "LOCAL" (Chỉ Local)
 CLOUD_API_URL = "https://tuongkydaisu.com/api/engine/bestmove"
 CLOUD_TIMEOUT_SEC = 5
 
 # --- SIMULATION API CONFIGURATION ---
 SIMULATION_API_URL = "https://tuongkydaisu.com"
-# Secret token read securely from environment variable, avoiding hardcoded secrets in source control
-SIMULATION_TOKEN = _os.environ.get("SIMULATION_TOKEN", "")
+SIMULATION_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzaW11bGF0aW9uMDAxIiwicm9sZSI6IlNJTVVMQVRJT04iLCJ0b2tlbklkIjoiMTlkYjRjMDEtNjk4My00MTU5LTllNzYtODk0NDU5YjJhMjM5IiwiaWF0IjoxNzczMTI3MTE5LCJleHAiOjE4MDQ2NjMxMTl9.cHQEzHS-SqrZqUZ9FRcJgUE_BzyxZ60iiy7xYzZPQOo" # Liên hệ admin để lấy Token cấp cho app. Điền vào đây.
 
-# --- PIKAFISH ENGINE (PRIMARY LOCAL ENGINE WITH NNUE & ELO CONTROL) ---
-_BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
-PIKAFISH_DIR = _os.path.join(_BASE_DIR, 'engines', 'pikafish')
-PIKAFISH_EXE = _os.path.join(PIKAFISH_DIR, 'Pikafish-Windows-x86-64-universal.exe')
-PIKAFISH_NNUE = _os.path.join(PIKAFISH_DIR, 'pikafish.nnue')
-PIKAFISH_THREADS = 2
-PIKAFISH_HASH_MB = 64
-DEFAULT_AI_ELO = 1400  # Default ELO rating (1400: Quán cóc)
-LOCAL_AI_BACKEND = "PIKAFISH"  # "PIKAFISH" hoặc "MOONFISH"
-
-# --- MOONFISH ENGINE (LEGACY FALLBACK) ---
+# --- MOONFISH ENGINE ---
+# Hướng dẫn cho người mới clone repo:
+# 1. Clone Moonfish engine: git clone https://github.com/walker8088/moonfish.git moonfish
+# 2. Moonfish không cần NNUE file, chạy trực tiếp bằng Python
+import os as _os
+_BASE_DIR      = _os.path.dirname(_os.path.abspath(__file__))
 _MOONFISH_DIR = _os.path.join(_BASE_DIR, 'moonfish')
 MOONFISH_EXE  = _os.path.join(_MOONFISH_DIR, 'moonfish_ucci.py')
 MOONFISH_NNUE = None  # Moonfish doesn't use NNUE
 MOONFISH_THINK_MS = 1000  # Thời gian suy nghĩ mỗi nước (milliseconds)
 
-# Tọa độ về nhà (Home) để né Camera - [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-IDLE_X = -72.027  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-IDLE_Y = 200.248  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
-IDLE_Z = 278.586  # [LEGACY ONLY - DEPRECATED FOR UNIFIED MOTION PATH]
+# --- PLAYER-SELECTABLE AI DIFFICULTY ---
+# All difficulty levels use the same local Moonfish engine.  The first three
+# profiles deliberately restrict its search; ``impossible`` preserves the
+# project's original Moonfish invocation (MOONFISH_THINK_MS, no added limits).
+AI_DIFFICULTY = "hard"  # "easy" | "medium" | "hard" | "impossible"
+AI_DIFFICULTY_PROFILES = {
+    "easy": {
+        "label": "Easy",
+        "depth": 3,
+        "nodes": 2_000,
+        "temperature": 1.35,
+        "think_ms": 200,
+    },
+    "medium": {
+        "label": "Medium",
+        "depth": 8,
+        "nodes": 20_000,
+        "temperature": 0.9,
+        "think_ms": 1_000,
+    },
+    "hard": {
+        "label": "Hard",
+        "depth": 11,
+        "nodes": 150_000,
+        "temperature": 0.4,
+        "think_ms": 2_000,
+    },
+    "impossible": {
+        "label": "Impossible",
+        "depth": None,
+        "nodes": None,
+        "temperature": None,
+        "think_ms": None,
+    },
+}
+# Legacy policy checkpoints remain available for training tooling, but they are
+# not required to choose a difficulty in the game UI.
+EASY_POLICY_MODEL = _os.path.join(_BASE_DIR, "models", "xiangqi_easy_policy.pt")
+MEDIUM_POLICY_MODEL = _os.path.join(_BASE_DIR, "models", "xiangqi_medium_policy.pt")
 
-# --- OPTIONAL DEBUG DASHBOARD ---
-ENABLE_DEBUG_DASHBOARD = False
+# Tọa độ về nhà (Home) để né Camera
+# IDLE_X = -72.027
+# IDLE_Y = 200.248
+# IDLE_Z = 278.586  
 
+IDLE_X = -104.274
+IDLE_Y = 149.608
+IDLE_Z = 348.199
+# --- CCHESS RECOGNITION (ONNX) ---
+CCHESS_RECOGNITION_ENABLED = True  # Bật/tắt CChess ONNX recognition bổ sung
+
+# Gameplay remains owned by the visual application.
+GAME_MODE = _os.environ.get("GAME_MODE", "HUMAN_VS_ROBOT").upper()

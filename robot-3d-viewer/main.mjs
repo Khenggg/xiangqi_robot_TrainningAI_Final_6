@@ -20,6 +20,7 @@ import {
   boardPointToXYZ,
 } from "./board.mjs";
 import { buildCoordinateRulerGroup, createDimensionTape } from "./ruler.mjs";
+import { inspectBoardPlacementPacket, canSendLiveCommand } from "./placement_integrity.mjs";
 
 // ---------------------------------------------------------------------------
 // 1) CẤU HÌNH ROBOT & KINEMATICS DYNAMIC LOADER
@@ -565,6 +566,8 @@ const state = {
   trajectoryStage: "IDLE",
   gripperClosed: false,
   liveSocket: null,
+  liveSource: null,
+  livePlacementValid: null,
   placementVersion: 1,
   forwardShiftMm: 0.0,
   safeTransitHeightMm: 70.0,
@@ -674,6 +677,16 @@ function setLiveBadge(text, kind = "") {
   liveStateEl.className = kind;
 }
 
+function sendLivePayload(payload) {
+  if (!state.liveSocket || state.liveSocket.readyState !== WebSocket.OPEN) return false;
+  if (!canSendLiveCommand(state.liveSource, state.livePlacementValid, payload.command)) {
+    handleBackendError("Hiệu chuẩn bàn thật không nhất quán; đã chặn lệnh gửi tới FR3.");
+    return false;
+  }
+  state.liveSocket.send(JSON.stringify(payload));
+  return true;
+}
+
 function applyLiveState(payload) {
   const expectedModel = getRobotProfile(state.robotProfileId).label.includes("FR3")
     ? "FR3"
@@ -684,6 +697,7 @@ function applyLiveState(payload) {
     return;
   }
   // Authoritative joints directly from backend telemetry
+  state.liveSource = payload.source ?? null;
   state.jointsDeg = [...validation.joints];
   if (!state.hasInitializedLiveHome && validation.joints.length === 6) {
     state.homePoseDeg = [...validation.joints];
@@ -766,7 +780,7 @@ function connectLive() {
         }
       } else if (data.type === "world_state") {
         const val = validateWorldStatePacket(data);
-        if (val.ok) {
+        if (val.ok && !(state.liveSource === "PHYSICAL" && state.livePlacementValid !== true)) {
           if (piecesGroupRef && xiangqiPieces) {
             updatePiecesFromWorldState(piecesGroupRef, xiangqiPieces, val.pieces);
           }
@@ -871,6 +885,8 @@ function connectLive() {
   };
   socket.onclose = () => {
     state.liveSocket = null;
+    state.liveSource = null;
+    state.livePlacementValid = null;
     setLiveBadge("OFFLINE");
     if (sourceBadgeEl) {
       sourceBadgeEl.textContent = "";
@@ -965,11 +981,14 @@ function updateSingleJoint(index, val) {
     const targetJoints = [...state.jointsDeg];
     targetJoints[index] = clamped;
     const _speedFactor = getActiveSpeedFactor();
-    state.liveSocket.send(JSON.stringify({
+    if (!sendLivePayload({
       command: "MOVE_JOINT",
       joints_deg: targetJoints,
       speed_factor: _speedFactor,
-    }));
+    })) {
+      if (slider) slider.value = state.jointsDeg[index];
+      if (num) num.value = state.jointsDeg[index].toFixed(1);
+    }
   } else {
     // No collision authority is available while offline. Keep the last
     // validated posture instead of rendering an unchecked intersection.
@@ -1159,6 +1178,22 @@ function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0, yaw_deg = null) {
 export function applyAuthoritativeBoardPlacement(packet) {
   if (!packet) return;
 
+  const integrity = inspectBoardPlacementPacket(packet, physicalGeometryRef?.cellM ?? 0.04);
+  const warning = document.getElementById("placementSyncWarning");
+  if (!integrity.ok) {
+    state.livePlacementValid = false;
+    if (warning) {
+      warning.hidden = false;
+      warning.textContent = `⚠️ HIỆU CHUẨN BÀN KHÔNG NHẤT QUÁN: ${integrity.reason}. Đang giữ bàn mô phỏng; không điều khiển robot theo ô.`;
+    }
+    const badge = document.getElementById("geomPrecheckBadge");
+    if (badge) { badge.className = "badge-warn"; badge.textContent = "CALIBRATION INVALID"; }
+    console.error("Rejected inconsistent board placement:", integrity.reason);
+    return false;
+  }
+  state.livePlacementValid = true;
+  if (warning) warning.hidden = true;
+
   // 1 & 2. Atomically update board visual root & active scene placement cache
   setScenePlacement(packet);
 
@@ -1174,7 +1209,8 @@ export function applyAuthoritativeBoardPlacement(packet) {
   state.boardSurfaceHeightM = Number(packet.board_surface_z_m ?? packet.board_surface_z_robot_m ?? (0.0105 + zOff / 1000.0));
   state.placementVersion = ver;
   state.boardYawDeg = Number(packet.board_yaw_deg ?? state.boardYawDeg ?? 0);
-  state.placementSource = packet.placement_source ?? "NOMINAL_SIMULATION";
+  state.placementSource = packet.placement_source ??
+    (state.liveSource === "PHYSICAL" ? "R1_R4_PHYSICAL" : "NOMINAL_SIMULATION");
 
   // Sync placement control UI
   const shiftSlider = document.getElementById("boardShiftSlider");
@@ -1183,7 +1219,8 @@ export function applyAuthoritativeBoardPlacement(packet) {
   const transitNum = document.getElementById("safeTransitNum");
   const zOffsetNum = document.getElementById("boardZOffsetNum");
   const verBadge = document.getElementById("placementVersionBadge");
-  const fourPointPose = state.placementSource === "R1_R4_SIMULATION";
+  const fourPointPose = state.placementSource === "R1_R4_SIMULATION" ||
+    state.placementSource === "R1_R4_PHYSICAL";
 
   if (shiftSlider) shiftSlider.value = fourPointPose ? "0" : String(d);
   if (shiftNum) {
@@ -1312,7 +1349,7 @@ export function applyPlacementAnalysisUI(data) {
   const badge = document.getElementById("geomPrecheckBadge");
 
   const activeYaw = Number(data.board_yaw_deg ?? state.boardYawDeg ?? 0.0);
-  const preview = computeGeometricPrecheck(d_mm, H_mm, 10.5 + z_off_mm, activeYaw);
+  const preview = computeGeometricPrecheck(d_mm, H_mm, 10.5 + Number(data.board_height_offset_mm ?? 0), activeYaw);
   if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
   if (elNearGrid) elNearGrid.textContent = data.near_grid_depth_mm !== undefined ? `${data.near_grid_depth_mm.toFixed(1)} mm` : (data.nearest_cell_distance_mm !== undefined ? `${data.nearest_cell_distance_mm.toFixed(1)} mm` : `${preview.near_grid_depth_mm.toFixed(1)} mm`);
   if (elFarGrid) elFarGrid.textContent = data.far_grid_depth_mm !== undefined ? `${data.far_grid_depth_mm.toFixed(1)} mm` : (data.farthest_cell_distance_mm !== undefined ? `${data.farthest_cell_distance_mm.toFixed(1)} mm` : `${preview.far_grid_depth_mm.toFixed(1)} mm`);
@@ -1429,8 +1466,7 @@ function initServicePanelEvents() {
       if (cmdObj.speed_factor === undefined) {
         cmdObj.speed_factor = getActiveSpeedFactor();
       }
-      state.liveSocket.send(JSON.stringify(cmdObj));
-      return true;
+      return sendLivePayload(cmdObj);
     } else {
       handleBackendError("Chưa kết nối Backend: Bấm Connect live để gửi lệnh.");
       return false;
@@ -1510,8 +1546,7 @@ function initPlacementPanelEvents() {
       if (teachingStatus) teachingStatus.textContent = "Cần Connect live với simulator để đổi vị trí bàn.";
       return false;
     }
-    state.liveSocket.send(JSON.stringify(payload));
-    return true;
+    return sendLivePayload(payload);
   };
   document.getElementById("btnLoadSimTeachingPoints")?.addEventListener("click", () => {
     sendTeachingCommand({ command: "GET_BOARD_TEACHING_POINTS" });
@@ -1577,12 +1612,12 @@ function initPlacementPanelEvents() {
       const d = Number(shiftNum?.value ?? 0);
       const h = Number(transitNum?.value ?? 70);
       const zOff = Number(zOffsetNum?.value ?? 0);
-      state.liveSocket.send(JSON.stringify({
+      sendLivePayload({
         command: "SET_BOARD_PLACEMENT",
         forward_shift_mm: d,
         safe_transit_height_mm: h,
         board_height_offset_mm: zOff,
-      }));
+      });
     } else {
       handleBackendError("Chưa kết nối Backend: Bấm Connect live để thay đổi vị trí bàn cờ có thẩm quyền");
     }
@@ -1590,9 +1625,9 @@ function initPlacementPanelEvents() {
 
   btnReset?.addEventListener("click", () => {
     if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
-      state.liveSocket.send(JSON.stringify({
+      sendLivePayload({
         command: "RESET_BOARD_PLACEMENT",
-      }));
+      });
     } else {
       if (shiftSlider) shiftSlider.value = "0";
       if (shiftNum) shiftNum.value = "0";
@@ -1605,9 +1640,9 @@ function initPlacementPanelEvents() {
 
   btnValidate?.addEventListener("click", () => {
     if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
-      state.liveSocket.send(JSON.stringify({
+      if (!sendLivePayload({
         command: "VALIDATE_BOARD_PLACEMENT",
-      }));
+      })) return;
       const valBadge = document.getElementById("valResultBadge");
       if (valBadge) {
         valBadge.className = "badge-warn";
@@ -1633,11 +1668,11 @@ function initJointControlPanelEvents() {
       }
       const homeDeg = state.homePoseDeg || [0.0, -45.0, 90.0, -45.0, -90.0, 0.0];
       const _speedFactor = getActiveSpeedFactor();
-      state.liveSocket.send(JSON.stringify({
+      if (!sendLivePayload({
         command: "RESET",
         speed_factor: _speedFactor,
         joints_deg: homeDeg,
-      }));
+      })) return;
       state.currentCell = null;
       updateStepperUI(null, []);
       const badge = document.getElementById("diagStatusBadge");
@@ -1653,10 +1688,10 @@ function initJointControlPanelEvents() {
     setHomeBtn.addEventListener("click", () => {
       state.homePoseDeg = [...state.jointsDeg];
       if (state.liveSocket && state.liveSocket.readyState === WebSocket.OPEN) {
-        state.liveSocket.send(JSON.stringify({
+        sendLivePayload({
           command: "SET_HOME",
           joints_deg: state.homePoseDeg,
-        }));
+        });
       }
       const badge = document.getElementById("diagStatusBadge");
       if (badge) {
@@ -1675,11 +1710,11 @@ function initJointControlPanelEvents() {
       handleBackendError("Bấm Connect live để điều khiển kẹp trong mô phỏng.");
       return;
     }
-    state.liveSocket.send(JSON.stringify({
+    if (!sendLivePayload({
       command: "SET_GRIPPER",
       closed: closed,
       pulse_sec: closed ? 0.30 : 0.35,
-    }));
+    })) return;
   }
 
   function updateGripperUIState(closed) {
@@ -1727,9 +1762,9 @@ function initJointControlPanelEvents() {
         badge.className = "badge-warn";
         badge.textContent = "ĐANG RESET BACKEND...";
       }
-      state.liveSocket.send(JSON.stringify({
+      if (!sendLivePayload({
         command: "RESET_ALL_BACKEND_DATA",
-      }));
+      })) return;
     } else {
       handleBackendError("Chưa kết nối Backend: Bấm Connect live để khởi động lại dữ liệu backend.");
     }
@@ -2314,7 +2349,7 @@ function executePickAndPlace(srcRow, srcCol, dstRow, dstCol) {
       grasp_piece: true,
       speed_factor: _speedFactor,
     };
-    state.liveSocket.send(JSON.stringify(cmd));
+    if (!sendLivePayload(cmd)) return;
     const badge = document.getElementById("diagStatusBadge");
     if (badge) {
       badge.className = "badge-warn";
@@ -2445,7 +2480,7 @@ function goToCell(row, col, explicitGrasp = false) {
       grasp_piece: false,
       speed_factor: _speedFactor,
     };
-    state.liveSocket.send(JSON.stringify(cmd));
+    if (!sendLivePayload(cmd)) return;
     const badge = document.getElementById("diagStatusBadge");
     if (badge) {
       badge.className = "badge-warn";

@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "status": "SIMULATION_ONLY_PROVISIONAL",
+  "comment": "Simulation extrinsics configuration for Virtual FAIRINO FR3. NOT measured physical calibration.",
+  "robot_model": "FR3",
+  "robot_base_to_3d_world": {
+    "rotation_matrix": [
+      [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ],
+      [
+        -1.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "translation_m": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "axis_mapping": {
+      "world_x": "-robot_y",
+      "world_y": "+robot_z",
+      "world_z": "-robot_x"
+    },
+    "handedness": "right_handed",
+    "determinant": 1.0
+  },
+  "virtual_board_placement": {
+    "grid_origin_in_robot_base_m": [
+      0.18,
+      0.2,
+      0.0105
+    ],
+    "board_center_in_robot_base_m": [
+      0,
+      0.36,
+      0.0105
+    ],
+    "grid_origin_in_3d_world_m": [
+      -0.2,
+      0.0105,
+      -0.18
+    ],
+    "board_center_in_3d_world_m": [
+      -0.36,
+      0.0105,
+      0
+    ],
+    "board_surface_height_m": 0.0105,
+    "board_yaw_deg": 0.0,
+    "row_axis_in_robot_base": "-X",
+    "column_axis_in_robot_base": "+Y",
+    "up_axis_in_robot_base": "+Z",
+    "row_axis_in_3d_world": "+Z",
+    "column_axis_in_3d_world": "-X",
+    "up_axis_in_3d_world": "+Y",
+    "target_tool_orientation_euler_deg": [
+      180.0,
+      0.0,
+      0.0
+    ],
+    "legacy_teaching_points_unvalidated": {
+      "R1": [
+        -211.171,
+        210.149,
+        10.5
+      ],
+      "R2": [
+        -214.359,
+        544.595,
+        10.5
+      ],
+      "R3": [
+        166.645,
+        538.109,
+        10.5
+      ],
+      "R4": [
+        163.581,
+        215.261,
+        10.5
+      ]
+    },
+    "legacy_teaching_points_note": "Historical nonrigid observations disagree with canonical nominal simulation pose; not used for placement or hardware calibration."
+  },
+  "home_pose": {
+    "joints_deg": [
+      0.0,
+      -45.0,
+      90.0,
+      -45.0,
+      -90.0,
+      0.0
+    ]
+  },
+  "tool_transform": {
+    "status": "MEASURED_PHYSICAL",
+    "type": "tcp_relative_to_flange",
+    "canonical_profile_ref": "shared/robot_profiles/fr3.json",
+    "flange_to_tcp_xyz_m": [
+      0.0,
+      0.0,
+      0.1683
+    ],
+    "flange_to_tcp_rpy_deg": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "flange_to_tcp_distance_m": 0.1683,
+    "description": "Measured distance from FR3 J6 flange to contact tip of gripper (~168.3mm, touching table surface). Source: MEASURED_PHYSICAL.",
+    "cad_derived_length_m": 0.1475,
+    "obsolete_legacy_length_m": 0.218,
+    "visual_asset_status": "VISUAL_CALIBRATION_PROVISIONAL",
+    "visual_asset_notes": "Finger meshes visual scale (0.0008) and origin approximation for 3D viewer rendering."
+  }
+}

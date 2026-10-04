@@ -24,7 +24,8 @@ const profile = JSON.parse(profileBytes);
 const cfg = visual.profiles.fr3;
 const stepPath = join(root, "robot-3d-viewer/assets/fr3_v6", visual.asset_file);
 const stepBytes = readFileSync(stepPath);
-const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
+// STEP and JSON are text assets; Git checkout line endings must not alter provenance.
+const sha = (bytes) => createHash("sha256").update(bytes.toString("utf8").replace(/\r\n/g, "\n")).digest("hex");
 if (visual.cad_units !== "millimeter" || Math.abs(cfg.mount_rotation_euler_rad[0] - Math.PI) > 1e-6 ||
     cfg.mount_rotation_euler_rad.slice(1).some((v) => Math.abs(v) > 1e-9) || cfg.mount_roll_rad !== 0) {
   throw new Error("Unsupported CAD mount transform; update generator before regenerating");
@@ -101,6 +102,7 @@ fixed.push({
 });
 const output = {
   schema_version: 2,
+  fingerprint_encoding: "UTF8_LF_V1",
   source_step_sha256: sha(stepBytes),
   source_visual_sha256: sha(visualBytes),
   source_profile_sha256: sha(profileBytes),

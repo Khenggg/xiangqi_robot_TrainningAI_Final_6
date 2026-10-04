@@ -38,7 +38,8 @@ class FR3TelemetryTests(unittest.TestCase):
 
         self.assertEqual(packet.get("type"), "robot_state")
         self.assertEqual(packet.get("robot_model"), "FR3")
-        self.assertIsInstance(packet.get("timestamp"), (int, float))
+        self.assertIsNone(packet.get("timestamp"))  # No measured backend snapshot yet.
+        self.assertIsInstance(packet.get("published_at"), (int, float))
 
         joints = packet.get("joints")
         self.assertIsInstance(joints, list)

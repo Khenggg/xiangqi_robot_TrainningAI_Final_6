@@ -32,6 +32,7 @@ export async function fetchScenePlacement(url = "/shared/virtual_fr3_scene.json"
     boardCenterZ: Number(worldCenter[2]),
     board_yaw_deg: Number(data.virtual_board_placement.board_yaw_deg ?? 0.0),
     teaching_points: data.virtual_board_placement?.teaching_points || null,
+    T_robot_from_board: data.virtual_board_placement?.T_robot_from_board || null,
   };
   setScenePlacement(placement);
   return placement;
@@ -41,7 +42,8 @@ let _activeBoardGroup = null;
 
 export function setScenePlacement(placement) {
   if (!placement) throw new Error("placement cannot be null or undefined");
-  const centerWorld = placement.board_center_world_m || [
+  const T = placement.T_robot_from_board;
+  const centerWorld = T ? [-T[1][3], T[2][3], -T[0][3]] : placement.board_center_world_m || [
     placement.boardCenterX ?? -0.3770,
     placement.boardSurfaceY ?? 0.0105,
     placement.boardCenterZ ?? 0.0238
@@ -73,10 +75,6 @@ export function setScenePlacement(placement) {
 
 export function applyBoardRootPlacement(group, placement) {
   group.position.set(placement.boardCenterX, placement.boardSurfaceY, placement.boardCenterZ);
-  if (placement.teachingPoints || placement.teaching_points) {
-    group.rotation.set(0, ((placement.boardYawDeg + 90.0) * Math.PI) / 180.0, 0);
-    return;
-  }
   const T = placement.TRobotFromBoard;
   if (T) {
     // Mesh axes (x,y,z) are board (v,normal,u); robot -> viewer is (-y,z,-x).
@@ -88,7 +86,7 @@ export function applyBoardRootPlacement(group, placement) {
     );
     group.quaternion.setFromRotationMatrix(matrix).normalize();
   } else {
-    group.rotation.set(0, ((placement.boardYawDeg + 90.0) * Math.PI) / 180.0, 0);
+    group.rotation.set(0, ((placement.boardYawDeg - 90.0) * Math.PI) / 180.0, 0);
   }
 }
 
@@ -140,8 +138,21 @@ export function boardPointToXYZ(rowOrCell, colOrGeometry = null, maybeGeometry =
 
   const geo = geometry || getActiveGeometry();
   const placement = getScenePlacement();
+  const colM = geo.cellM || 0.040;
+  const rowM = geo.rowSpacingM || 0.040;
+  const u = (col - 4.0) * colM;
+  const v = (row - 4.5) * rowM;
 
-  // Authoritative physical teaching points interpolation
+  // A calibrated rigid transform is the single authority for both mesh and cells.
+  if (placement.TRobotFromBoard) {
+    const T = placement.TRobotFromBoard;
+    const robX = T[0][0] * u + T[0][1] * v + T[0][3];
+    const robY = T[1][0] * u + T[1][1] * v + T[1][3];
+    const robZ = T[2][0] * u + T[2][1] * v + T[2][3];
+    return new THREE.Vector3(-robY, robZ, -robX);
+  }
+
+  // Preview-only interpolation for scenes without a rigid transform.
   const tp = placement.teachingPoints || placement.teaching_points;
   if (tp && tp.R1 && tp.R2 && tp.R3 && tp.R4) {
     const colRatio = Math.max(0.0, Math.min(1.0, col / 8.0));
@@ -178,24 +189,7 @@ export function boardPointToXYZ(rowOrCell, colOrGeometry = null, maybeGeometry =
     return new THREE.Vector3(-robY, robZ, -robX);
   }
 
-  const colM = geo.cellM || 0.040;
-  const rowM = geo.rowSpacingM || 0.040;
-  const u = (col - 4.0) * colM;
-  const v = (row - 4.5) * rowM;
-
-  // Authoritative BoardPose transformation:
-  // 1. If 4x4 transform T_robot_from_board is available, apply directly
-  if (placement.TRobotFromBoard) {
-    const T = placement.TRobotFromBoard;
-    const robX = T[0][0] * u + T[0][1] * v + T[0][3];
-    const robY = T[1][0] * u + T[1][1] * v + T[1][3];
-    const robZ = T[2][0] * u + T[2][1] * v + T[2][3];
-    // Map from robot base frame to Three.js world frame:
-    // X_world = -Y_robot, Y_world = +Z_robot, Z_world = -X_robot
-    return new THREE.Vector3(-robY, robZ, -robX);
-  }
-
-  // 2. Otherwise derive SE(3) transformation from authoritative boardYawDeg and center
+  // Otherwise derive SE(3) from board yaw and center.
   const yawDeg = placement.boardYawDeg ?? 0.0;
   const theta = (yawDeg * Math.PI) / 180.0;
   const sinT = Math.sin(theta);

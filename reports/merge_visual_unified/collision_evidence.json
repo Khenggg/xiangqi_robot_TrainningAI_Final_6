@@ -1,0 +1,23 @@
+{
+  "board_penetration": {
+    "accepted": false,
+    "error": "MoveCartesian rejected by collision guard: Waypoint 117/160 failed collision check: Gripper proxy colliding with board (distance 0.47mm < margin 0.50mm)",
+    "max_joint_delta_deg": 0.0,
+    "max_tcp_delta_mm_deg": 0.0,
+    "gripper_unchanged": true
+  },
+  "folded_collision": {
+    "accepted": false,
+    "error": "MoveJ rejected by collision guard: Waypoint 9/251 failed collision check: Gripper colliding with floor (0.15mm)",
+    "max_joint_delta_deg": 0.0,
+    "max_tcp_delta_mm_deg": 0.0,
+    "gripper_unchanged": true
+  },
+  "direct_board_penetration_min_mm": -10.758000000000255,
+  "direct_gripper_arm_penetrations_mm": [
+    [
+      2,
+      -26.847973492908523
+    ]
+  ]
+}

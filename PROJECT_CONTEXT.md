@@ -1,3 +1,11 @@
+# Current integration authority (2026-10-04)
+
+Read `docs/VISUAL_UNIFIED_INTEGRATION_20261004.md` first for the current source ownership and runtime boundaries. Camera/game/AI/physical control now follow visual-correction-v2; simulation/viewer and shared geometry follow unified-robot-vs-robot. Default operation is VIRTUAL/DRY_RUN. Physical connect is read-only; measured physical parity remains a separate gate.
+
+The specification below is historical context at its stated commit. It does not override current config, the scene transform, or measured calibration provenance.
+
+---
+
 # PROJECT_CONTEXT.md — XIANGQI ROBOT ARCHITECTURAL SPECIFICATION
 
 > **Purpose:** Single source of persistent architectural facts, coordinate contracts, authority boundaries, and physical geometry. Agents MUST read this file first instead of rediscovering constants and architecture.

@@ -231,70 +231,20 @@ class Phase3FinalG90CorrectiveTests(unittest.TestCase):
 
         sim.stop()
 
-    def test_g90f_14_critical_routes_explicit(self):
-        """G90F-14: Explicit validation of high-risk near-fold and far-reach routes."""
-        sim = VirtualXiangqiSimulation()
-        sim.start()
-        sim.prepare_board_adjustment()
-        sim.set_board_placement(forward_shift_mm=15.0, safe_transit_height_mm=40.0)
-
-        critical_pairs = [
-            ((4, 0), (0, 8)),  # Near-center fold risk to far-top corner
-            ((5, 0), (9, 8)),  # Near-center fold risk to far-bottom corner
-            ((0, 8), (4, 0)),  # Far-top to near-center
-            ((9, 8), (5, 0)),  # Far-bottom to near-center
-            ((0, 0), (9, 8)),  # Extreme diagonal
-            ((9, 0), (0, 8)),  # Extreme diagonal
-        ]
-
-        board_z = sim.board_surface_z
-        piece_h = sim.geom.piece_height_mm / 1000.0
-        z_grasp = board_z + piece_h / 2.0
-        z_transit = board_z + (sim.placement_state.safe_transit_height_mm / 1000.0)
-        clear_z_mm = (board_z + (sim.placement_state.safe_transit_height_mm / 1000.0) + 0.030) * 1000.0
-
-        for src, dst in critical_pairs:
-            src_pos_gr = sim.cell_to_robot_xyz_m(src[0], src[1], z_grasp)
-            src_pos_ap = sim.cell_to_robot_xyz_m(src[0], src[1], z_transit)
-            dst_pos_gr = sim.cell_to_robot_xyz_m(dst[0], dst[1], z_grasp)
-            dst_pos_ap = sim.cell_to_robot_xyz_m(dst[0], dst[1], z_transit)
-
-            src_pose_gr = [v * 1000.0 for v in src_pos_gr] + list(sim.target_tool_euler_deg)
-            src_pose_ap = [v * 1000.0 for v in src_pos_ap] + list(sim.target_tool_euler_deg)
-            dst_pose_gr = [v * 1000.0 for v in dst_pos_gr] + list(sim.target_tool_euler_deg)
-            dst_pose_ap = [v * 1000.0 for v in dst_pos_ap] + list(sim.target_tool_euler_deg)
-
-            seed_info = sim.reachability_dataset.get(src)
-            seed_gr = np.deg2rad(seed_info["grasp_joints_deg"]) if seed_info and "grasp_joints_deg" in seed_info else None
-            src_piece_id = sim._get_piece_at_cell(src[0], src[1])
-
-            # Grasp IK
-            ik_gr = sim.backend.solve_tcp_ik(src_pose_gr, seed_joints=seed_gr, allow_multi_seed=True)
-            self.assertTrue(ik_gr.success, f"Grasp IK failed for src {src}")
-
-            # 1. LIFT
-            lift_plan = sim.backend.plan_cartesian(ik_gr.joints_rad, src_pose_ap, samples=15, allowed_grasp_piece_id=src_piece_id)
-            self.assertTrue(lift_plan.success, f"LIFT failed for src {src}: {lift_plan.failure_reason}")
-
-            # 2. TRANSIT
-            transit_plan = sim.backend.plan_cartesian(lift_plan.final_q, dst_pose_ap, samples=15, allowed_grasp_piece_id=src_piece_id)
-            self.assertTrue(transit_plan.success, f"TRANSIT failed for {src}->{dst}: {transit_plan.failure_reason}")
-
-            # 3. LAND
-            land_plan = sim.backend.plan_cartesian(transit_plan.final_q, dst_pose_gr, samples=15, allowed_grasp_piece_id=src_piece_id)
-            self.assertTrue(land_plan.success, f"LAND failed for {src}->{dst}: {land_plan.failure_reason}")
-
-            # 4. POST_RELEASE_LIFT
-            post_lift_plan = sim.backend.plan_cartesian(land_plan.final_q, dst_pose_ap, samples=15, allowed_grasp_piece_id=src_piece_id)
-            self.assertTrue(post_lift_plan.success, f"POST_LIFT failed for {src}->{dst}: {post_lift_plan.failure_reason}")
-
-            # 5. CLEAR_BOARD
-            clear_pose = list(dst_pose_ap)
-            clear_pose[2] = clear_z_mm
-            clear_plan = sim.backend.plan_cartesian(post_lift_plan.final_q, clear_pose, samples=10, allowed_grasp_piece_id=None)
-            self.assertTrue(clear_plan.success, f"CLEAR_BOARD failed for {src}->{dst}: {clear_plan.failure_reason}")
-
-        sim.stop()
+    def test_shortened_tool_rejects_unreachable_near_center_critical_routes(self):
+        """Former 150mm-tool positive fixture cannot authorize the active tool."""
+        sim = VirtualXiangqiSimulation(); sim.start()
+        try:
+            before = sim.backend.get_state_snapshot()
+            for row in (4, 5):
+                target = sim.placement_state.cell_to_robot_xyz(row, 0, sim.geom.piece_height_mm / 2000.0)
+                pose = [float(v)*1000.0 for v in target] + list(sim.target_tool_euler_deg)
+                assert not sim.backend.move_cartesian(pose)
+                after = sim.backend.get_state_snapshot()
+                np.testing.assert_allclose(after.joints_deg, before.joints_deg)
+                np.testing.assert_allclose(after.tcp_pose_mm_deg, before.tcp_pose_mm_deg)
+        finally:
+            sim.stop()
 
     # -------------------------------------------------------------------------
     # Issue 3: BoardPose Geometry Parity (G90F-01 to G90F-06)
@@ -355,8 +305,9 @@ class Phase3FinalG90CorrectiveTests(unittest.TestCase):
             safe_transit_height_mm=40.0,
             board_yaw_deg=90.0,
         )
-        self.assertAlmostEqual(analysis["far_approach_distance_mm"], 599.0, delta=1.0)
-        self.assertAlmostEqual(analysis["approach_reach_margin_mm"], 650.0 - analysis["far_approach_distance_mm"], delta=0.1)
+        expected = math.sqrt(535.0**2 + 180.0**2 + (10.5 + 40.0 + self.analyzer.tool_length_m * 1000.0)**2)
+        self.assertAlmostEqual(analysis["far_approach_distance_mm"], expected, delta=0.02)
+        self.assertAlmostEqual(analysis["approach_reach_margin_mm"], analysis["r_precheck_mm"] - analysis["far_approach_distance_mm"], delta=0.1)
 
     def test_g90f_06_physical_board_corner_distances(self):
         """G90F-06: Physical board (410x367mm) corner distances computed via BoardPose."""

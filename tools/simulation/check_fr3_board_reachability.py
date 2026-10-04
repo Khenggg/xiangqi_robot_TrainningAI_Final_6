@@ -25,6 +25,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 from src.domain.geometry import get_physical_geometry
 from src.simulation.kinematics.fr3 import FR3Kinematics, IKResult, IKStatus
 from src.simulation.kinematics.urdf_chain import Pose3D
+from src.domain.board_pose import BoardPlacementState
+from src.simulation.tool_geometry import virtual_link_to_tcp_offset_m
 
 
 def evaluate_board_reachability(
@@ -47,9 +49,24 @@ def evaluate_board_reachability(
     kin = kinematics or FR3Kinematics()
     board_cfg = scene["virtual_board_placement"]
 
-    x0, y0, z0 = board_cfg["grid_origin_in_robot_base_m"]
-    z_target = z0 + height_offset_m
+    center = board_cfg["board_center_in_robot_base_m"]
+    state = BoardPlacementState.compute(0., board_yaw_deg=board_cfg["board_yaw_deg"],
+        nominal_board_center_robot_m=center,
+        nominal_board_surface_z_m=board_cfg["board_surface_height_m"])
+    if "T_robot_from_board" in board_cfg:
+        T_board = np.asarray(board_cfg["T_robot_from_board"], dtype=float)
+        if (T_board.shape != (4, 4) or not np.isfinite(T_board).all()
+                or not np.allclose(T_board[3], [0., 0., 0., 1.])
+                or not np.allclose(T_board[:3,:3].T @ T_board[:3,:3], np.eye(3), atol=1e-6)
+                or not np.isclose(np.linalg.det(T_board[:3,:3]), 1., atol=1e-6)):
+            raise ValueError("Invalid authoritative board transform")
+        state.rotation_matrix = T_board[:3,:3].tolist()
+        state.board_center_robot_m[:2] = T_board[:2,3].tolist()
+        state.board_surface_z_robot_m = float(T_board[2,3])
+    z_target = state.board_surface_z_m + height_offset_m
     R_target = np.array(board_cfg["target_tool_orientation_matrix"], dtype=float)
+    T_tcp_to_link = np.eye(4)
+    T_tcp_to_link[:3,3] = -virtual_link_to_tcp_offset_m()
 
     geom = get_physical_geometry()
     col_spacing = geom.board.column_spacing / 1000.0  # Derived from canonical geometry
@@ -70,21 +87,22 @@ def evaluate_board_reachability(
     cell_results = []
 
     for r in range(num_rows):
-        # In 90° orientation: Col axis is along -X, Row axis is along -Y
-        y = y0 - r * row_spacing
         for c in range(num_cols):
-            x = x0 - c * col_spacing
+            target_xyz = state.cell_to_robot_xyz(r, c, z_rel_m=height_offset_m)
 
             T_target = np.eye(4, dtype=float)
             T_target[:3, :3] = R_target
-            T_target[:3, 3] = [x, y, z_target]
+            T_target[:3, 3] = target_xyz
+            # URDF IK ends at wrist3_link; the requested point is the actual TCP.
+            T_tcp_target = T_target.copy()
+            T_target = T_target @ T_tcp_to_link
 
             res = kin.inverse_kinematics(
                 T_target,
                 seed_joints=q_seed,
                 max_iterations=80,
-                pos_tol_mm=pos_tol_mm,
-                rot_tol_deg=rot_tol_deg,
+                pos_tol_mm=min(pos_tol_mm, 0.1),
+                rot_tol_deg=min(rot_tol_deg, 0.1),
             )
             if not res.success:
                 # Retry with unconstrained multi-seed exploration
@@ -93,27 +111,34 @@ def evaluate_board_reachability(
                     seed_joints=None,
                     allow_multi_seed=True,
                     max_iterations=100,
-                    pos_tol_mm=pos_tol_mm,
-                    rot_tol_deg=rot_tol_deg,
+                    pos_tol_mm=min(pos_tol_mm, 0.1),
+                    rot_tol_deg=min(rot_tol_deg, 0.1),
                 )
 
+            T_link_to_tcp = np.eye(4)
+            T_link_to_tcp[:3, 3] = virtual_link_to_tcp_offset_m()
+            actual = kin.forward_kinematics(res.joints_rad).as_matrix() @ T_link_to_tcp
+            tcp_pos_error = float(np.linalg.norm(actual[:3, 3] - T_tcp_target[:3, 3]) * 1000.)
+            rotation_delta = actual[:3, :3].T @ T_tcp_target[:3, :3]
+            tcp_rot_error = math.degrees(math.acos(float(np.clip((np.trace(rotation_delta)-1.)/2., -1., 1.))))
+            accepted = res.success and tcp_pos_error <= pos_tol_mm and tcp_rot_error <= rot_tol_deg
             cell_data = {
                 "col": c,
                 "row": r,
-                "target_xyz_m": [x, y, z_target],
+                "target_xyz_m": target_xyz.tolist(),
                 "status": res.status.value,
-                "success": res.success,
-                "pos_err_mm": res.position_error_mm,
-                "rot_err_deg": res.orientation_error_deg,
+                "success": accepted,
+                "pos_err_mm": tcp_pos_error,
+                "rot_err_deg": tcp_rot_error,
                 "iterations": res.iterations,
                 "condition_number": res.condition_number,
             }
 
-            if res.success:
+            if accepted:
                 reachable_count += 1
                 q_seed = res.joints_rad.copy()
-                worst_pos_err = max(worst_pos_err, res.position_error_mm)
-                worst_rot_err = max(worst_rot_err, res.orientation_error_deg)
+                worst_pos_err = max(worst_pos_err, tcp_pos_error)
+                worst_rot_err = max(worst_rot_err, tcp_rot_error)
                 worst_cond = max(worst_cond, res.condition_number)
 
                 _, margins = kin.chain.check_joint_limits(res.joints_rad)
@@ -125,6 +150,8 @@ def evaluate_board_reachability(
 
     return {
         "scene_status": scene.get("status"),
+        "evaluation_scope": "TCP_KINEMATICS_ONLY_NOT_COLLISION_OR_GRASP_ACCEPTANCE",
+        "cell_results": cell_results,
         "robot_model": scene.get("robot_model"),
         "target_height_m": z_target,
         "total_cells": num_rows * num_cols,

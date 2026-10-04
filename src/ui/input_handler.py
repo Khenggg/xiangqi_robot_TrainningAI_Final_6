@@ -1,42 +1,24 @@
-# =============================================================================
-# === FILE: input_handler.py ===
-# === Quản lý sự kiện Chuột & Bàn phím với trải nghiệm chuẩn App Cờ Tướng ===
-# =============================================================================
 import time
-import threading
-import pygame
-from typing import Optional, Tuple
-from src.core import xiangqi
-from src.ui.board_renderer import (
-    BoardRenderer,
-    BTN_SURRENDER_RECT,
-    BTN_NEW_GAME_RECT,
-    BTN_UNDO_RECT,
-    BTN_HINT_RECT,
-    BTN_RESUME_SCAN_RECT,
-    ELO_BUTTON_RECTS,
-    BTN_ELO_PREV_RECT,
-    BTN_ELO_NEXT_RECT,
-    NUM_COLS,
-    NUM_ROWS,
-)
-from src.vision.move_observation import MoveObservation, derive_move_observation
-from src.digital_twin.live_twin_bridge import LiveTwinBridge
+import math
+from src.core import xiangqi  # type: ignore
+from src.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT,
+                                   BTN_CONTINUE_RECT, BTN_SCAN_FEN_RECT, BTN_CONFIRM_MOVE_RECT,
+                                   BTN_EMERGENCY_RECT, BTN_ROLLBACK_RECT, NUM_COLS, NUM_ROWS)  # type: ignore
 from src.vision.board_stability_monitor import BoardStabilityMonitor
 from src.vision.player_turn_arbiter import PlayerTurnArbiter
-from src.vision.player_turn_types import (
-    BoardObservation,
-    CommitRequest,
-    InteractionCapability,
-    PlayerTurnMode,
-    Visibility,
-)
+from src.vision.player_turn_types import BoardObservation, CommitRequest, InteractionCapability, PlayerTurnMode, Visibility
 from src.core.human_move_commit_coordinator import HumanMoveCommitCoordinator
+from src.vision.legal_successor_matcher import LegalSuccessorMatcher
+from src.vision.player_turn_types import MatchKind
+
+CHECK_STATUS_MESSAGE = (
+    "⚠️ CHECK — Your General is in check. "
+    "Block, capture, or move your General."
+)
 
 
 class InputHandler:
     """Manages Pygame Key/Mouse events and bridges them to GameState and HardwareManager."""
-
     def __init__(self, game_state, hw_manager):
         self.state = game_state
         self.hw = hw_manager
@@ -48,6 +30,10 @@ class InputHandler:
         )
         self._observed_baseline_time = None
         self._last_stability_poll_at = 0.0
+        self._last_board_warning_check_at = 0.0
+        self._board_warning_candidate = None
+        self._board_warning_samples = 0
+        self._board_warning_message = None
         configured_mode = getattr(stability_config, "PLAYER_TURN_MODE", "LEGACY")
         try:
             self._player_turn_mode = PlayerTurnMode(configured_mode.upper())
@@ -64,14 +50,6 @@ class InputHandler:
         self._unified_active = False
         self._observed_game_epoch = getattr(game_state, "game_epoch", 0)
 
-    @property
-    def _human_turn(self):
-        return bool(getattr(self.state, "is_human_turn", self.state.turn == "r"))
-
-    @property
-    def _has_twin(self):
-        return isinstance(getattr(self.hw, "twin_bridge", None), LiveTwinBridge)
-
     def _interaction_capability(self):
         """Hardware must explicitly provide obstruction evidence for UNIFIED."""
         capability = getattr(self.hw, "interaction_capability", None)
@@ -87,9 +65,101 @@ class InputHandler:
     def _commit_human_move(self, src, dst, piece, source="LEGACY"):
         request = type("Request", (), {"turn_token": (getattr(self.state, "game_epoch", 0),
                                                         getattr(self.state, "human_commit_generation", 0),
-                                                        getattr(self._player_turn_arbiter, "turn_token", 0)),
+                                                        self._player_turn_arbiter.turn_token),
                                          "move": (src, dst), "source": source})()
         return self._human_commit_coordinator.try_commit(request, piece) == "ACCEPTED"
+
+    def _rejected_red_move_status(self, src, dst):
+        """Explain an invalid Red move without hiding an active check threat."""
+        if xiangqi.is_king_in_check("r", self.state.board):
+            return CHECK_STATUS_MESSAGE
+        return f"❌ Illegal move: {xiangqi.format_move(src, dst)} — move not accepted."
+
+    def _check_board_warning(self, cchess_result, now):
+        """Surface unexplained full-board changes without mutating game state."""
+        try:
+            interval = float(getattr(
+                getattr(self.hw, "config", None), "BOARD_WARNING_CHECK_INTERVAL_SECONDS", 2.0
+            ))
+        except (TypeError, ValueError):
+            interval = 2.0
+        interval = max(0.1, interval) if math.isfinite(interval) else 2.0
+        if now - self._last_board_warning_check_at < interval:
+            return
+        self._last_board_warning_check_at = now
+
+        occluded = getattr(self.hw, "is_board_occluded", None)
+        if callable(occluded) and occluded():
+            self._clear_board_warning()
+            return
+
+        layout = cchess_result.get("board") if cchess_result and cchess_result.get("success") else None
+        if layout is None:
+            self._clear_board_warning()
+            return
+        match = LegalSuccessorMatcher(self.state.board).match(layout)
+        if match.kind in (MatchKind.BASELINE_EQUAL, MatchKind.UNIQUE, MatchKind.UNAVAILABLE):
+            self._clear_board_warning()
+            return
+        try:
+            candidate = (match.kind, tuple(tuple(row) for row in layout))
+        except TypeError:
+            self._board_warning_candidate = None
+            self._board_warning_samples = 0
+            return
+        if candidate != self._board_warning_candidate:
+            self._board_warning_candidate = candidate
+            self._board_warning_samples = 1
+            return
+        self._board_warning_samples += 1
+        try:
+            minimum = max(1, int(getattr(
+                getattr(self.hw, "config", None), "BOARD_WARNING_MIN_STABLE_SAMPLES", 2
+            )))
+        except (TypeError, ValueError):
+            minimum = 2
+        if self._board_warning_samples < minimum:
+            return
+        illegal_move = self._single_observed_red_move(layout)
+        if illegal_move is not None and illegal_move[0] == illegal_move[1]:
+            message = f"⚠️ Unstable FEN detection at {xiangqi.format_square(illegal_move[0])}"
+        elif illegal_move is not None:
+            message = self._rejected_red_move_status(*illegal_move)
+        else:
+            message = "⚠️ Board does not match the expected position."
+        color = (180, 0, 0) if message == CHECK_STATUS_MESSAGE else (180, 100, 0)
+        self.state.set_status(message, color=color, duration=5.0)
+        self._board_warning_message = message
+
+    def _clear_board_warning(self):
+        self._board_warning_candidate = None
+        self._board_warning_samples = 0
+        set_status = getattr(self.state, "set_status", None)
+        if (self._board_warning_message is not None
+                and getattr(self.state, "status_message", None) == self._board_warning_message
+                and callable(set_status)):
+            set_status("", duration=0)
+        self._board_warning_message = None
+
+    def _single_observed_red_move(self, layout):
+        """Return one observed Red source/destination pair, if unambiguous."""
+        sources, destinations = [], []
+        try:
+            for row in range(10):
+                for col in range(9):
+                    expected = self.state.board[row][col]
+                    observed = layout[row][col]
+                    if not isinstance(observed, str):
+                        return None
+                    if expected.startswith("r") and observed != expected:
+                        sources.append((col, row))
+                    if observed.startswith("r") and observed != expected:
+                        destinations.append((col, row))
+        except (IndexError, TypeError):
+            return None
+        if len(sources) == 1 and len(destinations) == 1:
+            return sources[0], destinations[0]
+        return None
 
     def _maybe_activate_unified_turn(self):
         current_epoch = getattr(self.state, "game_epoch", 0)
@@ -101,11 +171,13 @@ class InputHandler:
             return False
         capability = self._interaction_capability()
         if (self.state.turn != "r" or self.state.game_over
-                or not getattr(self.hw, "yolo_detector", None) or not self.hw.yolo_detector.has_baseline()):
+                or not self.hw.yolo_detector or not self.hw.yolo_detector.has_baseline()):
             self._player_turn_arbiter.deactivate()
             self._unified_active = False
             return False
         if not self._unified_active:
+            # SHADOW must remain observable with partial hardware, but it has
+            # zero commit authority.  UNIFIED keeps the stricter capability.
             activation_capability = (InteractionCapability.AVAILABLE
                                      if self._player_turn_mode == PlayerTurnMode.SHADOW
                                      else capability)
@@ -113,310 +185,400 @@ class InputHandler:
             self._unified_active = self._player_turn_arbiter.state.name != "INACTIVE"
         return self._unified_active
 
-    # =========================================================================
-    # 1. XỬ LÝ CHUỘT (MOUSE INPUT - CLICK BUTTONS & CLICK-TO-MOVE)
-    # =========================================================================
-    def handle_mouse_down(self, mx: int, my: int):
-        # 0. Nút Tiếp tục quét FEN khi đang ở manual override
-        if BTN_RESUME_SCAN_RECT.collidepoint(mx, my) and getattr(self.state, "manual_override_active", False):
-            self.resume_automatic_scanning()
+    def handle_mouse_down(self, mx, my):
+        import pygame  # type: ignore
+        client_actions = (
+            (BTN_SCAN_FEN_RECT, pygame.K_v),
+            (BTN_CONFIRM_MOVE_RECT, pygame.K_SPACE),
+            (BTN_EMERGENCY_RECT, pygame.K_m),
+            (BTN_ROLLBACK_RECT, pygame.K_z),
+        )
+        for rect, key in client_actions:
+            if rect.collidepoint(mx, my) and not self.state.game_over:
+                self.handle_keyboard(key)
+                return
+
+        if BTN_CONTINUE_RECT.collidepoint(mx, my):
+            if (getattr(self.state, "snapshot_continue_required", False)
+                    and not self.state.game_over):
+                self._continue_after_snapshot_pause()
             return
 
-        # 1. Nút Xin đi lại (Undo Round)
-        if BTN_UNDO_RECT.collidepoint(mx, my):
-            self.state.undo_round(self.hw)
+        # Surrender Button
+        if BTN_SURRENDER_RECT.collidepoint(mx, my) and not self.state.game_over:
+            print("[GAME] YOU SURRENDER!")
+            self.state.handle_game_over("b")
+            self.state.api_client.end_match(winner="BLACK", reason="RESIGN")
             return
 
-        # 2. Nút Gợi ý nước đi (Hint)
-        if BTN_HINT_RECT.collidepoint(mx, my):
-            self._handle_hint()
-            return
-
-        # 3. Nút Ván mới (New Game)
+        # New Game Button
         if BTN_NEW_GAME_RECT.collidepoint(mx, my):
             self.state.reset_game(self.hw)
             return
 
-        # 4. Nút Xin thua (Surrender / Resign)
-        if BTN_SURRENDER_RECT.collidepoint(mx, my):
-            self._handle_surrender()
-            return
-
-        # 5. Nút Giảm ELO [-]
-        if BTN_ELO_PREV_RECT.collidepoint(mx, my):
-            self._step_elo(-1)
-            return
-
-        # 6. Nút Tăng ELO [+]
-        if BTN_ELO_NEXT_RECT.collidepoint(mx, my):
-            self._step_elo(1)
-            return
-
-        # 7. Danh sách 8 nút chọn nhanh ELO (800 - 3000)
-        for target_elo, rect in ELO_BUTTON_RECTS.items():
-            if rect.collidepoint(mx, my):
-                self._set_elo(target_elo)
+        # Manual Override (Mouse Drag)
+        if (self.state.allow_mouse_move or self.state.manual_override_active) and not self.state.game_over:
+            if self._player_turn_mode == PlayerTurnMode.UNIFIED:
+                self.state.set_status("⚠️ UNIFIED: cần xác nhận bàn cờ vật lý trước.", color=(180, 100, 0))
                 return
-
-        # 8. Tương tác bàn cờ (Click-to-Move cho người chơi)
-        if (self.state.allow_mouse_move or getattr(self.state, "manual_override_active", False)) and self._human_turn and not self.state.game_over:
             c, r = BoardRenderer.pixel_to_grid(mx, my)
             if 0 <= c < NUM_COLS and 0 <= r < NUM_ROWS:
                 clicked_piece = self.state.board[r][c]
-
-                # Nếu đang có quân được chọn
-                if self.state.selected_pos is not None:
-                    src = self.state.selected_pos
-                    dst = (c, r)
-
-                    # Bấm lại chính nó -> Hủy chọn (Deselect)
-                    if dst == src:
-                        self.state.selected_pos = None
-                        return
-
-                    # Bấm sang một quân khác của phe Đỏ -> Đổi quân được chọn
-                    if clicked_piece.startswith(self.state.turn):
-                        self.state.selected_pos = (c, r)
-                        return
-
-                    # Thử đi tới ô được click
+                
+                # Select a piece
+                active_color = self.state.turn
+                if clicked_piece.startswith(active_color):
+                    self.state.selected_pos = (c, r)
+                    
+                # Move a selected piece
+                elif self.state.selected_pos:
+                    src, dst = self.state.selected_pos, (c, r)
                     p_name = self.state.board[src[1]][src[0]]
-                    if xiangqi.is_valid_move(src, dst, self.state.board, self.state.turn):
-                        if (getattr(getattr(self.hw, "config", None), "ROBOT_BACKEND", "VIRTUAL").upper() == "PHYSICAL"
-                                and not getattr(self.hw, "dry_run", True)):
-                            expected, _ = xiangqi.make_temp_move(self.state.board, (src, dst))
-                            if not self.hw.verify_physical_board(expected):
-                                self.state.set_status("❌ Bàn thật chưa xác nhận nước đi.", color=(180, 0, 0), duration=7)
-                                return
-                        if getattr(self.state, "manual_override_active", False) and hasattr(self.state, "save_rollback_state"):
-                            occ = getattr(getattr(self.hw, "yolo_detector", None), "_baseline_occ", None)
-                            b_time = getattr(getattr(self.hw, "yolo_detector", None), "_baseline_time", None)
-                            self.state.save_rollback_state(occ, b_time)
-
-                        print(f"[UI] 🖱️ Người dùng đi cờ: {p_name} {src} ➜ {dst}")
-                        accepted = self.state.process_human_move(src, dst, p_name)
-                        if accepted is False:
-                            return
+                    
+                    if xiangqi.is_valid_move(src, dst, self.state.board, active_color):
+                        print("[UI] 🖱️ Người dùng đi cờ trên màn hình.")
+                        detector = getattr(self.hw, "yolo_detector", None)
+                        if detector and detector.has_baseline():
+                            occ = [row[:] for row in detector._baseline_occ]
+                            self.state.save_rollback_state(occ, detector._baseline_time)
+                        if getattr(self.state, "emergency_mode", False):
+                            emergency_commit = getattr(self.state, "process_emergency_move", None)
+                            if callable(emergency_commit):
+                                emergency_commit(src, dst, p_name)
+                                committed = True
+                            else:
+                                # Lightweight test/dry-run state objects only
+                                # expose the legacy Red commit hook.
+                                committed = (active_color == "r" and
+                                             self._commit_human_move(src, dst, p_name, source="EMERGENCY"))
+                        elif active_color == "r" or bool(getattr(self.state, "is_human_turn", False)):
+                            committed = self._commit_human_move(src, dst, p_name, source="MOUSE")
+                        else:
+                            committed = False
                         self.state.selected_pos = None
-                        self.state.hint_move = None
-                        self.state.manual_override_active = False
-
-                        # Chụp lại baseline nếu camera đang hoạt động
-                        if self.hw and hasattr(self.hw, "cam_monitor") and self.hw.cam_monitor:
+                        # Emergency mode remains active until the operator
+                        # presses M again; normal mouse fallback keeps its old
+                        # one-move behavior.
+                        if not getattr(self.state, "emergency_mode", False):
+                            self.state.manual_override_active = not committed
+                        
+                        # Retake T1 baseline after manual override
+                        if committed and self.hw.cam_monitor:
+                            print("[UI] 📸 Đang chụp lại T1 baseline sau khi Override...")
+                            self.state.set_status("📸 Cập nhật Mắt Camera...", color=(0, 100, 180), duration=2.0)
                             self.hw.capture_baseline_if_needed(force_delay=1.0)
                     else:
-                        print(f"[UI] ❌ Nước đi không hợp lệ: {src} ➜ {dst}")
-                        self.state.set_status("❌ Nước đi không hợp lệ!", color=(220, 38, 38), duration=2.5)
+                        print(f"Invalid move: {xiangqi.format_move(src, dst)}")
+                        self.state.set_status(
+                            self._rejected_red_move_status(src, dst),
+                            color=(180, 0, 0),
+                        )
                         self.state.set_invalid_flash(dst[0], dst[1])
+                        self.state.selected_pos = None
+
+    def _fresh_confirmed_layout(self):
+        """Two separately captured, identical complete board observations."""
+        import numpy as np
+        from src.vision.cchess_recognizer import validate_board_sanity
+        camera = getattr(self.hw, "cam_monitor", None)
+        recognizer = getattr(self.hw, "recognize_board_state", None)
+        if camera is None or not callable(recognizer):
+            return None
+        if self._physical_recovery_required() and not getattr(self.hw, "camera_calibration_ready", False):
+            return None
+        first = None
+        threshold = float(getattr(getattr(self.hw, "config", None), "CCHESS_RECOVERY_MIN_CONFIDENCE", 0.5))
+        try:
+            for _ in range(2):
+                frame, _ = camera.get_fresh_snapshot()
+                result = recognizer(frame) if frame is not None else None
+                if not result or not result.get("success"):
+                    return None
+                board = result.get("board")
+                if (not isinstance(board, (list, tuple)) or len(board) != 10
+                        or any(not isinstance(row, (list, tuple)) or len(row) != 9 for row in board)):
+                    return None
+                sane, _ = validate_board_sanity(board)
+                if not sane:
+                    return None
+                if "quality_ok" in result:
+                    quality = result["quality_ok"] is True
                 else:
-                    # Chưa có quân chọn -> Nếu bấm trúng quân Đỏ thì chọn quân
-                    if clicked_piece.startswith(self.state.turn):
-                        self.state.selected_pos = (c, r)
+                    confidence = np.asarray(result.get("confidence", []), dtype=float)
+                    quality = (confidence.shape == (10, 9) and np.isfinite(confidence).all()
+                               and float(confidence.min()) >= threshold)
+                if not quality:
+                    return None
+                board = [list(row) for row in board]
+                if first is not None and board != first:
+                    return None
+                first = board
+            return first
+        except Exception as exc:
+            print(f"[FULL SCAN] Fresh board unavailable: {exc}")
+            return None
 
-    # =========================================================================
-    # 2. XỬ LÝ PHÍM TẮT (KEYBOARD INPUT)
-    # =========================================================================
+    def _rescan_confirmed_board(self):
+        """Explicit operator recovery; never sends robot or gripper commands."""
+        layout = self._fresh_confirmed_layout()
+        apply = getattr(self.state, "apply_confirmed_board", None)
+        if layout is None or not callable(apply) or not apply(layout):
+            self.state.set_status("Full scan rejected: need two matching clear, calibrated board frames.", color=(180, 0, 0), duration=12.0)
+            return False
+        self._board_stability_monitor.reset()
+        self._observed_baseline_time = None
+        capture = getattr(self.hw, "capture_baseline_if_needed", None)
+        captured = bool(capture(force_delay=0)) if callable(capture) else False
+        self.state.manual_override_active = not captured
+        self.state.snapshot_continue_required = not captured
+        self.state.emergency_mode = False
+        if not getattr(self.state, "turn_confirmation_required", False):
+            self.state.set_status("Full board synchronized." if captured else "Board synchronized; capture a fresh baseline before continuing.", duration=10.0)
+        return True
+
+    def _confirm_human_camera_move(self):
+        from src.vision.move_observation import derive_move_observation
+        if getattr(self.state, "physical_sync_fault", False) or getattr(self.state, "move_sync_error", None):
+            return False
+        layout = self._fresh_confirmed_layout()
+        if layout is None:
+            return False
+        observation = derive_move_observation(self.state.board, layout, player_color=self.state.turn)
+        if not observation.success:
+            return False
+        expected, _ = xiangqi.make_temp_move(self.state.board, (observation.src, observation.dst))
+        if expected != layout:
+            return False
+        return self._commit_human_move(observation.src, observation.dst, observation.piece, source="CAMERA_HUMAN_VS_HUMAN")
+
+    def _physical_recovery_required(self):
+        cfg = getattr(self.hw, "config", None)
+        return str(getattr(cfg, "ROBOT_BACKEND", "VIRTUAL")).upper() == "PHYSICAL" and not getattr(self.hw, "dry_run", getattr(cfg, "DRY_RUN", True))
+
+    def _verify_recovery_board(self, board):
+        verifier = getattr(self.hw, "verify_physical_board", None)
+        if not callable(verifier):
+            return False
+        try:
+            return bool(verifier(board))
+        except Exception as exc:
+            print(f"[RECOVERY] Fresh board verification failed: {exc}")
+            return False
+
+    def resume_automatic_scanning(self):
+        """Install a fresh physical baseline, then re-enable automatic polling.
+
+        The old baseline belongs to the board state before the unresolved
+        observation, so retaining it would immediately report the same fault.
+        A failed snapshot leaves scanning paused rather than accepting a blind
+        recovery.
+        """
+        detector = getattr(self.hw, "yolo_detector", None)
+        camera = getattr(self.hw, "cam_monitor", None)
+        if detector is None or camera is None:
+            self.state.set_status("❌ Không thể tiếp tục quét: camera chưa sẵn sàng.", color=(180, 0, 0), duration=8.0)
+            return False
+
+        # Do not turn an already divergent physical position into the new
+        # reference image.  Hardware without an identity verifier keeps the
+        # legacy supervised-baseline fallback, but a verifier is authoritative
+        # whenever it is available.
+        verifier = getattr(self.hw, "verify_physical_board", None)
+        reconciliation_available = bool(
+            getattr(self.hw, "board_reconciler", None) and camera
+        )
+        if self._physical_recovery_required() and not callable(verifier):
+            self.state.set_status("Camera identity verification unavailable; recovery remains paused.", color=(180, 0, 0), duration=10.0)
+            return False
+        if self._physical_recovery_required() or (reconciliation_available and callable(verifier)):
+            try:
+                board_matches = verifier(self.state.board)
+            except Exception as exc:
+                print(f"[RESUME SCAN] Physical-board verification error: {exc}")
+                board_matches = False
+            if not board_matches:
+                self.state.set_status(
+                    "❌ Bàn thật chưa khớp FEN. Chỉnh lại bàn rồi bấm tiếp tục quét.",
+                    color=(180, 0, 0), duration=10.0,
+                )
+                return False
+
+        self.state.set_status("📸 Đang lấy baseline mới để tiếp tục quét...", color=(0, 100, 180), duration=4.0)
+        self._board_stability_monitor.reset()
+        self._observed_baseline_time = None
+        captured = bool(self.hw.capture_baseline_if_needed(force_delay=0.0))
+        if not captured:
+            self.state.set_status("❌ Không lấy được baseline; quét vẫn đang tạm dừng.", color=(180, 0, 0), duration=8.0)
+            return False
+
+        self.state.manual_override_active = False
+        self.state.emergency_mode = False
+        self._last_move_confirmation_failure = None
+        self.state.set_status("✅ Đã tiếp tục tự động quét FEN.", color=(0, 120, 0), duration=6.0)
+        return True
+
     def handle_keyboard(self, key):
-        if getattr(self.state, "turn_confirmation_required", False):
-            if key in (pygame.K_1, pygame.K_KP1):
-                self.state.confirm_turn_after_rescan("r")
-            elif key in (pygame.K_2, pygame.K_KP2):
-                self.state.confirm_turn_after_rescan("b")
+        import pygame  # type: ignore
+        if key == pygame.K_F4:
+            self._rescan_confirmed_board()
             return
-        # U KEY: Undo Last Move (Hoàn tác nước cờ)
-        if key == pygame.K_u:
-            self.state.undo_round(self.hw)
+        if key in (pygame.K_1, pygame.K_2) and getattr(self.state, "turn_confirmation_required", False):
+            self.state.confirm_turn_after_rescan("r" if key == pygame.K_1 else "b")
             return
-
-        # H KEY: Gợi ý nước đi (Hint)
-        if key == pygame.K_h:
-            self._handle_hint()
+        if self.state.game_over:
             return
 
-        # N KEY: Ván mới (New Game)
-        if key == pygame.K_n:
-            self.state.reset_game(self.hw)
-            return
-
-        # PHÍM 1-8: Đổi cấp độ ELO của AI
-        elo_key_map = {
-            pygame.K_1: 800,
-            pygame.K_2: 1100,
-            pygame.K_3: 1400,
-            pygame.K_4: 1700,
-            pygame.K_5: 2000,
-            pygame.K_6: 2300,
-            pygame.K_7: 2600,
-            pygame.K_8: 3000,
-        }
-        if key in elo_key_map:
-            self._set_elo(elo_key_map[key])
-            return
-
-        # [ KEY / ] KEY / - / +: Tăng hoặc giảm nấc ELO
-        if key in (pygame.K_LEFTBRACKET, pygame.K_MINUS):
-            self._step_elo(-1)
-            return
-        elif key in (pygame.K_RIGHTBRACKET, pygame.K_EQUALS):
-            self._step_elo(1)
-            return
-
-        # G KEY: Test Gripper Tool DO0
-        if key == pygame.K_g:
-            self._handle_gripper_test(do_id=0)
-            return
-
-        # I KEY: Lấy dữ liệu & Kiểm tra kết nối từ Robot FR3
-        # M KEY: Emergency manual client mode
-        if key == pygame.K_m and not self.state.game_over:
-            self.state.manual_override_active = True
-            self.state.set_status("⚠️ Emergency client mode enabled: Click to move manually.", color=(234, 88, 12), duration=10.0)
-            return
-
-        if self.state.allow_mouse_move or self.state.game_over or not self._human_turn:
+        if key == pygame.K_v:
+            if self.state.physical_sync_fault:
+                self._reconcile_physical_sync_fault()
+            else:
+                self.resume_automatic_scanning()
             return
 
         # Z KEY: Rollback
         if key == pygame.K_z:
             self.state.handle_rollback(self.hw)
 
-        # SPACE KEY: Trigger YOLO / Camera Detection
+        # M KEY: Emergency client-side move mode. This is intentionally
+        # explicit so a camera failure cannot silently switch control paths.
+        elif key == pygame.K_m:
+            enabled = not getattr(self.state, "emergency_mode", False)
+            if not enabled and self._physical_recovery_required():
+                self.resume_automatic_scanning()
+                return
+            self.state.emergency_mode = enabled
+            self.state.manual_override_active = enabled
+            self._board_stability_monitor.reset()
+            self.state.set_status(
+                ("⚠️ Manual/Emergency mode active — automatic camera confirmation is paused."
+                 if enabled else "✅ Đã tắt Emergency mode — tiếp tục quét camera."),
+                color=(180, 100, 0), duration=12.0,
+            )
+            
+        # SPACE KEY: Trigger YOLO Detection
         elif key == pygame.K_SPACE:
             self._handle_space_key()
 
-    # =========================================================================
-    # 3. HELPER ACTIONS (ĐỔI ELO, GỢI Ý, XIN THUA, TEST THIẾT BỊ)
-    # =========================================================================
-    def _set_elo(self, target_elo: int):
-        """Đặt mức ELO cho AI qua AIController."""
-        if self.hw and hasattr(self.hw, "ai_ctrl") and self.hw.ai_ctrl:
-            elo, title = self.hw.ai_ctrl.set_elo(target_elo)
-            self.state.ai_elo = elo
-            self.state.ai_elo_title = title
-            self.state.set_status(f"🎯 AI ELO: {title}", color=(234, 88, 12), duration=3.0)
-            print(f"[UI] 🎯 Đã đổi AI ELO thành {elo} ({title})")
-
-    def _step_elo(self, direction: int):
-        """Tăng hoặc giảm 1 nấc ELO."""
-        if self.hw and hasattr(self.hw, "ai_ctrl") and self.hw.ai_ctrl:
-            elo, title = self.hw.ai_ctrl.step_elo(direction)
-            self.state.ai_elo = elo
-            self.state.ai_elo_title = title
-            self.state.set_status(f"🎯 AI ELO: {title}", color=(234, 88, 12), duration=3.0)
-            print(f"[UI] 🎯 Đã đổi AI ELO thành {elo} ({title})")
-
-    def _handle_hint(self):
-        """Tìm và hiển thị nước đi gợi ý cho người chơi."""
-        if self.state.game_over:
+    def _reconcile_physical_sync_fault(self):
+        """Supervised recovery for a stopped physical-board synchronization."""
+        pending = self.state.pending_ai_move
+        if not pending and self._physical_recovery_required():
+            if not self._verify_recovery_board(self.state.board):
+                self.state.set_status("Fresh full-board verification failed; emergency correction remains paused.", color=(180, 0, 0), duration=10.0)
+                return
+            sync = getattr(self.state, "sync_current_board", None)
+            if callable(sync) and not sync():
+                return
+            if self.resume_automatic_scanning():
+                self.state.physical_sync_fault = False
+                self.state.snapshot_continue_required = False
+                self.state.snapshot_continue_can_commit_pending = False
+                clear = getattr(self.state, "clear_move_sync_error", None)
+                if callable(clear):
+                    clear()
             return
-        if self.state.turn != "r":
-            self.state.set_status("⚠️ Đang trong lượt của AI, hãy đợi AI đi xong!", color=(200, 100, 0), duration=2.5)
+        if not pending or not callable(getattr(self.hw, "verify_physical_board", None)):
+            self.state.set_status("❌ Không có trạng thái đối soát để khôi phục.", color=(180, 0, 0), duration=8.0)
             return
 
-        if self.hw and hasattr(self.hw, "ai_ctrl") and self.hw.ai_ctrl:
-            board_snap = [row[:] for row in self.state.board]
-
-            def _hint_worker():
-                self.state.set_status("💡 AI đang tìm nước gợi ý tốt nhất...", color=(202, 138, 4), duration=2.0)
-                hint = self.hw.ai_ctrl.pick_move(board_snap, color="r")
-                if hint:
-                    self.state.hint_move = hint
-                    self.state.hint_expiry = time.time() + 6.0
-                    hs, hd = hint
-                    p = self.state.board[hs[1]][hs[0]]
-                    self.state.set_status(f"💡 Gợi ý: {p} ({hs[0]},{hs[1]}) ➜ ({hd[0]},{hd[1]})", color=(168, 85, 247), duration=6.0)
-                    print(f"[HINT] 💡 Gợi ý nước đi: {p} {hs} ➜ {hd}")
-                else:
-                    self.state.set_status("⚠️ Không tìm được nước gợi ý!", color=(180, 100, 0), duration=2.5)
-
-            threading.Thread(target=_hint_worker, daemon=True).start()
-
-    def _handle_surrender(self):
-        """Xử lý khi người chơi xin thua."""
-        if not self.state.game_over:
-            print("[GAME] YOU SURRENDER!")
-            self.state.handle_game_over("b", reason="XIN THUA")
-            if hasattr(self.state, "api_client") and self.state.api_client:
-                try:
-                    self.state.api_client.end_match(winner="BLACK", reason="RESIGN")
-                except Exception:
-                    pass
-            self.state.set_status("🏳️ Bạn đã xin thua ván cờ!", color=(220, 38, 38), duration=5.0)
-
-    def _handle_gripper_test(self, do_id=0):
-        if self.hw.gripper_driver is not None:
-            def _driver_worker():
-                action_name = "CLOSE" if do_id == 0 else "OPEN"
-                print(f"\n[GRIPPER TEST] 🔧 Đang test kích hoạt GripperDriver: {action_name}...")
-                self.state.set_status(f"🔧 Test Gripper: {action_name}...", color=(0, 150, 0), duration=2.0)
-                try:
-                    if do_id == 0:
-                        ok = self.hw.gripper_driver.close()
-                    else:
-                        ok = self.hw.gripper_driver.open()
-                    msg = "✅ Thành công!" if ok else "⚠️ Thất bại!"
-                    self.state.set_status(f"Gripper {action_name}: {msg}", color=(0, 100, 180), duration=2.0)
-                except Exception as e:
-                    print(f"[GRIPPER TEST] ❌ Lỗi test Gripper: {e}")
-                    self.state.set_status(f"❌ Lỗi: {e}", color=(180, 0, 0), duration=3.0)
-
-            threading.Thread(target=_driver_worker, daemon=True).start()
+        self.state.set_status("📸 Đang đối soát lại bàn thật...", color=(0, 100, 180), duration=5.0)
+        # No robot command is issued here.  Matching the old board means the
+        # arm did not complete the move; matching expected_board means it did.
+        if self._verify_recovery_board(self.state.board):
+            self.state.clear_pending_ai_move()
+            self.state.snapshot_continue_required = False
+            if self._physical_recovery_required():
+                self.state.physical_sync_fault = True
+                self.state.manual_override_active = True
+                self.state.snapshot_continue_required = True
+                self.state.set_status("Verified old board. Physical retry remains paused; inspect the arm before restarting.", color=(180, 100, 0), duration=15.0)
+                return
+            retry = getattr(self.state, "prepare_ai_retry_after_physical_miss", None)
+            if callable(retry) and retry():
+                self.state.set_status(
+                    "↩️ AI retrying after a physical board mismatch.",
+                    color=(0, 100, 180), duration=10.0,
+                )
+            else:
+                self.state.set_status(
+                    "↩️ Bàn thật vẫn ở FEN cũ, nhưng không thể khởi động lại lượt AI.",
+                    color=(180, 0, 0), duration=10.0,
+                )
             return
 
-        if not self.hw.gripper_driver:
-            print("[GRIPPER TEST] ❌ GripperDriver chưa được cấu hình!")
-            self.state.set_status("❌ GripperDriver chưa cấu hình!", color=(180, 0, 0), duration=3.0)
+        if self._verify_recovery_board(pending["expected_board"]):
+            self._finalize_pending_ai_move(
+                "✅ Đã xác nhận bàn thật — đến lượt bạn.", (0, 100, 180)
+            )
             return
 
-    def _handle_robot_info(self):
-        if self.hw.backend is not None:
-            snap = self.hw.backend.get_state_snapshot()
-            print("\n" + "="*50)
-            print("🤖 [THÔNG TIN TRẠNG THÁI ROBOT FR3 - UNIFIED BACKEND]")
-            print(f"  - Robot Model: {snap.robot_model}")
-            print(f"  - Kết nối: {'✅ ĐANG KẾT NỐI' if snap.connected else '❌ MẤT KẾT NỐI'}")
-            print(f"  - Trạng thái Motion: {snap.motion_state}")
-            print(f"  - Khớp Joints (deg): {[round(q, 2) for q in snap.joints_deg]}")
-            print(f"  - TCP Pose (mm, deg): {[round(p, 2) for p in snap.tcp_pose_mm_deg]}")
-            print(f"  - Flange Pose (mm, deg): {[round(p, 2) for p in snap.flange_pose_mm_deg]}")
-            print("="*50 + "\n")
-            self.state.set_status("✅ Đã lấy thông số từ Backend (Xem Terminal)", color=(0, 100, 180), duration=4.0)
-            return
+        src, dst = pending["move"]
+        if pending.get("captured_piece") != ".":
+            # Occupancy alone cannot prove captured identity or the rest of the board.
+            self.state.set_status(
+                "⚠️ Nước ăn chưa hoàn tất: chuyển quân Đen "
+                f"({src[0]},{src[1]})→({dst[0]},{dst[1]}) rồi nhấn V.",
+                color=(180, 100, 0), duration=20.0,
+            )
+        else:
+            self.state.set_status(
+                "❌ Bàn thật không khớp trước/sau nước đi. Chỉnh tay rồi nhấn V.",
+                color=(180, 0, 0), duration=15.0,
+            )
 
-        if not self.hw.robot or not self.hw.robot.connected:
-            print("[ROBOT INFO] ❌ Robot chưa kết nối!")
-            self.state.set_status("❌ Robot chưa kết nối!", color=(180, 0, 0), duration=3.0)
-            return
+    def _finalize_pending_ai_move(self, status_message, status_color):
+        """Commit the one pending AI move after a verified recovery path."""
+        if not self.state.commit_pending_ai_move():
+            return False
+        self.state.snapshot_continue_required = False
+        self.state.api_client.send_move_update_board(self.state.current_fen)
+        if xiangqi.get_king_pos("r", self.state.board) is None:
+            self.state.handle_game_over("b")
+            self.state.api_client.end_match(winner="BLACK", reason="CHECKMATE")
+        else:
+            captured = self.hw.capture_baseline_if_needed(force_delay=1.0)
+            if self._physical_recovery_required() and not captured:
+                self.state.manual_override_active = True
+                self.state.snapshot_continue_required = True
+                self.state.set_status("Move reconciled; camera baseline failed and scanning remains paused.", color=(180, 0, 0), duration=10.0)
+                return True
+            self.state.manual_override_active = False
+            self.state.emergency_mode = False
+            self.state.snapshot_continue_can_commit_pending = False
+            clear = getattr(self.state, "clear_move_sync_error", None)
+            if callable(clear):
+                clear()
+            self.state.set_status(status_message, color=status_color, duration=8.0)
+        return True
 
-    def _handle_space_key(self, auto_retry=False) -> bool:
+    def _handle_space_key(self, auto_retry=False):
+        import config
+        if str(getattr(config, "GAME_MODE", "HUMAN_VS_ROBOT")).upper() == "HUMAN_VS_HUMAN":
+            return self._confirm_human_camera_move()
         if self._player_turn_mode == PlayerTurnMode.UNIFIED:
             self.state.set_status("⚠️ UNIFIED: SPACE chỉ yêu cầu poll state-machine.", color=(180, 100, 0))
             return False
         print("\n[SPACE] 🎯 Người chơi bấm SPACE — đang chụp T2 snapshot...")
-        self.state.set_status("📸 Đang phân tích bàn cờ...", color=(0, 100, 180), duration=3.0)
-
-        if not self._human_turn or self.state.game_over:
-            print("[SPACE] ⚠️ Chưa đến lượt người chơi hoặc ván đấu đã kết thúc.")
+        self.state.set_status("📸  Đang phân tích YOLO...", color=(0, 100, 180), duration=3.0)
+        
+        if not self.hw.yolo_detector or not self.hw.cam_monitor:
+            self.state.set_status("❌  Hệ thống nhận diện chưa khởi tạo!", color=(180, 0, 0))
             return False
-
-        if not getattr(self.hw, "yolo_detector", None) or not getattr(self.hw, "cam_monitor", None):
-            self.state.set_status("❌ Hệ thống nhận diện chưa khởi tạo!", color=(180, 0, 0))
-            return False
-
+            
         frame, detections = self.hw.cam_monitor.get_fresh_snapshot()
-
-        # Validate / Capture YOLO baseline if detector is active
+        
+        # Validate Baseline
         if not self.hw.yolo_detector.has_baseline():
             print("[SPACE] ⚠️ Chưa có T1 baseline — chụp ngay...")
-            if hasattr(self.hw.yolo_detector, "capture_baseline") and self.hw.yolo_detector.capture_baseline(frame, detections):
+            if self.hw.yolo_detector.capture_baseline(frame, detections):
                 self.state.set_status("📸 Đã làm mới Trạng thái bàn cờ hiện tại", color=(0, 100, 180), duration=5.0)
             else:
                 self.state.set_status("❌ Không chụp được baseline!", color=(180, 0, 0))
             return False
 
         # SAVE ROLLBACK STATE TRƯỚC KHI DETECT (để có thể rollback khi lỗi)
-        occ = [row[:] for row in getattr(self.hw.yolo_detector, "_baseline_occ", [])]
-        b_time = getattr(self.hw.yolo_detector, "_baseline_time", None)
+        occ = [row[:] for row in self.hw.yolo_detector._baseline_occ]
+        b_time = self.hw.yolo_detector._baseline_time
         self.state.save_rollback_state(occ, b_time)
 
         # CCHESS ONNX Recognition (nếu đã kích hoạt)
@@ -436,9 +598,25 @@ class InputHandler:
             frame, detections, self.state.board, cchess_result=cchess_result
         )
 
-        if src:
-            print(f"[YOLO] 👉 Nhận diện đi từ Cột {src[0]} Hàng {src[1]} đến Cột {dst[0]} Hàng {dst[1]}")
+        if self._physical_recovery_required() and not (cchess_result and cchess_result.get("success")):
+            # Occupancy dropout alone cannot establish physical piece identity.
+            src, dst, piece = None, None, None
+        
+        # Full identified layout must agree with the detected transition.
+        # A positive occupancy guess cannot override a contradictory camera board.
+        if cchess_result and cchess_result.get("success"):
+            from src.vision.move_observation import derive_move_observation
+            observation = derive_move_observation(
+                self.state.board, cchess_result.get("board"), player_color="r",
+                confidence_grid=cchess_result.get("confidence"),
+            )
+            if not observation.success or observation.as_tuple() != (src, dst, piece):
+                src, dst, piece = None, None, None
 
+        if src:
+            # Note: Vietnamese name resolution skipped here for brevity, handled by detector UI largely
+            print(f"[YOLO] 👉 Nhận diện nước đi: {xiangqi.format_move(src, dst)}")
+            
         # Verify result
         if src is None:
             print("[SPACE] ❌ YOLO KHÔNG thấy nước đi hợp lệ!")
@@ -447,27 +625,34 @@ class InputHandler:
             )
             if has_new_move:
                 self._last_move_confirmation_failure = "invalid"
-                message = "❌ NƯỚC ĐI KHÔNG HỢP LỆ"
+                message = "⚠️ Board changed, but one legal move could not be identified."
             else:
+                # In auto-retry mode, retain earlier positive evidence of a
+                # changed move rather than letting a later noisy frame erase it.
                 if not auto_retry or self._last_move_confirmation_failure != "invalid":
                     self._last_move_confirmation_failure = "missing"
-                message = "❌ KHÔNG NHẬN DIỆN ĐƯỢC NƯỚC ĐI MỚI"
+                message = "⚠️ No legal move could be identified."
             if not auto_retry:
                 self.state.set_status(message, color=(180, 0, 0), duration=8.0)
                 self.state.manual_override_active = True
-                if hasattr(self.hw, "clear_yolo_baseline"):
-                    self.hw.clear_yolo_baseline()
+                self.state.snapshot_continue_required = True
+                self.state.snapshot_continue_can_commit_pending = False
+                self.hw.clear_yolo_baseline()
             return False
-
+            
         if not xiangqi.is_valid_move(src, dst, self.state.board, "r"):
-            print(f"[SPACE] ❌ YOLO báo nước đi không hợp lệ: {src}->{dst}")
+            print(f"[SPACE] ❌ YOLO báo nước đi không hợp lệ: {xiangqi.format_move(src, dst)}")
             self._last_move_confirmation_failure = "invalid"
             if not auto_retry:
-                self.state.set_status("❌ NƯỚC ĐI KHÔNG HỢP LỆ", color=(180, 0, 0), duration=8.0)
+                self.state.set_status(
+                    self._rejected_red_move_status(src, dst),
+                    color=(180, 0, 0), duration=8.0,
+                )
                 self.state.set_invalid_flash(dst[0], dst[1])
                 self.state.manual_override_active = True
-                if hasattr(self.hw, "clear_yolo_baseline"):
-                    self.hw.clear_yolo_baseline()
+                self.state.snapshot_continue_required = True
+                self.state.snapshot_continue_can_commit_pending = False
+                self.hw.clear_yolo_baseline()
             return False
 
         # Commit move (state đã được save ở trên rồi)
@@ -475,15 +660,62 @@ class InputHandler:
         committed = self._commit_human_move(src, dst, piece, source="SPACE")
         if committed:
             self.state.manual_override_active = False
-            if hasattr(self.hw, "yolo_detector") and hasattr(self.hw.yolo_detector, "capture_baseline"):
-                self.hw.yolo_detector.capture_baseline(frame, detections)
+            self.state.emergency_mode = False
+            self.state.snapshot_continue_required = False
         return committed
 
-    def try_auto_confirm_move(self, retries=10, retry_seconds=0.2) -> bool:
+    def _continue_after_snapshot_pause(self):
+        """Apply the operator-approved recovery shown by the Continue button."""
+        if getattr(self.state, "physical_sync_fault", False):
+            self._reconcile_physical_sync_fault()
+            return
+        else:
+            # Do not install a new baseline blindly: the physical Red move may
+            # exist while FEN still describes the old board.  CChess must
+            # prove either the old board or one unique legal successor.
+            recognizer = getattr(self.hw, "recognize_board_state", None)
+            camera = getattr(self.hw, "cam_monitor", None)
+            frame, _ = camera.get_fresh_snapshot() if camera else (None, [])
+            result = recognizer(frame) if callable(recognizer) and frame is not None else None
+            layout = result.get("board") if result and result.get("success") else None
+            match = LegalSuccessorMatcher(self.state.board).match(layout)
+            if match.kind == MatchKind.UNIQUE:
+                src, dst = match.move
+                piece = self.state.board[src[1]][src[0]]
+                if not self._commit_human_move(src, dst, piece, source="CONTINUE"):
+                    return
+            elif match.kind != MatchKind.BASELINE_EQUAL:
+                self.state.snapshot_continue_required = True
+                self.state.emergency_mode = not self._physical_recovery_required()
+                self.state.manual_override_active = True
+                self.state.set_status(
+                    "⚠️ Không thể xác nhận FEN. Emergency mode đã bật để nhập nước đi.",
+                    color=(180, 100, 0), duration=12.0,
+                )
+                return
+        self._board_stability_monitor.reset()
+        capture = getattr(self.hw, "capture_baseline_if_needed", None)
+        captured = bool(capture(force_delay=0.0)) if callable(capture) else False
+        if not captured:
+            self.state.manual_override_active = True
+            self.state.snapshot_continue_required = True
+            self.state.set_status("Fresh baseline unavailable; recovery remains paused.", color=(180, 0, 0), duration=10.0)
+            return
+        self.state.physical_sync_fault = False
+        self.state.snapshot_continue_required = False
+        self.state.snapshot_continue_can_commit_pending = False
+        self.state.manual_override_active = False
+        self.state.emergency_mode = False
+        message = ("✅ Continue: FEN đã tiếp tục, đang quét bàn cờ mới."
+                   if captured else "✅ Continue: FEN đã tiếp tục. Nhấn SPACE để tạo baseline mới.")
+        self.state.set_status(message, color=(0, 120, 0), duration=10.0)
+
+    def try_auto_confirm_move(self, retries=10, retry_seconds=0.2):
         """Reuse the existing rule-validated snapshot flow after hand exit."""
-        if not self._human_turn or self.state.game_over:
+        import time
+        if self.state.turn != "r" or self.state.game_over:
             return False
-        if not getattr(self.hw, "yolo_detector", None) or not self.hw.yolo_detector.has_baseline():
+        if not self.hw.yolo_detector or not self.hw.yolo_detector.has_baseline():
             reset_monitor = getattr(self.hw, "reset_hand_interaction_monitor", None)
             if reset_monitor:
                 reset_monitor()
@@ -497,7 +729,7 @@ class InputHandler:
                 if reset_monitor:
                     reset_monitor()
                 return True
-            if attempt < retries and float(retry_seconds) > 0:
+            if attempt < retries:
                 time.sleep(float(retry_seconds))
         self.state.manual_override_active = False
         reset_monitor = getattr(self.hw, "reset_hand_interaction_monitor", None)
@@ -510,54 +742,11 @@ class InputHandler:
         print("[AUTO CONFIRM] Failed after retry limit; waiting for SPACE fallback.")
         return False
 
-    def resume_automatic_scanning(self) -> bool:
-        """Install a fresh physical baseline, then re-enable automatic polling."""
-        detector = getattr(self.hw, "yolo_detector", None)
-        camera = getattr(self.hw, "cam_monitor", None)
-        if detector is None or camera is None:
-            self.state.set_status("❌ Không thể tiếp tục quét: camera chưa sẵn sàng.", color=(180, 0, 0), duration=8.0)
-            return False
-
-        verifier = getattr(self.hw, "verify_physical_board", None)
-        reconciliation_available = bool(
-            getattr(self.hw, "board_reconciler", None) and camera
-        )
-        if reconciliation_available and callable(verifier):
-            try:
-                board_matches = verifier(self.state.board)
-            except Exception as exc:
-                print(f"[RESUME SCAN] Physical-board verification error: {exc}")
-                board_matches = False
-            if not board_matches:
-                self.state.set_status(
-                    "❌ Bàn thật chưa khớp FEN. Chỉnh lại bàn rồi bấm tiếp tục quét.",
-                    color=(180, 0, 0), duration=10.0,
-                )
-                return False
-
-        self.state.set_status("📸 Đang lấy baseline mới để tiếp tục quét...", color=(0, 100, 180), duration=4.0)
-        if hasattr(self, "_board_stability_monitor"):
-            self._board_stability_monitor.reset()
-        self._observed_baseline_time = None
-        captured = bool(self.hw.capture_baseline_if_needed(force_delay=0.0))
-        if not captured:
-            self.state.set_status("❌ Không lấy được baseline; quét vẫn đang tạm dừng.", color=(180, 0, 0), duration=8.0)
-            return False
-
-        self.state.manual_override_active = False
-        self._last_move_confirmation_failure = None
-        if getattr(self.state, "turn_confirmation_required", False):
-            self.state.set_status(self.state.move_sync_error, color=(180, 100, 0), duration=30.0)
-        else:
-            self.state.set_status("✅ Đã tiếp tục tự động quét FEN.", color=(0, 120, 0), duration=6.0)
-        return True
-
-    def poll_board_stability(self) -> bool:
+    def poll_board_stability(self):
         """Commit one legal Red move after repeated stable board observations."""
         if (self.state.turn != "r" or self.state.game_over
                 or getattr(self.state, "manual_override_active", False)):
-            if hasattr(self, "_board_stability_monitor"):
-                self._board_stability_monitor.reset()
+            self._board_stability_monitor.reset()
             return False
         now = time.monotonic()
         sample_interval = getattr(
@@ -566,14 +755,14 @@ class InputHandler:
         if now - self._last_stability_poll_at < float(sample_interval):
             return False
         self._last_stability_poll_at = now
-        if not getattr(self.hw, "yolo_detector", None) or not getattr(self.hw, "cam_monitor", None):
+        if not self.hw.yolo_detector or not self.hw.cam_monitor:
             return False
         if not self.hw.yolo_detector.has_baseline():
             self._board_stability_monitor.reset()
             self._observed_baseline_time = None
             return False
 
-        baseline_time = getattr(self.hw.yolo_detector, "_baseline_time", None)
+        baseline_time = self.hw.yolo_detector._baseline_time
         if baseline_time != self._observed_baseline_time:
             if self._board_stability_monitor.candidate is not None:
                 print("[STABILITY] Candidate reset: T1 baseline changed.")
@@ -594,7 +783,10 @@ class InputHandler:
             except Exception as exc:
                 print(f"[STABILITY] CChess recognition error: {exc}")
 
-        # UNIFIED only consumes a fully recognized layout.
+        self._check_board_warning(cchess_result, now)
+
+        # UNIFIED only consumes a fully recognized layout.  A missing red
+        # piece while being held is deliberately incomplete, never a move.
         if self._player_turn_mode != PlayerTurnMode.LEGACY:
             active = self._maybe_activate_unified_turn()
             layout = cchess_result.get("board") if cchess_result and cchess_result.get("success") else None
@@ -618,6 +810,8 @@ class InputHandler:
                 if committed:
                     self._player_turn_arbiter.deactivate()
                 return committed
+            # SHADOW deliberately leaves legacy authoritative while recording
+            # the same decisions in the arbiter state.
             if self._player_turn_mode == PlayerTurnMode.UNIFIED:
                 return False
 
@@ -649,8 +843,8 @@ class InputHandler:
             return False
 
         src, dst, piece = stable_move
-        occ = [row[:] for row in getattr(self.hw.yolo_detector, "_baseline_occ", [])]
-        self.state.save_rollback_state(occ, getattr(self.hw.yolo_detector, "_baseline_time", None))
+        occ = [row[:] for row in self.hw.yolo_detector._baseline_occ]
+        self.state.save_rollback_state(occ, self.hw.yolo_detector._baseline_time)
         print(
             "[STABILITY] Stable legal move confirmed: "
             f"{piece} {src}->{dst}; samples={self._board_stability_monitor.sample_count}, "
@@ -659,7 +853,4 @@ class InputHandler:
         self._last_move_confirmation_failure = None
         committed = self._commit_human_move(src, dst, piece, source="AUTO")
         self._board_stability_monitor.reset()
-        if committed:
-            if hasattr(self.hw, "yolo_detector") and hasattr(self.hw.yolo_detector, "capture_baseline"):
-                self.hw.yolo_detector.capture_baseline(frame, detections)
         return committed

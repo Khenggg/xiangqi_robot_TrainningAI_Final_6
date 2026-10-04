@@ -11,13 +11,12 @@ import queue
 import config
 
 
-def calibrate_perspective_camera(cap, save_path, skip_warmup=False):
+def calibrate_perspective_camera(cap, save_path):
     """Hiệu chỉnh perspective camera bằng cách click 4 góc bàn cờ.
     
     Args:
         cap: cv2.VideoCapture object đã mở
         save_path: đường dẫn lưu file .npy (perspective matrix)
-        skip_warmup: Nếu True, bỏ qua warm-up vì đã warm-up ở bước trước
     
     Returns:
         M: perspective transform matrix (3x3), hoặc None nếu hủy
@@ -26,20 +25,17 @@ def calibrate_perspective_camera(cap, save_path, skip_warmup=False):
         print("[CALIBRATE] DRY_RUN: bỏ qua calibration.")
         return None
 
-    # --- WARM UP camera TRƯỚC khi bắt đầu thread (nếu chưa warm-up) ---
+    # --- WARM UP camera TRƯỚC khi bắt đầu thread ---
     # ⚠️ PHẢI warm-up TRƯỚC, KHÔNG ĐƯỢC chạy song song với capture thread
     #    vì race condition trên cv2.VideoCapture gây frame đen!
-    if not skip_warmup:
-        print("[CALIBRATE] ⏳ Đang chờ camera warm up...", flush=True)
-        for i in range(10):  # Đọc ~10 frame để camera USB ổn định
-            ret, _ = cap.read()
-            if not ret:
-                time.sleep(0.02)
-            time.sleep(0.01)
-        time.sleep(0.1)  # Chờ thêm cho camera ổn định hoàn toàn
-        print("[CALIBRATE] ✅ Camera warm up xong!", flush=True)
-    else:
-        print("[CALIBRATE] ✅ Camera đã warm up từ trước, mở giao diện ngay...", flush=True)
+    print("[CALIBRATE] ⏳ Đang chờ camera warm up...")
+    for i in range(60):  # Đọc ~60 frame để camera USB ổn định (bỏ frame đen)
+        ret, _ = cap.read()
+        if not ret:
+            time.sleep(0.05)
+        time.sleep(0.03)
+    time.sleep(0.5)  # Chờ thêm cho camera ổn định hoàn toàn
+    print("[CALIBRATE] ✅ Camera warm up xong!")
 
     # --- Thread đọc camera liên tục (bắt đầu SAU warm-up) ---
     cal_q = queue.Queue(maxsize=2)
@@ -63,21 +59,20 @@ def calibrate_perspective_camera(cap, save_path, skip_warmup=False):
     def mouse_callback(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN and len(points) < 4:
             points.append((x, y))
-            print(f"  👉 Điểm {len(points)}: ({x}, {y})", flush=True)
+            print(f"  👉 Điểm {len(points)}: ({x}, {y})")
 
     window = "CALIBRATE"
     cv2.namedWindow(window)
     cv2.setMouseCallback(window, mouse_callback)
-    print("\n[CALIBRATE] 🖥️ CỬA SỔ 'CALIBRATE' ĐÃ MỞ TRÊN MÀN HÌNH!", flush=True)
 
-    print("\n=== HƯỚNG DẪN CLICK (QUAN TRỌNG) ===", flush=True)
-    print("👉 Click lần lượt 4 góc bàn cờ thật trên màn hình:", flush=True)
-    print("   1️⃣  Góc Xe Đen (Trái)", flush=True)
-    print("   2️⃣  Góc Xe Đen (Phải)", flush=True)
-    print("   3️⃣  Góc Xe Đỏ (Phải)", flush=True)
-    print("   4️⃣  Góc Xe Đỏ (Trái)", flush=True)
-    print("---------------------------------------------", flush=True)
-    print("⌨️  Phím tắt: 'R'=Làm lại | 'S'=Lưu file (Dùng lưới cờ hiện tại) | 'Q'=Thoát", flush=True)
+    print("\n=== HƯỚNG DẪN CLICK (QUAN TRỌNG) ===")
+    print("👉 Click lần lượt 4 góc bàn cờ thật trên màn hình:")
+    print("   1️⃣  Góc Xe Đen (Trái)")
+    print("   2️⃣  Góc Xe Đen (Phải)")
+    print("   3️⃣  Góc Xe Đỏ (Phải)")
+    print("   4️⃣  Góc Xe Đỏ (Trái)")
+    print("---------------------------------------------")
+    print("⌨️  Phím tắt: 'R'=Làm lại | 'S'=Lưu file | 'Q'=Thoát")
 
     import os
     M = None
@@ -88,21 +83,9 @@ def calibrate_perspective_camera(cap, save_path, skip_warmup=False):
         except Exception:
             M = None
 
-    import time as _t
-    cal_opened_time = _t.time()
-    auto_proceed_timeout_sec = 6.0  # Tự động vào game sau 6s nếu đã có M, không bắt treo chờ 'S'
-
     while True:
-        # 1. Bơm sự kiện Pygame để cửa sổ chính không bao giờ bị Windows báo (Not Responding)
         try:
-            import pygame
-            if pygame.get_init():
-                pygame.event.pump()
-        except Exception:
-            pass
-
-        try:
-            frame = cal_q.get(timeout=0.05)
+            frame = cal_q.get(timeout=0.1)
         except queue.Empty:
             continue
 
@@ -146,17 +129,9 @@ def calibrate_perspective_camera(cap, save_path, skip_warmup=False):
                     cv2.line(display, (int(p1[0]), int(p1[1])),
                              (int(p2[0]), int(p2[1])), (0, 255, 255), 1)
 
-                elapsed = _t.time() - cal_opened_time
-                remaining = max(0, int(auto_proceed_timeout_sec - elapsed))
-                prompt_text = f"Bam 'S' de Luu / Tu dong vao game sau {remaining}s"
+                prompt_text = "OK? Bam 'S' de Luu / Dung lai"
                 cv2.putText(display, prompt_text, (20, 45),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-                # Tự động tiếp tục nếu người dùng không bấm gì sau timeout
-                if elapsed >= auto_proceed_timeout_sec:
-                    np.save(save_path, M)
-                    print(f"✅ Tự động tiếp tục vào game với ma trận: {save_path}", flush=True)
-                    break
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             except:
                 pass
 
@@ -169,7 +144,6 @@ def calibrate_perspective_camera(cap, save_path, skip_warmup=False):
         elif key == ord('r'):
             points.clear()
             M = None
-            cal_opened_time = _t.time() + 60.0  # Reset timer để người dùng thoải mái click lại
             print("🔄 Đã xóa điểm, hãy click lại.")
         elif key == ord('s') and M is not None:
             np.save(save_path, M)

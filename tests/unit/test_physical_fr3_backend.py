@@ -75,6 +75,9 @@ class PhysicalFR3BackendTests(unittest.TestCase):
         backend = PhysicalFR3Backend(ip="192.168.58.2", dry_run=False)
         mock_rpc = MagicMock()
         mock_rpc.SDK_state = True
+        mock_rpc.GetRobotMotionDone.return_value = (0, 1)
+        mock_rpc.GetRobotEmergencyStopState.return_value = (0, 0)
+        mock_rpc.GetRobotErrorCode.return_value = (0, [0, 0])
         mock_rpc.RobotEnable.return_value = 0
         mock_rpc.Mode.return_value = 0
         mock_rpc.MoveJ.return_value = 0
@@ -111,6 +114,9 @@ class PhysicalFR3BackendTests(unittest.TestCase):
         backend = PhysicalFR3Backend(ip="192.168.58.2", dry_run=False)
         mock_rpc = MagicMock()
         mock_rpc.SDK_state = True
+        mock_rpc.GetRobotMotionDone.return_value = (0, 1)
+        mock_rpc.GetRobotEmergencyStopState.return_value = (0, 0)
+        mock_rpc.GetRobotErrorCode.return_value = (0, [0, 0])
         backend._rpc = mock_rpc
         backend._connected = True
         backend._enabled = False
@@ -133,6 +139,9 @@ class PhysicalFR3BackendTests(unittest.TestCase):
         backend = PhysicalFR3Backend(ip="192.168.58.2", dry_run=False)
         mock_rpc = MagicMock()
         mock_rpc.SDK_state = True
+        mock_rpc.GetRobotMotionDone.return_value = (0, 1)
+        mock_rpc.GetRobotEmergencyStopState.return_value = (0, 0)
+        mock_rpc.GetRobotErrorCode.return_value = (0, [0, 0])
         mock_rpc.GetActualJointPosDegree.return_value = (0, [0.0]*6)
         mock_rpc.GetActualTCPPose.return_value = (0, [0.0]*6)
         mock_rpc.GetActualToolFlangePose.return_value = (0, [0.0]*6)
@@ -160,6 +169,9 @@ class PhysicalFR3BackendTests(unittest.TestCase):
         backend = PhysicalFR3Backend(ip="192.168.58.2", dry_run=False)
         mock_rpc = MagicMock()
         mock_rpc.SDK_state = True
+        mock_rpc.GetRobotMotionDone.return_value = (0, 1)
+        mock_rpc.GetRobotEmergencyStopState.return_value = (0, 0)
+        mock_rpc.GetRobotErrorCode.return_value = (0, [0, 0])
         mock_rpc.GetActualJointPosDegree.return_value = (0, [0.0]*6)
         mock_rpc.GetActualTCPPose.return_value = (0, [0.0]*6)
         mock_rpc.GetActualToolFlangePose.return_value = (0, [0.0]*6)

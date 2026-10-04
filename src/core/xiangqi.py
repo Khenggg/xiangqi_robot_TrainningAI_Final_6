@@ -31,6 +31,17 @@ initial_board = [
 def get_board():
     return [row[:] for row in initial_board]
 
+
+def format_square(square):
+    """Format an internal (column, row) board coordinate as a0 through i9."""
+    col, row = square
+    return f"{chr(ord('a') + col)}{row}"
+
+
+def format_move(src, dst):
+    """Format a chess move for human-readable console output."""
+    return f"{format_square(src)} -> {format_square(dst)}"
+
 def get_zobrist_key(board):
     h = 0
     for r in range(NUM_ROWS):
@@ -255,13 +266,6 @@ def find_all_valid_moves(color, board):
     return moves
 
 
-def is_checkmate(color, board) -> bool:
-    """
-    Kiểm tra phe 'color' có bị chiếu bí hoặc tuyệt sát (hết nước đi) không.
-    Trong cờ tướng:
-    - Nếu mất Tướng -> Thua ngay lập tức.
-    - Nếu không còn bất kỳ nước đi hợp lệ nào -> Thua (Chiếu bí hoặc Tuyệt sát).
-    """
-    if get_king_pos(color, board) is None:
-        return True
-    return len(find_all_valid_moves(color, board)) == 0
+def is_checkmate(color, board):
+    """Xiangqi loss: missing king or no legal move (stalemate also loses)."""
+    return get_king_pos(color, board) is None or not find_all_valid_moves(color, board)

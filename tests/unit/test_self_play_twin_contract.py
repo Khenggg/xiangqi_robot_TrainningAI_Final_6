@@ -7,6 +7,7 @@ from unittest.mock import Mock
 from src.core.game_state import GameState
 from src.core.self_play_controller import SelfPlayController, SelfPlayStatus
 from src.domain.game_move import MoveActor
+from src.motion.result import MotionExecutionResult
 
 
 def _tick_until(controller, target):
@@ -22,7 +23,7 @@ def _system():
     state = GameState()
     state.api_client.send_move_update_board = Mock()
     moves = iter([((0, 6), (0, 5)), ((0, 3), (0, 4))])
-    execute = Mock(return_value=SimpleNamespace(success=True))
+    execute = Mock(return_value=MotionExecutionResult.ok())
     home = Mock(side_effect=AssertionError("Self-play issued an unrequested home motion"))
     hw = SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND="VIRTUAL"), dry_run=True,
                          is_robot_ready=True, ai_ctrl=SimpleNamespace(pick_move=lambda *a, **k: next(moves)),

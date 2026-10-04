@@ -1,4 +1,3 @@
 {
-    "kiroAgent.configureMCP": "Disabled",
-    "python.defaultInterpreterPath": "C:\\Users\\Ken\\AppData\\Local\\hermes\\hermes-agent\\venv\\Scripts\\python.exe"
+    "kiroAgent.configureMCP": "Disabled"
 }

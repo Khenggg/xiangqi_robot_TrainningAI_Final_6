@@ -9,6 +9,7 @@ Coordinates:
 
 from dataclasses import dataclass, replace
 import json
+import os
 import logging
 import math
 from pathlib import Path
@@ -89,7 +90,8 @@ class VirtualXiangqiSimulation:
         scene_config_path: Optional[Union[str, Path]] = None,
         enable_collision_guard: bool = True,
     ):
-        self.world = world or VirtualPhysicalWorld()
+        selected_scene = scene_config_path or os.environ.get("XIANGQI_SCENE_CONFIG")
+        self.world = world or VirtualPhysicalWorld(scene_config_path=selected_scene)
         self.backend = backend or VirtualFR3Backend()
         self.telemetry = telemetry
         self.auto_sync_telemetry = auto_sync_telemetry
@@ -107,9 +109,7 @@ class VirtualXiangqiSimulation:
 
         # Project root resolution
         project_root = Path(__file__).resolve().parent.parent.parent
-        self.scene_config_path = Path(scene_config_path) if scene_config_path else (
-            project_root / "shared" / "virtual_fr3_scene.json"
-        )
+        self.scene_config_path = Path(selected_scene or self.world.scene_config_path)
         self._load_scene_config()
 
         # Geometry
@@ -1456,9 +1456,11 @@ class VirtualXiangqiSimulation:
         with self._command_lock:
             with self.acquire_operation_state(RuntimeOperationState.RESETTING):
                 self.backend.stop()
+                if not self.backend.set_gripper(False):
+                    return {"success": False, "status": "RESET_GRIPPER_REJECTED", "error": self.backend._last_error}
                 self.world.release_attached_piece()
-                self.backend.set_gripper(False)
-                self.backend.reset_to_home(speed_factor=speed_factor)
+                if not self.backend.reset_to_home(speed_factor=speed_factor):
+                    return {"success": False, "status": "RESET_HOME_REJECTED", "error": self.backend._last_error}
                 self.clear_error()
                 self._sync_gripper_to_tcp(self.backend.get_state_snapshot())
                 return {"success": True, "status": "ROBOT_RESET_COMPLETE"}
@@ -1504,9 +1506,11 @@ class VirtualXiangqiSimulation:
             with self.acquire_operation_state(RuntimeOperationState.RESETTING):
                 self._validation_in_progress = False
                 self.backend.stop()
+                if not self.backend.set_gripper(False):
+                    return {"success": False, "status": "RESET_GRIPPER_REJECTED", "error": self.backend._last_error}
                 self.world.release_attached_piece()
-                self.backend.set_gripper(False)
-                self.backend.reset_to_home()
+                if not self.backend.reset_to_home():
+                    return {"success": False, "status": "RESET_HOME_REJECTED", "error": self.backend._last_error}
                 self.clear_error()
 
                 # Ensure any pieces are settled before resetting placement
@@ -1514,7 +1518,9 @@ class VirtualXiangqiSimulation:
                     self.world.step_until_settled(max_steps=30)
 
                 # Reset board placement (internally relocates PyBullet board & updates placement_state)
-                self.reset_board_placement()
+                placement_reset = self.reset_board_placement()
+                if not placement_reset.get("success", False):
+                    return {"success": False, "status": "RESET_BOARD_REJECTED", "error": placement_reset}
 
                 # Reset all pieces to canonical start layout
                 if hasattr(self.world, "reset_pieces"):
@@ -1875,7 +1881,7 @@ class VirtualXiangqiSimulation:
                         self.world.release_attached_piece()
 
                     # 4. Settle world & check transient states
-                    self.world.step_until_settled(max_steps=80)
+                    self.world.step_until_settled(max_steps=self.world.max_settle_steps)
                     transient = [
                         p_body for p_body in self.world.pieces.values()
                         if p_body.physical_state in (PiecePhysicalState.ATTACHED_TO_GRIPPER, PiecePhysicalState.FALLING, PiecePhysicalState.SETTLING)
@@ -1901,7 +1907,7 @@ class VirtualXiangqiSimulation:
                         self.backend.set_trajectory_stage("IDLE")
                         # Motion advances PyBullet; recheck settled pieces at the
                         # final service pose before granting board adjustment.
-                        self.world.step_until_settled(max_steps=80)
+                        self.world.step_until_settled(max_steps=self.world.max_settle_steps)
                         report = self.evaluate_service_safety()
                         if not report.service_safe:
                             return {
@@ -2977,18 +2983,28 @@ class VirtualXiangqiSimulation:
                 })
         elif action == "RESET":
             speed = cmd.get("speed_factor")
-            threading.Thread(target=self.reset_robot, kwargs={"speed_factor": speed}, daemon=True).start()
+            def _task_reset():
+                res = self.reset_robot(speed_factor=speed)
+                if not res.get("success") and self.telemetry is not None:
+                    self.telemetry.broadcast_custom({"type": "error", "message": res.get("error") or res.get("status")})
+            threading.Thread(target=_task_reset, daemon=True).start()
         elif action == "CLEAR_ERROR":
             self.clear_error()
         elif action == "RESET_ROBOT":
             speed = cmd.get("speed_factor")
-            threading.Thread(target=self.reset_robot, kwargs={"speed_factor": speed}, daemon=True).start()
+            def _task_reset():
+                res = self.reset_robot(speed_factor=speed)
+                if not res.get("success") and self.telemetry is not None:
+                    self.telemetry.broadcast_custom({"type": "error", "message": res.get("error") or res.get("status")})
+            threading.Thread(target=_task_reset, daemon=True).start()
         elif action == "RESET_BOARD":
             self.reset_board()
         elif action == "RESET_PIECES":
             threading.Thread(target=self.reset_pieces, daemon=True).start()
         elif action in ("FULL_RESET", "RESET_ALL_BACKEND_DATA", "RESET_BACKEND_DATA", "RESTART_BACKEND_DATA"):
-            self.full_reset()
+            res = self.full_reset()
+            if not res.get("success") and self.telemetry is not None:
+                self.telemetry.broadcast_custom({"type": "error", "message": res.get("error") or res.get("status")})
         elif action == "GO_SERVICE_SAFE":
             speed = cmd.get("speed_factor")
             def _task_safe():

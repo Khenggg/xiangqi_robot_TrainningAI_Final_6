@@ -5,10 +5,11 @@
 from enum import Enum
 import threading
 import time
+import inspect
 from typing import Any, Optional, Tuple
 from src.core import xiangqi
 from src.domain.game_move import MoveActor
-from src.hardware.robot_VIP import MotionResult, MotionStage
+from src.motion.result import MotionExecutionResult
 
 
 class SelfPlayStatus(str, Enum):
@@ -40,6 +41,14 @@ class SelfPlayController:
         self._result: Optional[Tuple] = None
         self._token: Optional[Tuple] = None
         self._moving_before_board = None
+
+    def _current_token(self):
+        return (self._epoch, getattr(self.state,"game_epoch",0),
+                getattr(self.state,"ai_epoch",0),getattr(self.state,"move_number",1),
+                self.state.turn,len(self.state.move_history))
+
+    def _is_physical(self):
+        return getattr(self.hw,"simulation_runtime",None) is None and not getattr(self.hw,"dry_run",False)
 
     @property
     def active(self) -> bool:
@@ -85,7 +94,7 @@ class SelfPlayController:
                 return self._start_fault("Both selected engine difficulties must be ready.")
 
         # 3. Camera baseline verification (if physical camera is active)
-        if backend_type == "PHYSICAL" and not dry_run:
+        if self._is_physical():
             if self.hw.cam_monitor is None or not callable(getattr(self.hw, "verify_physical_board", None)):
                 return self._start_fault("Live self-play requires a full-board camera verifier.")
             if hasattr(self.hw, "capture_baseline_if_needed"):
@@ -116,10 +125,18 @@ class SelfPlayController:
                 or getattr(self.state, "physical_sync_fault", False)):
             self._fault("Self-play blocked by robot readiness or board synchronization fault.")
             return False
+        if self._is_physical():
+            try:
+                if not self.hw.verify_physical_board(self.state.board):
+                    self._fault("Pre-motion full-board camera verification failed.")
+                    return False
+            except Exception as exc:
+                self._fault(f"Pre-motion camera verification failed: {exc}")
+                return False
         snapshot = [row[:] for row in self.state.board]
         color = self.state.turn
         difficulty = self.red_difficulty if color == "r" else self.black_difficulty
-        token = (self._epoch, getattr(self.state, "move_number", 1), color, len(self.state.move_history))
+        token = self._current_token()
         self._token = token
         self.status = SelfPlayStatus.THINKING
 
@@ -127,11 +144,13 @@ class SelfPlayController:
             try:
                 move = None
                 if hasattr(self.hw, "ai_ctrl") and self.hw.ai_ctrl is not None:
-                    # Check if pick_move accepts difficulty parameter
-                    try:
-                        move = self.hw.ai_ctrl.pick_move(snapshot, color=color, difficulty=difficulty)
-                    except TypeError:
-                        move = self.hw.ai_ctrl.pick_move(snapshot, color=color)
+                    picker = self.hw.ai_ctrl.pick_move
+                    params = inspect.signature(picker).parameters
+                    if "difficulty" in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+                        move = picker(snapshot,color=color,difficulty=difficulty)
+                    else:
+                        # Compatibility engines have no per-player difficulty API.
+                        move = picker(snapshot,color=color)
                 self._result = (token, snapshot, color, move, None)
             except Exception as exc:
                 self._result = (token, snapshot, color, None, exc)
@@ -149,7 +168,7 @@ class SelfPlayController:
         if self.status is SelfPlayStatus.THINKING and self._thread is not None and not self._thread.is_alive():
             token, snapshot, color, move, error = self._result
             self._thread = None
-            if (token != self._token or self.status is not SelfPlayStatus.THINKING
+            if (token != self._token or token != self._current_token() or self.status is not SelfPlayStatus.THINKING
                     or self.state.turn != color or self.state.board != snapshot):
                 self._fault("Game board changed while the engine was thinking.")
                 return
@@ -184,11 +203,19 @@ class SelfPlayController:
                 try:
                     is_capture = destination != "."
                     targets = {}
-                    if hasattr(self.hw, "get_robot_center_pick_targets"):
+                    physical = self._is_physical()
+                    if token != self._current_token() or self.state.board != snapshot:
+                        raise RuntimeError("Game changed before robot motion")
+                    if physical and not self.hw.verify_physical_board(snapshot):
+                        raise RuntimeError("Pre-motion full-board camera verification failed")
+                    visual = bool(getattr(getattr(self.hw,"config",None),"VISUAL_PICK_ENABLED",False))
+                    if physical and visual and hasattr(self.hw, "get_robot_center_pick_targets"):
                         targets = self.hw.get_robot_center_pick_targets(
                             {"captured": move[1]} if is_capture else {"moving": move[0]}
                         )
 
+                    if token != self._current_token() or self.state.board != snapshot:
+                        raise RuntimeError("Game changed during pre-motion camera verification")
                     exec_res = self.hw.execute_piece_move(
                             s_col=move[0][0],
                             s_row=move[0][1],
@@ -197,14 +224,14 @@ class SelfPlayController:
                             is_capture=is_capture,
                             moving_visual_target=targets.get("moving"),
                             captured_visual_target=targets.get("captured"),
+                            refresh_moving_visual_target=(lambda: self.hw.get_robot_center_pick_targets(
+                                {"moving":move[0]}).get("moving")) if physical and visual and is_capture else None,
+                            verify_capture_cleared=(lambda:self.hw.is_cell_visually_clear(move[1])) if physical and is_capture else None,
                             piece_id=move_ctx.piece_id,
                             captured_piece_id=move_ctx.captured_piece_id,
                             move_context=move_ctx,
                         )
-                    success = bool(getattr(exec_res, "success", False))
-                    result = MotionResult(success, MotionStage.COMPLETED if success else MotionStage.PLACE)
-
-                    self._result = (token, expected_after, color, result, None)
+                    self._result = (token, expected_after, color, exec_res, None)
                 except Exception as exc:
                     self._result = (token, expected_after, color, None, exc)
 
@@ -216,15 +243,15 @@ class SelfPlayController:
             token, expected_after, color, result, error = self._result
             self._thread = None
 
-            if self.status is SelfPlayStatus.ENDING or token != self._token:
+            if self.status is SelfPlayStatus.ENDING or token != self._token or token != self._current_token():
                 self.state.mark_move_failed("Self-play ended during motion; camera reconciliation required")
                 self.state.move_sync_error = self.state.move_execution_error
                 self.state.set_status("Self-play ended after motion.", color=(180, 100, 0), duration=10.0)
                 self.status = SelfPlayStatus.ENDED
                 return
 
-            if error or not isinstance(result, MotionResult) or not result.success:
-                self._fault(f"Robot motion failed: {error or getattr(result, 'error', 'Motion rejected')}")
+            if error or not isinstance(result, MotionExecutionResult) or not result.success:
+                self._fault(f"Robot motion failed: {error or getattr(result, 'message', 'Motion rejected')}")
                 return
 
             if self.state.turn != color or self.state.board != self._moving_before_board:
@@ -232,11 +259,18 @@ class SelfPlayController:
                 return
 
             # Camera verification on physical hardware
-            if (getattr(getattr(self.hw, "config", None), "ROBOT_BACKEND", "VIRTUAL").upper() == "PHYSICAL"
-                    and not getattr(self.hw, "dry_run", True)):
-                if not self.hw.verify_physical_board(expected_after):
+            if self._is_physical():
+                try:
+                    verified = self.hw.verify_physical_board(expected_after)
+                except Exception as exc:
+                    self._fault(f"Post-motion camera verification failed: {exc}")
+                    return
+                if not verified:
                     self._fault("Post-motion physical board verification failed.")
                     return
+            if token != self._current_token() or self.state.board != self._moving_before_board:
+                self._fault("Game changed during camera verification.")
+                return
 
             if not self.state.commit_pending_physical_move():
                 self._fault("State commit rejected.")
@@ -244,10 +278,11 @@ class SelfPlayController:
 
             # Check game termination
             next_turn = self.state.turn
-            if xiangqi.is_checkmate(next_turn, self.state.board):
+            if (xiangqi.get_king_pos(next_turn,self.state.board) is None
+                    or not xiangqi.find_all_valid_moves(next_turn,self.state.board)):
                 winner = color
                 reason = "CHIẾU BÍ"
-                self.state.handle_game_over(winner, reason=reason)
+                self.state.handle_game_over(winner)
                 self.status = SelfPlayStatus.FINISHED
                 print(f"[SELF-PLAY] 🏁 Game Over! Winner: {winner.upper()}")
             else:
@@ -270,7 +305,6 @@ class SelfPlayController:
 
     def _start_fault(self, message: str) -> bool:
         self.status = SelfPlayStatus.FAULTED
-        self.state.physical_sync_fault = True
         self.state.set_status(message, color=(180, 0, 0), duration=15.0)
         print(f"[SELF-PLAY] ❌ Start Fault: {message}")
         return False
@@ -278,6 +312,8 @@ class SelfPlayController:
     def _fault(self, message: str):
         self.status = SelfPlayStatus.FAULTED
         self.state.physical_sync_fault = True
+        self.state.snapshot_continue_required = True
+        self.state.snapshot_continue_can_commit_pending = False
         if hasattr(self.state, "mark_move_failed"):
             self.state.mark_move_failed(message)
         self.state.set_status(message, color=(180, 0, 0), duration=15.0)

@@ -121,13 +121,13 @@ class MoonfishEngine:
             
             if line == 'ucciok':
                 self._ready = True
-                print("[MOONFISH] ✅ Engine ready!")
+                print("[MOONFISH] Engine ready!")
                 return
         
         if found_name:
             # Engine responded but didn't send ucciok - might be waiting for more input
             self._ready = True
-            print("[MOONFISH] ✅ Engine ready (name received)!")
+            print("[MOONFISH] Engine ready (name received)!")
             return
             
         raise RuntimeError("[MOONFISH] Engine did not respond with 'ucciok' in time.")
@@ -138,7 +138,7 @@ class MoonfishEngine:
             try:
                 self.process.kill()
                 self.process.wait(timeout=2)
-                print("[MOONFISH] 🛑 atexit: subprocess killed.")
+                print("[MOONFISH] atexit: subprocess killed.")
             except Exception:
                 pass
 
@@ -165,7 +165,8 @@ class MoonfishEngine:
     # Core public method — drop-in replacement for ai.pick_best_move()
     # -------------------------------------------------------------------------
 
-    def pick_best_move(self, board: list, color: str, movetime_ms: int = 3000, depth: int = None):
+    def pick_best_move(self, board: list, color: str, movetime_ms: int = 3000,
+                       depth: int = None, nodes: int = None, temperature: float = None):
         """
         Ask Moonfish for the best move from the given board position.
 
@@ -174,6 +175,10 @@ class MoonfishEngine:
             color      : 'r' for Red, 'b' for Black.
             movetime_ms: Time allowed for search, in milliseconds (converted to depth).
             depth      : Limit the search to a certain depth (if None, calculated from movetime_ms).
+            nodes      : Optional maximum number of Moonfish search nodes.
+            temperature: Difficulty metadata. Moonfish's deterministic UCCI
+                         search has no native temperature command, so this is
+                         logged rather than silently changing move legality.
 
         Returns:
             ((src_col, src_row), (dst_col, dst_row))  in our coordinate system,
@@ -199,7 +204,12 @@ class MoonfishEngine:
                 else:
                     depth = 6
             
-            self._send(f'go depth {depth}')
+            command = f'go depth {depth} movetime {max(1, int(movetime_ms))}'
+            if nodes is not None:
+                command += f' nodes {max(1, int(nodes))}'
+            self._send(command)
+            if temperature is not None:
+                print(f"[MOONFISH] difficulty temperature={temperature:.2f}")
 
             # Read lines until we get 'bestmove ...'
             best_move_str = None
@@ -218,7 +228,7 @@ class MoonfishEngine:
             if best_move_str and best_move_str != '(none)' and best_move_str != 'null':
                 return self._uci_to_move(best_move_str)
 
-            print("[MOONFISH] ⚠️ No valid move returned.")
+            print("[MOONFISH] No valid move returned.")
             return None
 
     # -------------------------------------------------------------------------

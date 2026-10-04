@@ -134,7 +134,7 @@ def test_robot_move_passes_pending_identity_then_commits(state):
 
     def execute_piece_move(*, s_col, s_row, d_col, d_row, is_capture,
                            moving_visual_target, captured_visual_target,
-                           piece_id, captured_piece_id, move_context):
+                           piece_id, captured_piece_id, move_context, **kwargs):
         assert state.move_execution_status == "PENDING"
         assert state.board[s_row][s_col] == "b_C"
         assert piece_id == "black_cannon_0"
@@ -143,7 +143,7 @@ def test_robot_move_passes_pending_identity_then_commits(state):
         received.append(move_context)
         return MotionExecutionResult.ok()
 
-    hardware = SimpleNamespace(is_robot_ready=True, execute_piece_move=execute_piece_move)
+    hardware = SimpleNamespace(is_robot_ready=True, execute_piece_move=execute_piece_move, simulation_runtime=object())
     assert execute_ai_move(state, hardware, ((1, 2), (4, 2)))
     assert state.piece_ids[(2, 4)] == "black_cannon_0"
     assert (2, 1) not in state.piece_ids
@@ -165,7 +165,7 @@ def test_robot_failure_preserves_game_and_identity(state):
     assert state.pending_move.piece_id == "black_cannon_0"
 
 
-def test_legacy_hardware_signature_still_supported(state):
+def test_legacy_boolean_motion_cannot_claim_verified_success(state):
     state.turn = "b"
 
     def legacy(s_col, s_row, d_col, d_row, is_capture,
@@ -173,7 +173,7 @@ def test_legacy_hardware_signature_still_supported(state):
         return True
 
     hardware = SimpleNamespace(is_robot_ready=True, move_piece=legacy)
-    assert execute_ai_move(state, hardware, ((1, 2), (4, 2)))
+    assert not execute_ai_move(state, hardware, ((1, 2), (4, 2)))
 
 
 def test_undo_restores_identity_and_requires_twin_reconciliation(state):

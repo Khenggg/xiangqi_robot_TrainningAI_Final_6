@@ -16,6 +16,7 @@ class CaptureFenSyncTests(unittest.TestCase):
         state.board = empty_board()
         state.board[0][4] = "b_K"
         state.board[9][4] = "r_K"
+        state.board[6][4] = "r_P"  # Kings must not face along an empty file.
         state.turn = "r"
         state.move_number = 1
         return state
@@ -23,13 +24,11 @@ class CaptureFenSyncTests(unittest.TestCase):
     def test_red_capture_removes_black_piece_and_posts_resulting_fen(self):
         state = self.make_state()
         state.board[5][0] = "r_C"
+        state.board[4][0] = "r_P"  # Exactly one screen makes this a legal cannon capture.
         state.board[2][0] = "b_N"
-        state.board[4][0] = "b_P"  # Cannon capture requires exactly one screen.
-        state.board[4][4] = "b_P"  # Keep the two kings from facing each other.
-        state.piece_ids = {(0, 4): "black_king_0", (9, 4): "red_king_0",
-                           (5, 0): "red_cannon_0", (2, 0): "black_knight_0",
-                           (4, 0): "black_pawn_0", (4, 4): "black_pawn_2"}
 
+        self.assertTrue(state.apply_confirmed_board([row[:] for row in state.board]))
+        state.api_client.send_move_update_board.reset_mock()
         state.process_human_move((0, 5), (0, 2), "r_C")
 
         self.assertEqual("r_C", state.board[2][0])

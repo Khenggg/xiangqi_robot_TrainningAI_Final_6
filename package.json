@@ -1,0 +1,11 @@
+{
+  "name": "xiangqi-fr3-viewer-verification",
+  "private": true,
+  "version": "0.0.0",
+  "devDependencies": {
+    "three": "0.176.0"
+  },
+  "scripts": {
+    "test:viewer": "node --test tests/unit/test_viewer_board_mesh_transform.mjs tests/unit/test_viewer_placement_integrity.mjs"
+  }
+}

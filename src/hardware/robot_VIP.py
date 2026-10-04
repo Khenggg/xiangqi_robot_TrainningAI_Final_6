@@ -1,12 +1,14 @@
 # ==================================
 # === FILE: VIP/robot_VIP.py ===
 # === Điều khiển cánh tay robot FR5 — phiên bản VIP ===
-# === Dựa trên robot.py gốc, dùng Controller DO2 (bộ điều khiển) ===
+# === Dựa trên robot.py gốc, dùng Tool DO0/DO1 cho kẹp hai chiều ===
 # ==================================
 import time
 import sys
 import os
 import json
+import threading
+import math
 import numpy as np
 import cv2
 
@@ -15,6 +17,18 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(os.path.dirname(_THIS_DIR))
 sys.path.insert(0, _PROJECT_DIR)
 import config
+from src.motion.result import MotionExecutionResult, MotionFailureCategory, PayloadState
+from src.motion.stages import MotionStage
+
+class MotionResult(MotionExecutionResult):
+    def __bool__(self):
+        return self.success
+
+class RobotCommandError(RuntimeError):
+    def __init__(self, message, backend_code=None):
+        super().__init__(message)
+        self.backend_code = backend_code
+
 
 try:
     from src.hardware import robot_sdk_core
@@ -22,48 +36,30 @@ except ImportError:
     print("LỖI: Không tìm thấy module 'robot_sdk_core'...")
     robot_sdk_core = None
 
-from enum import Enum
-from dataclasses import dataclass
 
-
-class MotionStage(str, Enum):
-    PREFLIGHT = "preflight"
-    PICK_CAPTURED = "pick_captured"
-    CAPTURE_BIN = "capture_bin"
-    CAPTURE_RECONCILE = "capture_reconcile"
-    PICK_MOVING = "pick_moving"
-    PLACE = "place"
-    HOME = "home"
-    COMPLETED = "completed"
-
-
-@dataclass(frozen=True)
-class MotionResult:
-    """The only composite-motion outcome that can authorize a board commit."""
-
-    success: bool
-    stage: MotionStage
-    error: str | None = None
-
-
-try:
-    from src.hardware.telemetry_publisher import TelemetryPublisher
-except ImportError:
-    TelemetryPublisher = None
+class GripperCommandError(RuntimeError):
+    """The gripper output state is unsafe or could not be commanded."""
 
 
 class FR5Robot:
     def __init__(self, ip=None):
         self.ip          = ip or config.ROBOT_IP
         self.robot       = None
+        self.physical_motion_authorized = False
+        self.last_motion_result = None
+        self._active_stage = MotionStage.PREPOSITION
+        self._last_completed_stage = None
+        self._payload_state = PayloadState.NONE
         self.connected   = False
         self.dry         = config.DRY_RUN
         self.tool_num    = 0
         self.user_num    = 1
         self.default_vel = config.MOVE_SPEED
 
-        # ⚙️ Kẹp: dùng Tool DO0 (Đầu cánh tay - cáp M12)
-        self.gripper_do_id = 0
+        # Two-direction direct-drive gripper: Tool DO1=open, Tool DO0=close.
+        self.gripper_open_do_id = config.GRIPPER_OPEN_DO_ID
+        self.gripper_close_do_id = config.GRIPPER_CLOSE_DO_ID
+        self._gripper_lock = threading.RLock()
 
         # Ma trận hiệu chỉnh perspective (được set từ main_VIP.py)
         self.perspective_matrix = None
@@ -74,7 +70,26 @@ class FR5Robot:
 
         # Kích thước ô cờ (mm), mặc định theo config, tự động cập nhật khi load teaching points
         self.auto_cell_sizes = {"x": config.CELL_SIZE_X, "y": config.CELL_SIZE_Y}
-        self.telemetry = TelemetryPublisher.get_instance() if TelemetryPublisher else None
+
+        # Read-only state consumed by the optional debug dashboard. This does
+        # not affect motion; it records the command immediately before sending it.
+        self._planned_command_lock = threading.Lock()
+        self._planned_command = None
+
+    def _set_planned_command(self, command, pose, label):
+        with self._planned_command_lock:
+            self._planned_command = {
+                "command": command,
+                "pose": [float(value) for value in pose[:6]],
+                "label": label,
+            }
+
+    def get_planned_command(self):
+        """Return a copy safe for the dashboard's publishing thread."""
+        with self._planned_command_lock:
+            if self._planned_command is None:
+                return None
+            return dict(self._planned_command, pose=list(self._planned_command["pose"]))
 
     # -------------------------------------------------------------------------
     # SET MA TRẬN TỪ NGOÀI
@@ -90,62 +105,83 @@ class FR5Robot:
     # -------------------------------------------------------------------------
 
     def connect(self):
+        """Read-only connection: no servo, mode, motion or gripper command."""
+        self.physical_motion_authorized = False
         if self.dry:
-            print("[ROBOT] 🚀 DRY RUN — Khởi động Virtual Robot Simulator (WebSocket ws://127.0.0.1:8765)...")
-            if self.telemetry:
-                self.telemetry.start()
             self.connected = True
-            self._load_teaching_points()
-            return
-
+            return True
         if robot_sdk_core is None:
-            raise Exception("Module robot_sdk_core chưa được import.")
-
+            raise RobotCommandError("Robot SDK unavailable")
         try:
             self.robot = robot_sdk_core.RPC(self.ip)
-            time.sleep(2)
-            self.connected = self.robot.SDK_state
+            self.connected = bool(self.robot.SDK_state)
             if not self.connected:
-                raise Exception("SDK không thể kết nối tới robot")
-
-            print(f"[ROBOT] ✅ Đã kết nối tới {self.ip}")
-
-            err = self.robot.RobotEnable(1)
-            if err != 0:
-                print(f"[ROBOT] ⚠️ RobotEnable thất bại, code={err}")
-
-            err = self.robot.Mode(0)
-            if err != 0:
-                print(f"[ROBOT] ⚠️ Set Mode(0) thất bại, code={err}")
-            
-            # Load teaching points để tránh Singularity
+                raise RobotCommandError("Robot SDK not connected")
             self._load_teaching_points()
-
-        except Exception as e:
-            print(f"[ROBOT] ❌ Lỗi connect: {e}")
+            return True
+        except Exception:
             self.connected = False
             raise
-    
+
+    def activate_physical_control(self, *, commissioned=False):
+        """Explicit operator gate after calibration and commissioning review."""
+        self.physical_motion_authorized = False
+        if not commissioned:
+            raise RobotCommandError("Physical control requires commissioned authorization")
+        if self.dry:
+            return True
+        if not self.connected or self.robot is None:
+            raise RobotCommandError("Robot is not connected")
+        self._validated_corners()
+        self._validate_gripper_config()
+        for method, value in (("Mode", 0), ("RobotEnable", 1)):
+            err = getattr(self.robot, method)(value)
+            if err != 0:
+                raise RobotCommandError(f"{method} failed: {err}", err)
+        self.physical_motion_authorized = True
+        return True
+
+    def _require_actuation(self):
+        if not self.dry and (not self.connected or not self.physical_motion_authorized):
+            raise RobotCommandError("Physical actuation is not authorized")
+
+    @staticmethod
+    def _validate_pose(pose):
+        values = [float(v) for v in pose]
+        if len(values) != 6 or not all(math.isfinite(v) for v in values):
+            raise ValueError("Pose must contain six finite values")
+        if abs(values[0]) > 900 or abs(values[1]) > 900:
+            raise ValueError("Pose outside adapter XY envelope")
+        return values
+
+    def _validated_corners(self):
+        corners = np.array([self._validate_pose(self.teaching_points[name]["pose"])[:3]
+                            for name in ("R1", "R2", "R3", "R4")])
+        edges = np.roll(corners, -1, axis=0) - corners
+        crosses = np.cross(edges, np.roll(edges, -1, axis=0))[:, 2]
+        if np.any(np.linalg.norm(edges[:, :2], axis=1) <= 1e-6) or not (
+                np.all(crosses > 1e-6) or np.all(crosses < -1e-6)):
+            raise ValueError("R1-R4 must form an ordered nondegenerate convex board")
+        return corners
+
+    def _run_stage(self, stage, operation, *args, **kwargs):
+        self._active_stage = stage
+        value = operation(*args, **kwargs)
+        if isinstance(value, MotionExecutionResult):
+            if not value.success:
+                raise RobotCommandError(value.message, value.backend_code)
+        elif value is False or (isinstance(value, (int, np.integer))
+                               and not isinstance(value, bool) and value != 0):
+            raise RobotCommandError(f"{stage.name} failed: {value}", value)
+        self._last_completed_stage = stage
+        return value
+
+
     def _load_teaching_points(self):
         """Đọc teaching points R1, R2, R3, R4 để tính toán Bilinear Interpolation."""
-        if not self.connected:
+        if not self.connected or self.dry:
             return
         
-        if self.dry:
-            print("[ROBOT] 📍 DRY RUN: Khởi tạo tọa độ tham chiếu chuẩn (R1, R2, R3, R4, R_Trash)...")
-            self.teaching_points = {
-                "R1": {"pose": [-211.171, 210.149, 10.5, 180.0, 0.0, 90.0], "joints": [-64.07, -98.66, 123.49, -116.98, -92.28, 68.23]},
-                "R2": {"pose": [-214.359, 544.595, 10.5, 180.0, 0.0, 90.0], "joints": [-78.16, -33.10, 27.07, -84.99, -92.25, 55.48]},
-                "R3": {"pose": [ 166.645, 538.109, 10.5, 180.0, 0.0, 90.0], "joints": [-117.87, -41.14, 42.27, -91.57, -88.70, -165.78]},
-                "R4": {"pose": [ 163.581, 215.261, 10.5, 180.0, 0.0, 90.0], "joints": [-149.87, -105.81, 128.19, -113.49, -88.82, -11.89]},
-                "R_Trash": {"pose": [0.0, 580.0, 40.0, 180.0, 0.0, 90.0], "joints": [-90.0, -45.0, 90.0, -45.0, -90.0, 0.0]}
-            }
-            self._calculate_cell_sizes_from_corners()
-            if self.telemetry:
-                self.telemetry.update_pose_immediate([420.0, 0.0, 280.0, 180.0, 0.0, 0.0])
-            print(f"[ROBOT] ✅ Đã khởi tạo {len(self.teaching_points)} teaching points ảo.")
-            return
-
         print("[ROBOT] 📍 Đang load teaching points...")
         
         # Load 4 góc bàn cờ (bắt buộc)
@@ -212,153 +248,55 @@ class FR5Robot:
         return None, None
 
     def board_to_pose(self, col, row, z_height, rotation=None):
-        """Chuyển grid logic thành pose thật từ R1-R4.
-
-        ``rotation`` là [Rx, Ry, Rz] của tool trong hệ pose FR5. Không truyền
-        rotation sẽ giữ tương thích hoàn toàn với ``config.ROTATION`` cũ.
-        """
-        
-        # Kiểm tra xem có teaching point trực tiếp cho vị trí cụ thể không
-        point_name, point_data = self._get_teaching_point_for_position(col, row)
-        if point_data:
-            # Dùng tọa độ từ teaching point nhưng thay đổi Z
-            pose = point_data["pose"].copy()
-            pose[2] = z_height  # Thay đổi Z theo yêu cầu
-            if rotation is not None:
-                pose[3:6] = self._validated_rotation(rotation)
-            print(f"[ROBOT] 📍 Dùng teaching point {point_name} cho ({col},{row}) → X={pose[0]:.1f}, Y={pose[1]:.1f}, Z={z_height:.1f}")
-            return pose
-        
-        # Sử dụng Bilinear Interpolation cho tất cả vị trí khác
         return self.board_to_pose_bilinear(col, row, z_height, rotation=rotation)
 
     @staticmethod
+
+
     def _validated_rotation(rotation):
         """Return a copy of a Cartesian tool rotation, rejecting malformed config."""
         if not isinstance(rotation, (list, tuple)) or len(rotation) != 3:
             raise ValueError("Tool rotation must be a three-value [Rx, Ry, Rz] sequence")
-        return [float(value) for value in rotation]
+        values = [float(value) for value in rotation]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("Tool rotation must be finite")
+        return values
 
     def _calculate_cell_sizes_from_corners(self):
-        """Tính CELL_SIZE tự động từ 4 góc teaching points."""
-        r1 = self.teaching_points["R1"]["pose"]  # (0,0) - Đen Trái
-        r2 = self.teaching_points["R2"]["pose"]  # (8,0) - Đen Phải  
-        r3 = self.teaching_points["R3"]["pose"]  # (8,9) - Đỏ Phải
-        r4 = self.teaching_points["R4"]["pose"]  # (0,9) - Đỏ Trái
-        
-        # Tính khoảng cách theo chiều Y (ngang - col)
-        distance_y_top = abs(r2[1] - r1[1])     # R1 → R2: 8 ô ngang
-        distance_y_bottom = abs(r3[1] - r4[1])  # R4 → R3: 8 ô ngang
-        cell_size_x = (distance_y_top + distance_y_bottom) / (2 * 8)
-        
-        # Tính khoảng cách theo chiều X (dọc - row)  
-        distance_x_left = abs(r4[0] - r1[0])    # R1 → R4: 9 ô dọc
-        distance_x_right = abs(r3[0] - r2[0])   # R2 → R3: 9 ô dọc
-        cell_size_y = (distance_x_left + distance_x_right) / (2 * 9)
-        
-        self.auto_cell_sizes = {"x": cell_size_x, "y": cell_size_y}
+        r1, r2, r3, r4 = self._validated_corners()
+        self.auto_cell_sizes = {
+            "x": (np.linalg.norm(r2-r1) + np.linalg.norm(r3-r4)) / 16,
+            "y": (np.linalg.norm(r4-r1) + np.linalg.norm(r3-r2)) / 18,
+        }
 
-        print(f"[ROBOT] 📏 Tự động tính CELL_SIZE từ 4 góc:")
-        print(f"[ROBOT]   CELL_SIZE_X = {cell_size_x:.2f}mm (ngang)")
-        print(f"[ROBOT]   CELL_SIZE_Y = {cell_size_y:.2f}mm (dọc)")
-        print(f"[ROBOT]   Distance Y: top={distance_y_top:.1f}mm, bottom={distance_y_bottom:.1f}mm")
-        print(f"[ROBOT]   Distance X: left={distance_x_left:.1f}mm, right={distance_x_right:.1f}mm")
 
     def board_to_pose_bilinear(self, col, row, z_height, rotation=None):
-        """Tính pose vật lý từ grid float qua Bilinear Interpolation R1-R4.
+        if not all(math.isfinite(float(v)) for v in (col, row, z_height)):
+            raise ValueError("Grid target must be finite")
+        if not (0 <= col <= 8 and 0 <= row <= 9):
+            raise ValueError("Grid target outside board")
+        r1, r2, r3, r4 = self._validated_corners()
+        u, v = col/8.0, row/9.0
+        xyz = (1-v)*((1-u)*r1+u*r2) + v*((1-u)*r4+u*r3)
+        pose = [float(xyz[0])+config.OFFSET_X, float(xyz[1])+config.OFFSET_Y,
+                float(z_height)] + self._validated_rotation(config.ROTATION if rotation is None else rotation)
+        return self._validate_pose(pose)
 
-        Grid float được Visual Pick cung cấp chỉ bù XY. Tool orientation luôn
-        lấy từ motion profile đã dạy, không nội suy Euler angles của các corner
-        teaching points vì cách đó có thể tạo pose wrist không mong muốn.
-        """
-        try:
-            # Tọa độ logic (0-8 cho col, 0-9 cho row)
-            col_ratio = col / 8.0  # 0.0 → 1.0
-            row_ratio = row / 9.0  # 0.0 → 1.0
-            
-            # 4 góc teaching points
-            r1 = self.teaching_points["R1"]["pose"]  # (0,0) - Đen Trái
-            r2 = self.teaching_points["R2"]["pose"]  # (8,0) - Đen Phải
-            r3 = self.teaching_points["R3"]["pose"]  # (8,9) - Đỏ Phải  
-            r4 = self.teaching_points["R4"]["pose"]  # (0,9) - Đỏ Trái
-            
-            # Nội suy theo chiều ngang (col) - Hàng trên (row=0)
-            top_x = r1[0] + (r2[0] - r1[0]) * col_ratio
-            top_y = r1[1] + (r2[1] - r1[1]) * col_ratio
-            
-            # Nội suy theo chiều ngang (col) - Hàng dưới (row=9)
-            bottom_x = r4[0] + (r3[0] - r4[0]) * col_ratio
-            bottom_y = r4[1] + (r3[1] - r4[1]) * col_ratio
-            
-            # Nội suy theo chiều dọc (row)
-            final_x = top_x + (bottom_x - top_x) * row_ratio
-            final_y = top_y + (bottom_y - top_y) * row_ratio
-            
-            # Áp dụng offset điều chỉnh
-            final_x += config.OFFSET_X
-            final_y += config.OFFSET_Y
-            
-            # Kiểm tra tọa độ an toàn
-            if abs(final_x) > 900 or abs(final_y) > 900:
-                print(f"[ROBOT] ⚠️ Tọa độ quá xa ({final_x:.1f}, {final_y:.1f}) — cẩn thận đập máy!")
-            
-            print(f"[ROBOT] 🎯 Bilinear Interpolation ({col},{row}) → X={final_x:.1f}, Y={final_y:.1f}, Z={z_height:.1f}")
-            print(f"[ROBOT]   Ratios: col={col_ratio:.3f}, row={row_ratio:.3f}")
-            
-            tool_rotation = self._validated_rotation(
-                config.ROTATION if rotation is None else rotation
-            )
-            return [final_x, final_y, z_height] + tool_rotation
-            
-        except Exception as e:
-            print(f"[ROBOT] ⚠️ Lỗi Bilinear Interpolation: {e}, fallback sang linear")
-            return self.board_to_pose_linear(col, row, z_height, rotation=rotation)
 
     def board_to_pose_linear(self, col, row, z_height, rotation=None):
-        """Tính tọa độ bằng phương pháp linear từ R1 + CELL_SIZE (fallback)."""
-        # Dùng CELL_SIZE tự động tính nếu có, không thì dùng config
-        cell_x = self.auto_cell_sizes["x"]
-        cell_y = self.auto_cell_sizes["y"]
-        
-        # Lấy gốc từ R1 nếu có, không thì dùng config
-        if "R1" in self.teaching_points:
-            origin_x = self.teaching_points["R1"]["pose"][0]
-            origin_y = self.teaching_points["R1"]["pose"][1]
-        else:
-            origin_x = config.BOARD_ORIGIN_X
-            origin_y = config.BOARD_ORIGIN_Y
-        
-        # Tính delta khoảng cách từ ô gốc (0,0)
-        delta_x = row * cell_y  # row ảnh hưởng X (dọc)
-        delta_y = col * cell_x  # col ảnh hưởng Y (ngang)
-        
-        # Bù thêm khe hở Sông (River gap) cho các quân nằm phía Đỏ (row >= 5)
-        if row >= 5:
-            delta_x += config.RIVER_GAP_Y
-            
-        # Áp dụng hướng (Direction) và cộng với Tọa độ gốc
-        x_mm = origin_x + (delta_x * config.ROBOT_DIR_X) + config.OFFSET_X
-        y_mm = origin_y + (delta_y * config.ROBOT_DIR_Y) + config.OFFSET_Y
+        """Compatibility alias; all targets require four valid corners."""
+        return self.board_to_pose_bilinear(col, row, z_height, rotation=rotation)
 
-        # Kiểm tra tọa độ an toàn
-        if abs(x_mm) > 900 or abs(y_mm) > 900:
-            print(f"[ROBOT] ⚠️ Tọa độ quá xa ({x_mm:.1f}, {y_mm:.1f}) — cẩn thận đập máy!")
 
-        print(f"[ROBOT] 📐 Linear calculation ({col},{row}) → X={x_mm:.1f}, Y={y_mm:.1f}, Z={z_height:.1f}")
-        print(f"[ROBOT]   CELL_SIZE: X={cell_x:.2f}, Y={cell_y:.2f}")
-        
-        tool_rotation = self._validated_rotation(
-            config.ROTATION if rotation is None else rotation
-        )
-        return [x_mm, y_mm, z_height] + tool_rotation
-
-    # -------------------------------------------------------------------------
-    # DI CHUYỂN ROBOT
-    # -------------------------------------------------------------------------
-
-    def move_safe_pose(self, pose, speed=None, col=None, row=None):
+    def move_safe_pose(self, pose, speed=None, col=None, row=None, label=None):
         """Di chuyển an toàn đến pose. Luôn dùng MoveCart để đảm bảo đường thẳng."""
-        vel = speed or self.default_vel
+        self._require_actuation()
+        pose = self._validate_pose(pose)
+        vel = self.default_vel if speed is None else float(speed)
+        if not math.isfinite(vel) or not (0 < vel <= 100):
+            raise ValueError("Speed must be finite within (0,100]")
+        location = f"grid ({col}, {row})" if col is not None and row is not None else "waypoint"
+        self._set_planned_command("MoveCart", pose, label or f"Approach {location}")
         if self.dry:
             print(f"[ROBOT] DRY MoveCart → {[round(v,1) for v in pose]} vel={vel}")
             time.sleep(0.2)
@@ -369,14 +307,22 @@ class FR5Robot:
             desc_pos=pose, tool=self.tool_num, user=self.user_num,
             vel=vel, acc=0.0, ovl=100.0, blendT=-1.0, config=-1
         )
-        if err not in (0, 112):
+        if err != 0:
             print(f"[ROBOT] ❌ Lỗi MoveCart: {err}")
-            raise Exception(f"Robot MoveCart error code: {err}")
+            raise RobotCommandError(f"Robot MoveCart error code: {err}", err)
         return err
 
-    def movej_joint(self, joint_pos, desc_pos, speed=None):
+    def movej_joint(self, joint_pos, desc_pos, speed=None, label=None):
         """Di chuyển trực tiếp bằng góc joint (MoveJ) nếu đã biết."""
-        vel = speed or self.default_vel
+        self._require_actuation()
+        desc_pos = self._validate_pose(desc_pos)
+        joint_pos = [float(v) for v in joint_pos]
+        if len(joint_pos) != 6 or not all(math.isfinite(v) for v in joint_pos):
+            raise ValueError("Joint target must contain six finite values")
+        vel = self.default_vel if speed is None else float(speed)
+        if not math.isfinite(vel) or not (0 < vel <= 100):
+            raise ValueError("Speed must be finite within (0,100]")
+        self._set_planned_command("MoveJ", desc_pos, label or "Joint waypoint")
         if self.dry:
             print(f"[ROBOT] DRY MoveJ_Joint → vel={vel}")
             time.sleep(0.2)
@@ -386,14 +332,19 @@ class FR5Robot:
             joint_pos=joint_pos, desc_pos=desc_pos, tool=self.tool_num, user=self.user_num,
             vel=vel, acc=0.0, ovl=100.0, exaxis_pos=[0]*4, blendT=-1.0, offset_flag=0, offset_pos=[0]*6
         )
-        if err not in (0, 112):
+        if err != 0:
             print(f"[ROBOT] ❌ Lỗi movej_joint MoveJ: {err}")
-            raise Exception(f"Robot movej_joint error code: {err}")
+            raise RobotCommandError(f"Robot movej_joint error code: {err}", err)
         return err
 
-    def movel_pose(self, pose, speed=None):
+    def movel_pose(self, pose, speed=None, label=None):
         """Di chuyển thẳng đứng (MoveCart) đến pose."""
-        vel = speed or self.default_vel
+        self._require_actuation()
+        pose = self._validate_pose(pose)
+        vel = self.default_vel if speed is None else float(speed)
+        if not math.isfinite(vel) or not (0 < vel <= 100):
+            raise ValueError("Speed must be finite within (0,100]")
+        self._set_planned_command("MoveCart", pose, label or "Vertical movement")
         if self.dry:
             print(f"[ROBOT] DRY MoveL → {[round(v,1) for v in pose]} vel={vel}")
             time.sleep(0.2)
@@ -403,9 +354,9 @@ class FR5Robot:
             desc_pos=pose, tool=self.tool_num, user=self.user_num,
             vel=vel, acc=0.0, ovl=100.0, blendT=-1.0, config=-1
         )
-        if err not in (0, 112):
+        if err != 0:
             print(f"[ROBOT] ❌ Lỗi MoveCart (movel): {err}")
-            raise Exception(f"Robot MoveCart error code: {err}")
+            raise RobotCommandError(f"Robot MoveCart error code: {err}", err)
         return err
 
     # -------------------------------------------------------------------------
@@ -413,86 +364,98 @@ class FR5Robot:
     # -------------------------------------------------------------------------
 
     def go_to_idle_home(self):
-        """Đưa robot về vị trí chờ an toàn (IDLE)."""
-        print("[ROBOT] Về vị trí IDLE...")
-        pose = [config.IDLE_X, config.IDLE_Y, config.IDLE_Z] + list(config.ROTATION)
-        try:
-            self.move_safe_pose(pose)
-        except Exception as e:
-            print(f"[ROBOT] ⚠️ Lỗi khi về IDLE trực tiếp: {e}. Thử nâng Z lên cao...")
-            # Nâng Z an toàn trước khi di chuyển
-            try:
-                high_z_pose = [config.IDLE_X, config.IDLE_Y, config.IDLE_Z + 100.0] + list(config.ROTATION)
-                self.move_safe_pose(high_z_pose)
-                self.move_safe_pose(pose)
-            except Exception as e2:
-                print(f"[ROBOT] ❌ Lỗi cả khi qua điểm trung gian Z cao: {e2}")
+        return self.move_safe_pose([config.IDLE_X,config.IDLE_Y,config.IDLE_Z]+list(config.ROTATION))
+
 
     def go_to_home_chess(self):
-        """Về vị trí HOMECHESS đã dạy trên bộ điều khiển."""
-        print("[ROBOT] Về vị trí HOMECHESS...")
+        self._require_actuation()
         if self.dry:
-            print("[ROBOT] DRY RUN — bỏ qua HOMECHESS")
-            return
-        if self.robot is None:
-            print("[ROBOT] Chưa kết nối — không thể về HOMECHESS")
-            return
-        try:
-            err, data = self.robot.GetRobotTeachingPoint("HOMECHESS")
-            if err != 0:
-                print(f"[ROBOT] ⚠️ Không đọc được HOMECHESS (err={err}) → về IDLE")
-                self.go_to_idle_home()
-                return
-                
-            # If data contains joint pos, use it directly (data is typically >= 12 elements)
-            pose = list(data[:6])
-            
-            if len(data) >= 12:
-                joints = list(data[6:12])
-                print(f"[ROBOT] Đọc được joints HOMECHESS: {joints}")
-                try:
-                    self.movej_joint(joints, pose)
-                    print("[ROBOT] ✅ Đã về HOMECHESS (bằng Joint).")
-                    return
-                except Exception as je:
-                    print(f"[ROBOT] ⚠️ Lỗi MoveJ bằng khớp: {je}. Tiếp tục thử MoveJ Pose...")
-                    
-            # Fallback to MoveJ with pose
-            self.move_safe_pose(pose)
-            print("[ROBOT] ✅ Đã về HOMECHESS (bằng Pose).")
-            
-        except Exception as e:
-            print(f"[ROBOT] ⚠️ go_to_home_chess lỗi: {e} → về IDLE")
-            self.go_to_idle_home()
-
-    # -------------------------------------------------------------------------
-    # GRIPPER — Controller DO2
-    # -------------------------------------------------------------------------
-
-    def gripper_ctrl(self, val):
-        """Điều khiển kẹp qua Controller DO2 (bộ điều khiển, không phải Tool DO).
-        
-        val = config.GRIPPER_CLOSE (1) → Đóng kẹp
-        val = config.GRIPPER_OPEN  (0) → Mở kẹp
-        """
-        if self.dry:
-            action = "ĐÓNG" if val == config.GRIPPER_CLOSE else "MỞ"
-            print(f"[ROBOT] DRY Gripper (SetDO ID={self.gripper_do_id}) → {action}")
-            time.sleep(0.3)
             return 0
+        err, data = self.robot.GetRobotTeachingPoint("HOMECHESS")
+        if err != 0 or len(data) < 6:
+            raise RobotCommandError("Validated HOMECHESS teaching point unavailable",err)
+        pose = self._validate_pose(data[:6])
+        if len(data) >= 12:
+            return self.movej_joint([float(v) for v in data[6:12]],pose)
+        return self.move_safe_pose(pose)
 
-        # NẾU CẮM CÁP M12 8-PIN VÀO ĐẦU CÁNH TAY (Tool DO):
-        # 1. Hãy dò tìm ID bằng file test_tool_do2.py trước (Thử ID=0, rồi ID=1)
-        # 2. Sau khi biết ID thực (VD: 1), sửa self.gripper_do_id = 1 ở đầu file.
-        # 3. Đổi hàm SetDO (dưới đây) thành SetToolDO:
-        err = self.robot.SetToolDO(
-            id=self.gripper_do_id,
-            status=val,
-            block=1
+
+    def _validate_gripper_config(self):
+        if self.gripper_open_do_id == self.gripper_close_do_id:
+            raise GripperCommandError("Open and close gripper Tool DO IDs must differ")
+        if {self.gripper_open_do_id, self.gripper_close_do_id} - {0, 1}:
+            raise GripperCommandError("Gripper Tool DO IDs must be 0 or 1")
+        timing_values = (
+            config.GRIPPER_DIRECTION_DEADTIME_SEC,
+            config.GRIPPER_OPEN_MAX_PULSE_SEC,
+            config.GRIPPER_CLOSE_PULSE_SEC,
+            config.GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC,
+            config.GRIPPER_OPEN_SETTLE_SEC,
+            config.GRIPPER_CLOSE_SETTLE_SEC,
         )
+        if (any(not isinstance(value, (int, float)) for value in timing_values)
+                or any(not math.isfinite(value) or value < 0 for value in timing_values)):
+            raise GripperCommandError("Gripper timing values must be non-negative numbers")
+
+    def _set_tool_do(self, output_id, status):
+        if status:
+            self._require_actuation()
+        if self.dry:
+            print(f"[ROBOT] DRY Tool DO{output_id}={'ON' if status else 'OFF'}")
+            return 0
+        err = self.robot.SetToolDO(id=output_id, status=status, block=0)
         if err != 0:
-            print(f"[ROBOT] ❌ Lỗi SetToolDO (gripper): {err}")
+            raise GripperCommandError(f"SetToolDO(DO{output_id}, {status}) failed: {err}")
         return err
+
+    def _set_gripper_safe_idle(self):
+        """Best-effort all-low state; raise if either DO cannot be reset."""
+        failures = []
+        for output_id in (self.gripper_open_do_id, self.gripper_close_do_id):
+            try:
+                self._set_tool_do(output_id, config.GRIPPER_IDLE_STATUS)
+            except Exception as exc:
+                failures.append(exc)
+        if failures:
+            raise GripperCommandError("Could not force both gripper outputs LOW") from failures[0]
+
+    def gripper_ctrl(self, action):
+        """Pulse one gripper motor direction, then leave both Tool DO outputs LOW."""
+        self._require_actuation()
+        self._validate_gripper_config()
+        if action == config.GRIPPER_ACTION_OPEN_MAX:
+            target_id = self.gripper_open_do_id
+            pulse_seconds = config.GRIPPER_OPEN_MAX_PULSE_SEC
+            settle_seconds = config.GRIPPER_OPEN_SETTLE_SEC
+            label = "OPEN MAX"
+        elif action == config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP:
+            target_id = self.gripper_close_do_id
+            pulse_seconds = config.GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC
+            settle_seconds = config.GRIPPER_CLOSE_SETTLE_SEC
+            label = "CLOSE TO SAFE GAP"
+        elif action == config.GRIPPER_ACTION_CLOSE:
+            target_id = self.gripper_close_do_id
+            pulse_seconds = config.GRIPPER_CLOSE_PULSE_SEC
+            settle_seconds = config.GRIPPER_CLOSE_SETTLE_SEC
+            label = "CLOSE"
+        else:
+            raise GripperCommandError(f"Unknown gripper action: {action!r}")
+
+        with self._gripper_lock:
+            self._pulse_gripper_direction(target_id, pulse_seconds, label)
+            time.sleep(settle_seconds)
+        return 0
+
+    def _pulse_gripper_direction(self, target_id, pulse_seconds, label):
+        """Interlocked single-direction pulse; callers must hold _gripper_lock."""
+        self._set_gripper_safe_idle()
+        time.sleep(config.GRIPPER_DIRECTION_DEADTIME_SEC)
+        try:
+            print(f"[ROBOT] Gripper {label}: DO{target_id} ON for {pulse_seconds:.2f}s")
+            self._set_tool_do(target_id, config.GRIPPER_ACTIVE_STATUS)
+            time.sleep(pulse_seconds)
+        finally:
+            self._set_gripper_safe_idle()
 
     # -------------------------------------------------------------------------
     # QUY TRÌNH GẮP / ĐẶT / ĂN QUÂN
@@ -520,12 +483,11 @@ class FR5Robot:
             pose_pick = self.board_to_pose(col, row, config.PICK_Z, rotation=pick_rotation)
         print(f"[ROBOT] 🤏 Gắp tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
-        self.gripper_ctrl(config.GRIPPER_OPEN)   # Mở kẹp
-        self.move_safe_pose(pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
-        self.movel_pose(pose_pick)                # Hạ xuống
-        self.gripper_ctrl(config.GRIPPER_CLOSE)  # Đóng kẹp (gắp)
-        time.sleep(0.5)                           # Đợi kẹp đóng
-        self.movel_pose(pose_safe)                # Nhấc lên
+        self._run_stage(MotionStage.APPROACH, self.move_safe_pose, pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
+        self._run_stage(MotionStage.LAND, self.movel_pose, pose_pick)                # Hạ xuống
+        self._run_stage(MotionStage.GRIP, self.gripper_ctrl, config.GRIPPER_ACTION_CLOSE)
+        self._payload_state = PayloadState.EXPECTED_ATTACHED
+        self._run_stage(MotionStage.LIFT, self.movel_pose, pose_safe)                # Nhấc lên
         print(f"[ROBOT] ✅ Gắp xong ({col},{row})")
 
     def place_at(self, col, row):
@@ -535,11 +497,12 @@ class FR5Robot:
         pose_place = self.board_to_pose(col, row, config.PLACE_Z, rotation=place_rotation)
         print(f"[ROBOT] 📍 Đặt tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
-        self.move_safe_pose(pose_safe, col=col, row=row)  # Đến vị trí an toàn
-        self.movel_pose(pose_place)               # Hạ xuống
-        self.gripper_ctrl(config.GRIPPER_OPEN)   # Mở kẹp (thả)
-        time.sleep(0.5)                           # Đợi thả
-        self.movel_pose(pose_safe)                # Nhấc lên
+        self._run_stage(MotionStage.PLACE_APPROACH, self.move_safe_pose, pose_safe, col=col, row=row)  # Đến vị trí an toàn
+        self._run_stage(MotionStage.PLACE_LAND, self.movel_pose, pose_place)               # Hạ xuống
+        self._run_stage(MotionStage.RELEASE, self.gripper_ctrl, config.GRIPPER_ACTION_OPEN_MAX)
+        self._payload_state = PayloadState.EXPECTED_RELEASED
+        self._run_stage(MotionStage.POST_RELEASE_LIFT, self.movel_pose, pose_safe)                # Nhấc lên
+        self._run_stage(MotionStage.SETTLE, self.gripper_ctrl, config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
         print(f"[ROBOT] ✅ Đặt xong ({col},{row})")
     
     def move_to_extra_safe(self, col, row, visual_target=None):
@@ -552,116 +515,112 @@ class FR5Robot:
         else:
             pose_safe = self.board_to_pose(col, row, config.SAFE_Z, rotation=pick_rotation)
         print(f"[ROBOT] ⬆️ Nâng lên độ cao an toàn tại ({col},{row}) Z={config.SAFE_Z}")
-        self.move_safe_pose(pose_safe, col=col, row=row)
+        self._run_stage(MotionStage.LIFT,self.move_safe_pose,pose_safe,col=col,row=row)
 
     def place_in_capture_bin(self, current_z=None):
-        """Thả quân bị ăn vào bãi thải sử dụng teaching point R_Trash.
-        
-        Args:
-            current_z: Độ cao hiện tại của robot (nếu None, dùng SAFE_Z)
-        
-        Logic:
-            1. Về home trước (waypoint an toàn)
-            2. Từ home đi đến R_Trash bằng MoveJ (sử dụng teaching point)
-            3. Thả quân
-            4. Về home
-        """
-        print("[ROBOT] 🗑️ Thả quân bị ăn vào bãi...")
-        
-        # Bước 1: Về home trước (waypoint an toàn)
-        print(f"[ROBOT] 🏠 Về home trước khi đi bãi thải (tránh đường cong)")
-        self.go_to_home_chess()
-        
-        # Bước 2: Sử dụng teaching point R_Trash để đi đến bãi thải
-        if "R_Trash" in self.teaching_points:
-            print(f"[ROBOT] ✈️ Sử dụng teaching point R_Trash để đi bãi thải")
-            trash_joints = self.teaching_points["R_Trash"]["joints"]
-            trash_pose = self.teaching_points["R_Trash"]["pose"]
-            
-            # Di chuyển đến R_Trash bằng MoveJ (an toàn hơn)
-            err = self.movej_joint(trash_joints, trash_pose)
-            if err not in (0, 112):
-                print(f"[ROBOT] ⚠️ Không thể đến R_Trash, dùng tọa độ config backup")
-                # Fallback: dùng tọa độ từ config
-                safe_z = current_z if current_z is not None else config.SAFE_Z
-                pose_safe = [config.CAPTURE_BIN_X, config.CAPTURE_BIN_Y, safe_z] + list(config.ROTATION)
-                self.move_safe_pose(pose_safe)
-        else:
-            print(f"[ROBOT] ⚠️ Không tìm thấy R_Trash, dùng tọa độ config")
-            # Fallback: dùng tọa độ từ config
-            safe_z = current_z if current_z is not None else config.SAFE_Z
-            pose_safe = [config.CAPTURE_BIN_X, config.CAPTURE_BIN_Y, safe_z] + list(config.ROTATION)
-            self.move_safe_pose(pose_safe)
-        
-        # Bước 3: Thả quân
-        self.gripper_ctrl(config.GRIPPER_OPEN)
-        time.sleep(0.5)
-        
-        # Bước 4: Về home sau khi thả xong (chuẩn bị cho bước tiếp theo)
-        print(f"[ROBOT] 🏠 Về home sau khi thả quân (chuẩn bị bước tiếp theo)")
-        self.go_to_home_chess()
-        
-        print("[ROBOT] ✅ Đã thả quân bị ăn.")
+        self._require_actuation()
+        if "R_Trash" not in self.teaching_points:
+            raise RobotCommandError("Validated R_Trash teaching point unavailable")
+        trash = self.teaching_points["R_Trash"]
+        self._run_stage(MotionStage.SERVICE_RETREAT,self.go_to_home_chess)
+        self._run_stage(MotionStage.TRANSIT,self.movej_joint,trash["joints"],trash["pose"])
+        self._run_stage(MotionStage.RELEASE,self.gripper_ctrl,config.GRIPPER_ACTION_OPEN_MAX)
+        self._payload_state = PayloadState.EXPECTED_RELEASED
+        self._run_stage(MotionStage.SERVICE_RETREAT,self.go_to_home_chess)
+        self._run_stage(MotionStage.SETTLE,self.gripper_ctrl,config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
+        return 0
 
-    # -------------------------------------------------------------------------
-    # HÀM CHÍNH — GỌI TỪ main_VIP.py
-    # -------------------------------------------------------------------------
 
-    def move_piece(self, s_col, s_row, d_col, d_row, is_capture,
+    def move_piece(self, *args, **kwargs):
+        self._active_stage = MotionStage.PREPOSITION
+        self._last_completed_stage = None
+        self._payload_state = PayloadState.NONE
+        try:
+            self._move_piece_sequence(*args, **kwargs)
+            result = MotionResult.ok(payload_state=self._payload_state)
+        except Exception as exc:
+            category = (MotionFailureCategory.GRIPPER_FAILED if isinstance(exc,GripperCommandError)
+                        else MotionFailureCategory.TARGET_INVALID if isinstance(exc,(ValueError,KeyError))
+                        else MotionFailureCategory.MOTION_COMMAND_FAILED)
+            result = MotionResult.fail(self._active_stage,category,str(exc),
+                last_completed_stage=self._last_completed_stage,payload_state=self._payload_state,
+                backend_code=getattr(exc,"backend_code",None))
+        self.last_motion_result = result
+        return result
+
+    execute_piece_move = move_piece
+
+    def _move_piece_sequence(self, s_col, s_row, d_col, d_row, is_capture,
                    moving_visual_target=None, captured_visual_target=None,
                    refresh_moving_visual_target=None, verify_capture_cleared=None):
-        """Move one piece and return an explicit, fail-closed motion outcome."""
+        """Quy trình di chuyển hoàn chỉnh, bao gồm xử lý ăn quân.
+        
+        Args:
+            s_col, s_row: ô nguồn
+            d_col, d_row: ô đích
+            is_capture:   True nếu ăn quân đối phương
+            moving_visual_target: GridTarget camera cho quân đang di chuyển, hoặc None
+            captured_visual_target: GridTarget camera cho quân bị ăn, hoặc None
+            refresh_moving_visual_target: callback chụp lại bàn thật ngay trước
+                khi gắp quân di chuyển. Trả về GridTarget hoặc None để hủy an toàn.
+        """
         print(f"[ROBOT] ♟️ Di chuyển: ({s_col},{s_row}) → ({d_col},{d_row})"
               + (" [ĂN QUÂN]" if is_capture else ""))
         print(f"[ROBOT] 🔍 DEBUG: s_col={s_col}, s_row={s_row}, d_col={d_col}, d_row={d_row}")
 
-        stage = MotionStage.PREFLIGHT
-        if not self.connected and not self.dry:
-            try:
-                self.connect()
-            except Exception as e:
-                print(f"[ROBOT] ❌ Không thể kết nối, hủy nước đi: {e}")
-                return MotionResult(False, stage, str(e))
-        if not self.connected and not self.dry:
-            return MotionResult(False, stage, "Robot is not connected")
+        self._require_actuation()
+        self.board_to_pose(s_col,s_row,config.PICK_Z)
+        self.board_to_pose(d_col,d_row,config.PLACE_Z)
+        if is_capture:
+            if "R_Trash" not in self.teaching_points:
+                raise RobotCommandError("Validated R_Trash teaching point unavailable")
+            self._validate_pose(self.teaching_points["R_Trash"]["pose"])
+            joints = self.teaching_points["R_Trash"]["joints"]
+            if len(joints) != 6 or not all(math.isfinite(float(v)) for v in joints):
+                raise ValueError("Capture-bin joint target is invalid")
 
-        try:
-            distance = abs(d_col - s_col) + abs(d_row - s_row)
-            use_extra_safe = distance >= 4
-            if is_capture:
-                stage = MotionStage.PICK_CAPTURED
-                print(f"[ROBOT] 🎯 Gắp quân địch tại đích ({d_col},{d_row})")
-                self.pick_at(d_col, d_row, visual_target=captured_visual_target)
-                self.move_to_extra_safe(d_col, d_row, visual_target=captured_visual_target)
-                stage = MotionStage.CAPTURE_BIN
-                self.place_in_capture_bin(current_z=config.SAFE_Z)
-                stage = MotionStage.CAPTURE_RECONCILE
-                if verify_capture_cleared is not None and not verify_capture_cleared():
-                    # Preserve the legacy caller's explicit recovery signal; the
-                    # composite catch below still turns other motion failures
-                    # into typed outcomes for new controller callers.
-                    raise RuntimeError("Capture square is not visually clear after removal")
+        distance = abs(d_col - s_col) + abs(d_row - s_row)
+        use_extra_safe = distance >= 4  # Nếu di chuyển >= 4 ô, dùng độ cao an toàn
 
-            if refresh_moving_visual_target is not None:
-                moving_visual_target = refresh_moving_visual_target()
-                if moving_visual_target is None:
-                    print("[ROBOT] Visual correction unavailable after refresh; picking logical cell centre.")
+        # 1. Nếu ăn quân: gắp quân địch → thả vào bãi thải
+        if is_capture:
+            print(f"[ROBOT] 🎯 Gắp quân địch tại đích ({d_col},{d_row})")
+            self._run_stage(MotionStage.LIFT,self.pick_at,d_col,d_row,visual_target=captured_visual_target)
+            
+            # Nâng lên độ cao an toàn (SAFE_Z)
+            print(f"[ROBOT] ⬆️ Nâng lên SAFE_Z={config.SAFE_Z}mm")
+            self._run_stage(MotionStage.LIFT,self.move_to_extra_safe,d_col,d_row,visual_target=captured_visual_target)
+            
+            # Bay thẳng đến bãi thải ở độ cao SAFE_Z (giữ nguyên Z)
+            self._run_stage(MotionStage.RELEASE,self.place_in_capture_bin,current_z=config.SAFE_Z)
+            self._active_stage = MotionStage.SETTLE
+            if verify_capture_cleared is not None and not verify_capture_cleared():
+                raise RuntimeError("Capture square is not visually clear after removal")
 
-            stage = MotionStage.PICK_MOVING
-            self.pick_at(s_col, s_row, visual_target=moving_visual_target)
-            if use_extra_safe:
-                self.move_to_extra_safe(s_col, s_row, visual_target=moving_visual_target)
-            stage = MotionStage.PLACE
-            self.place_at(d_col, d_row)
-            stage = MotionStage.HOME
-            self.go_to_home_chess()
-            print("[ROBOT] ✅ Hoàn tất di chuyển.")
-            return MotionResult(True, MotionStage.COMPLETED)
-        except Exception as exc:
-            print(f"[ROBOT] ❌ Motion failed at {stage.value}: {exc}")
-            if stage is MotionStage.CAPTURE_RECONCILE:
-                raise
-            return MotionResult(False, stage, str(exc))
+        # A capture changes the physical board.  Do not reuse a target measured
+        # before that operation for the next pick; ask vision for a fresh pose.
+        if refresh_moving_visual_target is not None:
+            moving_visual_target = refresh_moving_visual_target()
+            if moving_visual_target is None:
+                raise RobotCommandError("Fresh visual correction unavailable after refresh")
+
+        # 2. Gắp quân mình ở nguồn
+        print(f"[ROBOT] 🤏 Gắp quân mình tại nguồn ({s_col},{s_row})")
+        self._run_stage(MotionStage.LIFT,self.pick_at,s_col,s_row,visual_target=moving_visual_target)
+        
+        # Nâng lên độ cao an toàn nếu di chuyển xa
+        if use_extra_safe:
+            print(f"[ROBOT] 🛡️ Di chuyển xa ({distance} ô), sử dụng độ cao an toàn")
+            self._run_stage(MotionStage.LIFT,self.move_to_extra_safe,s_col,s_row,visual_target=moving_visual_target)
+
+        # 3. Đặt quân mình vào đích
+        print(f"[ROBOT] 📍 Đặt quân mình tại đích ({d_col},{d_row})")
+        self._run_stage(MotionStage.POST_RELEASE_LIFT,self.place_at,d_col,d_row)
+
+        # 4. Về vị trí chờ
+        self._run_stage(MotionStage.SERVICE_RETREAT,self.go_to_home_chess)
+
+        print("[ROBOT] ✅ Hoàn tất di chuyển.")
 
     # -------------------------------------------------------------------------
     # TIỆN ÍCH

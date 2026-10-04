@@ -21,6 +21,16 @@ from src.simulation.physics.transforms import (
 from src.simulation.physics.validation import validate_gripper_profile
 
 
+def asset_fingerprint(data: bytes, encoding: str = "RAW_V1") -> str:
+    """Ignore Git CRLF checkout differences only for explicitly versioned text hashes."""
+    if encoding == "UTF8_LF_V1":
+        data.decode("utf-8")  # Reject binary/non-UTF8 inputs for this encoding.
+        data = data.replace(b"\r\n", b"\n")
+    elif encoding != "RAW_V1":
+        raise ValueError(f"Unsupported gripper fingerprint encoding: {encoding}")
+    return hashlib.sha256(data).hexdigest()
+
+
 class VirtualGripper:
     """
     Kinematic gripper proxy attached to the Virtual FR3 robot.
@@ -78,11 +88,12 @@ class VirtualGripper:
         profile_bytes = (root / "shared" / "robot_profiles" / "fr3.json").read_bytes()
         visual = json.loads(visual_bytes)
         step_bytes = (root / "robot-3d-viewer" / "assets" / "fr3_v6" / visual["asset_file"]).read_bytes()
+        encoding = collision_asset.get("fingerprint_encoding", "RAW_V1")
         if (collision_asset.get("schema_version") != 2 or
-                hashlib.sha256(visual_bytes).hexdigest() != collision_asset.get("source_visual_sha256") or
-                hashlib.sha256(profile_bytes).hexdigest() != collision_asset.get("source_profile_sha256") or
-                hashlib.sha256(gripper_profile_bytes).hexdigest() != collision_asset.get("source_gripper_profile_sha256") or
-                hashlib.sha256(step_bytes).hexdigest() != collision_asset.get("source_step_sha256")):
+                asset_fingerprint(visual_bytes, encoding) != collision_asset.get("source_visual_sha256") or
+                asset_fingerprint(profile_bytes, encoding) != collision_asset.get("source_profile_sha256") or
+                asset_fingerprint(gripper_profile_bytes, encoding) != collision_asset.get("source_gripper_profile_sha256") or
+                asset_fingerprint(step_bytes, encoding) != collision_asset.get("source_step_sha256")):
             raise ValueError("Gripper STEP/profile/visual changed; regenerate CAD-derived collision envelope")
         self.collision_asset = collision_asset
         fingers = collision_asset["finger_boxes"]

@@ -49,7 +49,8 @@ def bridge_setup():
     # These recorded grasp joints target the historical 90-degree board pose.
     # Pin that pose here so the test still measures attachment geometry after
     # the product default board was rotated to yaw 0.
-    provider = FixedBoardPoseProvider.from_forward_shift(0.0, board_yaw_deg=90.0)
+    from src.domain.board_pose import BoardPlacementState
+    provider = FixedBoardPoseProvider(BoardPlacementState.compute(0.0))
     world = VirtualPhysicalWorld(
         board_placement_state=provider.get_board_placement_state(),
         enable_gui=False,
@@ -182,7 +183,12 @@ def test_06_to_08_gripper_close_attach_follow_and_release(bridge_setup):
     target_piece = world.pieces[piece_id]
 
     # Pre-position backend joints directly over piece
-    grasp_joints = [-117.01, -59.39, 83.1, -113.7, -90.0, -117.01]
+    from src.simulation.virtual_fr3_backend import VirtualFR3Backend
+    solver = VirtualFR3Backend()
+    pose = list(target_piece.get_position_robot() * 1000.) + [180., 0., 0.]
+    ik = solver.solve_tcp_ik(pose, allow_multi_seed=True, allow_alternate_yaw=True)
+    assert ik.success, ik.failure_reason
+    grasp_joints = list(ik.joints_deg)
     backend._current_joints_deg = list(grasp_joints)
     bridge.poll_once()
 

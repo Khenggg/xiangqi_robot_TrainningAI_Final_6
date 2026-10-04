@@ -260,7 +260,7 @@ class TestPhase3CoordinateSemanticsContract(unittest.TestCase):
                 }
                 sim._handle_client_command(cmd)
 
-                mock_traj.assert_called_once_with((2, 7), (7, 2), 1, False)
+                mock_traj.assert_called_once_with((2, 7), (7, 2), 1, False, None)
         finally:
             sim.stop()
 

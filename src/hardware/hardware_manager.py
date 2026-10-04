@@ -1,48 +1,21 @@
 import os
 import time
 import sys
-import math
 import numpy as np
 import cv2
 import threading
-from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
 from src.hardware.robot_VIP import FR5Robot
-from src.hardware.backends import RobotBackend, PhysicalFR3Backend, VirtualFR3Backend
-from src.hardware.gripper import TwoOutputGripperDriver
-from src.domain.board_pose_provider import (
-    BoardPoseProvider,
-    FixedBoardPoseProvider,
-    PhysicalTeachingPointBoardPoseProvider,
-    BoardCalibrationResult,
-    BoardCalibrationProfile,
-    BoardCalibrationTolerancePolicy,
-)
-from src.motion.coordinator import MotionCoordinator, MotionProfile
-from src.motion.stages import MotionStage
-from src.motion.contracts import (
-    MotionType,
-    GripperCommand,
-)
-from src.motion.plan import PieceMoveIntent, CaptureIntent
-from src.motion.resolver import MotionResolver
-from src.motion.executor import MotionExecutor
-from src.motion.result import (
-    PayloadState,
-    MotionFailureCategory,
-    ExecutionFailureCategory,
-    MotionExecutionResult,
-)
 from src.ai.moonfish_engine import MoonfishEngine
-from src.ai.pikafish_engine import PikafishEngine
 from src.ai.cloud_engine import CloudEngine
 from src.ai.ai_controller import AIController
 from src.vision.camera_monitor import CameraMonitor
 from src.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetector
 from src.vision.visual_pick_estimator import VisualPickEstimator
+from src.vision.board_reconciler import BoardReconciler
 from src.vision.calibrate_camera import calibrate_perspective_camera
-from src.vision.turn_completion_monitor import TurnCompletionMonitor
+from src.vision.auto_calibrate import run_calibration_flow
 
 try:
     from ultralytics import YOLO
@@ -51,49 +24,32 @@ except ImportError:
 
 class HardwareManager:
     """Manages Robot, Camera (Vision), and AI Engine connections."""
-    def __init__(
-        self,
-        config,
-        project_dir,
-        board_calibration_profile: Optional[BoardCalibrationProfile] = None,
-        board_calibration_policy: Optional[BoardCalibrationTolerancePolicy] = None,
-        simulation_runtime: Optional[Any] = None,
-        twin_bridge: Optional[Any] = None,
-    ):
+    def __init__(self, config, project_dir):
         self.config = config
         self.project_dir = project_dir
         self.dry_run = config.DRY_RUN
-        self.board_calibration_profile = board_calibration_profile
-        self.board_calibration_policy = board_calibration_policy
-        self.simulation_runtime = simulation_runtime
-        self.twin_bridge = twin_bridge
         
         # Hardware instances
         self.robot = FR5Robot()
         self.backend = None
-        self.gripper_driver = None
+        self.simulation_runtime = None
         self.board_pose_provider = None
-        self.motion_profile = None
-        self.motion_coordinator = None
-        self.motion_resolver = None
-        self.motion_executor = None
-        self.physical_motion_authorized = False
+        self.twin_bridge = None
+        self.telemetry = None
+        self.simulation_error = None
+        self._piece_move_lock = threading.Lock()
         self.engine = None
         self.ai_ctrl = None
         self.cap = None
         self.model = None
         self.cam_monitor = None
         self.yolo_detector = None
-        self.pick_estimator = None
-        self.hand_model = None
-        self.turn_completion_monitor = None
-        self._last_hand_check = 0.0
         self.cchess_recognizer = None
+        self.pick_estimator = None
+        self.center_pick_estimator = None
+        self.board_reconciler = None
+        self._difficulty_availability = {"easy": False, "medium": False, "hard": False}
         self.perspective_path = Path(project_dir) / "perspective.npy"
-        self.camera_ready = False
-        self._difficulty_availability = {
-            "easy": True, "medium": True, "hard": True, "impossible": True
-        }
         
         self.class_id_to_name = {
             0: "b_A", 1: "b_C", 2: "b_R", 3: "b_E", 4: "b_K", 5: "b_N", 6: "b_P",
@@ -102,342 +58,146 @@ class HardwareManager:
 
     def initialize_all(self):
         """Khởi tạo toàn bộ Robot, AI, Camera theo đúng thứ tự."""
-        self._init_ai()
-        self._init_robot()
-        self._init_camera()
+        try:
+            self._init_ai()
+            self._init_robot()
+            self._init_camera()
+        except Exception:
+            # The caller has not received this manager yet. Release partial
+            # startup resources here, including its engine and virtual world.
+            try:
+                self.cleanup()
+            except Exception as cleanup_error:
+                print(f"[CLEANUP] Partial startup cleanup failed: {cleanup_error}")
+            raise
         return self
 
+    @property
+    def is_robot_ready(self):
+        if self.simulation_runtime is not None:
+            return self.backend.is_connected()
+        return bool(self.robot.connected and not self.dry_run
+                    and getattr(self.robot, "physical_motion_authorized", False))
+
     def _init_robot(self):
-        backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
-        if backend_type == "VIRTUAL":
-            print("[MAIN] 🎮 Initializing Virtual FR3 Backend (Simulation)...")
-            if self.simulation_runtime is not None:
-                self.backend = self.simulation_runtime.backend
-                if not getattr(self.backend, "connected", False):
-                    self.backend.connect()
-                print("[MAIN] ✅ Virtual FR3 Backend connected via simulation runtime.")
-            elif self.backend is None:
-                try:
-                    self.backend = VirtualFR3Backend(
-                        default_speed_factor=float(getattr(self.config, "ROBOT_SPEED_FACTOR", 0.25))
-                    )
-                    self.backend.connect()
-                    print("[MAIN] ✅ Virtual FR3 Backend connected.")
-                except Exception as e:
-                    print(f"⚠️ [MAIN] Virtual FR3 init error: {e}")
-                    self.backend = None
-
-            # Setup Board Pose Provider & Motion Pipeline for Virtual Backend
-            forward_shift_mm = getattr(self.config, "FORWARD_SHIFT_MM", 0.0)
-            board_yaw_deg = float(getattr(self.config, "BOARD_YAW_DEG", 0.0))
-            if self.simulation_runtime is not None:
-                self.board_pose_provider = FixedBoardPoseProvider(
-                    self.simulation_runtime.world.board_placement_state)
-                self.simulation_runtime.bind_board_pose_provider(self.board_pose_provider)
-            else:
-                self.board_pose_provider = FixedBoardPoseProvider.from_forward_shift(
-                    forward_shift_mm=forward_shift_mm,
-                    board_yaw_deg=board_yaw_deg,
-                )
-            self.motion_profile = MotionProfile(
-                pick_tcp_height_above_board_mm=getattr(self.config, "PICK_TCP_HEIGHT_MM", 4.715),
-                place_tcp_height_above_board_mm=getattr(self.config, "PLACE_TCP_HEIGHT_MM", 4.715),
-                safe_clearance_above_board_mm=getattr(self.config, "SAFE_CLEARANCE_Z_MM", 40.0),
-                provenance="SIMULATION_GEOMETRIC_DEFAULT",
-            )
-
-            # Create payload verifier for virtual simulation (only if world is available)
-            virtual_payload_verifier = None
-            if self.simulation_runtime is not None and getattr(self.simulation_runtime, "world", None) is not None:
-                def _verifier(state: PayloadState) -> bool:
-                    world = getattr(self.simulation_runtime, "world", None)
-                    if world is None:
-                        return False
-                    piece = world.get_attached_piece()
-                    if state in (PayloadState.EXPECTED_ATTACHED, PayloadState.ATTACHED):
-                        return piece is not None
-                    elif state in (PayloadState.EXPECTED_RELEASED, PayloadState.RELEASED, PayloadState.NONE):
-                        return piece is None
-                    return False
-                virtual_payload_verifier = _verifier
-
-            tool_rot = getattr(self.config, "PICK_TOOL_ROTATION", [-179.164, -3.047, -26.304])
-            if self.backend is not None:
-                self.motion_resolver = MotionResolver(
-                    board_pose_provider=self.board_pose_provider,
-                    motion_profile=self.motion_profile,
-                    tool_rotation_deg=tool_rot,
-                    default_speed_factor=float(getattr(self.config, "ROBOT_SPEED_FACTOR", 0.25)),
-                )
-                self.motion_executor = MotionExecutor(
-                    backend=self.backend,
-                    payload_verifier=virtual_payload_verifier,
-                    board_pose_provider=self.board_pose_provider,
-                    twin_bridge=self.twin_bridge,
-                )
-                self.motion_coordinator = MotionCoordinator(
-                    backend=self.backend,
-                    board_pose_provider=self.board_pose_provider,
-                    motion_profile=self.motion_profile,
-                    tool_rotation_deg=tool_rot,
-                )
-                print("[MAIN] 🧭 MotionResolver & MotionExecutor initialized (Virtual Mode).")
-            self.physical_motion_authorized = True
-        else:
-            print("[MAIN] 🦾 Initializing Physical FR3 Backend...")
-            try:
-                self.backend = PhysicalFR3Backend(
-                    ip=getattr(self.config, "ROBOT_IP", "192.168.58.2"),
-                    dry_run=self.dry_run,
-                    default_vel=float(getattr(self.config, "MOVE_SPEED", 20.0)),
-                )
-                self.backend.connect()
-                self.gripper_driver = TwoOutputGripperDriver(
-                    set_do_fn=self.backend.set_tool_do,
-                    dry_run=self.dry_run,
-                    open_do_id=getattr(self.config, "TOOL_DO_OPEN", 1),
-                    close_do_id=getattr(self.config, "TOOL_DO_CLOSE", 0),
-                    open_pulse_sec=getattr(self.config, "TOOL_DO_OPEN_PULSE_SEC", 0.30),
-                    close_pulse_sec=getattr(self.config, "TOOL_DO_CLOSE_PULSE_SEC", 0.30),
-                    deadtime_sec=getattr(self.config, "TOOL_DO_DEADTIME_SEC", 0.10),
-                )
-                self.backend.gripper_driver = self.gripper_driver
-                if not self.dry_run:
-                    print("[MAIN] ✅ Physical FR3 Backend connected (READ-ONLY).")
-            except Exception as e:
-                print(f"⚠️ [MAIN] Physical FR3 Backend init error: {e}")
-                self.backend = None
-
-            # Legacy double connection REMOVED: Do NOT call self.robot.connect()!
-            # HardwareManager interacts with physical hardware exclusively through self.backend.
-            self.robot.connected = False
-
-            # Physical board calibration from R1-R4 teaching points
-            # TUYỆT ĐỐI KHÔNG GỌI MOTION (go_to_home_chess, MoveJ, MoveL, MoveCart) TRƯỚC KHI CALIBRATE
+        mode = getattr(self.config, "ROBOT_BACKEND", "VIRTUAL").upper()
+        if mode == "VIRTUAL":
+            from src.simulation.runtime import VirtualXiangqiSimulation
+            from src.simulation.virtual_fr3_backend import VirtualFR3Backend
+            from src.domain.board_pose_provider import FixedBoardPoseProvider
+            from src.hardware.simulation_adapter import VirtualVisualRobot
+            self.backend = VirtualFR3Backend(default_speed_factor=float(
+                getattr(self.config, "SIMULATION_SPEED_FACTOR", 0.2)))
+            self.simulation_runtime = VirtualXiangqiSimulation(backend=self.backend)
+            self.simulation_runtime.connect()
+            self.board_pose_provider = FixedBoardPoseProvider(self.simulation_runtime.placement_state)
+            self.simulation_runtime.bind_board_pose_provider(self.board_pose_provider)
+            self.robot = VirtualVisualRobot(self)
+            print("[ROBOT] Virtual runtime ready; physical hardware untouched.")
+            return
+        if mode != "PHYSICAL":
+            raise ValueError("ROBOT_BACKEND must be VIRTUAL or PHYSICAL")
+        if self.dry_run:
+            print("[ROBOT] Physical DRY_RUN: no controller connection or actuation.")
+            return
+        try:
+            self.robot.connect()  # Read-only; no enable, home, or gripper command.
+            if not self.robot.connected:
+                raise RuntimeError("Physical controller connection failed")
             self._calibrate_robot()
+        except Exception as exc:
+            self.simulation_error = str(exc)
+            print(f"[ROBOT] Physical startup unavailable: {exc}")
 
     def _calibrate_robot(self):
-        print("\n--- ROBOT CALIBRATION (R1-R4 TEACHING POINTS) ---")
-        backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
-        if backend_type == "VIRTUAL":
-            self.physical_motion_authorized = True
-            return
-
-        if self.backend is None:
-            print("  ⚠️ Backend không khả dụng — không thể calibrate physical board pose.")
-            self.physical_motion_authorized = False
-            self.board_pose_provider = None
-            self.motion_profile = None
-            self.motion_resolver = None
-            self.motion_executor = None
-            self.motion_coordinator = None
-            return
-
-        # Explicit Physical Calibration Profile Resolution
-        cal_profile: Optional[BoardCalibrationProfile] = None
-        if self.board_calibration_profile is not None:
-            cal_profile = self.board_calibration_profile
-        else:
-            cal_mode = getattr(self.config, "BOARD_CALIBRATION_MODE", None)
-            if cal_mode == "POINTER_CONTACT":
-                cal_profile = BoardCalibrationProfile(
-                    tcp_to_board_contact_offset_mm=[0.0, 0.0, 0.0],
-                    offset_frame="ROBOT_BASE",
-                    provenance="CALIBRATED_POINTER_CONTACT",
-                )
-            elif cal_mode == "KNOWN_OFFSET":
-                offset = getattr(self.config, "BOARD_CALIBRATION_OFFSET_MM", None)
-                frame = getattr(self.config, "BOARD_CALIBRATION_OFFSET_FRAME", None)
-                prov = getattr(self.config, "BOARD_CALIBRATION_PROVENANCE", None)
-                if (
-                    not isinstance(offset, (list, tuple))
-                    or len(offset) != 3
-                    or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in offset)
-                    or frame not in ("TOOL", "ROBOT_BASE")
-                    or not prov
-                    or not str(prov).strip()
-                ):
-                    print(f"\n{'='*60}")
-                    print("❌ [CRITICAL] Cấu hình KNOWN_OFFSET không hợp lệ hoặc thiếu thông số:")
-                    print(f"   BOARD_CALIBRATION_OFFSET_MM: {offset}")
-                    print(f"   BOARD_CALIBRATION_OFFSET_FRAME: {frame}")
-                    print(f"   BOARD_CALIBRATION_PROVENANCE: {prov}")
-                    print("   Robot motion đã bị VÔ HIỆU HÓA. Physical board calibration failed closed.")
-                    print(f"{'='*60}\n")
-                    self.physical_motion_authorized = False
-                    self.board_pose_provider = None
-                    self.motion_profile = None
-                    self.motion_resolver = None
-                    self.motion_executor = None
-                    self.motion_coordinator = None
-                    return
-                cal_profile = BoardCalibrationProfile(
-                    tcp_to_board_contact_offset_mm=[float(offset[0]), float(offset[1]), float(offset[2])],
-                    offset_frame=frame,
-                    provenance=str(prov).strip(),
-                )
-            else:
-                print(f"\n{'='*60}")
-                print("❌ [CRITICAL] Thiếu hoặc sai cấu hình chế độ calibrate bàn cờ thật (BOARD_CALIBRATION_MODE):")
-                print(f"   BOARD_CALIBRATION_MODE hiện tại: {cal_mode}")
-                print("   PHYSICAL mode yêu cầu cấu hình rõ ràng: 'POINTER_CONTACT' hoặc 'KNOWN_OFFSET'.")
-                print("   Robot motion đã bị VÔ HIỆU HÓA. Physical board calibration failed closed.")
-                print(f"{'='*60}\n")
-                self.physical_motion_authorized = False
-                self.board_pose_provider = None
-                self.motion_profile = None
-                self.motion_resolver = None
-                self.motion_executor = None
-                self.motion_coordinator = None
-                return
-
-        # Explicit Physical Calibration Tolerance Policy Resolution
-        cal_policy: BoardCalibrationTolerancePolicy
-        if self.board_calibration_policy is not None:
-            cal_policy = self.board_calibration_policy
-        else:
-            warning_tilt = getattr(self.config, "BOARD_MAX_TILT_WARNING_DEG", 2.5)
-            hard_fail_tilt = getattr(self.config, "BOARD_MAX_TILT_HARD_FAIL_DEG", 5.0)
-            max_dim_fail = getattr(self.config, "BOARD_MAX_DIMENSION_ERROR_HARD_FAIL_MM", 25.0)
-            max_edge_diff = getattr(self.config, "BOARD_MAX_EDGE_LENGTH_DIFF_MM", 20.0)
-            max_corner_fail = getattr(self.config, "BOARD_MAX_CORNER_RESIDUAL_HARD_FAIL_MM", 15.0)
-            max_rms_fail = getattr(self.config, "BOARD_MAX_RMS_RESIDUAL_HARD_FAIL_MM", 10.0)
-            max_diag_diff = getattr(self.config, "BOARD_MAX_DIAGONAL_DIFF_MM", 15.0)
-            cal_policy = BoardCalibrationTolerancePolicy(
-                max_board_tilt_warning_deg=float(warning_tilt),
-                max_board_tilt_hard_fail_deg=float(hard_fail_tilt),
-                max_dimension_error_hard_fail_mm=float(max_dim_fail),
-                max_edge_length_diff_mm=float(max_edge_diff),
-                max_corner_residual_hard_fail_mm=float(max_corner_fail),
-                max_rms_residual_hard_fail_mm=float(max_rms_fail),
-                max_diagonal_diff_mm=float(max_diag_diff),
-                allow_wobj_ids=(0, 1),
-            )
-
+        from src.hardware.simulation_adapter import physical_board_provider, BorrowedPhysicalStateSource
+        self.board_pose_provider = None
         try:
-            provider = PhysicalTeachingPointBoardPoseProvider.from_controller(
-                self.backend,
-                calibration_profile=cal_profile,
-                tolerance_policy=cal_policy,
-            )
-            res = provider.calibration_result
+            self.board_pose_provider = physical_board_provider(self.robot, self.config)
+            self.backend = BorrowedPhysicalStateSource(self.robot)
+        except Exception as exc:
+            self.simulation_error = str(exc)
+            print(f"[TWIN] Physical mirror unavailable: {exc}")
+            # Connection alone does not grant calibrated motion authorization.
+            self.robot.physical_motion_authorized = False
 
-            if not res.success:
-                print(f"\n{'='*60}")
-                print(f"❌ [CRITICAL] Physical board calibration THẤT BẠI: {res.error_message}")
-                print(f"   RMS error: {res.rms_error_mm:.3f} mm, Max error: {res.max_error_mm:.3f} mm")
-                print("   Robot motion đã bị VÔ HIỆU HÓA. Không fallback sang simulation.")
-                print(f"{'='*60}\n")
-                self.physical_motion_authorized = False
-                self.board_pose_provider = None
-                self.motion_profile = None
-                self.motion_resolver = None
-                self.motion_executor = None
-                self.motion_coordinator = None
-                return
+    def setup_digital_twin(self, telemetry=None, poll_hz=25.0, start=True):
+        if self.board_pose_provider is None or self.backend is None:
+            return None
+        from src.digital_twin.live_twin_bridge import LiveTwinBridge
+        if self.twin_bridge is not None:
+            return self.twin_bridge
+        self.telemetry = telemetry
+        virtual = self.simulation_runtime is not None
+        if virtual and telemetry is not None:
+            runtime = self.simulation_runtime
+            runtime.telemetry = telemetry
+            runtime.backend.telemetry_publisher = telemetry
+            telemetry.register_command_handler(runtime._handle_client_command)
+        self.twin_bridge = LiveTwinBridge(
+            self.backend, self.board_pose_provider, telemetry=telemetry,
+            world=self.simulation_runtime.world if virtual else None,
+            physical=not virtual, owns_world=not virtual, poll_hz=poll_hz,
+        )
+        if virtual:
+            self.simulation_runtime.bind_board_pose_provider(self.board_pose_provider, self.twin_bridge)
+        if start:
+            self.twin_bridge.start()
+        return self.twin_bridge
 
-            self.board_pose_provider = provider
-            self.physical_motion_authorized = True
-            print(f"  ✅ Calibrated physical board pose thành công:")
-            if res.calibration_log:
-                print(f"{res.calibration_log}")
-            if res.warnings:
-                for w in res.warnings:
-                    print(f"  ⚠️ [CALIBRATION WARNING] {w}")
+    def execute_piece_move(self, *args, **kwargs):
+        from src.hardware.simulation_adapter import execute_virtual_move, rejected
+        from src.motion.result import MotionFailureCategory
+        if not self._piece_move_lock.acquire(blocking=False):
+            return rejected("Another piece move is active", MotionFailureCategory.ROBOT_BUSY)
+        try:
+            if self.simulation_runtime is not None:
+                return execute_virtual_move(self.simulation_runtime, *args, **kwargs)
+            if not self.is_robot_ready or self.board_pose_provider is None:
+                return rejected("Physical control requires explicit commissioning and calibrated board parity")
+            # Context IDs are mirror metadata; the visual controller owns motion.
+            call_kwargs = dict(kwargs)
+            for key in ("piece_id", "captured_piece_id", "move_context"):
+                call_kwargs.pop(key, None)
+            return self.robot.move_piece(*args, **call_kwargs)
+        finally:
+            self._piece_move_lock.release()
 
-            # Setup MotionProfile with explicit provenance
-            prov = getattr(self.config, "PICK_HEIGHT_PROVENANCE", "PROVISIONAL_SIMULATION")
-            self.motion_profile = MotionProfile(
-                pick_tcp_height_above_board_mm=getattr(self.config, "PICK_TCP_HEIGHT_MM", 4.715),
-                place_tcp_height_above_board_mm=getattr(self.config, "PLACE_TCP_HEIGHT_MM", 4.715),
-                safe_clearance_above_board_mm=getattr(self.config, "SAFE_CLEARANCE_Z_MM", 40.0),
-                provenance=prov,
-            )
-            if not self.motion_profile.is_physical_validated:
-                print(f"  ⚠️ [MAIN WARNING] Physical grasp height is {prov}, not measured physical truth.")
+    def sync_committed_board(self, piece_cells):
+        """Reconcile only a complete board already accepted by the game/camera."""
+        if self.twin_bridge is None or self._piece_move_lock.locked():
+            return False
+        return self.twin_bridge.reconcile_to_board_cells(piece_cells)
 
-            tool_rot = getattr(self.config, "PICK_TOOL_ROTATION", [-179.164, -3.047, -26.304])
-            self.motion_resolver = MotionResolver(
-                board_pose_provider=self.board_pose_provider,
-                motion_profile=self.motion_profile,
-                tool_rotation_deg=tool_rot,
-                default_speed_factor=float(getattr(self.config, "ROBOT_SPEED_FACTOR", 0.25)),
-            )
-            self.motion_executor = MotionExecutor(
-                backend=self.backend,
-                payload_verifier=None,
-                board_pose_provider=self.board_pose_provider,
-                twin_bridge=self.twin_bridge,
-            )
-            self.motion_coordinator = MotionCoordinator(
-                backend=self.backend,
-                board_pose_provider=self.board_pose_provider,
-                motion_profile=self.motion_profile,
-                tool_rotation_deg=tool_rot,
-            )
-            print("[MAIN] 🧭 MotionResolver & MotionExecutor initialized with Calibrated Physical Board Pose.")
-
-            # Deprecated: Keep legacy config variables populated for non-migrated code
-            # Note: The new motion path (MotionResolver/Executor) does NOT depend on these.
-            state = self.board_pose_provider.get_board_placement_state()
-            p_r1 = state.cell_to_robot_xyz(0, 0, height_above_board_mm=0.0)
-            self.config.BOARD_ORIGIN_X = float(p_r1[0]) * 1000.0
-            self.config.BOARD_ORIGIN_Y = float(p_r1[1]) * 1000.0
-            print(f"  [LEGACY] Synced deprecated config.BOARD_ORIGIN_X={self.config.BOARD_ORIGIN_X:.3f}, Y={self.config.BOARD_ORIGIN_Y:.3f}")
-
-        except Exception as e:
-            print(f"\n{'='*60}")
-            print(f"❌ [CRITICAL] Lỗi trong quá trình calibrate physical board: {e}")
-            print("   Robot motion đã bị VÔ HIỆU HÓA. Không fallback sang simulation.")
-            print(f"{'='*60}\n")
-            self.physical_motion_authorized = False
-            self.board_pose_provider = None
-            self.motion_profile = None
-            self.motion_resolver = None
-            self.motion_executor = None
-            self.motion_coordinator = None
+    def close_simulation(self):
+        if self.twin_bridge is not None:
+            self.twin_bridge.close()
+            self.twin_bridge = None
+        if self.simulation_runtime is not None:
+            self.simulation_runtime.stop()
+            self.simulation_runtime = None
 
     def _init_ai(self):
         engine_type = getattr(self.config, "ENGINE_TYPE", "LOCAL")
         local_engine = None
         cloud_engine = None
+        difficulty = getattr(self.config, "AI_DIFFICULTY", "hard")
 
-        # 1. Khởi tạo Local Engine (Ưu tiên Pikafish, fallback sang Moonfish)
-        if engine_type in ["HYBRID", "LOCAL"]:
-            local_backend = getattr(self.config, "LOCAL_AI_BACKEND", "PIKAFISH").upper()
-            
-            # Thử Pikafish trước
-            if local_backend == "PIKAFISH":
-                try:
-                    pika_exe = getattr(self.config, "PIKAFISH_EXE", None)
-                    pika_nnue = getattr(self.config, "PIKAFISH_NNUE", None)
-                    if pika_exe and os.path.isfile(pika_exe):
-                        threads = getattr(self.config, "PIKAFISH_THREADS", 2)
-                        hash_mb = getattr(self.config, "PIKAFISH_HASH_MB", 64)
-                        local_engine = PikafishEngine(pika_exe, pika_nnue)
-                        local_engine.start(threads=threads, hash_mb=hash_mb)
-                        default_elo = getattr(self.config, "DEFAULT_AI_ELO", 1400)
-                        local_engine.set_elo(default_elo)
-                        print(f"[MAIN] Pikafish engine started! (ELO={default_elo}, Threads={threads}, Hash={hash_mb}MB)")
-                except Exception as e:
-                    print(f"[MAIN] Pikafish init error: {e} -> Thu fallback sang Moonfish...")
-                    local_engine = None
-
-            # Fallback sang Moonfish nếu Pikafish chưa có hoặc lỗi
-            if local_engine is None:
-                try:
-                    exe_path = getattr(self.config, "MOONFISH_EXE", None)
-                    if exe_path and os.path.isfile(exe_path):
-                        local_engine = MoonfishEngine(exe_path)
-                        local_engine.start(nnue_path=getattr(self.config, "MOONFISH_NNUE", None))
-                        print(f"[MAIN] Moonfish engine started! (think={getattr(self.config, 'MOONFISH_THINK_MS', 1000)}ms)")
-                except Exception as e:
-                    print(f"[MAIN] Moonfish init error: {e}")
-                    local_engine = None
+        # 1. Khởi tạo Local Moonfish (nếu cần)
+        if engine_type in ["HYBRID", "LOCAL"] or difficulty in ("easy", "medium", "hard", "impossible"):
+            try:
+                exe_path = self.config.MOONFISH_EXE
+                nnue_path = self.config.MOONFISH_NNUE
+                local_engine = MoonfishEngine(exe_path)
+                local_engine.start(nnue_path=nnue_path)
+                print(f"✅ Moonfish engine started! (think={self.config.MOONFISH_THINK_MS}ms)")
+            except Exception as e:
+                print(f"⚠️ Moonfish init error: {e}")
+                local_engine = None
             
             if local_engine is None and not self.dry_run:
                 print("\n========================================================")
-                print(" CẢNH BÁO: KHÔNG TÌM THẤY LOCAL AI ENGINE (PIKAFISH/MOONFISH)!")
+                print("⚠️ CẢNH BÁO: KHÔNG TÌM THẤY MOONFISH ENGINE DỰ PHÒNG LOCAL!")
                 print("   Hệ thống sẽ duy trì hoạt động bằng API Cloud Engine.")
                 print("========================================================\n")
 
@@ -456,13 +216,13 @@ class HardwareManager:
         # 3. Giao cho AI Controller quản lý cả 2
         self.ai_ctrl = AIController(local_engine, cloud_engine, self.config)
         self._difficulty_availability = {
-            difficulty_name: local_engine is not None and getattr(local_engine, "_ready", True)
+            difficulty_name: local_engine is not None and local_engine._ready
             for difficulty_name in ("easy", "medium", "hard", "impossible")
         }
 
     def difficulty_availability(self):
         """Return which menu options can be selected without weakening a choice."""
-        return dict(getattr(self, "_difficulty_availability", {"easy": True, "medium": True, "hard": True, "impossible": True}))
+        return dict(self._difficulty_availability)
 
     def select_difficulty(self, difficulty):
         """Switch engine only after its requested policy is usable."""
@@ -474,22 +234,17 @@ class HardwareManager:
             profile = getattr(self.config, "AI_DIFFICULTY_PROFILES", {}).get(difficulty, {})
             if difficulty == "impossible":
                 return "Đã chọn IMPOSSIBLE — Moonfish nguyên gốc đang được sử dụng."
-            nodes = profile.get('nodes', 0)
-            nodes_str = f"≤{nodes:,} nodes" if nodes else ""
-            depth_str = f"Moonfish depth {profile.get('depth')}" if profile.get('depth') is not None else ""
-            think_str = f"≤{profile.get('think_ms', 0) / 1000:g}s" if profile.get('think_ms') else ""
-            parts = [p for p in [depth_str, nodes_str, think_str] if p]
-            details = f" — {', '.join(parts)}." if parts else "."
-            return f"Đã chọn {difficulty.upper()}{details}"
+            return (f"Đã chọn {difficulty.upper()} — Moonfish depth {profile.get('depth')}, "
+                    f"≤{profile.get('nodes'):,} nodes, ≤{profile.get('think_ms') / 1000:g}s.")
 
         if difficulty == getattr(self.config, "AI_DIFFICULTY", "hard"):
             message = confirmation()
             print(f"[GAME] {message}")
             return True, message
         if self.ai_ctrl is not None:
-            if getattr(self.ai_ctrl, "local_engine", None) is not None:
+            if self.ai_ctrl.local_engine is not None:
                 self.ai_ctrl.local_engine.stop()
-            if getattr(self.ai_ctrl, "cloud_engine", None) is not None:
+            if self.ai_ctrl.cloud_engine is not None:
                 self.ai_ctrl.cloud_engine.stop()
         self.config.AI_DIFFICULTY = difficulty
         self._init_ai()
@@ -498,18 +253,22 @@ class HardwareManager:
         return True, message
 
     def _init_camera(self):
-        # Initialize CChessRecognizer if ONNX models exist
-        try:
-            from src.vision.cchess_recognizer import CChessRecognizer
-            pose_onnx = Path(self.project_dir) / getattr(self.config, "CCHESS_POSE_MODEL_PATH", "models/cchess/pose_4_v6.onnx")
-            layout_onnx = Path(self.project_dir) / getattr(self.config, "CCHESS_LAYOUT_MODEL_PATH", "models/cchess/layout_nano_v3.onnx")
-            if pose_onnx.exists() and layout_onnx.exists():
-                self.cchess_recognizer = CChessRecognizer(pose_onnx, layout_onnx)
-                print("[INIT] [CChess] ✅ CChessRecognizer loaded successfully (pose + layout ONNX).")
-            else:
-                print(f"[INIT] [CChess] ⚠️ ONNX models not found ({pose_onnx}, {layout_onnx}).")
-        except Exception as e:
-            print(f"[INIT] [CChess] ⚠️ Could not initialize CChessRecognizer: {e}")
+        self.camera_calibration_ready = False
+        self.camera_calibration_source = "UNAVAILABLE"
+        self.camera_startup_error = None
+        # Initialize CChessRecognizer (ONNX)
+        if getattr(self.config, "CCHESS_RECOGNITION_ENABLED", True):
+            try:
+                from src.vision.cchess_recognizer import CChessRecognizer
+                pose_onnx = Path(self.project_dir) / "models" / "cchess" / "pose_4_v6.onnx"
+                layout_onnx = Path(self.project_dir) / "models" / "cchess" / "layout_nano_v3.onnx"
+                if pose_onnx.exists() and layout_onnx.exists():
+                    self.cchess_recognizer = CChessRecognizer(pose_onnx, layout_onnx)
+                    print("[INIT] [CChess] CChessRecognizer loaded successfully (pose + layout ONNX).")
+                else:
+                    print("[INIT] [CChess] ONNX models not found in models/cchess/.")
+            except Exception as e:
+                print(f"[INIT] [CChess] Could not initialize CChessRecognizer: {e}")
 
         if self.dry_run:
             return
@@ -524,114 +283,48 @@ class HardwareManager:
         except Exception as e:
             print(f"⚠️ Warning: Could not load YOLO model: {e}")
             
-        cam_index = int(os.environ.get("VIDEO_INDEX", str(self.config.VIDEO_SOURCE)))
-        candidate_indices = [cam_index] + [i for i in [0, 1, 2, 3] if i != cam_index]
-        candidate_backends = [
-            ("DSHOW", cv2.CAP_DSHOW),
-            ("MSMF", cv2.CAP_MSMF),
-            ("DEFAULT", cv2.CAP_ANY),
-        ]
-
-        print(f"[INIT] 📷 Scanning cameras (Preferred index: {cam_index})...")
-        best_cap = None
-        best_info = ""
-
-        for idx in candidate_indices:
-            for b_name, backend in candidate_backends:
-                try:
-                    cap_try = cv2.VideoCapture(idx, backend)
-                    if not cap_try.isOpened():
-                        cap_try.release()
-                        continue
-
-                    # Thử đọc 1 frame để kiểm tra tín hiệu thực tế
-                    ret, test_frm = cap_try.read()
-                    if ret and test_frm is not None:
-                        brightness = float(np.mean(test_frm))
-                        w = int(cap_try.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        h = int(cap_try.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        print(f"  🔍 Camera {idx} [{b_name}]: {w}x{h}, brightness={brightness:.1f}")
-
-                        # Nếu có ánh sáng (không phải frame đen xì toàn 0)
-                        if brightness > 1.0:
-                            best_cap = cap_try
-                            best_info = f"Index {idx} [{b_name}] ({w}x{h}, brightness={brightness:.1f})"
-                            break
-                    cap_try.release()
-                except Exception as e_cam:
-                    pass
-            if best_cap is not None:
-                break
-
-        # Nếu không có camera nào có ánh sáng > 1.0, lấy camera đầu tiên mở được
-        if best_cap is None:
-            for idx in candidate_indices:
-                cap_try = cv2.VideoCapture(idx)
-                if cap_try.isOpened():
-                    best_cap = cap_try
-                    best_info = f"Index {idx} [Fallback Default]"
-                    break
-
-        if best_cap is None:
-            print("❌ Lỗi: Không thể mở bất kỳ Camera nào!")
-            sys.exit(1)
-
-        self.cap = best_cap
-        print(f"✅ Camera đã chọn thành công: {best_info}")
-
-        # Thử nâng độ phân giải lên 720p/MJPG an toàn
+        from src.vision.camera_startup import open_validated_camera, validate_perspective
+        self.camera_calibration_ready = False
+        self.camera_calibration_source = "UNAVAILABLE"
+        self.camera_startup_error = None
         try:
-            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            # Kiểm tra xem sau khi đổi format có bị driver làm đen ảnh không
-            ret_chk, frm_chk = self.cap.read()
-            if ret_chk and frm_chk is not None and np.mean(frm_chk) < 1.0:
-                print("  ⚠️ Format MJPG làm đen frame -> Khôi phục cấu hình tự động của camera.")
-                # Mở lại mà không ép FOURCC
-                self.cap.release()
-                self.cap = cv2.VideoCapture(idx)
-        except Exception:
-            pass
-
-        # Calibrate Vision (RTMPose ONNX Auto-Calibration + Manual Fallback)
-        print("\n" + "=" * 60)
-        print("  📐  CAMERA CALIBRATION — BẮT BUỘC KHI KHỞI ĐỘNG")
-        print("=" * 60)
-        from src.vision.auto_calibrate import run_calibration_flow
-        calib_matrix = run_calibration_flow(
-            self.cap, str(self.perspective_path), cchess_recognizer=self.cchess_recognizer
-        )
-        
-        if calib_matrix is None:
-            # Fallback an toàn cuối cùng: Sử dụng perspective matrix đã lưu nếu có
-            if self.perspective_path.exists():
-                try:
-                    calib_matrix = np.load(str(self.perspective_path))
-                    print(f"ℹ️ [RECOVERY] Đã nạp lại ma trận perspective có sẵn từ: {self.perspective_path}")
-                except Exception:
-                    calib_matrix = None
-
-        if calib_matrix is None:
-            print("\n" + "=" * 60)
-            print("❌ [CRITICAL] Camera calibration thất bại và không có file perspective.npy!")
-            print("   Hệ thống Vision không thể khởi động an toàn. Thao tác bị dừng.")
-            print("=" * 60 + "\n")
+            cam_index = int(os.environ.get("VIDEO_INDEX", str(self.config.VIDEO_SOURCE)))
+            self.cap = open_validated_camera(cam_index)
+            self.camera_selected_index = cam_index
+            print(f"[INIT] Camera VIDEO_INDEX={cam_index}: valid BGR frame received")
+            # A cancelled/failed fresh session cannot be rescued by an old file.
+            matrix = run_calibration_flow(self.cap, str(self.perspective_path),
+                                          cchess_recognizer=self.cchess_recognizer)
+            if not validate_perspective(matrix):
+                raise RuntimeError("Fresh camera calibration failed/cancelled; saved perspective is not verified")
+            if not self.perspective_path.exists():
+                raise RuntimeError("Fresh camera calibration was not saved")
+            saved = np.load(str(self.perspective_path), allow_pickle=False)
+            if not validate_perspective(saved) or not np.allclose(saved, matrix):
+                raise RuntimeError("Saved perspective does not match fresh calibration")
+            self.camera_calibration_ready = True
+            self.camera_calibration_source = "FRESH_STARTUP_CALIBRATION"
+        except Exception as exc:
+            self.camera_startup_error = str(exc)
             if self.cap is not None:
                 self.cap.release()
                 self.cap = None
-            self.camera_ready = False
-            sys.exit(1)
+            print(f"[INIT] Camera unavailable: {exc}")
+            raise RuntimeError(f"Camera startup blocked: {exc}") from exc
 
-        self.camera_ready = True
-
-        # Start Monitor
-        if self.model is not None:
-            self.cam_monitor = CameraMonitor(self.cap, self.model, self.perspective_path)
+        # Start Monitor (Ưu tiên CChessRecognizer ONNX)
+        if self.model is not None or self.cchess_recognizer is not None:
+            self.cam_monitor = CameraMonitor(
+                self.cap,
+                model=self.model,
+                perspective_path=self.perspective_path,
+                cchess_recognizer=self.cchess_recognizer,
+            )
             self.cam_monitor.start()
             self.yolo_detector = YoloSnapshotDetector(self.perspective_path, self.class_id_to_name)
-            print("[INIT] ✅ YoloSnapshotDetector initialized.")
-            if getattr(self.config, "VISUAL_PICK_ENABLED", False):
+            print("[INIT] SnapshotDetector & CameraMonitor initialized (CChess ONNX enabled).")
+            if (getattr(self.config, "VISUAL_PICK_ENABLED", False)
+                    or getattr(self.config, "VISUAL_BOARD_SYNC_REQUIRED", True)):
                 try:
                     self.pick_estimator = VisualPickEstimator(
                         self.perspective_path,
@@ -639,420 +332,24 @@ class HardwareManager:
                         max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
                         foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
                     )
-                    print("[INIT] ✅ VisualPickEstimator initialized.")
+                    # The primary robot path picks at the geometric centre of
+                    # best.pt's measured box.  The existing foot-point estimator
+                    # stays available as the supervised fallback.
+                    self.center_pick_estimator = VisualPickEstimator(
+                        self.perspective_path,
+                        min_confidence=self.config.VISUAL_PICK_MIN_CONFIDENCE,
+                        max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
+                        foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
+                        point_mode="center",
+                    )
+                    self.board_reconciler = BoardReconciler(self.pick_estimator)
+                    print("[INIT] ✅ Visual pick / board reconciliation initialized.")
                 except Exception as e:
                     print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
 
-        if getattr(self.config, "AUTO_MOVE_CONFIRM_ENABLED", False) and YOLO is not None:
-            hand_path = Path(self.project_dir) / getattr(self.config, "HAND_MODEL_PATH", "models/hand_best_egohands.pt")
-            try:
-                if hand_path.exists():
-                    self.hand_model = YOLO(str(hand_path))
-                    self.turn_completion_monitor = TurnCompletionMonitor(
-                        getattr(self.config, "HAND_ABSENCE_SECONDS", 0.8),
-                        getattr(self.config, "HAND_MIN_PRESENT_SECONDS", 0.25),
-                    )
-                    print("[INIT] ✅ Hand-aware automatic move confirmation enabled.")
-                else:
-                    print(f"[INIT] ⚠️ Hand model not found: {hand_path}")
-            except Exception as e:
-                print(f"[INIT] ⚠️ Hand-aware confirmation disabled: {e}")
-
-    def hand_interaction_finished(self) -> bool:
-        """Return True once after a hand has entered then cleared the board ROI."""
-        if self.hand_model is None or self.turn_completion_monitor is None or self.cam_monitor is None:
-            return False
-        now = time.monotonic()
-        if now - self._last_hand_check < 0.10:
-            return False
-        self._last_hand_check = now
-        frame, _ = self.cam_monitor.get_latest_frame_and_detections()
-        if frame is None:
-            return False
-        hand_on_board = False
-        try:
-            result = self.hand_model(frame, conf=getattr(self.config, "HAND_CONFIDENCE", 0.45), verbose=False)[0]
-            boxes = getattr(result, "boxes", None)
-            if boxes is not None and len(boxes) > 0:
-                polygon = self.cam_monitor._compute_board_polygon()
-                if polygon is None:
-                    return False
-                for box in boxes.xyxy.cpu().tolist():
-                    cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
-                    if cv2.pointPolygonTest(polygon, (cx, cy), False) >= 0:
-                        hand_on_board = True
-                        break
-        except Exception as e:
-            print(f"[HAND] ⚠️ Detection error: {e}")
-            return False
-        return self.turn_completion_monitor.observe(hand_on_board, now)
-
-    def reset_hand_interaction_monitor(self):
-        if self.turn_completion_monitor is not None:
-            self.turn_completion_monitor.reset()
-
-    def enable_robot(self) -> bool:
-        """Explicitly enable robot actuators for motion (non-read-only)."""
-        if self.backend is not None and hasattr(self.backend, "enable_robot"):
-            return self.backend.enable_robot()
-        return True
-
-    def disable_robot(self) -> bool:
-        """Explicitly disable robot actuators (safe idling)."""
-        if self.backend is not None and hasattr(self.backend, "disable_robot"):
-            return self.backend.disable_robot()
-        return True
-
-    def set_operational_mode(self, mode: int = 0) -> bool:
-        """Set robot controller operational mode (0: automatic, 1: manual)."""
-        if self.backend is not None and hasattr(self.backend, "set_operational_mode"):
-            return self.backend.set_operational_mode(mode)
-        return True
-
-    @property
-    def lifecycle_state(self) -> str:
-        """
-        Operational lifecycle state:
-        DISCONNECTED -> CONNECTED -> ENABLED -> MODE_CONFIGURED -> CALIBRATED -> MOTION_AUTHORIZED
-        """
-        if self.backend is None:
-            return "DISCONNECTED"
-        snap = self.backend.get_state_snapshot()
-        if not snap.connected:
-            return "DISCONNECTED"
-
-        backend_enabled = getattr(self.backend, "is_enabled", False)
-        if not backend_enabled:
-            return "CONNECTED"
-
-        op_mode = getattr(self.backend, "operational_mode", None)
-        if op_mode != 0:
-            return "ENABLED"
-
-        board_calibrated = (
-            self.board_pose_provider is not None
-            and getattr(self.board_pose_provider, "is_calibrated", False)
-        )
-        if not board_calibrated:
-            return "MODE_CONFIGURED"
-
-        if self.motion_resolver is None or self.motion_executor is None or not self.physical_motion_authorized:
-            return "CALIBRATED"
-
-        return "MOTION_AUTHORIZED"
-
-    @property
-    def is_robot_ready(self) -> bool:
-        """
-        Returns True if authoritative backend is ready for motion.
-        For Physical mode, strictly requires:
-          1. backend connected
-          2. backend enabled (or dry_run)
-          3. operational mode explicitly configured to 0 (for live physical mode)
-          4. board provider calibrated
-          5. motion_resolver and motion_executor available
-          6. physical motion authorized
-        For Virtual mode, requires:
-          1. backend connected
-          2. board_pose_provider available
-          3. motion_resolver and motion_executor available
-        """
-        backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
-        if backend_type == "PHYSICAL":
-            if self.backend is None:
-                return False
-            snapshot = self.backend.get_state_snapshot()
-            if not snapshot.connected:
-                return False
-            backend_enabled = getattr(self.backend, "is_enabled", False)
-            if not self.dry_run and not backend_enabled:
-                return False
-            if not self.dry_run:
-                op_mode = getattr(self.backend, "operational_mode", None)
-                if op_mode != 0:
-                    return False
-            board_calibrated = (
-                self.board_pose_provider is not None
-                and getattr(self.board_pose_provider, "is_calibrated", False)
-            )
-            if not board_calibrated:
-                return False
-            if self.motion_resolver is None or self.motion_executor is None:
-                return False
-            return bool(self.physical_motion_authorized)
-        elif backend_type == "VIRTUAL":
-            if self.backend is None:
-                return False
-            snapshot = self.backend.get_state_snapshot()
-            return bool(
-                snapshot.connected
-                and self.board_pose_provider is not None
-                and self.motion_resolver is not None
-                and self.motion_executor is not None
-                and self.twin_bridge is not None
-                and getattr(self.backend, "collision_guard", None) is not None
-                and self.backend.collision_guard.world is self.twin_bridge.world
-            )
-        else:
-            if self.backend is not None:
-                return bool(
-                    self.backend.get_state_snapshot().connected
-                    and self.motion_resolver is not None
-                    and self.motion_executor is not None
-                )
-            return bool(self.robot and self.robot.connected and self.physical_motion_authorized)
-
-    def setup_digital_twin(self, telemetry=None, poll_hz: float = 25.0, start: bool = True):
-        """Instantiate and optionally start LiveTwinBridge using authoritative physical calibration."""
-        if self.board_pose_provider is None or self.backend is None:
-            print("⚠️ [HardwareManager] Cannot setup Digital Twin: backend or board_pose_provider missing.")
-            return None
-        if self.twin_bridge is not None:
-            return self.twin_bridge
-        if hasattr(self.backend, "telemetry_publisher") and self.backend.telemetry_publisher is None and telemetry is not None:
-            self.backend.telemetry_publisher = telemetry
-        from src.digital_twin.live_twin_bridge import LiveTwinBridge
-        self.twin_bridge = LiveTwinBridge(
-            backend=self.backend,
-            board_pose_provider=self.board_pose_provider,
-            telemetry=telemetry,
-            poll_hz=poll_hz,
-            physical=getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper() == "PHYSICAL",
-            world=(self.simulation_runtime.world if self.simulation_runtime is not None else None),
-            owns_world=self.simulation_runtime is None,
-        )
-        if self.simulation_runtime is not None:
-            self.simulation_runtime.bind_board_pose_provider(self.board_pose_provider, self.twin_bridge)
-        if (getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper() == "VIRTUAL"
-                and self.simulation_runtime is None):
-            # Game-started virtual backend needs the same collision guard and
-            # PyBullet bodies as motion and viewer; runtime-owned worlds
-            # already install their own guard.
-            from src.simulation.physics.collision_guard import FR3CollisionGuard
-            self.backend.set_collision_guard(FR3CollisionGuard(self.twin_bridge.world))
-        if self.motion_executor is not None:
-            self.motion_executor.twin_bridge = self.twin_bridge
-        if start:
-            self.twin_bridge.start()
-        return self.twin_bridge
-
-    def reconcile_human_move(self, context) -> bool:
-        """Observe committed human moves and reconcile them in the Digital Twin without robot motion."""
-        if self.twin_bridge is not None:
-            return self.twin_bridge.reconcile_human_move(context)
-        return True
-
-    def reconcile_new_game(self) -> bool:
-        """Reset digital twin state when a new game starts."""
-        if self.twin_bridge is not None:
-            return self.twin_bridge.reconcile_new_game()
-        return True
-
-    def reconcile_board(self, piece_ids: dict) -> bool:
-        """Reconcile digital twin state to specific board piece mapping (e.g. on Undo)."""
-        if self.twin_bridge is not None:
-            return self.twin_bridge.reconcile_to_board_cells(piece_ids)
-        return True
-
-    def verify_physical_board(self, expected_board) -> bool:
-        """Verify a completed move using fresh, quality-approved full recognition.
-
-        Occupancy alone cannot prove piece color/type after a capture. This
-        read-only check deliberately requires the full-board recognizer.
-        """
-        if self.cam_monitor is None or self.cchess_recognizer is None:
-            return False
-        try:
-            for _ in range(2):
-                frame, _detections = self.cam_monitor.get_fresh_snapshot()
-                if frame is None:
-                    return False
-                observed = self.recognize_board_state(frame)
-                if not (observed and observed.get("success") and observed.get("quality_ok")
-                        and observed.get("board") == expected_board):
-                    return False
-        except Exception:
-            return False
-        return True
-
-    def execute_piece_move(
-        self,
-        s_col: int,
-        s_row: int,
-        d_col: int,
-        d_row: int,
-        is_capture: bool,
-        moving_visual_target: Optional[object] = None,
-        captured_visual_target: Optional[object] = None,
-        piece_id: Optional[str] = None,
-        captured_piece_id: Optional[str] = None,
-        move_context: Optional[Any] = None,
-    ) -> MotionExecutionResult:
-        """
-        Execute pick-and-place move through the authoritative MotionResolver and MotionExecutor.
-        """
-        backend_type = getattr(self.config, "ROBOT_BACKEND", "PHYSICAL").upper()
-        if not self.is_robot_ready:
-            print("[ROBOT] ❌ Motion rejected: robot is not ready or calibration failed.")
-            return MotionExecutionResult.fail(
-                failed_stage=MotionStage.PREPOSITION,
-                category=ExecutionFailureCategory.PRECONDITION_FAILED,
-                message=f"Robot is not ready for motion (backend_type={backend_type}, dry_run={self.dry_run}).",
-            )
-
-        if self.twin_bridge is not None and (
-                move_context is None or move_context.piece_id != piece_id
-                or move_context.captured_piece_id != captured_piece_id
-                or tuple(move_context.src) != (s_row, s_col)
-                or tuple(move_context.dst) != (d_row, d_col)
-                or bool(captured_piece_id) != bool(is_capture)):
-            return MotionExecutionResult.fail(
-                failed_stage=MotionStage.PREPOSITION,
-                category=ExecutionFailureCategory.INVALID_PLAN,
-                message="Digital Twin execution requires a matching semantic move and piece identities.",
-            )
-
-        if is_capture and backend_type == "PHYSICAL":
-            if not getattr(self.config, "CAPTURE_BIN_VALIDATED", False):
-                print("[ROBOT] ❌ Physical capture rejected: CAPTURE_BIN_VALIDATED is False.")
-                return MotionExecutionResult.fail(
-                    failed_stage=MotionStage.PREPOSITION,
-                    category=ExecutionFailureCategory.SAFETY_INTERLOCK,
-                    message="Physical capture bin is not validated (CAPTURE_BIN_VALIDATED=False). Autonomous physical captures disabled until Phase 4 validation.",
-                )
-
-        if self.motion_resolver is None or self.motion_executor is None:
-            return MotionExecutionResult.fail(
-                failed_stage=MotionStage.PREPOSITION,
-                category=ExecutionFailureCategory.PRECONDITION_FAILED,
-                message="MotionResolver or MotionExecutor is not initialized.",
-            )
-
-        capture_pose = getattr(self.config, "CAPTURE_BIN_POSE_MM_DEG", None)
-        if capture_pose is None:
-            capture_pose = [
-                getattr(self.config, "CAPTURE_BIN_X", -226.123),
-                getattr(self.config, "CAPTURE_BIN_Y", 225.024),
-                getattr(self.config, "CAPTURE_BIN_Z", 291.68),
-            ] + list(getattr(self.config, "ROTATION", [-179.164, -3.047, -26.304]))
-
-        try:
-            if is_capture:
-                intent = CaptureIntent(
-                    src_row=float(s_row),
-                    src_col=float(s_col),
-                    dst_row=float(d_row),
-                    dst_col=float(d_col),
-                    bin_pose_mm_deg=tuple(float(v) for v in capture_pose),  # type: ignore
-                    attacker_piece_id=piece_id,
-                    captured_piece_id=captured_piece_id,
-                )
-                plan = self.motion_resolver.resolve_capture(
-                    intent=intent,
-                    moving_visual_target=moving_visual_target,
-                    captured_visual_target=captured_visual_target,
-                )
-            else:
-                intent = PieceMoveIntent(
-                    src_row=float(s_row),
-                    src_col=float(s_col),
-                    dst_row=float(d_row),
-                    dst_col=float(d_col),
-                    piece_id=piece_id,
-                )
-                plan = self.motion_resolver.resolve_move(
-                    intent=intent,
-                    moving_visual_target=moving_visual_target,
-                )
-        except Exception as e:
-            return MotionExecutionResult.fail(
-                failed_stage=MotionStage.PREPOSITION,
-                category=ExecutionFailureCategory.INVALID_PLAN,
-                message=f"Plan resolution error: {e}",
-            )
-
-        if self.twin_bridge is not None and move_context is not None:
-            if not self.twin_bridge.begin_robot_move(move_context):
-                return MotionExecutionResult.fail(
-                    failed_stage=MotionStage.PREPOSITION,
-                    category=ExecutionFailureCategory.ROBOT_BUSY,
-                    message=f"Digital Twin rejected robot move: {self.twin_bridge.last_error}",
-                )
-
-        try:
-            if self.simulation_runtime is not None and hasattr(self.simulation_runtime, "acquire_operation_state"):
-                from src.simulation.runtime import RuntimeOperationState
-                with self.simulation_runtime.acquire_operation_state(RuntimeOperationState.MOTION):
-                    res = self.motion_executor.execute_plan(plan)
-            else:
-                res = self.motion_executor.execute_plan(plan)
-        except Exception as e:
-            # Always finish the twin transaction, including executor/runtime
-            # exceptions. Recovery remains latched; no retreat or fake commit.
-            res = MotionExecutionResult.fail(
-                failed_stage=MotionStage.PREPOSITION,
-                category=ExecutionFailureCategory.PAYLOAD_STATE_UNCERTAIN,
-                message=f"Motion execution interrupted: {e}",
-                payload_state=PayloadState.UNKNOWN,
-            )
-
-        if self.twin_bridge is not None and move_context is not None:
-            if not self.twin_bridge.end_robot_move(move_context, res.success):
-                res = MotionExecutionResult.fail(
-                    failed_stage=res.failed_stage or MotionStage.LAND,
-                    category=ExecutionFailureCategory.PAYLOAD_STATE_UNCERTAIN,
-                    message=f"Digital Twin verification failed: {self.twin_bridge.last_error}",
-                    last_completed_stage=res.last_completed_stage,
-                    payload_state=res.payload_state,
-                )
-
-        self._last_execution_result = res
-        return res
-
-    def move_piece(
-        self,
-        s_col: int,
-        s_row: int,
-        d_col: int,
-        d_row: int,
-        is_capture: bool,
-        moving_visual_target: Optional[object] = None,
-        captured_visual_target: Optional[object] = None,
-        piece_id: Optional[str] = None,
-        captured_piece_id: Optional[str] = None,
-        move_context: Optional[Any] = None,
-    ) -> bool:
-        """
-        Legacy compatibility wrapper over execute_piece_move.
-        Returns True if execution succeeded, False otherwise.
-        """
-        res = self.execute_piece_move(
-            s_col=s_col,
-            s_row=s_row,
-            d_col=d_col,
-            d_row=d_row,
-            is_capture=is_capture,
-            moving_visual_target=moving_visual_target,
-            captured_visual_target=captured_visual_target,
-            piece_id=piece_id,
-            captured_piece_id=captured_piece_id,
-            move_context=move_context,
-        )
-        return bool(res.success)
-
     def cleanup(self):
+        self.close_simulation()
         print("[CLEANUP] Đang dọn dẹp hardware...")
-        if getattr(self, "twin_bridge", None) is not None:
-            try: self.twin_bridge.close()
-            except: pass
-        # Backend disconnect owns cleanup of outputs actually used this session.
-        # An observation-only session must never pulse Tool DO during shutdown.
-        if self.simulation_runtime is not None and hasattr(self.simulation_runtime, "stop"):
-            try: self.simulation_runtime.stop()
-            except: pass
-        if self.backend is not None:
-            try: self.backend.disconnect()
-            except: pass
         if self.cam_monitor:
             try: self.cam_monitor.stop()
             except: pass
@@ -1069,11 +366,103 @@ class HardwareManager:
         if self.cap and self.cap.isOpened():
             try: self.cap.release()
             except: pass
-        if self.robot and getattr(self.robot, "connected", False) and not self.dry_run:
+        if (self.robot and self.robot.connected and not self.dry_run
+                and getattr(self.robot, "physical_motion_authorized", False)):
+            try: self.robot._set_gripper_safe_idle()
+            except Exception as e: print(f"[CLEANUP] ⚠️ Không thể tắt gripper Tool DO: {e}")
             try: self.robot.robot.RobotEnable(0)
             except: pass
 
     # --- WRAPPER VISION UTILS ---
+    def get_robot_center_pick_targets(self, expected_cells):
+        """Locate robot pick points from centres of fresh ``best.pt`` boxes.
+
+        CChess calibration owns ``perspective.npy`` (pixel -> 9x10 grid); YOLO
+        measures where a physical piece actually is.  After three unsuccessful
+        centre-box samples, retain the prior foot-point visual correction as a
+        fallback instead of making CChess/FEN identity a motion gate.
+        """
+        targets = {name: None for name in expected_cells}
+        if not self.center_pick_estimator or not self.cam_monitor:
+            print("[CENTER PICK] Unavailable; using legacy visual-pick fallback.")
+            return self.get_visual_pick_targets(expected_cells)
+
+        samples = {name: [] for name in expected_cells}
+        attempts = max(1, int(getattr(self.config, "VISUAL_CENTER_PICK_ATTEMPTS", 3)))
+        for attempt in range(1, attempts + 1):
+            try:
+                frame, detections = self.cam_monitor.get_fresh_snapshot()
+                if frame is None:
+                    print(f"[CENTER PICK] Attempt {attempt}/{attempts}: no camera frame.")
+                    continue
+                for name, (col, row) in expected_cells.items():
+                    samples[name].append(
+                        self.center_pick_estimator.estimate_pick_target(detections, col, row)
+                    )
+            except Exception as exc:
+                print(f"[CENTER PICK] Attempt {attempt}/{attempts} failed: {exc}")
+
+        minimum = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
+        max_jitter = float(getattr(self.config, "VISUAL_CENTER_PICK_MAX_JITTER_CELLS", 0.12))
+        for name, values in samples.items():
+            targets[name] = self.center_pick_estimator.aggregate_targets(
+                values, minimum, max_spread_cells=max_jitter
+            )
+
+        if all(target is not None for target in targets.values()):
+            print(f"[CENTER PICK] Using stable centres from best.pt ({attempts} attempts).")
+            return targets
+
+        missing = [name for name, target in targets.items() if target is None]
+        print(f"[CENTER PICK] No stable box centre after {attempts} attempts for {missing}; "
+              "using legacy foot-point correction.")
+        return self.get_visual_pick_targets(expected_cells)
+
+    def _cell_has_center_detection(self, detections, cell):
+        """Whether best.pt sees a confident box centre at a calibrated cell."""
+        col, row = cell
+        half_width = float(getattr(self.config, "VISUAL_OCCUPANCY_CELL_HALF_WIDTH", 0.5))
+        return self.center_pick_estimator.has_detection_in_cell(
+            detections, col, row, cell_half_width=half_width
+        )
+
+    def is_cell_visually_clear(self, cell):
+        """Confirm that a capture square is clear without using CChess identity."""
+        if not self.center_pick_estimator or not self.cam_monitor:
+            print("[CENTER PICK] Cannot confirm cleared capture square: vision unavailable.")
+            return False
+        attempts = max(1, int(getattr(self.config, "VISUAL_CENTER_PICK_ATTEMPTS", 3)))
+        required = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
+        clear_samples = 0
+        for _ in range(attempts):
+            frame, detections = self.cam_monitor.get_fresh_snapshot()
+            if frame is not None and not self._cell_has_center_detection(detections, cell):
+                clear_samples += 1
+        cleared = clear_samples >= required
+        print(f"[CENTER PICK] Capture square {cell} clear: {clear_samples}/{attempts}.")
+        return cleared
+
+    def verify_visual_move(self, source_cell, destination_cell):
+        """Verify the observed YOLO geometry after a robot move, not CChess/FEN."""
+        if not self.center_pick_estimator or not self.cam_monitor:
+            print("[CENTER PICK] Cannot verify completed move: vision unavailable.")
+            return False
+        attempts = max(1, int(getattr(self.config, "VISUAL_CENTER_PICK_ATTEMPTS", 3)))
+        required = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
+        matching_samples = 0
+        for _ in range(attempts):
+            frame, detections = self.cam_monitor.get_fresh_snapshot()
+            if frame is None:
+                continue
+            source_clear = not self._cell_has_center_detection(detections, source_cell)
+            destination_occupied = self._cell_has_center_detection(detections, destination_cell)
+            if source_clear and destination_occupied:
+                matching_samples += 1
+        verified = matching_samples >= required
+        print(f"[CENTER PICK] Move geometry {source_cell}->{destination_cell}: "
+              f"{matching_samples}/{attempts} matching snapshots.")
+        return verified
+
     def get_visual_pick_targets(self, expected_cells):
         """Lấy snapshot trước khi robot di chuyển và ước lượng điểm gắp thực tế.
         Bọc phòng thủ toàn diện: Mọi ngoại lệ đều tự động fallback về None (tâm ô lý thuyết).
@@ -1087,42 +476,122 @@ class HardwareManager:
             print("[VISUAL PICK] Fallback: cam_monitor chưa được khởi tạo.")
             return targets
 
-        # 1. Bọc an toàn khi lấy snapshot từ camera
-        try:
-            if not hasattr(self.cam_monitor, "get_fresh_snapshot"):
-                print("[VISUAL PICK] ⚠️ cam_monitor thiếu method 'get_fresh_snapshot'. Dùng fallback tâm ô.")
-                return targets
-
-            _frame, detections = self.cam_monitor.get_fresh_snapshot()
-            if _frame is None:
-                print("[VISUAL PICK] ⚠️ Không lấy được frame mới từ camera. Dùng fallback tâm ô.")
-                return targets
-        except Exception as e:
-            print(f"[VISUAL PICK] ⚠️ Ngoại lệ khi snapshot camera: {e}. Dùng fallback tâm ô.")
-            return targets
-
-        # 2. Bọc an toàn khi ước lượng từng ô cờ
-        for name, cell in expected_cells.items():
+        samples = {name: [] for name in expected_cells}
+        for _ in range(max(1, int(getattr(self.config, "VISUAL_PICK_SAMPLE_COUNT", 3)))):
             try:
-                col, row = cell
-                targets[name] = self.pick_estimator.estimate_pick_target(detections, col, row)
+                frame, detections = self.cam_monitor.get_fresh_snapshot()
+                if frame is None:
+                    continue
+                for name, (col, row) in expected_cells.items():
+                    samples[name].append(self.pick_estimator.estimate_pick_target(detections, col, row))
             except Exception as e:
-                print(f"[VISUAL PICK] ⚠️ Lỗi ước lượng cho {name} tại {cell!r}: {e}. Fallback ô này.")
-                targets[name] = None
+                print(f"[VISUAL PICK] ⚠️ Snapshot error: {e}")
+        min_samples = getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2)
+        for name, values in samples.items():
+            targets[name] = self.pick_estimator.aggregate_targets(values, min_samples)
+            if targets[name] is None:
+                print(f"[VISUAL PICK] Fallback {name}: insufficient stable samples.")
 
         return targets
+
+    def get_verified_visual_pick_targets(self, expected_board, expected_cells):
+        """Verify the real board and return stable, camera-corrected pick points.
+
+        The robot must only pick a source/capture piece after CChess confirms
+        its identity against the FEN board.  Placement intentionally remains at
+        the calibrated logical destination, which is handled by ``place_at``.
+        """
+        targets = {name: None for name in expected_cells}
+        if not self.board_reconciler or not self.cam_monitor:
+            print("[BOARD SYNC] CChess/visual reconciliation is unavailable.")
+            return targets, False
+
+        samples = {name: [] for name in expected_cells}
+        valid_reports = 0
+        sample_count = max(1, int(getattr(self.config, "VISUAL_PICK_SAMPLE_COUNT", 3)))
+        for _ in range(sample_count):
+            try:
+                frame, detections = self.cam_monitor.get_fresh_snapshot()
+                if frame is None:
+                    continue
+                report = self.board_reconciler.reconcile(
+                    expected_board,
+                    expected_cells,
+                    self.recognize_board_state(frame),
+                    detections,
+                )
+                if not report.available:
+                    print(f"[BOARD SYNC] Recognition unavailable: {report.error}")
+                    continue
+                if not report.board_matches:
+                    if report.mismatches:
+                        print(f"[BOARD SYNC] FEN mismatch at {list(report.mismatches)}; robot motion blocked.")
+                    else:
+                        print(f"[BOARD SYNC] Unknown CChess cells at {list(report.unknown_cells)}; robot motion blocked.")
+                    continue
+                if not report.picks_verified:
+                    failures = {name: obs.reason for name, obs in report.picks.items() if not obs.verified}
+                    print(f"[BOARD SYNC] Pick verification failed: {failures}")
+                    continue
+                valid_reports += 1
+                for name, observation in report.picks.items():
+                    samples[name].append(observation.target)
+            except Exception as e:
+                print(f"[BOARD SYNC] Snapshot error: {e}")
+
+        minimum = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
+        for name, values in samples.items():
+            targets[name] = self.pick_estimator.aggregate_targets(values, minimum)
+
+        verified = valid_reports >= minimum and all(target is not None for target in targets.values())
+        if verified:
+            print(f"[BOARD SYNC] ✅ {valid_reports}/{sample_count} snapshots match FEN; using physical pick offsets.")
+        else:
+            print("[BOARD SYNC] Robot motion blocked: board/pick state was not stable enough.")
+        return targets, verified
+
+    def verify_physical_board(self, expected_board):
+        """Require consecutive fresh, quality-approved complete board observations."""
+        camera = getattr(self, "cam_monitor", None)
+        recognizer = getattr(self, "recognize_board_state", None)
+        if not getattr(self, "camera_calibration_ready", False) or camera is None or not callable(recognizer):
+            print("[BOARD SYNC] Fresh calibrated camera verification unavailable.")
+            return False
+        cfg = getattr(self, "config", None)
+        minimum = max(2, int(getattr(cfg, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2)))
+        samples = max(minimum, int(getattr(cfg, "VISUAL_PICK_SAMPLE_COUNT", minimum)))
+        threshold = float(getattr(cfg, "CCHESS_RECOVERY_MIN_CONFIDENCE", 0.5))
+        consecutive = 0
+        for _ in range(samples):
+            try:
+                frame, _ = camera.get_fresh_snapshot()
+                result = recognizer(frame) if frame is not None else None
+                valid = bool(result and result.get("success"))
+                observed = result.get("board") if result else None
+                from src.vision.cchess_recognizer import validate_board_sanity
+                sane, _ = validate_board_sanity(observed) if isinstance(observed, (list, tuple)) else (False, None)
+                if result and "quality_ok" in result:
+                    quality = result["quality_ok"] is True and sane
+                else:
+                    confidence = np.asarray(result.get("confidence", []) if result else [], dtype=float)
+                    quality = (sane and confidence.shape == (10, 9) and np.isfinite(confidence).all()
+                               and float(confidence.min()) >= threshold)
+                exact = (isinstance(observed, (list, tuple)) and len(observed) == 10
+                         and all(isinstance(row, (list, tuple)) and len(row) == 9 for row in observed)
+                         and observed == expected_board)
+                consecutive = consecutive + 1 if valid and quality and exact else 0
+                if consecutive >= minimum:
+                    return True
+            except Exception as exc:
+                print(f"[BOARD SYNC] Fresh verification failed: {exc}")
+                consecutive = 0
+        print("[BOARD SYNC] Full physical board was not confirmed by consecutive fresh frames.")
+        return False
 
     def capture_baseline_if_needed(self, force_delay=0.0):
         if self.cam_monitor and self.yolo_detector:
             if force_delay > 0:
-                t_end = time.time() + float(force_delay)
-                while time.time() < t_end:
-                    try:
-                        import pygame
-                        pygame.event.pump()
-                    except Exception:
-                        pass
-                    time.sleep(0.05)
+                time.sleep(force_delay)
             frame, detections = self.cam_monitor.get_fresh_snapshot()
             success = self.yolo_detector.capture_baseline(frame, detections)
             return success
@@ -1132,6 +601,19 @@ class HardwareManager:
         if self.yolo_detector:
             self.yolo_detector._baseline_occ = None
 
+    def interaction_capability(self):
+        """Expose an explicit safety capability; never infer it from motion."""
+        return getattr(self.config, "PLAYER_TURN_INTERACTION_CAPABILITY", "UNAVAILABLE")
+
+    def is_board_occluded(self):
+        """Optional integration point for a real hand/tool obstruction producer.
+
+        The current camera stack has no such producer, so the safe answer is
+        False only because UNIFIED is separately blocked by capability.
+        """
+        provider = getattr(self, "occlusion_provider", None)
+        return bool(provider()) if callable(provider) else False
+
     def restore_yolo_baseline(self, occ, baseline_time):
         if self.yolo_detector and occ is not None:
             self.yolo_detector._baseline_occ = [row[:] for row in occ]
@@ -1139,12 +621,13 @@ class HardwareManager:
 
     def recognize_board_state(self, frame=None):
         """Nhận diện toàn bộ bàn cờ (10x9) bằng CChessRecognizer ONNX models.
+        Ưu tiên dùng ma trận phối cảnh đã cân chỉnh để nắn bàn cờ chuẩn xác và ổn định nhất.
         
         Args:
             frame: OpenCV BGR frame. Nếu None, sẽ lấy từ CameraMonitor.
             
         Returns:
-            dict kết quả từ CChessRecognizer.full_recognize() hoặc None nếu không khả dụng.
+            dict kết quả nhận diện bàn cờ hoặc None nếu không khả dụng.
         """
         if self.cchess_recognizer is None:
             return None
@@ -1155,4 +638,28 @@ class HardwareManager:
         if frame is None:
             return None
 
+        # 1. Ưu tiên nắn bằng 4 góc đã hiệu chỉnh (calibrated perspective)
+        if os.path.exists(str(self.perspective_path)):
+            try:
+                M = np.load(str(self.perspective_path))
+                inv_M = np.linalg.inv(M)
+                grid_kpts = np.array([
+                    [[0.0, 0.0]], [[8.0, 0.0]], [[0.0, 9.0]], [[8.0, 9.0]]
+                ], dtype=np.float32)
+                kpts_px = cv2.perspectiveTransform(grid_kpts, inv_M).reshape(4, 2)
+                warped, _ = self.cchess_recognizer.extract_rectified_board(frame, kpts_px)
+                board_proj, board_short, confs = self.cchess_recognizer.recognize_layout(warped)
+                return {
+                    "success": True,
+                    "board": board_proj,
+                    "board_short": board_short,
+                    "confidence": confs,
+                    "keypoints": kpts_px,
+                    "warped_image": warped,
+                    "error": None,
+                }
+            except Exception as e:
+                print(f"[RECOGNIZE] Fallback to full_recognize: {e}")
+
+        # 2. Fallback sang phát hiện lại 4 góc nếu chưa có perspective.npy
         return self.cchess_recognizer.full_recognize(frame)

@@ -149,18 +149,11 @@ class PhysicalGeometryTests(unittest.TestCase):
         with self.assertRaises(Exception):
             self.geom.outer_width_mm = 500.0
 
-    def test_config_backward_compatibility_aliases(self):
-        """Ensure legacy aliases in config.py resolve to canonical geometry."""
-        self.assertEqual(config.CELL_SIZE_X, 40.0)
-        self.assertEqual(config.CELL_SIZE_Y, 40.0)
-        self.assertEqual(config.BOARD_WIDTH_MM, 367.0)
-        self.assertEqual(config.BOARD_LENGTH_MM, 410.0)
-        self.assertEqual(config.PIECE_DIAMETER_MM, 22.5)
-        self.assertEqual(config.PIECE_HEIGHT_MM, 9.43)
-        self.assertEqual(config.PLAYABLE_WIDTH_MM, 320.0)
-        self.assertEqual(config.PLAYABLE_LENGTH_MM, 360.0)
-        self.assertEqual(config.BOARD_MARGIN_X_MM, 23.5)
-        self.assertEqual(config.BOARD_MARGIN_Y_MM, 25.0)
+    def test_visual_config_does_not_redefine_canonical_simulation_geometry(self):
+        geom = load_physical_geometry()
+        self.assertEqual(geom.board.column_spacing, 40.0)
+        self.assertEqual(config.CELL_SIZE_X, 40.75)
+        self.assertEqual(config.CELL_SIZE_Y, 41.0)
 
     def test_geometry_validation_fail_fast(self):
         """Ensure load_physical_geometry rejects invalid / corrupted geometry configurations."""

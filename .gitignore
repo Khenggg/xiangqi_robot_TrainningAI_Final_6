@@ -1,5 +1,4 @@
 # Thư mục chứa AI Engine (Quá lớn, tải thủ công)
-moonfish/*
 !moonfish/.keep
 !moonfish/README.md
 
@@ -14,6 +13,7 @@ __pycache__/
 data/
 runs/
 outputs/
+graphify-out/
 *.zip
 hand_detection/
 
@@ -26,18 +26,10 @@ env/
 ENV/
 VENV/
 
-# Generated PyBullet URDFs
-fairino3_v6_pybullet.urdf
 
-# Node.js dependencies
+# Local verification dependencies and generated runtime files
 node_modules/
-
-# AI Engine binaries (quá lớn >50MB, tải thủ công theo README)
-engines/**/*.exe
-engines/**/*.nnue
-
-# Local tooling & MCP caches
-.codebase-memory/
-reports/*.log
+.cad_tools/
+.playwright-cli/
 *.log
-
+robot-3d-viewer/assets/fr3_v6/fairino3_v6_pybullet.urdf

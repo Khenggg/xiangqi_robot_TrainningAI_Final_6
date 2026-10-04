@@ -86,7 +86,7 @@ def test_explicit_full_scan_recovers_moved_and_captured_board_without_arm_motion
     state, bridge, telemetry, handler, results, commands = camera_game
     camera_board, _ = xiangqi.make_temp_move(state.board, ((1, 7), (1, 0)))
     results.extend([{"success": True, "quality_ok": True, "board": camera_board}] * 2)
-    assert handler.resume_automatic_scanning()
+    assert handler._rescan_confirmed_board()
     assert state.board == camera_board
     assert state.piece_ids[(0, 1)] == "red_cannon_0"
     assert state.turn == "b"
@@ -103,7 +103,7 @@ def test_multi_change_rescan_requires_operator_to_confirm_turn(camera_game):
     observed[6][0], observed[5][0] = ".", observed[6][0]
     observed[3][8], observed[4][8] = ".", observed[3][8]
     results.extend([{"success": True, "quality_ok": True, "board": observed}] * 2)
-    assert handler.resume_automatic_scanning()
+    assert handler._rescan_confirmed_board()
     assert state.board == observed
     assert state.turn_confirmation_required
     assert state.move_sync_error

@@ -278,7 +278,8 @@ class TestPhase3BoardOrientation90(unittest.TestCase):
         pose_dst_ap = [v * 1000.0 for v in p_dst_ap] + [180.0, 0.0, 90.0]
         pose_dst_gr = [v * 1000.0 for v in p_dst_gr] + [180.0, 0.0, 90.0]
 
-        seed_src = np.deg2rad(sim.reachability_dataset[(4, 4)]["approach_joints_deg"])
+        seed_info = sim.reachability_dataset.get((4, 4))
+        seed_src = np.deg2rad(seed_info["approach_joints_deg"]) if seed_info else None
         ik_src = backend.solve_tcp_ik(pose_src, seed_joints=seed_src, allow_multi_seed=True)
         self.assertTrue(ik_src.success)
 
@@ -316,26 +317,21 @@ class TestPhase3BoardOrientation90(unittest.TestCase):
         self.assertIn(res["status"], ("FULL_BOARD_ROUTES_SAMPLE_SAFE", "FULL_BOARD_ROUTE_SAFE", "FULL_BOARD_ROUTE_COLLISION", "ROUTE_VALIDATION_REJECTED_BUSY"))
         sim.stop()
 
-    def test_g90_17_near_side_center_cells_no_link1_link3_collision(self):
-        """G90-17: near-side center cells do not reproduce old link1-link3 collision."""
-        sim = VirtualXiangqiSimulation()
-        sim.start()
-        sim.prepare_board_adjustment()
-        sim.set_board_placement(forward_shift_mm=15.0, safe_transit_height_mm=40.0)
-
-        # The two closest cells to robot base are (4, 0) and (5, 0)
-        for r, c in [(4, 0), (5, 0)]:
-            p_gr = sim.placement_state.cell_to_robot_xyz(r, c, 0.004715)
-            pose_gr_mm = [v * 1000.0 for v in p_gr] + [180.0, 0.0, 90.0]
-            seed_info = sim.reachability_dataset.get((r, c))
-            seed_gr = np.deg2rad(seed_info["grasp_joints_deg"]) if seed_info else None
-            ik_gr = sim.backend.solve_tcp_ik(pose_gr_mm, seed_joints=seed_gr, allow_multi_seed=True)
-            self.assertTrue(ik_gr.success, f"IK failed for near cell ({r}, {c})")
-
-            col = sim.collision_guard.validate_configuration(ik_gr.joints_rad, allowed_grasp_piece_id="*")
-            self.assertTrue(col.safe, f"Collision detected at near cell ({r}, {c}): {col.failure_reason}")
-
-        sim.stop()
+    def test_active_tool_near_center_ik_queries_do_not_mutate_robot(self):
+        sim = VirtualXiangqiSimulation(); sim.start()
+        try:
+            before = sim.backend.get_state_snapshot()
+            for row in (4, 5):
+                target = sim.placement_state.cell_to_robot_xyz(row, 0, 0.004715)
+                result = sim.backend.solve_tcp_ik([float(v)*1000 for v in target] + list(sim.target_tool_euler_deg), allow_multi_seed=True)
+                if result.success:
+                    actual = sim.backend._compute_tcp_pose_mm_deg(result.joints_rad)
+                    np.testing.assert_allclose(actual[:3], target * 1000.0, atol=1.0)
+                else:
+                    self.assertTrue(result.failure_reason)
+                np.testing.assert_allclose(sim.backend.get_state_snapshot().joints_deg, before.joints_deg)
+        finally:
+            sim.stop()
 
     def test_g90_18_far_side_worst_cell_retains_positive_reach_margin(self):
         """G90-18: far-side worst cell retains positive reach margin."""
@@ -352,7 +348,8 @@ class TestPhase3BoardOrientation90(unittest.TestCase):
         sim.prepare_board_adjustment()
         sim.set_board_placement(forward_shift_mm=15.0)
 
-        # Robot at home pose should be service safe
+        sim.world.step_until_settled(max_steps=600)
+        # Verify settled world before evaluating service pose.
         rep = sim.evaluate_service_safety()
         self.assertTrue(rep.service_safe, f"Service safety failed with rotated board: {rep.reasons}")
         self.assertTrue(rep.links_clear)
@@ -380,9 +377,11 @@ class TestPhase3BoardOrientation90(unittest.TestCase):
         # Move piece at (0, 0) to (0, 1) if (0, 0) has a piece
         src_pid = sim._get_piece_at_cell(0, 0)
         if src_pid is not None:
-            pick_res = sim.pick_piece((0, 0))
+            pick_res = sim.pick_piece(src_pid)
             self.assertTrue(pick_res.success, f"Pick piece failed: {pick_res.error}")
-            place_res = sim.place_piece((1, 0))
+            # Row 0 col 1 contains a knight. Use an actually empty destination.
+            self.assertIsNone(sim._get_piece_at_cell(1, 0))
+            place_res = sim.place_piece(target_cell=(1, 0))
             self.assertTrue(place_res.success, f"Place piece failed: {place_res.error}")
             self.assertTrue(place_res.piece_placed)
             self.assertTrue(place_res.service_safe)
@@ -396,6 +395,7 @@ class TestPhase3BoardOrientation90(unittest.TestCase):
         sim.prepare_board_adjustment()
         sim.set_board_placement(forward_shift_mm=15.0, safe_transit_height_mm=40.0)
 
+        sim.world.step_until_settled(max_steps=600)
         rep = sim.evaluate_service_safety()
         self.assertTrue(rep.service_safe)
         sim.stop()

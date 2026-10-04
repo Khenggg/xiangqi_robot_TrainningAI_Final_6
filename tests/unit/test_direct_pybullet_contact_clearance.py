@@ -148,10 +148,13 @@ class DirectPyBulletContactClearanceTests(unittest.TestCase):
     def test_direct_pybullet_gripper_rim_contact(self):
         """
         Directly verify PyBullet contact/penetration when gripper proxy collides with board outer rim.
-        Board outer boundary is in Y in [0.1765, 0.5435], X in [-0.2245, 0.2245].
+        Derive the rim from active board-local geometry, independent of scene pose.
         """
         # Position TCP at board rim edge and lower Z so collar overlaps board border
-        rim_tcp = [0.2245, 0.360, self.world.board_surface_z - 0.010]
+        rim_tcp = self.world.board_placement_state.board_local_to_robot(
+            0.0, self.world.geom.outer_length_mm / 2000.0 + 0.005,
+            z_rel_m=-0.010,
+        )
         self.gripper.set_tcp_pose(rim_tcp, self.tool_down_quat)
 
         pts = []

@@ -389,6 +389,33 @@ def calibrate_board_from_teaching_points(
     pts_mm_dict = {pt: list(contact_pts_mm[pt]) for pt in required_points}
 
     # 4. Geometry and quadrilateral plausibility checks
+    # Board-local +u runs R1 -> R2 (columns), +v runs R1 -> R4 (rows).
+    # Their cross product must point toward +Z_robot for a horizontal board.
+    # A negative winding cannot be represented by a proper rigid transform;
+    # changing the canonical axes to make the fit pass would mirror the game grid.
+    winding_z = float(np.cross(p2_mm - p1_mm, p4_mm - p1_mm)[2])
+    if winding_z <= 0.0:
+        return BoardCalibrationResult(
+            success=False,
+            state=None,
+            error_r1_mm=float("inf"),
+            error_r2_mm=float("inf"),
+            error_r3_mm=float("inf"),
+            error_r4_mm=float("inf"),
+            rms_error_mm=float("inf"),
+            max_error_mm=float("inf"),
+            measured_width_mm=0.0,
+            measured_length_mm=0.0,
+            error_message=(
+                "R1-R4 winding is reversed in robot base frame: "
+                "(R2-R1) x (R4-R1) must point toward +Z_robot. "
+                "Verify corner labels and board orientation before physical motion."
+            ),
+            teaching_points=pts_mm_dict,
+            calibration_profile=profile,
+            tolerance_policy=policy,
+        )
+
     w_top = float(np.linalg.norm(p2_mm - p1_mm))
     w_bot = float(np.linalg.norm(p3_mm - p4_mm))
     measured_width = (w_top + w_bot) / 2.0
@@ -575,33 +602,14 @@ def calibrate_board_from_teaching_points(
     P_meas = P_meas_mm / 1000.0
     p_center_m = p_center_mm / 1000.0
 
-    # Determine board axis orientation relative to robot base:
-    # v_col connects R1 (col 0, row 0) -> R2 (col 8, row 0)
-    # v_row connects R1 (col 0, row 0) -> R4 (col 0, row 9)
-    v_col = P_meas[1] - P_meas[0]
-    v_row = P_meas[3] - P_meas[0]
-    n_cross = np.cross(v_col, v_row)
-
-    if n_cross[2] < 0.0:
-        # Col x Row points downward in robot base {B}, meaning Row x Col points upward (+Z).
-        # Physical board layout: Axis 0 = Row (-0.180 to +0.180) and Axis 1 = Col (-0.160 to +0.160).
-        P_can = np.array([
-            [-0.180, -0.160, 0.0],  # R1 (row 0, col 0)
-            [-0.180, +0.160, 0.0],  # R2 (row 0, col 8)
-            [+0.180, +0.160, 0.0],  # R3 (row 9, col 8)
-            [+0.180, -0.160, 0.0],  # R4 (row 9, col 0)
-        ], dtype=float)
-        R_0 = np.eye(3, dtype=float)
-    else:
-        # Col x Row points upward in robot base {B}.
-        # Alternate 90° orientation where Axis 0 = Col and Axis 1 = Row.
-        P_can = np.array([
-            [-0.160, -0.180, 0.0],  # R1 (row 0, col 0)
-            [+0.160, -0.180, 0.0],  # R2 (row 0, col 8)
-            [+0.160, +0.180, 0.0],  # R3 (row 9, col 8)
-            [-0.160, +0.180, 0.0],  # R4 (row 9, col 0)
-        ], dtype=float)
-        R_0 = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=float)
+    # Canonical board-local coordinates always use u=column and v=row.
+    P_can = np.array([
+        [-0.160, -0.180, 0.0],  # R1 (row 0, col 0)
+        [+0.160, -0.180, 0.0],  # R2 (row 0, col 8)
+        [+0.160, +0.180, 0.0],  # R3 (row 9, col 8)
+        [-0.160, +0.180, 0.0],  # R4 (row 9, col 0)
+    ], dtype=float)
+    R_0 = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=float)
 
     P_meas_centered = P_meas - p_center_m
     H = P_can.T @ P_meas_centered
@@ -747,8 +755,28 @@ def calibrate_board_from_teaching_points(
         placement_version=1,
     )
 
-    # Set grid origin (cell 0, 0)
+    # A single rigid transform must locate both the rendered board and every
+    # robot cell target. Reject a future non-rigid cell override at calibration.
     p_c00 = state.cell_to_robot_xyz(0, 0, z_rel_m=0.0)
+    p_c00_from_transform = (state.T_robot_from_board @ np.array([-0.160, -0.180, 0.0, 1.0]))[:3]
+    grid_transform_error_mm = float(np.linalg.norm(p_c00 - p_c00_from_transform) * 1000.0)
+    if grid_transform_error_mm > 0.001:
+        return BoardCalibrationResult(
+            success=False,
+            state=None,
+            error_r1_mm=e1,
+            error_r2_mm=e2,
+            error_r3_mm=e3,
+            error_r4_mm=e4,
+            rms_error_mm=rms_error,
+            max_error_mm=max_error,
+            measured_width_mm=round(measured_width, 2),
+            measured_length_mm=round(measured_length, 2),
+            error_message=f"Grid/T_robot_from_board mismatch: {grid_transform_error_mm:.3f} mm",
+            teaching_points=pts_mm_dict,
+            calibration_profile=profile,
+            tolerance_policy=policy,
+        )
     state.grid_origin_robot_m = [round(float(v), 6) for v in p_c00]
 
     # 10. Generate full calibration log report (Section 14)

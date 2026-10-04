@@ -49,7 +49,8 @@ def test_model_loading_and_inference():
     # Test full pipeline with a mock image
     mock_frame = np.full((720, 1280, 3), 128, dtype=np.uint8)
     res = recognizer.full_recognize(mock_frame)
-    assert res["success"] is True
+    assert res["success"] is False, "A blank image cannot authorize a board observation"
+    assert res["error"]
     assert res["keypoints"].shape == (4, 2)
     assert len(res["board"]) == 10
     assert len(res["board"][0]) == 9
@@ -66,34 +67,14 @@ def test_snapshot_detector_tiebreaker():
     perspective_path = PROJECT_ROOT / "perspective.npy"
     detector = SnapshotDetector(perspective_path, {})
 
-    # Mock board: Pháo đỏ ở (1, 7)
-    board = [["." for _ in range(9)] for _ in range(10)]
-    board[7][1] = "r_C"
-    # Giả sử quân đen ở (1, 2) và (1, 0)
-    board[2][1] = "b_P"
-    board[0][1] = "b_N"
+    board = xiangqi.get_board()
+    board[6][2] = "."
+    board[5][1] = "r_P"  # Cannon screen.
+    after, _ = xiangqi.make_temp_move(board, ((1, 7), (1, 2)))
+    src, dst, piece = detector.detect_move(None, [], board,
+                                         cchess_result={"success": True, "board": after})
+    assert (src, dst, piece) == ((1, 7), (1, 2), "r_C")
 
-    # Mock CChess result pointing to (1, 2)
-    cchess_board = [["." for _ in range(9)] for _ in range(10)]
-    cchess_board[2][1] = "r_C"
-
-    cchess_result = {
-        "success": True,
-        "board": cchess_board
-    }
-
-    # Hai valid moves: (1, 7) -> (1, 2) [ăn tốt] và (1, 7) -> (1, 0) [ăn mã]
-    valid_moves = [
-        ((1, 7), (1, 2), "r_C", "ăn quân"),
-        ((1, 7), (1, 0), "r_C", "ăn quân")
-    ]
-
-    # Test tiebreaker logic
-    rec_board = cchess_result["board"]
-    matched = [m for m in valid_moves if rec_board[m[1][1]][m[1][0]] == m[2]]
-    assert len(matched) == 1
-    assert matched[0][1] == (1, 2)
-    print("  --> SnapshotDetector CChess tiebreaker verified!")
 
 def test_snapshot_detector_recovery():
     print("[TEST] 4. Checking SnapshotDetector CChess recovery fallback...")
@@ -114,26 +95,32 @@ def test_snapshot_detector_recovery():
         "board": rec_board
     }
 
-    candidates_src = []
-    candidates_dst = []
-    for r in range(10):
-        for c in range(9):
-            orig_p = board[r][c]
-            rec_p = rec_board[r][c]
-            if orig_p.startswith("r") and rec_p != orig_p:
-                candidates_src.append(((c, r), orig_p))
-            elif rec_p.startswith("r") and orig_p != rec_p:
-                candidates_dst.append(((c, r), rec_p))
+    detector = SnapshotDetector(PROJECT_ROOT / "perspective.npy", {})
+    assert detector.detect_move(None, [], board, cchess_result=cchess_result) == ((4, 6), (4, 5), "r_P")
 
-    recovered_moves = []
-    for (s_c, s_r), p_src in candidates_src:
-        for (d_c, d_r), p_dst in candidates_dst:
-            if p_src == p_dst and xiangqi.is_valid_move((s_c, s_r), (d_c, d_r), board, "r"):
-                recovered_moves.append(((s_c, s_r), (d_c, d_r), p_src))
 
-    assert len(recovered_moves) == 1
-    assert recovered_moves[0] == ((4, 6), (4, 5), "r_P")
-    print("  --> SnapshotDetector CChess recovery fallback verified!")
+def test_snapshot_detector_direct_cchess_move():
+    print("[TEST] 5. Checking direct CChess move detection via detect_move()...")
+    perspective_path = PROJECT_ROOT / "perspective.npy"
+    detector = SnapshotDetector(perspective_path, {})
+
+    board = xiangqi.get_board()
+    # Move: Red cannon at (1, 7) moves to (4, 7)
+    rec_board = [row[:] for row in board]
+    rec_board[7][1] = "."
+    rec_board[7][4] = "r_C"
+
+    cchess_result = {
+        "success": True,
+        "board": rec_board
+    }
+
+    # Calling detect_move directly with cchess_result (even without T1 baseline!)
+    src, dst, piece = detector.detect_move(None, [], board, cchess_result=cchess_result)
+    assert src == (1, 7), f"Expected src (1, 7), got {src}"
+    assert dst == (4, 7), f"Expected dst (4, 7), got {dst}"
+    assert piece == "r_C", f"Expected piece r_C, got {piece}"
+    print("  --> Direct CChess move detection verified successfully!")
 
 def main():
     print("=" * 60)

@@ -1,0 +1,24 @@
+{
+  "full_regression": {
+    "passed": 716,
+    "failed": 1,
+    "exit_code": 1,
+    "remaining_failure": "A2.5 bounded worker join timeout; subsequently fixed and verified"
+  },
+  "final_corrective_gate": {
+    "passed": 79,
+    "exit_code": 0
+  },
+  "viewer_tests": {
+    "passed": 2,
+    "exit_code": 0
+  },
+  "gui_modes": [
+    "HUMAN_VS_ROBOT",
+    "HUMAN_VS_HUMAN",
+    "ROBOT_VS_ROBOT"
+  ],
+  "direct_collision_exit_code": 0,
+  "physical_hardware_exercised": false,
+  "full_regression_rerun_after_final_correction": false
+}

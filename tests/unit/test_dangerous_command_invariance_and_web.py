@@ -51,7 +51,7 @@ class DangerousCommandInvarianceAndWebTests(unittest.TestCase):
         q_rad_before = np.copy(self.backend._current_joints_rad)
         q_deg_before = np.copy(self.backend._current_joints_deg)
         tcp_before = np.copy(self.backend._tcp_pose_mm_deg)
-        gripper_before = self.backend.is_gripper_closed
+        gripper_before = self.backend.is_gripper_closed()
 
         # Target penetrating deep into board center (Z = 0.0mm, well below board surface ~80.5mm)
         dangerous_pose = [0.0, 360.0, 0.0, 180.0, 0.0, 90.0]
@@ -81,7 +81,7 @@ class DangerousCommandInvarianceAndWebTests(unittest.TestCase):
             err_msg="TCP coordinates must remain 100% unchanged after rejected move",
         )
         self.assertEqual(
-            self.backend.is_gripper_closed,
+            self.backend.is_gripper_closed(),
             gripper_before,
             "Gripper state must remain 100% unchanged after rejected move",
         )

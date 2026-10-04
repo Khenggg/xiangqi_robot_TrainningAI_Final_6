@@ -17,6 +17,7 @@ Single source of truth for:
 
 from dataclasses import asdict, dataclass, field
 import json
+import os
 import math
 from pathlib import Path
 import time
@@ -152,7 +153,7 @@ def compute_rotation_matrix(board_yaw_deg: float) -> np.ndarray:
 def load_nominal_scene_placement(scene_config_path: Optional[Path] = None) -> Dict[str, Any]:
     """Load nominal placement parameters from shared/virtual_fr3_scene.json."""
     if scene_config_path is None:
-        scene_config_path = Path(__file__).resolve().parent.parent.parent / "shared" / "virtual_fr3_scene.json"
+        scene_config_path = Path(os.environ.get("XIANGQI_SCENE_CONFIG", str(Path(__file__).resolve().parent.parent.parent / "shared" / "virtual_fr3_scene.json")))
     if scene_config_path.is_file():
         try:
             with open(scene_config_path, "r", encoding="utf-8-sig") as f:
@@ -210,10 +211,9 @@ class BoardPlacementState:
     # When provided (e.g. from physical calibration), overrides board_yaw_deg computation.
     rotation_matrix: Optional[List[List[float]]] = None
 
-    # Teaching points R1..R4 in robot base coordinates (mm) for exact bilinear surface interpolation
-    teaching_points: Optional[Dict[str, List[float]]] = field(
-        default_factory=lambda: {k: list(v) for k, v in DEFAULT_TEACHING_POINTS.items()}
-    )
+    # Physical R1..R4 observations in robot base (mm), retained as calibration
+    # evidence. Cell targets are always computed from T_robot_from_board.
+    teaching_points: Optional[Dict[str, List[float]]] = None
 
     placement_version: int = 1
     timestamp: float = field(default_factory=time.time)
@@ -334,21 +334,6 @@ class BoardPlacementState:
         if height_above_board_mm is not None:
             z_rel_m = float(height_above_board_mm) / 1000.0
 
-        if self.teaching_points and all(k in self.teaching_points for k in ("R1", "R2", "R3", "R4")):
-            col_ratio = max(0.0, min(1.0, float(col) / 8.0))
-            row_ratio = max(0.0, min(1.0, float(row) / 9.0))
-            r1 = np.array(self.teaching_points["R1"], dtype=float)
-            r2 = np.array(self.teaching_points["R2"], dtype=float)
-            r3 = np.array(self.teaching_points["R3"], dtype=float)
-            r4 = np.array(self.teaching_points["R4"], dtype=float)
-            if abs(r1[1]) > 10.0:  # coordinates in mm
-                r1, r2, r3, r4 = r1 / 1000.0, r2 / 1000.0, r3 / 1000.0, r4 / 1000.0
-            tx = r1 + (r2 - r1) * col_ratio
-            bx = r4 + (r3 - r4) * col_ratio
-            p_surf = tx + (bx - tx) * row_ratio
-            p_surf[2] += float(z_rel_m)
-            return p_surf
-
         u_m, v_m = self.cell_to_board_local(row, col)
         return self.board_local_to_robot(u_m, v_m, z_rel_m=z_rel_m)
 
@@ -360,22 +345,6 @@ class BoardPlacementState:
         Returns:
             (nearest_row, nearest_col, dist_m) in canonical Xiangqi order.
         """
-        if self.teaching_points and all(k in self.teaching_points for k in ("R1", "R2", "R3", "R4")):
-            best_dist = float("inf")
-            best_r = 0
-            best_c = 0
-            px = float(pos_robot_m[0])
-            py = float(pos_robot_m[1])
-            for r in range(10):
-                for c in range(9):
-                    p_cell = self.cell_to_robot_xyz(r, c, z_rel_m=0.0)
-                    dist = math.hypot(px - p_cell[0], py - p_cell[1])
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_r = r
-                        best_c = c
-            return best_r, best_c, best_dist
-
         p_local = self.robot_to_board_local(pos_robot_m)
         r_float, c_float = self.board_local_to_cell(p_local[0], p_local[1])
         nearest_r = max(0, min(9, int(round(r_float))))
@@ -441,6 +410,7 @@ class BoardPlacementState:
         nominal_board_center_robot_m: Optional[Sequence[float]] = None,
         nominal_board_surface_z_m: Optional[float] = None,
         placement_version: int = 1,
+        nominal_grid_origin_m: Optional[Sequence[float]] = None,
         **kwargs,
     ) -> "BoardPlacementState":
         d_m = float(forward_shift_mm) / 1000.0
@@ -450,6 +420,16 @@ class BoardPlacementState:
         nom_cfg = load_nominal_scene_placement() if (nominal_board_center_robot_m is None or nominal_board_surface_z_m is None) else {}
         if nominal_board_surface_z_m is None:
             nominal_board_surface_z_m = nom_cfg.get("board_surface_height_m", 0.0105)
+        if nominal_grid_origin_m is not None:
+            origin = np.asarray(nominal_grid_origin_m, dtype=float)
+            if origin.shape != (3,) or not np.all(np.isfinite(origin)):
+                raise ValueError("Grid origin must contain three finite robot-base coordinates")
+            center = origin - compute_rotation_matrix(yaw_deg) @ np.array([-0.160, -0.180, 0.0])
+            if nominal_board_center_robot_m is not None and not np.allclose(
+                np.asarray(nominal_board_center_robot_m)[:2], center[:2], atol=1e-6
+            ):
+                raise ValueError("Grid origin and board center disagree")
+            nominal_board_center_robot_m = center.tolist()
         if nominal_board_center_robot_m is None:
             bc = nom_cfg.get("board_center_in_robot_base_m", [-0.0238, 0.3770, 0.0105])
             nominal_board_center_robot_m = [bc[0], bc[1], nominal_board_surface_z_m / 2.0]
@@ -458,15 +438,11 @@ class BoardPlacementState:
         nom_surface_z = float(nominal_board_surface_z_m)
         thickness_m = 0.0105  # canonical 10.5 mm
 
-        # Forward shift translates along the line from robot base to board center:
-        # At yaw 0 deg (board at +Y_robot), forward shift d translates along +Y_robot.
-        # At yaw 90 deg (board at -X_robot), forward shift d translates along -X_robot.
-        if abs(yaw_deg) < 1.0:
-            center_x = round(nom_cx, 6)
-            center_y = round(nom_cy + d_m, 6)
-        else:
-            center_x = round(nom_cx - d_m, 6)
-            center_y = round(nom_cy, 6)
+        # Forward shift follows the board's positive column axis at every yaw.
+        # At yaw 0 this axis is +Y_robot; at yaw 90 it is -X_robot.
+        shift_axis = compute_rotation_matrix(yaw_deg)[:, 0]
+        center_x = round(nom_cx + d_m * shift_axis[0], 6)
+        center_y = round(nom_cy + d_m * shift_axis[1], 6)
         surface_z = round(nom_surface_z + h_offset_m, 6)
         box_center_z = round(surface_z - thickness_m / 2.0, 6)
 
@@ -483,19 +459,6 @@ class BoardPlacementState:
             round(-center_x, 6),
         ]
 
-        # Resolve teaching points
-        tp_raw = nom_cfg.get("teaching_points") if isinstance(nom_cfg, dict) else None
-        if tp_raw is None:
-            tp = {k: list(v) for k, v in DEFAULT_TEACHING_POINTS.items()}
-        else:
-            tp = {k: list(v) for k, v in tp_raw.items()}
-
-        if abs(forward_shift_mm) > 1e-6 or abs(h_offset_m) > 1e-6:
-            shift_x = 0.0 if abs(yaw_deg) < 1.0 else -d_m * 1000.0
-            shift_y = d_m * 1000.0 if abs(yaw_deg) < 1.0 else 0.0
-            shift_z = h_offset_m * 1000.0
-            tp = {k: [round(v[0] + shift_x, 3), round(v[1] + shift_y, 3), round(v[2] + shift_z, 3)] for k, v in tp.items()}
-
         instance = cls(
             forward_shift_mm=float(forward_shift_mm),
             safe_transit_height_mm=float(safe_transit_height_mm),
@@ -507,7 +470,6 @@ class BoardPlacementState:
             physical_board_center_world_m=physical_board_center_world_m,
             board_visual_root_world_m=board_visual_root_world_m,
             board_center_world_m=board_visual_root_world_m,
-            teaching_points=tp,
             placement_version=int(placement_version),
             timestamp=time.time(),
         )
@@ -530,11 +492,17 @@ def canonical_cell_to_robot_xyz_m(
     """
     Authoritative cell coordinate mapping using BoardPlacementState.
     """
-    state = BoardPlacementState.compute(
-        forward_shift_mm=forward_shift_mm,
-        board_yaw_deg=board_yaw_deg,
-    )
-    p = state.cell_to_robot_xyz(row, col, z_rel_m=float(z_m) - state.board_surface_z_robot_m)
+    if (nominal_x0 is None) != (nominal_y0 is None):
+        raise ValueError("Both grid origin coordinates are required")
+    if nominal_x0 is not None:
+        origin = np.array([nominal_x0, nominal_y0, z_m], dtype=float)
+    else:
+        state = BoardPlacementState.compute(0.0, board_yaw_deg=board_yaw_deg)
+        origin = state.cell_to_robot_xyz(0, 0)
+        origin[2] = z_m
+    R = compute_rotation_matrix(board_yaw_deg)
+    p = origin + R @ np.array([col * col_spacing_m + forward_shift_mm / 1000.0,
+                               row * row_spacing_m, 0.0])
     return round(float(p[0]), 6), round(float(p[1]), 6), round(float(p[2]), 6)
 
 
@@ -547,15 +515,13 @@ def find_nearest_cell(
     board_yaw_deg: float = 0.0,
 ) -> Tuple[int, int]:
     """Map a 3D position in robot_base to nearest board grid (row, col)."""
-    fwd = float(forward_shift_mm)
-    if grid_origin_robot_m is not None and abs(fwd) < 1e-6:
-        if abs(board_yaw_deg) < 1.0:
-            fwd = (float(grid_origin_robot_m[1]) - 0.200) * 1000.0
-        else:
-            fwd = (-0.200 - float(grid_origin_robot_m[0])) * 1000.0
-    state = BoardPlacementState.compute(
-        forward_shift_mm=fwd,
-        board_yaw_deg=board_yaw_deg,
-    )
-    r, c, _ = state.robot_xyz_to_nearest_cell(pos_robot_m)
-    return r, c
+    if row_spacing_m <= 0 or col_spacing_m <= 0:
+        raise ValueError("Grid spacing must be positive")
+    if grid_origin_robot_m is None:
+        state = BoardPlacementState.compute(forward_shift_mm, board_yaw_deg=board_yaw_deg)
+        origin = state.cell_to_robot_xyz(0, 0)
+    else:
+        # An explicit origin already describes the current translated board.
+        origin = np.asarray(grid_origin_robot_m, dtype=float)
+    local = compute_rotation_matrix(board_yaw_deg).T @ (np.asarray(pos_robot_m[:3]) - origin)
+    return max(0, min(9, int(round(local[1] / row_spacing_m)))), max(0, min(8, int(round(local[0] / col_spacing_m))))

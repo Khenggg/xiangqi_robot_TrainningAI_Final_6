@@ -86,7 +86,7 @@ PROJECT_TO_SHORT["x"] = "x"
 
 def validate_board_sanity(board: List[List[str]]) -> Tuple[bool, Optional[str]]:
     """Kiểm tra tính hợp lệ cơ bản của bàn cờ tướng (Sanity check).
-    
+
     Phát hiện các trạng thái bất thường / lỗi nhận diện như:
       - Thiếu hoặc thừa Tướng (Red King 'r_K', Black King 'b_K')
       - Tướng nằm ngoài Cung (Palace)
@@ -103,6 +103,8 @@ def validate_board_sanity(board: List[List[str]]) -> Tuple[bool, Optional[str]]:
     for r in range(10):
         for c in range(9):
             p = board[r][c]
+            if not isinstance(p, str) or p not in PROJECT_TO_SHORT or p == "x":
+                return False, f"Unknown piece at ({c}, {r})"
             if p == "r_K":
                 r_kings.append((c, r))
                 red_count += 1
@@ -182,6 +184,16 @@ def check_recognition_quality(
             error="Không đủ 4 keypoints góc bàn cờ",
         )
 
+    try:
+        points = np.asarray(kpts, dtype=float)
+        scores = np.asarray(kpt_scores, dtype=float)
+        finite_corners = (points.shape == (4, 2) and scores.shape == (4,)
+                          and np.isfinite(points).all() and np.isfinite(scores).all())
+    except (TypeError, ValueError):
+        finite_corners = False
+    if not finite_corners:
+        return RecognitionQuality(is_valid=False, corner_quality_ok=False,
+                                  error="Invalid or non-finite corner observations")
     min_kpt = float(np.min(kpt_scores))
     mean_kpt = float(np.mean(kpt_scores))
     if min_kpt < min_kpt_conf or mean_kpt < mean_kpt_conf:
@@ -278,6 +290,15 @@ def check_recognition_quality(
     mean_piece_conf = 1.0
 
     if confs is not None:
+        try:
+            values = np.asarray(confs, dtype=float)
+            finite_layout = (values.shape == (10, 9) and np.isfinite(values).all()
+                             and (values >= 0.).all() and (values <= 1.).all())
+        except (TypeError, ValueError):
+            finite_layout = False
+        if not finite_layout:
+            return RecognitionQuality(is_valid=False, layout_quality_ok=False,
+                                      error="Invalid or non-finite layout confidence")
         if len(confs) != 10 or any(len(r) != 9 for r in confs):
             return RecognitionQuality(
                 is_valid=False,
@@ -368,27 +389,15 @@ class CChessRecognizer:
         pose_model_path: Union[str, Path],
         layout_model_path: Union[str, Path],
         use_gpu: bool = False,
-        min_kpt_conf: float = 0.08,
-        mean_kpt_conf: float = 0.15,
-        min_layout_conf: float = 0.25,
-        min_piece_conf: float = 0.35,
     ):
         """
         Args:
             pose_model_path: Đường dẫn model RTMPose 4 keypoints (.onnx)
             layout_model_path: Đường dẫn model Layout classifier (.onnx)
             use_gpu: Cho phép sử dụng CUDA Execution Provider nếu có
-            min_kpt_conf: Ngưỡng score tối thiểu cho từng keypoint SimCC (default: 0.08)
-            mean_kpt_conf: Ngưỡng trung bình keypoint score SimCC (default: 0.15)
-            min_layout_conf: Ngưỡng confidence trung bình layout (default: 0.25)
-            min_piece_conf: Ngưỡng confidence trung bình cho các ô có quân (default: 0.35)
         """
         self.pose_model_path = str(pose_model_path)
         self.layout_model_path = str(layout_model_path)
-        self.min_kpt_conf = float(min_kpt_conf)
-        self.mean_kpt_conf = float(mean_kpt_conf)
-        self.min_layout_conf = float(min_layout_conf)
-        self.min_piece_conf = float(min_piece_conf)
 
         providers = ["CPUExecutionProvider"]
         if use_gpu and "CUDAExecutionProvider" in ort.get_available_providers():
@@ -599,32 +608,13 @@ class CChessRecognizer:
     # 4. FULL PIPELINE & UTILITIES
     # -------------------------------------------------------------------------
 
-    def check_recognition_quality(
-        self, result: Dict, img_shape: Optional[Tuple[int, int]] = None
-    ) -> RecognitionQuality:
-        return check_recognition_quality(
-            result,
-            img_shape=img_shape,
-            min_kpt_conf=self.min_kpt_conf,
-            mean_kpt_conf=self.mean_kpt_conf,
-            min_layout_conf=self.min_layout_conf,
-            min_piece_conf=self.min_piece_conf,
-        )
-
-    def validate_recognition_result(
-        self, result: Dict, img_shape: Optional[Tuple[int, int]] = None
-    ) -> Tuple[bool, Optional[str]]:
-        quality = self.check_recognition_quality(result, img_shape=img_shape)
-        return quality.is_valid, quality.error
-
     def full_recognize(self, frame_bgr: np.ndarray) -> Dict:
         """Thực hiện toàn bộ quy trình:
-        frame camera -> tìm 4 góc -> nắn bàn cờ -> nhận diện 90 ô cờ -> quality gate.
+        frame camera -> tìm 4 góc -> nắn bàn cờ -> nhận diện 90 ô cờ.
 
         Returns:
             Dict chứa:
                 'success': bool
-                'quality_ok': bool
                 'keypoints': np.ndarray (4, 2)
                 'keypoint_scores': np.ndarray (4,)
                 'warped_image': np.ndarray (500, 450, 3)
@@ -634,14 +624,12 @@ class CChessRecognizer:
                 'error': Optional[str]
         """
         try:
-            h, w = frame_bgr.shape[:2]
             kpts, kpt_scores = self.detect_board_corners(frame_bgr)
             warped_bgr, _ = self.extract_rectified_board(frame_bgr, kpts)
             board_proj, board_short, confs = self.recognize_layout(warped_bgr)
 
             result = {
                 "success": True,
-                "quality_ok": True,
                 "keypoints": kpts,
                 "keypoint_scores": kpt_scores,
                 "warped_image": warped_bgr,
@@ -650,19 +638,13 @@ class CChessRecognizer:
                 "confidence": confs,
                 "error": None,
             }
-
-            quality = self.check_recognition_quality(result, img_shape=(h, w))
-            if not quality.is_valid:
-                result["success"] = False
-                result["quality_ok"] = False
-                result["error"] = f"Quality gate rejected: {quality.error}"
-                print(f"[CChessRecognizer] ⚠️ {result['error']}")
-
+            valid, error = validate_recognition_result(result, img_shape=frame_bgr.shape)
+            result["success"] = valid
+            result["error"] = error
             return result
         except Exception as e:
             return {
                 "success": False,
-                "quality_ok": False,
                 "keypoints": None,
                 "keypoint_scores": None,
                 "warped_image": None,

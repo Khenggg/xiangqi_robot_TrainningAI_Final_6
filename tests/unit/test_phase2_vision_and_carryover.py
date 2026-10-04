@@ -158,6 +158,8 @@ class TestSafeAIExecution(unittest.TestCase):
         self.state = GameState()
         self.state.turn = "b"  # AI's turn
         self.mock_hw = MagicMock()
+        self.mock_hw.simulation_runtime = None
+        self.mock_hw.verify_physical_board.return_value = True
         # Normal starting move for black cannon: (1, 2) -> (4, 2)
         self.test_move = ((1, 2), (4, 2))
 
@@ -178,11 +180,12 @@ class TestSafeAIExecution(unittest.TestCase):
         self.assertEqual(self.state.board, initial_board)
         self.assertEqual(self.state.turn, "b")
         # Hardware motion must NOT have been called
-        self.mock_hw.move_piece.assert_not_called()
+        self.mock_hw.execute_piece_move.assert_not_called()
 
     def test_physical_ready_motion_failure_rejects_commit(self):
         self.mock_hw.is_robot_ready = True
-        self.mock_hw.move_piece.return_value = False
+        from src.motion.result import MotionExecutionResult, MotionFailureCategory, PayloadState
+        self.mock_hw.execute_piece_move.return_value = MotionExecutionResult.fail(None, MotionFailureCategory.MOTION_COMMAND_FAILED, "stopped", payload_state=PayloadState.NONE)
         initial_board = [row[:] for row in self.state.board]
 
         result = execute_ai_move(
@@ -200,7 +203,8 @@ class TestSafeAIExecution(unittest.TestCase):
 
     def test_physical_ready_motion_success_commits_state(self):
         self.mock_hw.is_robot_ready = True
-        self.mock_hw.move_piece.return_value = True
+        from src.motion.result import MotionExecutionResult, MotionFailureCategory, PayloadState
+        self.mock_hw.execute_piece_move.return_value = MotionExecutionResult.ok()
 
         result = execute_ai_move(
             state=self.state,
@@ -300,7 +304,8 @@ class TestSnapshotDetectorCChessIntegration(unittest.TestCase):
         t2_occ[4][1] = True
 
         # Provide CChess result where (4, 7) has "r_C"
-        rec_board = [["." for _ in range(9)] for _ in range(10)]
+        rec_board = [row[:] for row in self.board]
+        rec_board[7][1] = "."
         rec_board[7][4] = "r_C"
         cchess_result = {"success": True, "board": rec_board}
 
@@ -456,7 +461,7 @@ class TestAmbiguityAndManhattanRemoval(unittest.TestCase):
         )
         self.assertFalse(obs.success)
         self.assertTrue(obs.is_ambiguous)
-        self.assertIn("Mơ hồ", obs.error)
+        self.assertIn("Multiple", obs.error)
 
 
 class TestCChessQualityGate(unittest.TestCase):
@@ -633,10 +638,11 @@ class TestCameraCalibrationFailClosed(unittest.TestCase):
     """Requirement 7: Auto-calibration must fail closed and never silently reuse stale matrix."""
 
     @patch("cv2.VideoCapture")
-    @patch("src.vision.auto_calibrate.run_calibration_flow")
+    @patch("src.hardware.hardware_manager.run_calibration_flow")
     def test_calibration_cancelled_fails_closed(self, mock_calib_flow, mock_vid_cap):
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
+        mock_cap_instance.read.return_value = (True, np.zeros((480, 640, 3), dtype=np.uint8))
         mock_vid_cap.return_value = mock_cap_instance
 
         # User cancels calibration -> run_calibration_flow returns None
@@ -649,17 +655,17 @@ class TestCameraCalibrationFailClosed(unittest.TestCase):
             stale_perspective = Path(tmp_dir) / "perspective.npy"
             np.save(stale_perspective, np.eye(3, dtype=np.float32))
 
-            with self.assertRaises(SystemExit) as cm:
+            with self.assertRaises(RuntimeError):
                 hw._init_camera()
-            self.assertEqual(cm.exception.code, 1)
-            self.assertFalse(hw.camera_ready)
+            self.assertFalse(hw.camera_calibration_ready)
             self.assertIsNone(hw.cap)
 
     @patch("cv2.VideoCapture")
-    @patch("src.vision.auto_calibrate.run_calibration_flow")
+    @patch("src.hardware.hardware_manager.run_calibration_flow")
     def test_calibration_success_authorizes_startup(self, mock_calib_flow, mock_vid_cap):
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
+        mock_cap_instance.read.return_value = (True, np.zeros((480, 640, 3), dtype=np.uint8))
         mock_vid_cap.return_value = mock_cap_instance
 
         valid_matrix = np.eye(3, dtype=np.float32)
@@ -674,7 +680,7 @@ class TestCameraCalibrationFailClosed(unittest.TestCase):
             np.save(perspective, valid_matrix)
 
             hw._init_camera()
-            self.assertTrue(hw.camera_ready)
+            self.assertTrue(hw.camera_calibration_ready)
             self.assertIsNotNone(hw.cap)
 
 
@@ -689,6 +695,7 @@ class TestProductionSpaceKeyFlow(unittest.TestCase):
         self.mock_frame = np.zeros((480, 640, 3), dtype=np.uint8)
         self.hw.cam_monitor.get_fresh_snapshot.return_value = (self.mock_frame, [])
         self.hw.yolo_detector.has_baseline.return_value = True
+        self.hw.yolo_detector.detect_move.return_value = (None, None, None)
 
     def test_space_key_commits_valid_cchess_observation(self):
         rec_board = [row[:] for row in self.state.board]
@@ -701,9 +708,7 @@ class TestProductionSpaceKeyFlow(unittest.TestCase):
             "board": rec_board,
             "confidence": np.ones((10, 9), dtype=np.float32),
         }
-        self.hw.yolo_detector.detect_move_observation.return_value = MoveObservation(
-            success=True, src=(1, 7), dst=(4, 7), piece="r_C"
-        )
+        self.hw.yolo_detector.detect_move.return_value = ((1, 7), (4, 7), "r_C")
 
         ok = self.input_handler._handle_space_key()
         self.assertTrue(ok)
@@ -738,9 +743,7 @@ class TestProductionSpaceKeyFlow(unittest.TestCase):
             "quality_ok": True,
             "board": rec_board,
         }
-        self.hw.yolo_detector.detect_move_observation.return_value = MoveObservation(
-            success=True, src=(0, 6), dst=(0, 5), piece="r_P"
-        )
+        self.hw.yolo_detector.detect_move.return_value = ((0, 6), (0, 5), "r_P")
 
         ok = self.input_handler._handle_space_key()
         self.assertFalse(ok)

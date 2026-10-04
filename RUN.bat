@@ -58,7 +58,7 @@ REM Kiểm tra Moonfish Engine (Tùy chọn cho chế độ Offline)
 if not exist "%~dp0moonfish\Windows\moonfish-avx2.exe" (
     echo.
     echo  [THÔNG BÁO] Không tìm thấy moonfish-avx2.exe offline.
-    echo  - Hệ thống sẽ tự động sử dụng Cloud Engine API (tuongkydaisu.com).
+    echo  - Hệ thống sẽ tự động sử dụng Cloud Engine API ^(tuongkydaisu.com^).
     echo.
 )
 

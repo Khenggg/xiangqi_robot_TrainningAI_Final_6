@@ -103,44 +103,34 @@ class TestGripperRPCBindingAndInvariants(unittest.TestCase):
         # Verify driver is in safe idle (no active outputs)
         self.assertEqual(len(driver._active_outputs), 0)
 
-    def test_physical_fr3_backend_binds_set_do_fn_not_none(self):
-        """
-        Verify that HardwareManager in PHYSICAL mode binds set_do_fn to
-        PhysicalFR3Backend.set_tool_do (must NOT be None).
-        """
-        class MockConfig:
-            ROBOT_BACKEND = "PHYSICAL"
-            ROBOT_IP = "192.168.58.2"
-            DRY_RUN = True
-            BOARD_CALIBRATION_MODE = "POINTER_CONTACT"
-            TOOL_DO_OPEN = 1
-            TOOL_DO_CLOSE = 0
+    def test_physical_application_dry_run_keeps_sdk_unbound(self):
+        from types import SimpleNamespace
+        cfg=SimpleNamespace(ROBOT_BACKEND="PHYSICAL",DRY_RUN=True)
+        hm=HardwareManager(cfg,".")
+        with patch.object(hm.robot,"connect") as connect:
+            hm._init_robot()
+        connect.assert_not_called()
+        self.assertIsNone(hm.backend)
+        self.assertIsNone(hm.robot.robot)
+        self.assertFalse(hm.is_robot_ready)
 
-        hm = HardwareManager(MockConfig(), ".")
-        hm.initialize_all()
-
-        self.assertIsNotNone(hm.backend)
-        self.assertIsNotNone(hm.gripper_driver)
-        # The critical P0 check: set_do_fn must NOT be None
-        self.assertIsNotNone(hm.gripper_driver._set_do_fn)
-        self.assertEqual(hm.gripper_driver._set_do_fn, hm.backend.set_tool_do)
-
-    def test_safe_idle_called_on_cleanup(self):
-        """HardwareManager.cleanup() must invoke safe_idle on gripper driver."""
-        class MockConfig:
-            ROBOT_BACKEND = "PHYSICAL"
-            ROBOT_IP = "192.168.58.2"
-            DRY_RUN = True
-            BOARD_CALIBRATION_MODE = "POINTER_CONTACT"
-
-        hm = HardwareManager(MockConfig(), ".")
-        hm.initialize_all()
-
-        mock_driver = MagicMock()
-        hm.gripper_driver = mock_driver
-
+    def test_cleanup_read_only_connection_never_commands_gripper_or_enable(self):
+        from types import SimpleNamespace
+        cfg=SimpleNamespace(ROBOT_BACKEND="PHYSICAL",DRY_RUN=False)
+        hm=HardwareManager(cfg,".")
+        hm.robot=MagicMock(connected=True,physical_motion_authorized=False)
         hm.cleanup()
-        mock_driver.safe_idle.assert_called_once()
+        hm.robot._set_gripper_safe_idle.assert_not_called()
+        hm.robot.robot.RobotEnable.assert_not_called()
+
+    def test_cleanup_commissioned_connection_forces_outputs_low_and_disables(self):
+        from types import SimpleNamespace
+        cfg=SimpleNamespace(ROBOT_BACKEND="PHYSICAL",DRY_RUN=False)
+        hm=HardwareManager(cfg,".")
+        hm.robot=MagicMock(connected=True,physical_motion_authorized=True)
+        hm.cleanup()
+        hm.robot._set_gripper_safe_idle.assert_called_once()
+        hm.robot.robot.RobotEnable.assert_called_once_with(0)
 
 
 class TestMoveCartReturnCodesAndSafety(unittest.TestCase):
@@ -199,45 +189,23 @@ class TestMoveCartReturnCodesAndSafety(unittest.TestCase):
 
 
 class TestGameStateCommitRule(unittest.TestCase):
-    """Requirement 18 & 42: GameState must NOT commit if motion failed."""
-
-    def test_motion_failure_prevents_board_commit(self):
-        """Simulate move execution failure in game loop: state.board must not change."""
-        initial_board = [
-            ["r", "n", "b", "a", "k", "a", "b", "n", "r"],
-            [".", ".", ".", ".", ".", ".", ".", ".", "."],
-            [".", "c", ".", ".", ".", ".", ".", "c", "."],
-            ["p", ".", "p", ".", "p", ".", "p", ".", "p"],
-            [".", ".", ".", ".", ".", ".", ".", ".", "."],
-            [".", ".", ".", ".", ".", ".", ".", ".", "."],
-            ["P", ".", "P", ".", "P", ".", "P", ".", "P"],
-            [".", "C", ".", ".", ".", ".", ".", "C", "."],
-            [".", ".", ".", ".", ".", ".", ".", ".", "."],
-            ["R", "N", "B", "A", "K", "A", "B", "N", "R"],
-        ]
-        board = [row[:] for row in initial_board]
-        move_history = []
-        r_captured = []
-
-        # Mock a failed move (e.g. MoveCart threw or returned False)
-        robot_success = False
-        best = ((1, 2), (1, 4))
-        s, d = best
-        cap_p = board[d[1]][d[0]]
-        is_cap = cap_p != "."
-
-        # The new execution contract from main.py:
-        if robot_success:
-            move_history.append({"turn": "b", "src": s, "dst": d})
-            if is_cap:
-                r_captured.append(cap_p)
-            board[d[1]][d[0]] = board[s[1]][s[0]]
-            board[s[1]][s[0]] = "."
-
-        # State must remain identical to initial state
-        self.assertEqual(board, initial_board)
-        self.assertEqual(len(move_history), 0)
-        self.assertEqual(len(r_captured), 0)
+    def test_real_execution_entrypoint_failure_does_not_commit(self):
+        from types import SimpleNamespace
+        from src.core.ai_execution import execute_ai_move
+        from src.core.game_state import GameState
+        from src.motion.result import MotionExecutionResult,MotionFailureCategory
+        from src.motion.stages import MotionStage
+        state=GameState()
+        state.api_client.send_move_update_board=MagicMock()
+        state.process_human_move((0,6),(0,5),"r_P")
+        before=[row[:] for row in state.board];before_fen=state.current_fen
+        hw=SimpleNamespace(is_robot_ready=True,simulation_runtime=object(),
+            execute_piece_move=MagicMock(return_value=MotionExecutionResult.fail(
+                MotionStage.LAND,MotionFailureCategory.MOTION_COMMAND_FAILED,"112")))
+        self.assertFalse(execute_ai_move(state,hw,((0,3),(0,4))))
+        self.assertEqual(before,state.board)
+        self.assertEqual(before_fen,state.current_fen)
+        self.assertTrue(state.physical_sync_fault)
 
 
 class TestFailClosedCalibrationMode(unittest.TestCase):
@@ -252,32 +220,31 @@ class TestFailClosedCalibrationMode(unittest.TestCase):
             BOARD_CALIBRATION_MODE = None
 
         hm = HardwareManager(UnconfiguredConfig(), ".")
-        hm.initialize_all()
-
-        self.assertFalse(hm.physical_motion_authorized)
+        with patch.object(hm.robot,"connect") as connect:
+            hm._init_robot()
+        self.assertFalse(hm.robot.physical_motion_authorized)
         self.assertFalse(hm.is_robot_ready)
-        self.assertIsNone(hm.motion_coordinator)
-        # Attempting move_piece must return False safely
-        self.assertFalse(hm.move_piece(0, 0, 0, 1, False))
+        connect.assert_not_called()
+        self.assertFalse(hm.execute_piece_move(0,0,0,1,False).success)
 
 
 class TestCanonicalTool218mmResidual(unittest.TestCase):
     """Requirement 12, 44: Verify removal of stale 218mm runtime assumptions."""
 
-    def test_canonical_tool_is_150mm_with_approximate_provenance(self):
-        """Active canonical tool must be 150mm with MEASURED_APPROXIMATE."""
+    def test_canonical_tool_matches_active_1683mm_profile(self):
+        """Canonical active profile declares the measured 168.3mm direct-mount tool."""
         tool = get_canonical_tool_geometry()
-        self.assertAlmostEqual(tool.flange_to_tcp_distance_mm, 150.0, places=3)
-        self.assertEqual(tool.status, ProvenanceStatus.MEASURED_APPROXIMATE)
+        self.assertAlmostEqual(tool.flange_to_tcp_distance_mm, 168.3, places=3)
+        self.assertEqual(tool.status, ProvenanceStatus.MEASURED_PHYSICAL)
 
-    def test_backend_dry_flange_pose_derived_from_150mm(self):
-        """Initial mock flange pose is TCP Z (200.0) + 150.0 = 350.0 mm, not 418 mm."""
+    def test_backend_dry_flange_pose_derived_from_canonical_tool(self):
+        """Dry mock flange uses the current canonical tool, never stale 150/218mm offsets."""
         backend = PhysicalFR3Backend(ip="192.168.58.2", dry_run=True)
         snap = backend.get_state_snapshot()
         self.assertAlmostEqual(snap.tcp_pose_mm_deg[2], 200.0)
-        self.assertAlmostEqual(snap.flange_pose_mm_deg[2], 350.0)
-        # Difference must be 150.0 mm, NOT 218.0 mm
-        self.assertAlmostEqual(snap.flange_pose_mm_deg[2] - snap.tcp_pose_mm_deg[2], 150.0)
+        self.assertAlmostEqual(snap.flange_pose_mm_deg[2], 200.0 + get_canonical_tool_geometry().flange_to_tcp_distance_mm)
+        # Difference must follow active geometry, not the historical 218mm assumption.
+        self.assertAlmostEqual(snap.flange_pose_mm_deg[2] - snap.tcp_pose_mm_deg[2], get_canonical_tool_geometry().flange_to_tcp_distance_mm)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ Defines the semantic contract for vision observations of the Xiangqi board:
   - Fails safely if multiple pieces move or if moves violate rules
 """
 
+import math
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from src.core import xiangqi
@@ -80,7 +81,14 @@ def derive_move_observation(
     # 2. Check confidence if provided
     avg_conf = 1.0
     if confidence_grid is not None:
-        confs = [c for row in confidence_grid for c in row]
+        try:
+            if len(confidence_grid) != 10 or any(len(row) != 9 for row in confidence_grid):
+                raise ValueError("confidence shape")
+            confs = [float(c) for row in confidence_grid for c in row]
+            if any(not math.isfinite(c) or not 0. <= c <= 1. for c in confs):
+                raise ValueError("confidence values")
+        except (TypeError, ValueError):
+            return MoveObservation(success=False, status="INVALID_CONFIDENCE", error="Invalid confidence grid")
         if confs:
             avg_conf = float(sum(confs) / len(confs))
             if min(confs) < min_confidence and avg_conf < min_confidence:
@@ -178,6 +186,12 @@ def derive_move_observation(
             status="ILLEGAL_MOVE",
             error=f"Illegal move {piece} {src}->{dst} according to Xiangqi rules",
         )
+
+    expected, _ = xiangqi.make_temp_move(before_board, (src, dst))
+    if expected != after_board:
+        return MoveObservation(success=False, is_ambiguous=True,
+                               status="BOARD_MISMATCH",
+                               error="Multiple or inconsistent board changes outside the legal transition")
 
     # 7. Check capture
     orig_dest_piece = before_board[dst_r][dst_c]

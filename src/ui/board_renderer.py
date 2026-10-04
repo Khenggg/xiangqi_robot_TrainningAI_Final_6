@@ -1,90 +1,77 @@
 # =============================================================================
-# === FILE: board_renderer.py ===
-# === Giao diện Bàn cờ Tướng & Bảng điều khiển chuyên nghiệp (ZingPlay / Xiangqi.com style) ===
+# === FILE: board_renderer.py (Tách từ main_VIP.py) ===
+# === Hiển thị bàn cờ Tướng ảo trên Pygame ===
 # =============================================================================
 import time
-import math
+import os
 import pygame
-from typing import Dict, Tuple, List, Optional, Any
 from src.core import xiangqi
 
 # ==========================================
-# 1. HẰNG SỐ KÍCH THƯỚC & TỌA ĐỘ BỐ CỤC
+# HẰNG SỐ HIỂN THỊ
 # ==========================================
-SCREEN_WIDTH = 1040
-SCREEN_HEIGHT = 640
+SCREEN_WIDTH = 1440
+SCREEN_HEIGHT = 1080
+SQUARE_SIZE = 72
+NUM_COLS = xiangqi.NUM_COLS
+NUM_ROWS = xiangqi.NUM_ROWS
+BOARD_WIDTH = (NUM_COLS - 1) * SQUARE_SIZE
+START_X = (SCREEN_WIDTH - BOARD_WIDTH) / 2
+START_Y = (SCREEN_HEIGHT - ((NUM_ROWS - 1) * SQUARE_SIZE)) / 2 + 14
+LINE_COLOR = (69, 57, 38)
+BOARD_COLOR = (246, 239, 220)
+INK_COLOR = (33, 48, 43)
+JADE_COLOR = (25, 111, 91)
+JADE_DARK = (18, 75, 63)
+GOLD_COLOR = (177, 142, 82)
+VERMILION_COLOR = (177, 59, 47)
+AMBER_COLOR = (184, 126, 45)
+MENU_TEXT_COLOR = INK_COLOR
+MENU_MUTED_TEXT_COLOR = (94, 101, 77)
+MENU_ACCENT_COLOR = VERMILION_COLOR
+MENU_BORDER_COLOR = GOLD_COLOR
+RED_PIECE_COLOR = (192, 54, 46)
+BLACK_PIECE_COLOR = (34, 40, 36)
+# Keep the two side panels in the window gutters, clear of the board tray.
+MOVE_LOG_RECT = pygame.Rect(20, 230, 340, 590)
+MOVE_LOG_X = MOVE_LOG_RECT.x + 24
+MOVE_LOG_Y = MOVE_LOG_RECT.y + 76
+MOVE_LOG_LINE_HEIGHT = 48
+AI_STATUS_RECT = pygame.Rect(420, 42, 600, 120)
+PIECE_RADIUS = SQUARE_SIZE // 2 - 4
 
-NUM_COLS = xiangqi.NUM_COLS  # 9
-NUM_ROWS = xiangqi.NUM_ROWS  # 10
-
-# Bàn cờ (Bên trái)
-SQUARE_SIZE = 52
-START_X = 60
-START_Y = 86
-BOARD_GRID_WIDTH = (NUM_COLS - 1) * SQUARE_SIZE   # 8 * 52 = 416
-BOARD_GRID_HEIGHT = (NUM_ROWS - 1) * SQUARE_SIZE  # 9 * 52 = 468
-BOARD_BG_RECT = pygame.Rect(22, 46, 492, 548)
-PIECE_RADIUS = 23
-
-# Bảng điều khiển Sidebar (Bên phải)
-PANEL_X = 534
-PANEL_Y = 16
-PANEL_WIDTH = 484
-PANEL_HEIGHT = 608
-PANEL_RECT = pygame.Rect(PANEL_X, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT)
-
-# Nút tăng giảm nấc ELO (nằm ngang hàng với tiêu đề ELO, về phía bên phải)
-BTN_ELO_PREV_RECT = pygame.Rect(PANEL_X + PANEL_WIDTH - 146, 138, 60, 24)
-BTN_ELO_NEXT_RECT = pygame.Rect(PANEL_X + PANEL_WIDTH - 80, 138, 60, 24)
-
-# Bảng nút chọn ELO 8 nấc (Lưới 4x2)
-ELO_BUTTONS = [800, 1100, 1400, 1700, 2000, 2300, 2600, 3000]
-ELO_LABELS = {
-    800: "800 Tập sự",
-    1100: "1100 Nhập môn",
-    1400: "1400 Quán cóc",
-    1700: "1700 CLB",
-    2000: "2000 Tỉnh",
-    2300: "2300 Kiện tướng",
-    2600: "2600 Đại KT",
-    3000: "3000 Max AI",
+BTN_COLOR = (200, 50, 50)
+BTN_NEW_GAME_COLOR = (50, 150, 200)
+BTN_SURRENDER_RECT = pygame.Rect(540, 960, 160, 58)
+BTN_NEW_GAME_RECT = pygame.Rect(740, 960, 160, 58)
+# The control panel uses the right gutter: 38 px clear of the board tray and
+# 20 px clear of the window edge.
+CLIENT_ACTION_X = 1098
+CLIENT_ACTION_WIDTH = 304
+BTN_SCAN_FEN_RECT = pygame.Rect(CLIENT_ACTION_X, 342, CLIENT_ACTION_WIDTH, 64)
+BTN_CONFIRM_MOVE_RECT = pygame.Rect(CLIENT_ACTION_X, 422, CLIENT_ACTION_WIDTH, 64)
+BTN_EMERGENCY_RECT = pygame.Rect(CLIENT_ACTION_X, 502, CLIENT_ACTION_WIDTH, 64)
+BTN_ROLLBACK_RECT = pygame.Rect(CLIENT_ACTION_X, 582, CLIENT_ACTION_WIDTH, 64)
+BTN_CONTINUE_RECT = pygame.Rect(CLIENT_ACTION_X, 662, CLIENT_ACTION_WIDTH, 64)
+HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 240, 650, 480, 104)
+HOME_SELF_PLAY_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 310, 810, 300, 58)
+HOME_HUMAN_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 10, 810, 300, 58)
+HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 230, 42, 180, 58)
+SETTINGS_BACK_RECT = pygame.Rect(48, 42, 168, 58)
+DEBUG_STATUS_RECT = pygame.Rect(886, 330, 320, 70)
+DIFFICULTY_OPTIONS = (
+    ("easy", "EASY", pygame.Rect(120, 420, 560, 210), (62, 129, 91)),
+    ("medium", "MEDIUM", pygame.Rect(760, 420, 560, 210), (33, 115, 96)),
+    ("hard", "HARD", pygame.Rect(120, 680, 560, 210), (151, 79, 49)),
+    ("impossible", "IMPOSSIBLE", pygame.Rect(760, 680, 560, 210), (109, 56, 51)),
+)
+DIFFICULTY_PRESENTATION = {
+    "easy": ("兵", "TỐT", "Calm practice"),
+    "medium": ("馬", "MÃ", "Balanced strategy"),
+    "hard": ("車", "XE", "Tactical pressure"),
+    "impossible": ("將", "TƯỚNG", "Master level"),
 }
 
-ELO_BUTTON_RECTS: Dict[int, pygame.Rect] = {}
-_elo_start_y = 168
-for i, elo in enumerate(ELO_BUTTONS):
-    col = i % 4
-    row = i // 4
-    bx = PANEL_X + 16 + col * 114
-    by = _elo_start_y + row * 34
-    ELO_BUTTON_RECTS[elo] = pygame.Rect(bx, by, 110, 30)
-
-# Bảng 4 nút chức năng hành động (Hoàn tác, Gợi ý, Ván mới, Xin thua)
-BTN_UNDO_RECT = pygame.Rect(PANEL_X + 16, 308, 108, 40)
-BTN_HINT_RECT = pygame.Rect(PANEL_X + 130, 308, 108, 40)
-BTN_NEW_GAME_RECT = pygame.Rect(PANEL_X + 244, 308, 108, 40)
-BTN_SURRENDER_RECT = pygame.Rect(PANEL_X + 358, 308, 108, 40)
-
-# Nút Tiếp tục quét FEN (Emergency Scan Resume)
-BTN_RESUME_SCAN_RECT = pygame.Rect(PANEL_X + 16, 562, PANEL_WIDTH - 32, 36)
-
-# Nút Robot vs Robot (Tự đấu 2 AI)
-BTN_SELF_PLAY_TOGGLE_RECT = pygame.Rect(PANEL_X + 16, 562, PANEL_WIDTH - 32, 36)
-
-# Khả năng tương thích launcher
-HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 330, 330, 68)
-HOME_ROBOT_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 165, 414, 330, 68)
-HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 142, 22, 120, 38)
-SETTINGS_BACK_RECT = pygame.Rect(28, 22, 112, 38)
-DEBUG_STATUS_RECT = pygame.Rect(492, 190, 180, 48)
-DIFFICULTY_OPTIONS = (
-    ("easy", "1 · EASY", pygame.Rect(105, 330, 275, 64), (62, 129, 91)),
-    ("medium", "2 · MEDIUM", pygame.Rect(420, 330, 275, 64), (197, 132, 48)),
-    ("hard", "3 · HARD", pygame.Rect(105, 414, 275, 64), (159, 59, 55)),
-    ("impossible", "4 · IMPOSSIBLE", pygame.Rect(420, 414, 275, 64), (103, 61, 152)),
-)
-
-# Bảng ký tự quân cờ thư pháp truyền thống
 PIECE_DISPLAY_NAMES = {
     "r_K": "帥", "r_A": "仕", "r_E": "相", "r_R": "俥",
     "r_N": "傌", "r_C": "炮", "r_P": "兵",
@@ -92,397 +79,411 @@ PIECE_DISPLAY_NAMES = {
     "b_N": "馬", "b_C": "砲", "b_P": "卒",
 }
 
-# Bảng màu sắc đồ họa
-COLOR_BG = (17, 24, 39)                 # Nền app xám tối cao cấp
-COLOR_BOARD_WOOD = (243, 222, 187)      # Màu vân gỗ mặt bàn cờ
-COLOR_BOARD_BORDER = (107, 68, 35)      # Màu viền gỗ ngoài
-COLOR_BOARD_LINE = (92, 58, 33)         # Màu chỉ mực bàn cờ
-COLOR_RIVER_TEXT = (180, 142, 105)      # Chữ Sở Hà Hán Giới
+PIECE_LOG_NAMES = {
+    "K": "Tướng", "A": "Sĩ", "E": "Tượng", "N": "Mã",
+    "R": "Xe", "C": "Pháo", "P": "Tốt",
+}
 
-COLOR_PANEL_BG = (27, 36, 50)           # Nền bảng điều khiển
-COLOR_PANEL_BORDER = (45, 58, 78)       # Viền bảng điều khiển
-COLOR_CARD_BG = (35, 46, 64)            # Nền thẻ đấu thủ
+UNSUPPORTED_UI_GLYPHS = {
+    "⌨": "", "️": "", "🤖": "AI ", "✅": "", "⚠": "", "❌": "",
+    "📸": "", "↩": "", "✋": "",
+}
 
-COLOR_RED_PIECE = (195, 25, 25)         # Màu mực quân Đỏ
-COLOR_BLACK_PIECE = (28, 28, 28)        # Màu mực quân Đen
-COLOR_PIECE_BG = (255, 249, 238)        # Nền gỗ quân cờ ngà
-COLOR_PIECE_RIM = (196, 162, 126)       # Vành gỗ quân cờ
 
-COLOR_GOLD = (245, 158, 11)             # Vàng kim
-COLOR_ORANGE = (234, 88, 12)            # Cam rực rỡ
-COLOR_GREEN = (34, 197, 94)             # Xanh lá ngọc
-COLOR_BLUE = (37, 99, 235)              # Xanh dương
-COLOR_RED = (220, 38, 38)               # Đỏ tươi
-COLOR_PURPLE = (168, 85, 247)           # Tím gợi ý
+def unicode_ui_font(size, bold=False):
+    """Load Windows' Unicode UI font explicitly so Vietnamese glyphs are stable."""
+    font_name = "segoeuib.ttf" if bold else "segoeui.ttf"
+    font_path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", font_name)
+    if os.path.isfile(font_path):
+        return pygame.font.Font(font_path, size)
+    return pygame.font.SysFont("Segoe UI", size, bold=bold)
+
+
+def display_text(text):
+    """Remove emoji-only glyphs that SDL_ttf cannot reliably fall back for."""
+    for glyph, replacement in UNSUPPORTED_UI_GLYPHS.items():
+        text = text.replace(glyph, replacement)
+    return text
 
 
 class BoardRenderer:
-    """Quản lý hiển thị toàn diện giao diện bàn cờ và bảng điều khiển chuyên nghiệp."""
+    """Quản lý hiển thị bàn cờ Tướng trên Pygame."""
 
-    def __init__(self, screen: pygame.Surface):
+    def __init__(self, screen):
         self.screen = screen
-        self._init_fonts()
+        self.piece_font = pygame.font.SysFont("simsun", 38, bold=True)
+        self.game_font = pygame.font.SysFont("times new roman", 64, bold=True)
+        self.title_font = pygame.font.SysFont("times new roman", 76, bold=True)
+        self.ui_font = unicode_ui_font(26, bold=True)
+        self.log_font = unicode_ui_font(19, bold=True)
+        self.button_font = unicode_ui_font(22, bold=True)
+        self._landscape = self._load_landscape()
 
-    def _init_fonts(self):
-        """Khởi tạo font hỗ trợ cả tiếng Việt và chữ Hán triện thư."""
-        chinese_fonts = ["simsun", "kaiti", "mingliu", "arialunicodems", "microsoftyahei", "simhei"]
-        self.piece_font = pygame.font.SysFont(chinese_fonts, 24, bold=True)
-        self.river_font = pygame.font.SysFont(chinese_fonts, 20, bold=True)
-
-        ui_fonts = ["segoeui", "arial", "tahoma", "calibri"]
-        self.title_font = pygame.font.SysFont(ui_fonts, 20, bold=True)
-        self.sub_font = pygame.font.SysFont(ui_fonts, 12)
-        self.badge_font = pygame.font.SysFont(ui_fonts, 13, bold=True)
-        self.btn_font = pygame.font.SysFont(ui_fonts, 12, bold=True)
-        self.log_font = pygame.font.SysFont(ui_fonts, 12)
-        self.status_font = pygame.font.SysFont(ui_fonts, 13, bold=True)
-        self.big_font = pygame.font.SysFont(ui_fonts, 32, bold=True)
-
-    # --- CHUYỂN ĐỔI TỌA ĐỘ ---
     @staticmethod
-    def grid_to_pixel(col: int, row: int) -> Tuple[int, int]:
+    def _load_landscape():
+        """Load the project-owned Ink & Jade art without affecting game logic."""
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        path = os.path.join(root, "assets", "ui", "ink-jade-landscape-1440x1080.png")
+        try:
+            image = pygame.image.load(path)
+            return pygame.transform.smoothscale(image, (SCREEN_WIDTH, SCREEN_HEIGHT))
+        except (pygame.error, OSError):
+            return None
+
+    def _draw_ink_wash_background(self):
+        """Paint a layered ink-and-jade landscape behind the playable UI."""
+        if self._landscape is not None:
+            self.screen.blit(self._landscape, (0, 0))
+            pygame.draw.rect(self.screen, GOLD_COLOR, (0, 0, SCREEN_WIDTH, 9))
+            return
+
+        self.screen.fill(BOARD_COLOR)
+        wash = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        for cx, cy, radius, alpha in ((100, 930, 230, 22), (1320, 160, 196, 18), (1290, 920, 250, 16)):
+            pygame.draw.circle(wash, (*JADE_DARK, alpha), (cx, cy), radius)
+        # Pale morning sun and distant mist establish depth without competing
+        # with the board or its controls.
+        pygame.draw.circle(wash, (*GOLD_COLOR, 36), (700, 108), 54)
+        pygame.draw.circle(wash, (*BOARD_COLOR, 115), (700, 108), 38)
+        self._draw_mountain_ridge(wash, [(0, 600), (0, 548), (74, 486), (142, 544),
+                                         (211, 495), (287, 558), (370, 515), (448, 574),
+                                         (548, 504), (639, 554), (720, 475), (800, 528), (800, 600)],
+                                  (*JADE_DARK, 31))
+        self._draw_mountain_ridge(wash, [(0, 600), (0, 572), (102, 520), (181, 582),
+                                         (272, 538), (362, 590), (463, 534), (559, 582),
+                                         (660, 523), (746, 574), (800, 550), (800, 600)],
+                                  (*JADE_COLOR, 42))
+        for offset in range(-80, SCREEN_WIDTH + 80, 96):
+            pygame.draw.line(wash, (*GOLD_COLOR, 11), (offset, 0), (offset + 168, SCREEN_HEIGHT), 1)
+        self._draw_ink_branch(wash)
+        self._draw_reeds(wash)
+        self.screen.blit(wash, (0, 0))
+        pygame.draw.rect(self.screen, GOLD_COLOR, (0, 0, SCREEN_WIDTH, 9))
+
+    @staticmethod
+    def _draw_mountain_ridge(surface, points, color):
+        """Use a translucent polygon plus a thin brush contour for a mountain."""
+        pygame.draw.polygon(surface, color, points)
+        pygame.draw.lines(surface, (*JADE_DARK, max(color[3] + 22, 48)), False, points[1:-1], 2)
+
+    @staticmethod
+    def _draw_ink_branch(surface):
+        """Place a restrained plum branch in a safe decorative corner."""
+        branch = (*INK_COLOR, 78)
+        twig = (*INK_COLOR, 54)
+        pygame.draw.line(surface, branch, (-12, 72), (42, 50), 5)
+        pygame.draw.line(surface, branch, (38, 51), (96, 25), 4)
+        pygame.draw.line(surface, twig, (51, 46), (68, 10), 2)
+        pygame.draw.line(surface, twig, (76, 34), (131, 35), 2)
+        pygame.draw.line(surface, twig, (22, 58), (35, 16), 2)
+        blossoms = ((66, 10), (69, 18), (101, 24), (121, 35), (36, 16), (41, 25), (91, 30))
+        for x, y in blossoms:
+            pygame.draw.circle(surface, (*VERMILION_COLOR, 82), (x, y), 4)
+            pygame.draw.circle(surface, (*GOLD_COLOR, 105), (x, y), 1)
+
+    @staticmethod
+    def _draw_reeds(surface):
+        """Add a small foreground reed cluster at the lower-right edge."""
+        reed = (*JADE_DARK, 67)
+        for base_x, lean, height in ((762, -18, 78), (778, 8, 62), (790, -10, 92)):
+            base_y = 596
+            tip = (base_x + lean, base_y - height)
+            pygame.draw.line(surface, reed, (base_x, base_y), tip, 2)
+            pygame.draw.line(surface, (*JADE_COLOR, 49),
+                             (base_x + lean // 2, base_y - height // 2),
+                             (base_x + lean // 2 - 12, base_y - height // 2 - 9), 1)
+
+    def _draw_panel(self, rect, fill=(250, 245, 231), border=GOLD_COLOR, radius=10):
+        outer = rect.inflate(8, 8)
+        pygame.draw.rect(self.screen, (*border, 72), outer, width=2, border_radius=radius + 3)
+        panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+        panel.fill((*fill, 238))
+        self.screen.blit(panel, rect.topleft)
+        pygame.draw.rect(self.screen, border, rect, width=3, border_radius=radius)
+        pygame.draw.rect(self.screen, (255, 253, 245), rect.inflate(-10, -10), width=1,
+                         border_radius=max(radius - 3, 1))
+
+    # --- Chuyển đổi tọa độ ---
+    @staticmethod
+    def grid_to_pixel(col, row):
         return int(START_X + col * SQUARE_SIZE), int(START_Y + row * SQUARE_SIZE)
 
     @staticmethod
-    def pixel_to_grid(px: int, py: int) -> Tuple[int, int]:
+    def pixel_to_grid(px, py):
         col = int(round((px - START_X) / SQUARE_SIZE))
         row = int(round((py - START_Y) / SQUARE_SIZE))
         return col, row
 
-    # =========================================================================
-    # 2. VẼ TOÀN BỘ GIAO DIỆN CHÍNH
-    # =========================================================================
-    def draw_ui(self, game_state: Dict[str, Any]):
-        """Vẽ bàn cờ, các thẻ thông tin người chơi, các nút bấm ELO và thanh hành động."""
-        self.screen.fill(COLOR_BG)
-        self._draw_board_surface()
-        self._draw_sidebar(game_state)
+    # --- Vẽ giao diện ---
+    def draw_ui(self, game_state):
+        """Vẽ nền, bàn cờ, nút bấm, status bar.
+        
+        game_state: dict chứa các key:
+            game_over, turn, allow_mouse, ai_thinking, ai_think_start,
+            status_message, status_color, status_expiry
+        """
+        self._draw_ink_wash_background()
 
-    def _draw_board_surface(self):
-        """Vẽ mặt bàn cờ gỗ sang trọng với viền đôi và các đường chỉ cờ."""
-        pygame.draw.rect(self.screen, COLOR_BOARD_BORDER, BOARD_BG_RECT, border_radius=12)
-        inner_rect = BOARD_BG_RECT.inflate(-10, -10)
-        pygame.draw.rect(self.screen, COLOR_BOARD_WOOD, inner_rect, border_radius=8)
+        self.draw_recent_moves(game_state.get("recent_moves", []))
+        self._draw_ai_status(game_state)
+        self._draw_board_backdrop()
 
-        # Khung viền chỉ cờ bao quanh
-        outer_grid = pygame.Rect(START_X - 6, START_Y - 6, BOARD_GRID_WIDTH + 12, BOARD_GRID_HEIGHT + 12)
-        pygame.draw.rect(self.screen, COLOR_BOARD_LINE, outer_grid, width=2)
+        if not game_state.get("game_over"):
+            # Nút SURRENDER
+            pygame.draw.rect(self.screen, VERMILION_COLOR, BTN_SURRENDER_RECT, border_radius=14)
+            txt = self.ui_font.render("SURRENDER", True, (255, 255, 255))
+            self.screen.blit(txt, txt.get_rect(center=BTN_SURRENDER_RECT.center))
 
-        # Các đường ngang (10 đường)
+            # Nút NEW GAME
+            pygame.draw.rect(self.screen, JADE_COLOR, BTN_NEW_GAME_RECT, border_radius=14)
+            txt_new = self.ui_font.render("NEW GAME", True, (255, 255, 255))
+            self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
+
+            self._draw_client_actions(game_state)
+        else:
+            pygame.draw.rect(self.screen, JADE_COLOR, BTN_NEW_GAME_RECT, border_radius=14)
+            txt_new = self.ui_font.render("NEW GAME", True, (255, 255, 255))
+            self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
+
+    def _draw_client_actions(self, game_state):
+        """Draw the always-visible client control panel beside the board."""
+        panel = pygame.Rect(CLIENT_ACTION_X - 18, 230, CLIENT_ACTION_WIDTH + 36, 620)
+        self._draw_panel(panel, fill=(248, 242, 226), border=GOLD_COLOR)
+        title = self.ui_font.render("CLIENT CONTROLS", True, JADE_DARK)
+        self.screen.blit(title, title.get_rect(center=(panel.centerx, 274)))
+
+        actions = (
+            (BTN_SCAN_FEN_RECT, "V", ("QUÉT / ĐỐI SOÁT FEN",), JADE_COLOR),
+            (BTN_CONFIRM_MOVE_RECT, "SPACE", ("XÁC NHẬN", "NƯỚC ĐỎ"), JADE_DARK),
+            (BTN_EMERGENCY_RECT, "M", ("EMERGENCY MODE",), VERMILION_COLOR),
+            (BTN_ROLLBACK_RECT, "Z", ("ROLLBACK",), AMBER_COLOR),
+        )
+        emergency_active = game_state.get("emergency_mode", False)
+        for rect, key, label_lines, color in actions:
+            button_color = (139, 48, 38) if key == "M" and emergency_active else color
+            pygame.draw.rect(self.screen, button_color, rect, border_radius=12)
+            key_surf = self.ui_font.render(key, True, (255, 255, 255))
+            self.screen.blit(key_surf, (rect.x + 18, rect.y + 17))
+            label_x = rect.x + 38 + key_surf.get_width()
+            if len(label_lines) == 1:
+                label_surf = self.button_font.render(label_lines[0], True, (255, 255, 255))
+                self.screen.blit(label_surf, (label_x, rect.y + 20))
+            else:
+                for line_index, label in enumerate(label_lines):
+                    label_surf = self.button_font.render(label, True, (255, 255, 255))
+                    self.screen.blit(label_surf, (label_x, rect.y + 9 + line_index * 25))
+
+        can_continue = game_state.get("snapshot_continue_required", False)
+        continue_color = JADE_COLOR if can_continue else (121, 116, 100)
+        pygame.draw.rect(self.screen, continue_color, BTN_CONTINUE_RECT, border_radius=12)
+        continue_key = self.ui_font.render("▶", True, (255, 255, 255))
+        continue_label = self.ui_font.render("CONTINUE", True, (255, 255, 255))
+        self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 18, BTN_CONTINUE_RECT.y + 17))
+        self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 66, BTN_CONTINUE_RECT.y + 17))
+
+        note = "M đang bật: đi tay Đỏ / Đen" if emergency_active else "Chọn phím hoặc bấm nút"
+        note_surf = self.log_font.render(note, True, MENU_MUTED_TEXT_COLOR)
+        self.screen.blit(note_surf, note_surf.get_rect(center=(panel.centerx, 816)))
+
+        # --- Vẽ lưới bàn cờ ---
         for r in range(NUM_ROWS):
-            p1 = self.grid_to_pixel(0, r)
-            p2 = self.grid_to_pixel(NUM_COLS - 1, r)
-            pygame.draw.line(self.screen, COLOR_BOARD_LINE, p1, p2, 1)
-
-        # Các đường dọc (9 đường, ngắt ở sông)
+            pygame.draw.line(self.screen, LINE_COLOR,
+                             self.grid_to_pixel(0, r), self.grid_to_pixel(NUM_COLS - 1, r), 2)
         for c in range(NUM_COLS):
-            if c in (0, NUM_COLS - 1):
-                p1 = self.grid_to_pixel(c, 0)
-                p2 = self.grid_to_pixel(c, NUM_ROWS - 1)
-                pygame.draw.line(self.screen, COLOR_BOARD_LINE, p1, p2, 1)
+            if c in [0, NUM_COLS - 1]:
+                pygame.draw.line(self.screen, LINE_COLOR,
+                                 self.grid_to_pixel(c, 0), self.grid_to_pixel(c, NUM_ROWS - 1), 2)
             else:
-                pygame.draw.line(self.screen, COLOR_BOARD_LINE,
-                                 self.grid_to_pixel(c, 0), self.grid_to_pixel(c, 4), 1)
-                pygame.draw.line(self.screen, COLOR_BOARD_LINE,
-                                 self.grid_to_pixel(c, 5), self.grid_to_pixel(c, 9), 1)
+                pygame.draw.line(self.screen, LINE_COLOR,
+                                 self.grid_to_pixel(c, 0), self.grid_to_pixel(c, 4), 2)
+                pygame.draw.line(self.screen, LINE_COLOR,
+                                 self.grid_to_pixel(c, 5), self.grid_to_pixel(c, 9), 2)
 
-        # Cung tướng (Cửu cung) Đen và Đỏ
-        pygame.draw.line(self.screen, COLOR_BOARD_LINE, self.grid_to_pixel(3, 0), self.grid_to_pixel(5, 2), 1)
-        pygame.draw.line(self.screen, COLOR_BOARD_LINE, self.grid_to_pixel(5, 0), self.grid_to_pixel(3, 2), 1)
-        pygame.draw.line(self.screen, COLOR_BOARD_LINE, self.grid_to_pixel(3, 7), self.grid_to_pixel(5, 9), 1)
-        pygame.draw.line(self.screen, COLOR_BOARD_LINE, self.grid_to_pixel(5, 7), self.grid_to_pixel(3, 9), 1)
+        # Cung tướng
+        pygame.draw.line(self.screen, LINE_COLOR, self.grid_to_pixel(3, 0), self.grid_to_pixel(5, 2), 2)
+        pygame.draw.line(self.screen, LINE_COLOR, self.grid_to_pixel(5, 0), self.grid_to_pixel(3, 2), 2)
+        pygame.draw.line(self.screen, LINE_COLOR, self.grid_to_pixel(3, 7), self.grid_to_pixel(5, 9), 2)
+        pygame.draw.line(self.screen, LINE_COLOR, self.grid_to_pixel(5, 7), self.grid_to_pixel(3, 9), 2)
+        self.draw_board_coordinates()
 
-        # Dòng sông (Sở Hà - Hán Giới)
-        txt_so_ha = self.river_font.render("楚  河", True, COLOR_RIVER_TEXT)
-        txt_han_gioi = self.river_font.render("漢  界", True, COLOR_RIVER_TEXT)
-        cy_river = int((self.grid_to_pixel(0, 4)[1] + self.grid_to_pixel(0, 5)[1]) / 2)
-        cx_left = int(START_X + 1.5 * SQUARE_SIZE)
-        cx_right = int(START_X + 6.5 * SQUARE_SIZE)
-        self.screen.blit(txt_so_ha, txt_so_ha.get_rect(center=(cx_left, cy_river)))
-        self.screen.blit(txt_han_gioi, txt_han_gioi.get_rect(center=(cx_right, cy_river)))
+    def _draw_board_backdrop(self):
+        """Give the enlarged board a parchment tray over the scenic landscape."""
+        board_height = (NUM_ROWS - 1) * SQUARE_SIZE
+        tray = pygame.Rect(int(START_X) - 34, int(START_Y) - 34,
+                           BOARD_WIDTH + 68, board_height + 68)
+        outer = tray.inflate(12, 12)
+        pygame.draw.rect(self.screen, GOLD_COLOR, outer, border_radius=18)
+        parchment = pygame.Surface(tray.size, pygame.SRCALPHA)
+        parchment.fill((248, 238, 211, 222))
+        self.screen.blit(parchment, tray.topleft)
+        pygame.draw.rect(self.screen, JADE_DARK, tray, width=3, border_radius=14)
+        pygame.draw.rect(self.screen, GOLD_COLOR, tray.inflate(-14, -14), width=2, border_radius=9)
 
-        # Dấu chữ thập định vị Pháo và Tốt truyền thống
-        cross_cells = [
-            (1, 2), (7, 2),  # Pháo đen
-            (0, 3), (2, 3), (4, 3), (6, 3), (8, 3),  # Tốt đen
-            (1, 7), (7, 7),  # Pháo đỏ
-            (0, 6), (2, 6), (4, 6), (6, 6), (8, 6),  # Tốt đỏ
-        ]
-        for c, r in cross_cells:
-            self._draw_star_point(c, r)
-
-    def _draw_star_point(self, col: int, row: int):
-        """Vẽ góc căn vị trí quân cờ truyền thống."""
-        cx, cy = self.grid_to_pixel(col, row)
-        d = 4
-        gap = 3
-        if col > 0:
-            pygame.draw.line(self.screen, COLOR_BOARD_LINE, (cx - gap, cy - gap), (cx - gap - d, cy - gap), 1)
-            pygame.draw.line(self.screen, COLOR_BOARD_LINE, (cx - gap, cy - gap), (cx - gap, cy - gap - d), 1)
-            pygame.draw.line(self.screen, COLOR_BOARD_LINE, (cx - gap, cy + gap), (cx - gap - d, cy + gap), 1)
-            pygame.draw.line(self.screen, COLOR_BOARD_LINE, (cx - gap, cy + gap), (cx - gap, cy + gap + d), 1)
-        if col < NUM_COLS - 1:
-            pygame.draw.line(self.screen, COLOR_BOARD_LINE, (cx + gap, cy - gap), (cx + gap + d, cy - gap), 1)
-            pygame.draw.line(self.screen, COLOR_BOARD_LINE, (cx + gap, cy - gap), (cx + gap, cy - gap - d), 1)
-            pygame.draw.line(self.screen, COLOR_BOARD_LINE, (cx + gap, cy + gap), (cx + gap + d, cy + gap), 1)
-            pygame.draw.line(self.screen, COLOR_BOARD_LINE, (cx + gap, cy + gap), (cx + gap, cy + gap + d), 1)
-
-    # =========================================================================
-    # 3. SIDEBAR BẢNG ĐIỀU KHIỂN CHUYÊN NGHIỆP (ĐÃ CĂN CHỈNH TỌA ĐỘ CHUẨN XÁC)
-    # =========================================================================
-    def _draw_sidebar(self, game_state: Dict[str, Any]):
-        """Vẽ Sidebar với layout phân tầng rõ ràng, tuyệt đối không chồng lấn."""
-        # 1. Nền Panel chính
-        pygame.draw.rect(self.screen, COLOR_PANEL_BG, PANEL_RECT, border_radius=12)
-        pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, PANEL_RECT, width=2, border_radius=12)
-
-        # Header Title (Y: 28 -> 60)
-        title = self.title_font.render("XIANGQI ROBOT PRO", True, COLOR_GOLD)
-        self.screen.blit(title, (PANEL_X + 18, 28))
-
-        mode_str = "MÔ PHỎNG (DRY RUN)" if game_state.get("allow_mouse") else "CAMERA THỰC TẾ"
-        sub = self.sub_font.render(f"Pikafish NNUE AI  •  Chế độ: {mode_str}", True, (156, 163, 175))
-        self.screen.blit(sub, (PANEL_X + 18, 52))
-
-        # -------------------------------------------------------------
-        # KHỐI 1: THẺ ĐỐI THỦ AI (PIKAFISH) (Y: 72 -> 126, Cao 54)
-        # -------------------------------------------------------------
-        ai_card_rect = pygame.Rect(PANEL_X + 16, 72, PANEL_WIDTH - 32, 54)
-        is_ai_turn = game_state.get("turn") == "b"
-        card_border = COLOR_GOLD if is_ai_turn else COLOR_PANEL_BORDER
-        pygame.draw.rect(self.screen, COLOR_CARD_BG, ai_card_rect, border_radius=8)
-        pygame.draw.rect(self.screen, card_border, ai_card_rect, width=2 if is_ai_turn else 1, border_radius=8)
-
-        ai_name = self.badge_font.render("[AI] Pikafish NNUE", True, (255, 255, 255))
-        self.screen.blit(ai_name, (PANEL_X + 28, 80))
-
-        # Badge ELO
-        current_elo = game_state.get("ai_elo", 1400)
-        elo_title = game_state.get("ai_elo_title", f"ELO {current_elo}")
-        elo_badge_surf = self.badge_font.render(f" {elo_title} ", True, (255, 255, 255))
-        elo_badge_rect = elo_badge_surf.get_rect(topright=(PANEL_X + PANEL_WIDTH - 28, 80))
-        badge_bg = elo_badge_rect.inflate(8, 4)
-        pygame.draw.rect(self.screen, COLOR_ORANGE, badge_bg, border_radius=6)
-        self.screen.blit(elo_badge_surf, elo_badge_rect)
-
-        # Trạng thái suy nghĩ AI
+    def _draw_ai_status(self, game_state):
+        """Render one live status, never a historical activity feed."""
+        now = time.time()
         if game_state.get("ai_thinking"):
-            start = game_state.get("ai_think_start", time.time())
-            elapsed = time.time() - start
-            dots = "." * (int(elapsed * 2) % 4)
-            ai_stat = self.sub_font.render(f"Đang tính toán nước đi{dots} ({elapsed:.1f}s)", True, (52, 211, 153))
+            elapsed = now - game_state.get("ai_think_start", now)
+            dots = "." * (int(elapsed) % 4)
+            message = f"AI is thinking{dots} ({elapsed:.1f}s)"
+            accent = JADE_COLOR
+        elif (message := display_text(game_state.get("status_message", ""))) and now < game_state.get("status_expiry", 0):
+            raw_color = game_state.get("status_color", (180, 100, 0))
+            accent = VERMILION_COLOR if raw_color[0] > raw_color[1] else JADE_COLOR
+            if "CHECK" in message.upper():
+                accent = VERMILION_COLOR
         else:
-            ai_stat_text = "Đang đến lượt AI..." if is_ai_turn else "Đợi lượt bạn đi..."
-            ai_stat = self.sub_font.render(ai_stat_text, True, (156, 163, 175))
-        self.screen.blit(ai_stat, (PANEL_X + 28, 102))
+            message = "Your turn — move, then confirm with SPACE"
+            accent = JADE_COLOR
 
-        # -------------------------------------------------------------
-        # KHỐI 2: BỘ CHỌN ĐỘ KHÓ ELO (Y: 138 -> 232)
-        # Tiêu đề bên trái, nút < Giảm và Tăng > bên phải (KHÔNG CHỒNG NHAU)
-        # -------------------------------------------------------------
-        lbl_elo = self.badge_font.render("ĐỘ KHÓ AI (ELO)", True, COLOR_GOLD)
-        self.screen.blit(lbl_elo, (PANEL_X + 18, 142))
-
-        # Nút giảm ELO [< Giảm] và tăng ELO [Tăng >] nằm bên phải
-        pygame.draw.rect(self.screen, (45, 55, 75), BTN_ELO_PREV_RECT, border_radius=5)
-        pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, BTN_ELO_PREV_RECT, width=1, border_radius=5)
-        txt_prev = self.btn_font.render("< Giảm", True, (209, 213, 219))
-        self.screen.blit(txt_prev, txt_prev.get_rect(center=BTN_ELO_PREV_RECT.center))
-
-        pygame.draw.rect(self.screen, (45, 55, 75), BTN_ELO_NEXT_RECT, border_radius=5)
-        pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, BTN_ELO_NEXT_RECT, width=1, border_radius=5)
-        txt_next = self.btn_font.render("Tăng >", True, (209, 213, 219))
-        self.screen.blit(txt_next, txt_next.get_rect(center=BTN_ELO_NEXT_RECT.center))
-
-        # Vẽ 8 nút ELO (Lưới 4 cột x 2 hàng: Y = 168 và Y = 202)
-        for elo_val, b_rect in ELO_BUTTON_RECTS.items():
-            is_active = (current_elo == elo_val)
-            bg_c = COLOR_ORANGE if is_active else (38, 48, 65)
-            border_c = COLOR_GOLD if is_active else (55, 68, 90)
-            text_c = (255, 255, 255) if is_active else (209, 213, 219)
-
-            pygame.draw.rect(self.screen, bg_c, b_rect, border_radius=6)
-            pygame.draw.rect(self.screen, border_c, b_rect, width=2 if is_active else 1, border_radius=6)
-
-            txt_btn = self.btn_font.render(ELO_LABELS[elo_val], True, text_c)
-            self.screen.blit(txt_btn, txt_btn.get_rect(center=b_rect.center))
-
-        # -------------------------------------------------------------
-        # KHỐI 3: THẺ NGƯỜI CHƠI (BẠN - ĐỎ) (Y: 244 -> 296, Cao 52)
-        # -------------------------------------------------------------
-        player_card_rect = pygame.Rect(PANEL_X + 16, 244, PANEL_WIDTH - 32, 52)
-        is_my_turn = (game_state.get("turn") == "r" and not game_state.get("game_over"))
-        p_border = COLOR_GREEN if is_my_turn else COLOR_PANEL_BORDER
-        pygame.draw.rect(self.screen, COLOR_CARD_BG, player_card_rect, border_radius=8)
-        pygame.draw.rect(self.screen, p_border, player_card_rect, width=2 if is_my_turn else 1, border_radius=8)
-
-        p_name = self.badge_font.render("[Người chơi] Bạn (Tiên thủ Đỏ)", True, (255, 255, 255))
-        self.screen.blit(p_name, (PANEL_X + 28, 252))
-
-        if is_my_turn:
-            turn_msg = "LƯỢT CỦA BẠN (Click quân cờ để đi)"
-            turn_col = COLOR_GREEN
-        else:
-            turn_msg = "Đang đợi AI đi nước..."
-            turn_col = (156, 163, 175)
-        txt_turn = self.sub_font.render(turn_msg, True, turn_col)
-        self.screen.blit(txt_turn, (PANEL_X + 28, 274))
-
-        # -------------------------------------------------------------
-        # KHỐI 4: 4 NÚT HÀNH ĐỘNG CHUẨN APP CỜ (Y: 308 -> 348, Cao 40)
-        # NẰM HOÀN TOÀN TÁCH BIỆT PHÍA DƯỚI THẺ NGƯỜI CHƠI
-        # -------------------------------------------------------------
-        buttons_config = [
-            (BTN_UNDO_RECT, COLOR_BLUE, "Hoàn tác (U)"),
-            (BTN_HINT_RECT, COLOR_GOLD, "Gợi ý (H)"),
-            (BTN_NEW_GAME_RECT, COLOR_GREEN, "Ván mới (N)"),
-            (BTN_SURRENDER_RECT, COLOR_RED, "Xin thua"),
-        ]
-        for b_rect, color, label in buttons_config:
-            pygame.draw.rect(self.screen, color, b_rect, border_radius=8)
-            pygame.draw.rect(self.screen, (255, 255, 255, 80), b_rect, width=1, border_radius=8)
-            b_txt = self.btn_font.render(label, True, (255, 255, 255))
-            self.screen.blit(b_txt, b_txt.get_rect(center=b_rect.center))
-
-        # -------------------------------------------------------------
-        # KHỐI 5: BẢNG LỊCH SỬ NƯỚC ĐI (Y: 362 -> 552)
-        # -------------------------------------------------------------
-        lbl_hist = self.badge_font.render("LỊCH SỬ NƯỚC CỜ", True, (209, 213, 219))
-        self.screen.blit(lbl_hist, (PANEL_X + 18, 362))
-
-        log_rect = pygame.Rect(PANEL_X + 16, 384, PANEL_WIDTH - 32, 166)
-        pygame.draw.rect(self.screen, (17, 24, 39), log_rect, border_radius=8)
-        pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, log_rect, width=1, border_radius=8)
-
-        history = game_state.get("move_history", [])
-        if not history:
-            no_move_txt = self.sub_font.render("Chưa có nước cờ nào. Hãy chọn quân Đỏ để bắt đầu!", True, (107, 114, 128))
-            self.screen.blit(no_move_txt, (PANEL_X + 26, 396))
-        else:
-            display_moves = history[-7:]
-            for idx, m in enumerate(display_moves):
-                turn_str = "Đỏ" if m.get("turn") == "r" else "Đen"
-                s = m.get("src")
-                d = m.get("dst")
-                move_txt = f"{idx+1}. {turn_str}: ({s[0]},{s[1]}) -> ({d[0]},{d[1]})"
-                t_surf = self.log_font.render(move_txt, True, (229, 231, 235))
-                self.screen.blit(t_surf, (PANEL_X + 26, 394 + idx * 22))
-
-        # -------------------------------------------------------------
-        # KHỐI 6: THANH THÔNG BÁO / MẸO CHƠI (Y: 562 -> 598, Cao 36)
-        # -------------------------------------------------------------
-        status_rect = pygame.Rect(PANEL_X + 16, 562, PANEL_WIDTH - 32, 36)
-        pygame.draw.rect(self.screen, (22, 29, 41), status_rect, border_radius=8)
-        pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, status_rect, width=1, border_radius=8)
-
-        # Emergency Scan Resume Button (khi manual_override_active)
-        if game_state.get("manual_override_active"):
-            pygame.draw.rect(self.screen, (180, 83, 9), BTN_RESUME_SCAN_RECT, border_radius=8)
-            pygame.draw.rect(self.screen, (245, 158, 11), BTN_RESUME_SCAN_RECT, width=1, border_radius=8)
-            res_txt = self.btn_font.render("📸 TIẾP TỤC QUÉT FEN (CAMERA)", True, (255, 255, 255))
-            self.screen.blit(res_txt, res_txt.get_rect(center=BTN_RESUME_SCAN_RECT.center))
-        else:
-            now = time.time()
-            st_msg = game_state.get("status_message")
-            st_exp = game_state.get("status_expiry", 0)
-            if st_msg and now < st_exp:
-                st_color = game_state.get("status_color", (156, 163, 175))
+        self._draw_panel(AI_STATUS_RECT, fill=(249, 245, 232), border=accent, radius=12)
+        pulse = 10 + int((now * 2) % 4)
+        pygame.draw.circle(self.screen, accent, (AI_STATUS_RECT.x + 37, AI_STATUS_RECT.centery), pulse)
+        label = self.log_font.render("AI STATUS", True, JADE_DARK)
+        self.screen.blit(label, (AI_STATUS_RECT.x + 67, AI_STATUS_RECT.y + 16))
+        available = AI_STATUS_RECT.width - 95
+        words, lines, current = message.split(), [], ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if current and self.log_font.size(candidate)[0] > available:
+                lines.append(current)
+                current = word
             else:
-                st_msg = "Bấm [R]: Tự đấu 2 AI  •  [H]: Gợi ý  •  [U]: Đi lại"
-                st_color = (156, 163, 175)
-            st_surf = self.sub_font.render(st_msg, True, st_color)
-            self.screen.blit(st_surf, st_surf.get_rect(center=status_rect.center))
+                current = candidate
+        if current:
+            lines.append(current)
+        if len(lines) > 2:
+            lines = [lines[0], lines[1] + "..."]
+        for index, line in enumerate(lines):
+            text = self.log_font.render(line, True, INK_COLOR)
+            self.screen.blit(text, (AI_STATUS_RECT.x + 67, AI_STATUS_RECT.y + 52 + index * 24))
 
-    def draw_self_play_controls(self, controller):
-        """Overlay controls for the autonomous physical / virtual match."""
-        if controller is None:
-            return None
-        if not controller.active and controller.status.value not in {"faulted", "ended"}:
-            return None
+    @staticmethod
+    def _format_move(entry):
+        piece = PIECE_LOG_NAMES.get(entry.get("piece", "")[-1:], "Piece")
+        src_col, src_row = entry["src"]
+        dst_col, dst_row = entry["dst"]
+        src = f"{chr(ord('a') + src_col)}{src_row}"
+        dst = f"{chr(ord('a') + dst_col)}{dst_row}"
+        return f"{piece} {src} -> {dst}"
 
-        # Draw Self-Play Banner
-        banner_rect = pygame.Rect(PANEL_X + 16, 350, PANEL_WIDTH - 32, 28)
-        pygame.draw.rect(self.screen, (30, 27, 75), banner_rect, border_radius=6)
-        pygame.draw.rect(self.screen, (129, 140, 248), banner_rect, width=1, border_radius=6)
-        mode_str = f"TỰ ĐẤU (SELF-PLAY): {controller.status.value.upper()} | {controller.run_mode.upper()}"
-        b_txt = self.sub_font.render(mode_str, True, (224, 231, 255))
-        self.screen.blit(b_txt, b_txt.get_rect(center=banner_rect.center))
+    def draw_recent_moves(self, moves):
+        """Draw the latest eight moves in their moving side's color."""
+        self._draw_panel(MOVE_LOG_RECT, fill=(249, 245, 232), border=GOLD_COLOR, radius=14)
+        title = self.ui_font.render("RECENT MOVES", True, JADE_DARK)
+        self.screen.blit(title, title.get_rect(center=(MOVE_LOG_RECT.centerx, MOVE_LOG_RECT.y + 38)))
+        pygame.draw.line(self.screen, GOLD_COLOR, (MOVE_LOG_RECT.x + 24, MOVE_LOG_RECT.y + 61),
+                         (MOVE_LOG_RECT.right - 24, MOVE_LOG_RECT.y + 61), 2)
+        for index, entry in enumerate(moves[-8:]):
+            color = RED_PIECE_COLOR if entry.get("turn") == "r" else BLACK_PIECE_COLOR
+            text = self.log_font.render(self._format_move(entry), True, color)
+            y = MOVE_LOG_Y + index * MOVE_LOG_LINE_HEIGHT
+            if index == len(moves[-8:]) - 1:
+                pygame.draw.rect(self.screen, (221, 235, 216),
+                                 (MOVE_LOG_X - 8, y - 6, MOVE_LOG_RECT.width - 32, 36), border_radius=8)
+            self.screen.blit(text, (MOVE_LOG_X, y))
 
-        # Controls row
-        end_rect = pygame.Rect(SCREEN_WIDTH - 145, SCREEN_HEIGHT - 58, 125, 40)
-        pygame.draw.rect(self.screen, (180, 50, 50), end_rect, border_radius=8)
-        end = self.btn_font.render("DỪNG (END)", True, (255, 255, 255))
-        self.screen.blit(end, end.get_rect(center=end_rect.center))
+    def draw_board_coordinates(self):
+        """Label the board's compact internal a-i / 0-9 coordinate grid."""
+        for col in range(NUM_COLS):
+            label = self.log_font.render(chr(ord("a") + col), True, MENU_MUTED_TEXT_COLOR)
+            x, _ = self.grid_to_pixel(col, 0)
+            self.screen.blit(label, label.get_rect(
+                center=(x, int(START_Y) - PIECE_RADIUS - 18)
+            ))
+        for row in range(NUM_ROWS):
+            label = self.log_font.render(str(row), True, MENU_MUTED_TEXT_COLOR)
+            _, y = self.grid_to_pixel(0, row)
+            self.screen.blit(label, label.get_rect(center=(int(START_X) - PIECE_RADIUS - 17, y)))
 
-        if controller.accepts_next:
-            next_rect = pygame.Rect(20, SCREEN_HEIGHT - 58, 140, 40)
-            pygame.draw.rect(self.screen, (37, 99, 235), next_rect, border_radius=8)
-            nxt = self.btn_font.render("NƯỚC TIẾP (N)", True, (255, 255, 255))
-            self.screen.blit(nxt, nxt.get_rect(center=next_rect.center))
-
-        if controller.status.value in {"ready", "idle"}:
-            toggle_rect = pygame.Rect(SCREEN_WIDTH // 2 - 90, SCREEN_HEIGHT - 58, 180, 40)
-            pygame.draw.rect(self.screen, (109, 40, 217), toggle_rect, border_radius=8)
-            target = "CHẾ ĐỘ LIÊN TỤC" if controller.run_mode == "step" else "CHẾ ĐỘ TỪNG BƯỚC"
-            toggle = self.sub_font.render(target, True, (255, 255, 255))
-            self.screen.blit(toggle, toggle.get_rect(center=toggle_rect.center))
-
-        return end_rect
+    def draw_difficulty_menu(self, availability, message=""):
+        """Overlay shown after camera calibration and before a game can begin."""
+        self._draw_ink_wash_background()
+        title = self.title_font.render("CHOOSE YOUR OPPONENT", True, INK_COLOR)
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 170)))
+        subtitle = self.ui_font.render("Pick a challenge that feels right", True, MENU_MUTED_TEXT_COLOR)
+        self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 250)))
+        pygame.draw.line(self.screen, GOLD_COLOR, (480, 290), (960, 290), 2)
+        for key, label, rect, color in DIFFICULTY_OPTIONS:
+            enabled = availability.get(key, False)
+            border = color if enabled else (154, 145, 125)
+            self._draw_panel(rect, fill=(249, 245, 232) if enabled else (229, 222, 205), border=border)
+            piece, piece_name, description = DIFFICULTY_PRESENTATION[key]
+            piece_color = RED_PIECE_COLOR if key in ("hard", "impossible") else JADE_DARK
+            pygame.draw.circle(self.screen, (255, 252, 242), (rect.x + 98, rect.centery), 58)
+            pygame.draw.circle(self.screen, border, (rect.x + 98, rect.centery), 58, 3)
+            piece_surf = self.piece_font.render(piece, True, piece_color)
+            self.screen.blit(piece_surf, piece_surf.get_rect(center=(rect.x + 98, rect.centery)))
+            name = self.ui_font.render(f"{label} · {piece_name}", True, INK_COLOR if enabled else MENU_MUTED_TEXT_COLOR)
+            self.screen.blit(name, (rect.x + 190, rect.y + 57))
+            detail = self.log_font.render(description if enabled else "Moonfish not ready", True, MENU_MUTED_TEXT_COLOR)
+            self.screen.blit(detail, (rect.x + 190, rect.y + 112))
+        if message:
+            note = self.log_font.render(message, True, VERMILION_COLOR)
+            self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 950)))
 
     def draw_home_screen(self):
         """Draw the launcher shown before the player chooses a game mode."""
-        self.screen.fill((25, 20, 16))
-        accent = pygame.Rect(0, 0, SCREEN_WIDTH, 8)
-        pygame.draw.rect(self.screen, (194, 46, 46), accent)
+        self._draw_ink_wash_background()
 
-        title = self.big_font.render("XIANGQI ROBOT", True, (246, 225, 184))
-        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 190)))
-        subtitle = self.sub_font.render("Choose a game mode to begin", True, (228, 214, 190))
-        self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 235)))
+        title = self.title_font.render("XIANGQI ROBOT", True, INK_COLOR)
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 352)))
+        subtitle = self.ui_font.render("A thoughtful match, guided by a robot", True, MENU_MUTED_TEXT_COLOR)
+        self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 430)))
 
-        pygame.draw.rect(self.screen, (61, 73, 82), HOME_SETTINGS_RECT, border_radius=8)
-        settings = self.sub_font.render("SETTINGS", True, (255, 255, 255))
+        self._draw_panel(HOME_SETTINGS_RECT, fill=JADE_DARK, border=JADE_DARK, radius=8)
+        settings = self.log_font.render("SETTINGS", True, (255, 255, 255))
         self.screen.blit(settings, settings.get_rect(center=HOME_SETTINGS_RECT.center))
 
-        pygame.draw.rect(self.screen, (159, 59, 55), HOME_VS_ROBOT_RECT, border_radius=12)
-        pygame.draw.rect(self.screen, (239, 218, 177), HOME_VS_ROBOT_RECT, 2, border_radius=12)
-        button = self.title_font.render("VS ROBOT", True, (255, 255, 255))
-        self.screen.blit(button, button.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery - 6)))
-        detail = self.sub_font.render("Choose the robot difficulty next", True, (255, 224, 205))
-        self.screen.blit(detail, detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery + 22)))
+        card = HOME_VS_ROBOT_RECT.inflate(48, 68)
+        self._draw_panel(card, fill=(249, 245, 232), border=GOLD_COLOR, radius=20)
+        pygame.draw.circle(self.screen, JADE_DARK, (SCREEN_WIDTH // 2, card.y + 52), 30)
+        robot_mark = self.log_font.render("AI", True, (255, 255, 255))
+        self.screen.blit(robot_mark, robot_mark.get_rect(center=(SCREEN_WIDTH // 2, card.y + 52)))
+        pygame.draw.rect(self.screen, JADE_COLOR, HOME_VS_ROBOT_RECT, border_radius=18)
+        button = self.game_font.render("VS ROBOT", True, (255, 255, 255))
+        self.screen.blit(button, button.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery - 12)))
+        detail = self.log_font.render("Choose the robot difficulty next", True, (227, 245, 237))
+        self.screen.blit(detail, detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery + 32)))
 
-        hint = self.sub_font.render("Click VS ROBOT or press Enter", True, (190, 181, 166))
-        self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 465)))
+        for rect, label in ((HOME_SELF_PLAY_RECT, "ROBOT VS ROBOT"), (HOME_HUMAN_RECT, "HUMAN VS HUMAN")):
+            self._draw_panel(rect, fill=(249, 245, 232), border=GOLD_COLOR, radius=12)
+            text = self.log_font.render(label, True, JADE_DARK)
+            self.screen.blit(text, text.get_rect(center=rect.center))
+        hint = self.log_font.render("Self-play: F7 next move / F8 stop. Camera full scan: F4", True, JADE_DARK)
+        self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 914)))
 
     @staticmethod
     def home_action_from_pixel(px, py):
         if HOME_VS_ROBOT_RECT.collidepoint(px, py):
             return "vs_robot"
-        if HOME_ROBOT_VS_ROBOT_RECT.collidepoint(px, py):
-            return "robot_vs_robot"
+        if HOME_SELF_PLAY_RECT.collidepoint(px, py):
+            return "self_play"
+        if HOME_HUMAN_RECT.collidepoint(px, py):
+            return "human_vs_human"
         if HOME_SETTINGS_RECT.collidepoint(px, py):
             return "settings"
         return None
 
     def draw_settings_menu(self, debug_enabled):
         """Draw the pre-game settings restored from the previous menu flow."""
-        self.screen.fill((25, 20, 16))
+        self.screen.fill(BOARD_COLOR)
         pygame.draw.rect(self.screen, (61, 73, 82), SETTINGS_BACK_RECT, border_radius=8)
-        back = self.sub_font.render("< HOME", True, (255, 255, 255))
+        back = self.ui_font.render("< HOME", True, (255, 255, 255))
         self.screen.blit(back, back.get_rect(center=SETTINGS_BACK_RECT.center))
 
-        title = self.big_font.render("SETTINGS", True, (246, 225, 184))
+        title = self.game_font.render("SETTINGS", True, MENU_TEXT_COLOR)
         self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 118)))
-        label = self.sub_font.render("Debug dashboard", True, (235, 224, 205))
+        label = self.ui_font.render("Debug dashboard", True, MENU_TEXT_COLOR)
         self.screen.blit(label, label.get_rect(midleft=(126, DEBUG_STATUS_RECT.centery)))
 
         status = "ENABLED" if debug_enabled else "DISABLED"
         color = (62, 129, 91) if debug_enabled else (159, 59, 55)
         pygame.draw.rect(self.screen, color, DEBUG_STATUS_RECT, border_radius=10)
-        status_text = self.sub_font.render(status, True, (255, 255, 255))
+        status_text = self.ui_font.render(status, True, (255, 255, 255))
         self.screen.blit(status_text, status_text.get_rect(center=DEBUG_STATUS_RECT.center))
 
-        note = self.sub_font.render("Opens a separate read-only robot telemetry window", True, (190, 181, 166))
+        note = self.ui_font.render("Opens a separate read-only robot telemetry window", True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 284)))
 
     @staticmethod
@@ -493,29 +494,6 @@ class BoardRenderer:
             return "toggle_debug_dashboard"
         return None
 
-    def draw_difficulty_menu(self, availability, message=""):
-        """Overlay shown after camera calibration and before a game can begin."""
-        shade = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        shade.fill((25, 20, 16, 218))
-        self.screen.blit(shade, (0, 0))
-        title = self.big_font.render("CHOOSE YOUR OPPONENT", True, (246, 225, 184))
-        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 208)))
-        subtitle = self.sub_font.render("Select a difficulty to start after board calibration", True, (228, 214, 190))
-        self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 246)))
-        for key, label, rect, color in DIFFICULTY_OPTIONS:
-            enabled = availability.get(key, False)
-            card_color = color if enabled else (78, 72, 65)
-            pygame.draw.rect(self.screen, card_color, rect, border_radius=10)
-            pygame.draw.rect(self.screen, (239, 218, 177) if enabled else (125, 118, 107), rect, 2, border_radius=10)
-            text = self.sub_font.render(label, True, (255, 255, 255) if enabled else (185, 178, 166))
-            self.screen.blit(text, text.get_rect(center=(rect.centerx, rect.centery - 10)))
-            detail = "READY" if enabled else "NOT READY"
-            detail_surf = self.sub_font.render(detail, True, (246, 227, 193) if enabled else (190, 181, 166))
-            self.screen.blit(detail_surf, detail_surf.get_rect(center=(rect.centerx, rect.centery + 16)))
-        if message:
-            note = self.sub_font.render(message, True, (255, 204, 112))
-            self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 500)))
-
     @staticmethod
     def difficulty_from_pixel(px, py):
         for key, _, rect, _ in DIFFICULTY_OPTIONS:
@@ -523,187 +501,42 @@ class BoardRenderer:
                 return key
         return None
 
-    # =========================================================================
-    # 4. VẼ QUÂN CỜ TRUYỀN THỐNG (AUTHENTIC CHINESE CHESS TOKENS)
-    # =========================================================================
-    def draw_pieces(self, board: List[List[str]]):
-        """Vẽ toàn bộ quân cờ nổi 3D với vành gỗ ngà và chữ Hán thư pháp."""
+    def draw_pieces(self, board):
+        """Vẽ tất cả quân cờ trên bàn."""
         for r in range(NUM_ROWS):
             for c in range(NUM_COLS):
                 name = board[r][c]
                 if name == ".":
                     continue
                 cx, cy = self.grid_to_pixel(c, r)
+                color = RED_PIECE_COLOR if name.startswith("r") else BLACK_PIECE_COLOR
+                pygame.draw.circle(self.screen, (255, 255, 255), (cx, cy), PIECE_RADIUS)
+                pygame.draw.circle(self.screen, color, (cx, cy), PIECE_RADIUS, 2)
+                text_surf = self.piece_font.render(
+                    PIECE_DISPLAY_NAMES.get(name, "?"), True, color)
+                self.screen.blit(text_surf, text_surf.get_rect(center=(cx, cy)))
 
-                # Đổ bóng quân cờ
-                pygame.draw.circle(self.screen, (40, 25, 15, 90), (cx + 2, cy + 3), PIECE_RADIUS)
-                # Thân gỗ quân cờ
-                pygame.draw.circle(self.screen, COLOR_PIECE_BG, (cx, cy), PIECE_RADIUS)
-                # Vành gỗ ngoài
-                pygame.draw.circle(self.screen, COLOR_PIECE_RIM, (cx, cy), PIECE_RADIUS, 2)
-                # Vành chỉ tròn trong
-                pygame.draw.circle(self.screen, (225, 200, 165), (cx, cy), PIECE_RADIUS - 3, 1)
-
-                # Ký tự thư pháp
-                is_red = name.startswith("r")
-                color = COLOR_RED_PIECE if is_red else COLOR_BLACK_PIECE
-                char_str = PIECE_DISPLAY_NAMES.get(name, "?")
-                text_surf = self.piece_font.render(char_str, True, color)
-                self.screen.blit(text_surf, text_surf.get_rect(center=(cx, cy - 1)))
-
-    # =========================================================================
-    # 5. VẼ HIGHLIGHT & CHẤM TRÒN GỢI Ý NƯỚC ĐI (LEGAL MOVE DOTS)
-    # =========================================================================
-    def draw_highlight(
-        self,
-        last_move: Optional[Tuple[Tuple[int, int], Tuple[int, int]]] = None,
-        selected_pos: Optional[Tuple[int, int]] = None,
-        invalid_flash_pos: Optional[Tuple[int, int]] = None,
-        invalid_flash_expiry: float = 0.0,
-        legal_moves: Optional[List[Tuple[int, int]]] = None,
-        board: Optional[List[List[str]]] = None,
-        is_check: bool = False,
-        turn: str = "r",
-        hint_move: Optional[Tuple[Tuple[int, int], Tuple[int, int]]] = None,
-    ):
-        """Vẽ các chỉ dấu thị giác: ô chọn, chấm gợi ý đi được, nước đi trước, chiếu tướng."""
-        # 1. Nước đi gần nhất (Last Move): Vẽ 4 góc L màu vàng kim ở ô xuất phát và ô đến
+    def draw_highlight(self, last_move=None, selected_pos=None,
+                       invalid_flash_pos=None, invalid_flash_expiry=0):
+        """Vẽ highlight: nước đi cuối, ô chọn, invalid flash."""
         if last_move:
             s, d = last_move
-            self._draw_corner_brackets(s[0], s[1], COLOR_GOLD)
-            self._draw_corner_brackets(d[0], d[1], COLOR_GOLD)
-
-        # 2. Quân cờ đang được chọn: Viền phát sáng màu vàng cam
+            pygame.draw.circle(self.screen, (0, 255, 0, 100),
+                               self.grid_to_pixel(s[0], s[1]), PIECE_RADIUS + 2, 2)
+            pygame.draw.circle(self.screen, (0, 255, 0, 150),
+                               self.grid_to_pixel(d[0], d[1]), PIECE_RADIUS + 2, 2)
         if selected_pos:
-            sc, sr = selected_pos
-            cx, cy = self.grid_to_pixel(sc, sr)
-            pygame.draw.circle(self.screen, COLOR_GOLD, (cx, cy), PIECE_RADIUS + 4, 3)
-
-        # 3. GỢI Ý CÁC Ô ĐI HỢP LỆ (LEGAL MOVE MARKERS)
-        if selected_pos and legal_moves:
-            for dc, dr in legal_moves:
-                px, py = self.grid_to_pixel(dc, dr)
-                is_capture = (board is not None and board[dr][dc] != ".")
-                if is_capture:
-                    # Vòng tròn đỏ nhắm bắn quân địch
-                    pygame.draw.circle(self.screen, COLOR_RED, (px, py), PIECE_RADIUS + 3, 3)
-                    d_len = 6
-                    pygame.draw.line(self.screen, COLOR_RED, (px - PIECE_RADIUS - 4, py), (px - PIECE_RADIUS + d_len, py), 2)
-                    pygame.draw.line(self.screen, COLOR_RED, (px + PIECE_RADIUS + 4, py), (px + PIECE_RADIUS - d_len, py), 2)
-                    pygame.draw.line(self.screen, COLOR_RED, (px, py - PIECE_RADIUS - 4), (px, py - PIECE_RADIUS + d_len), 2)
-                    pygame.draw.line(self.screen, COLOR_RED, (px, py + PIECE_RADIUS + 4), (px, py + PIECE_RADIUS - d_len), 2)
-                else:
-                    # Chấm tròn xanh ngọc trên ô trống
-                    pygame.draw.circle(self.screen, COLOR_GREEN, (px, py), 7)
-                    pygame.draw.circle(self.screen, (255, 255, 255), (px, py), 8, 1)
-
-        # 4. Gợi ý nước đi từ AI (Hint Move): Viền tím phát sáng
-        if hint_move:
-            hs, hd = hint_move
-            self._draw_corner_brackets(hs[0], hs[1], COLOR_PURPLE)
-            self._draw_corner_brackets(hd[0], hd[1], COLOR_PURPLE)
-            p1 = self.grid_to_pixel(hs[0], hs[1])
-            p2 = self.grid_to_pixel(hd[0], hd[1])
-            pygame.draw.line(self.screen, COLOR_PURPLE, p1, p2, 3)
-
-        # 5. Chiếu tướng (Check Alert): Vòng đỏ nhấp nháy quanh Tướng + Badge "CHIẾU TƯỚNG"
-        if is_check and board:
-            king_pos = xiangqi.get_king_pos(turn, board)
-            if king_pos:
-                kx, ky = self.grid_to_pixel(king_pos[0], king_pos[1])
-                pulse = int(180 + 75 * math.sin(time.time() * 8))
-                pygame.draw.circle(self.screen, (pulse, 0, 0), (kx, ky), PIECE_RADIUS + 6, 4)
-
-                # Badge "CHIẾU TƯỚNG" nổi bật
-                badge_text = "CHIẾU TƯỚNG!"
-                b_surf = self.badge_font.render(badge_text, True, (255, 255, 255))
-                bw, bh = b_surf.get_width() + 14, b_surf.get_height() + 6
-                # Nếu tướng ở hàng trên thì badge đặt phía dưới, nếu ở hàng dưới thì badge đặt phía trên
-                by = (ky + PIECE_RADIUS + 6) if ky < 200 else (ky - PIECE_RADIUS - bh - 6)
-                bx = kx - bw // 2
-                badge_rect = pygame.Rect(bx, by, bw, bh)
-                pygame.draw.rect(self.screen, (185, 28, 28), badge_rect, border_radius=6)
-                pygame.draw.rect(self.screen, (254, 202, 202), badge_rect, width=1, border_radius=6)
-                self.screen.blit(b_surf, b_surf.get_rect(center=badge_rect.center))
-
-        # 6. Invalid Move Flash (Báo đỏ ô không hợp lệ)
+            c, r = selected_pos
+            cx, cy = self.grid_to_pixel(c, r)
+            pygame.draw.circle(self.screen, (0, 0, 255), (cx, cy), PIECE_RADIUS + 4, 2)
         if invalid_flash_pos and time.time() < invalid_flash_expiry:
             fc, fr = invalid_flash_pos
             fx, fy = self.grid_to_pixel(fc, fr)
-            pygame.draw.circle(self.screen, COLOR_RED, (fx, fy), PIECE_RADIUS + 6, 4)
+            pygame.draw.circle(self.screen, (220, 0, 0), (fx, fy), PIECE_RADIUS + 6, 4)
 
-    def _draw_corner_brackets(self, col: int, row: int, color: Tuple[int, int, int]):
-        """Vẽ 4 góc vuông L đặc trưng quanh một ô cờ."""
-        cx, cy = self.grid_to_pixel(col, row)
-        r = PIECE_RADIUS + 4
-        arm = 8
-        # Trên trái
-        pygame.draw.line(self.screen, color, (cx - r, cy - r), (cx - r + arm, cy - r), 2)
-        pygame.draw.line(self.screen, color, (cx - r, cy - r), (cx - r, cy - r + arm), 2)
-        # Trên phải
-        pygame.draw.line(self.screen, color, (cx + r, cy - r), (cx + r - arm, cy - r), 2)
-        pygame.draw.line(self.screen, color, (cx + r, cy - r), (cx + r, cy - r + arm), 2)
-        # Dưới trái
-        pygame.draw.line(self.screen, color, (cx - r, cy + r), (cx - r + arm, cy + r), 2)
-        pygame.draw.line(self.screen, color, (cx - r, cy + r), (cx - r, cy + r - arm), 2)
-        # Dưới phải
-        pygame.draw.line(self.screen, color, (cx + r, cy + r), (cx + r - arm, cy + r), 2)
-        pygame.draw.line(self.screen, color, (cx + r, cy + r), (cx + r, cy + r - arm), 2)
-
-    # =========================================================================
-    # 6. HIỂN THỊ KẾT THÚC GAME
-    # =========================================================================
-    def draw_game_over(self, winner: Optional[str], reason: str = "CHIẾU BÍ"):
-        """Vẽ thông báo kết thúc ván cờ với modal backdrop sang trọng chuẩn chess app."""
-        # 1. Dimming Backdrop che mờ bàn cờ
-        dim_surf = pygame.Surface((536, SCREEN_HEIGHT), pygame.SRCALPHA)
-        dim_surf.fill((10, 15, 25, 185))
-        self.screen.blit(dim_surf, (0, 0))
-
-        # 2. Modal Box ở trung tâm bàn cờ
-        modal_w, modal_h = 420, 160
-        modal_x = (536 - modal_w) // 2
-        modal_y = (SCREEN_HEIGHT - modal_h) // 2
-        modal_rect = pygame.Rect(modal_x, modal_y, modal_w, modal_h)
-
-        pygame.draw.rect(self.screen, (23, 30, 44), modal_rect, border_radius=14)
-        is_win = (winner == "r")
-        b_color = COLOR_GREEN if is_win else COLOR_RED
-        if winner not in ("r", "b"):
-            b_color = COLOR_GOLD
-
-        pygame.draw.rect(self.screen, b_color, modal_rect, width=3, border_radius=14)
-
-        # 3. Tiêu đề chính
-        if is_win:
-            msg_title = "🏆 CHIẾN THẮNG!"
-        elif winner == "b":
-            msg_title = "💀 BẠN ĐÃ THUA!"
-        else:
-            msg_title = "🤝 HÒA CỜ!"
-
-        t_surf = self.big_font.render(msg_title, True, b_color)
-        self.screen.blit(t_surf, t_surf.get_rect(center=(modal_rect.centerx, modal_rect.top + 34)))
-
-        # 4. Phụ đề nêu rõ nguyên nhân (Chiếu bí / Tuyệt sát / Xin thua)
-        if reason:
-            if is_win:
-                sub_detail = f"Đối thủ đã bị {reason}!"
-            elif winner == "b":
-                sub_detail = f"Bạn đã bị {reason}!"
-            else:
-                sub_detail = "Hai bên thỏa thuận hòa cuộc."
-        else:
-            sub_detail = "Ván đấu đã kết thúc."
-
-        d_surf = self.title_font.render(sub_detail, True, (254, 240, 138))  # Vàng sáng nổi bật
-        self.screen.blit(d_surf, d_surf.get_rect(center=(modal_rect.centerx, modal_rect.top + 76)))
-
-        # Đường gạch phân cách
-        pygame.draw.line(self.screen, (45, 58, 78), (modal_rect.left + 30, modal_rect.top + 104), (modal_rect.right - 30, modal_rect.top + 104), 1)
-
-        # 5. Hướng dẫn hành động
-        guide_msg = "Bấm [Ván mới (N)] để chơi lại  •  [Hoàn tác (U)] để đi lại"
-        g_surf = self.sub_font.render(guide_msg, True, (209, 213, 219))
-        self.screen.blit(g_surf, g_surf.get_rect(center=(modal_rect.centerx, modal_rect.top + 128)))
-
+    def draw_game_over(self, winner):
+        """Vẽ thông báo kết thúc game."""
+        msg = "AI WINS (SAVED)" if winner == "b" else "YOU WIN (NOT SAVED)"
+        color = (0, 255, 0) if winner == "b" else (255, 0, 0)
+        txt = self.game_font.render(msg, True, color)
+        self.screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)))

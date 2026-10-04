@@ -31,9 +31,8 @@ def twin_system():
 
     state = GameState(allow_mouse_move=True)
     state.api_client.send_move_update_board = MagicMock()
-    state.set_move_observer(hw.reconcile_human_move)
-    state.set_board_observer(hw.reconcile_board)
-    hw.reconcile_new_game()
+    state.set_board_observer(hw.sync_committed_board)
+    assert state.sync_current_board()
     state.clear_move_sync_error()
 
     yield {
@@ -111,7 +110,7 @@ def test_human_move_and_capture_synchronization(twin_system):
     assert pieces_in_packet["red_cannon_0"]["nearest_row"] == 0
 
 
-def test_ai_robot_move_collision_is_rejected_without_game_commit(twin_system):
+def test_ai_robot_move_uses_actual_guarded_runtime_and_commits_identity(twin_system):
     sys = twin_system
     hw = sys["hw"]
     twin = sys["twin"]
@@ -133,15 +132,12 @@ def test_ai_robot_move_collision_is_rejected_without_game_commit(twin_system):
         dry_run=True,
         visual_pick_enabled=False,
     )
-    # Current yaw-0 approach clips the non-mounting robot base by 0.18 mm.
-    # Keep the guard active and require a real planning correction before this
-    # move may be committed; a mock-only success would hide that collision.
     assert hw.backend.collision_guard is not None
-    assert ok is False
-    assert state.turn == "b"
-    assert state.board[2][4] == "."
-    # Piece remains at board intersection without advancing GameState FEN
-    assert twin.world.pieces["black_cannon_0"].get_nearest_intersection()[:2] in ((2, 1), (2, 4))
+    assert ok is True
+    assert state.turn == "r"
+    assert state.board[2][4] == "b_C"
+    assert state.piece_ids[(2, 4)] == "black_cannon_0"
+    assert twin.world.pieces["black_cannon_0"].get_nearest_intersection()[:2] == (2, 4)
 
 
 def test_reset_game_respawns_captured_pieces(twin_system):

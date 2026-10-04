@@ -24,12 +24,20 @@ class HumanMoveCommitCoordinator:
         with self._lock:
             if key in self._consumed:
                 return "DUPLICATE"
-            if self.state.game_over or self.state.turn != "r":
+            permission = getattr(self.state, "is_human_turn", None)
+            human_turn = permission() if callable(permission) else (bool(permission) if permission is not None else self.state.turn == "r")
+            if self.state.game_over or not human_turn:
                 return "STALE"
+            token = request.turn_token
+            if isinstance(token, tuple) and len(token) >= 2:
+                if token[:2] != (getattr(self.state, "game_epoch", 0), getattr(self.state, "human_commit_generation", 0)):
+                    return "STALE"
             src, dst = request.move
-            if not xiangqi.is_valid_move(src, dst, self.state.board, "r"):
+            if not xiangqi.is_valid_move(src, dst, self.state.board, self.state.turn):
                 return "RULE_MISMATCH"
             name = piece or self.state.board[src[1]][src[0]]
+            result = self.state.process_human_move(src, dst, name)
+            if result is False:
+                return "REJECTED"
             self._consumed.add(key)
-            self.state.process_human_move(src, dst, name)
             return "ACCEPTED"

@@ -61,7 +61,7 @@ class TuongKyDaiSuClient:
             "fen": fen
         }
         
-        # Captures are committed locally before this call. Retry transient
+        # Captures are committed locally before this call.  Retry transient
         # network/server failures so one dropped response cannot leave the
         # spectator client on the pre-capture FEN.
         for attempt in range(1, max(1, int(attempts)) + 1):
@@ -76,6 +76,8 @@ class TuongKyDaiSuClient:
                     print(f"[+] [API] Đã đồng bộ FEN thành công. Phe tiếp theo: {data['data'].get('currentTurn')}")
                     return move_info
                 print(f"[-] [API] Lỗi gửi FEN (lần {attempt}): {data}")
+                # Invalid FEN/authentication/state-conflict responses cannot
+                # be repaired by replaying the same request.
                 if response.status_code not in (408, 425, 429) and not 500 <= response.status_code < 600:
                     return None
             except requests.RequestException as exc:

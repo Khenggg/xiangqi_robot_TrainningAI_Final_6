@@ -7,8 +7,7 @@ import cv2
 import numpy as np
 import os
 import time
-
-from src.vision.move_observation import MoveObservation
+from src.core import xiangqi
 
 
 class SnapshotDetector:
@@ -30,19 +29,7 @@ class SnapshotDetector:
        Frame + detections được truyền vào từ CameraMonitor.
     """
 
-    MIN_ABSDIFF_SCORE = 500.0
-    MIN_ABSDIFF_MARGIN = 200.0
-
-    def __init__(
-        self,
-        perspective_path,
-        class_id_map,
-        num_cols=9,
-        num_rows=10,
-        max_dist_threshold=0.32,
-        min_absdiff_score=500.0,
-        min_absdiff_margin=200.0,
-    ):
+    def __init__(self, perspective_path, class_id_map, num_cols=9, num_rows=10, max_dist_threshold=0.32, min_absdiff_score=500.0, min_absdiff_margin=200.0):
         """
         Args:
             perspective_path: đường dẫn file perspective.npy
@@ -50,22 +37,21 @@ class SnapshotDetector:
             num_cols:         số cột bàn cờ (9)
             num_rows:         số hàng bàn cờ (10)
             max_dist_threshold: dung sai khoảng cách tối đa tới giao điểm ô cờ (default: 0.32)
-            min_absdiff_score: ngưỡng absdiff tối thiểu để xem là có thay đổi (default: 500.0)
-            min_absdiff_margin: chênh lệch điểm tối thiểu giữa candidate hạng 1 và 2 (default: 200.0)
         """
         self.perspective_path = str(perspective_path)
         self.class_id_map = class_id_map
         self.num_cols = num_cols
         self.num_rows = num_rows
         self.max_dist_threshold = max_dist_threshold
-        self.min_absdiff_score = float(min_absdiff_score)
-        self.min_absdiff_margin = float(min_absdiff_margin)
 
         # T1 baseline
         self._baseline_occ = None    # occupancy grid: True/False
+        self.min_absdiff_score = float(min_absdiff_score)
+        self.min_absdiff_margin = float(min_absdiff_margin)
+        self.last_detection_ambiguous = False
+        self.last_detection_error = None
         self._baseline_frame = None  # actual camera frame tại T1 (cho absdiff)
         self._baseline_time = None
-        self.last_detection_ambiguous = False
 
     # -------------------------------------------------------------------------
     # PUBLIC API
@@ -95,36 +81,68 @@ class SnapshotDetector:
         print(f"[SNAPSHOT] 📸 T1 Baseline captured: {n_occupied} quân detected by camera")
         return True
 
-    def _has_capture_visual_change(self, candidates, frame, min_mean_difference=8.0):
-        """Return True when a stable-occupancy black square changed visually."""
-        if self._baseline_frame is None or frame is None or not candidates:
-            return False
-        if not os.path.exists(self.perspective_path):
-            return False
-        try:
-            inv_M = np.linalg.inv(np.load(self.perspective_path))
-        except Exception:
-            return False
+    def detect_move(self, frame, detections, board, cchess_result=None):
+        """Chụp T2 và so sánh với T1 để phát hiện nước đi của quân ĐỎ.
+        ƯU TIÊN HÀNG ĐẦU: Nhận diện trực tiếp qua CChess ONNX layout (layout_nano_v3.onnx).
+        FALLBACK: So sánh occupancy grid của YOLO nếu không có CChess.
+        
+        Args:
+            frame:          OpenCV frame (BGR) từ CameraMonitor
+            detections:     list of (cls_id, conf, (x1, y1, x2, y2)) từ CameraMonitor
+            board:          memory board hiện tại (10x9 list, biết quân nào ở đâu)
+            cchess_result:  (optional) kết quả từ CChessRecognizer.full_recognize()
+        
+        Returns:
+            (src, dst, piece_name) nếu phát hiện nước đi hợp lệ
+            (None, None, None) nếu không phát hiện được
+        """
+        self.last_detection_ambiguous = False
+        self.last_detection_error = None
+        if cchess_result and cchess_result.get("success"):
+            return self._detect_move_from_cchess(board, cchess_result.get("board", []))
 
-        for col, row in candidates:
-            box = self._get_pixel_box_from_grid(col, row, inv_M, frame.shape)
-            if box is None:
-                continue
-            x1, y1, x2, y2 = box
-            previous = self._baseline_frame[y1:y2, x1:x2]
-            current = frame[y1:y2, x1:x2]
-            if previous.size == 0 or current.size == 0:
-                continue
-            try:
-                difference = cv2.absdiff(
-                    cv2.cvtColor(previous, cv2.COLOR_BGR2GRAY),
-                    cv2.cvtColor(current, cv2.COLOR_BGR2GRAY),
-                )
-                if float(np.mean(difference)) >= float(min_mean_difference):
-                    return True
-            except cv2.error:
-                continue
-        return False
+        # === 2. FALLBACK: YOLO OCCUPANCY GRID COMPARISON ===
+        if self._baseline_occ is None:
+            print("[SNAPSHOT] Chua co T1 baseline! Goi capture_baseline() truoc.")
+            return None, None, None
+
+        if frame is None:
+            print("[SNAPSHOT] Khong co frame cho T2!")
+            return None, None, None
+
+        # Build T2 occupancy
+        t2_occ = self._build_occupancy(detections)
+
+        # Debug
+        n_occupied = sum(1 for r in t2_occ for cell in r if cell)
+        print(f"[SNAPSHOT] T2 captured (YOLO): {n_occupied} quan detected")
+
+        # So sánh T1 vs T2
+        return self._compare_snapshots(self._baseline_occ, t2_occ, board, frame, cchess_result=cchess_result)
+
+    def _detect_move_from_cchess(self, current_board, rec_board):
+        from src.vision.move_observation import derive_move_observation
+        observation = derive_move_observation(current_board, rec_board, player_color="r")
+        self.last_detection_ambiguous = observation.is_ambiguous
+        self.last_detection_error = observation.error
+        return observation.as_tuple() if observation.success else (None, None, None)
+
+    def detect_move_observation(self, frame, detections, board, t2_occ=None, cchess_result=None):
+        from src.vision.move_observation import MoveObservation
+        if t2_occ is None:
+            src, dst, piece = self.detect_move(frame, detections, board, cchess_result)
+        else:
+            src, dst, piece = self._compare_snapshots(self._baseline_occ, t2_occ, board, frame, cchess_result)
+        if src is None:
+            return MoveObservation(success=False, is_ambiguous=self.last_detection_ambiguous,
+                                   error=self.last_detection_error or "Ambiguous / no verified move")
+        captured = board[dst[1]][dst[0]]
+        return MoveObservation(success=True, src=src, dst=dst, piece=piece,
+                               is_capture=captured != ".", captured_piece=captured if captured != "." else None)
+
+    def has_baseline(self):
+        """Kiểm tra đã có T1 baseline chưa."""
+        return self._baseline_occ is not None
 
     def has_new_human_move(self, detections, board, frame=None, cchess_result=None):
         """Return whether the current image shows a red piece changed from T1.
@@ -187,95 +205,36 @@ class SnapshotDetector:
             stable_black_squares, frame
         ))
 
-    def detect_move(self, frame, detections, board, cchess_result=None):
-        """Chụp T2 và so sánh với T1 để phát hiện nước đi của quân ĐỎ.
-        
-        Args:
-            frame:          OpenCV frame (BGR) từ CameraMonitor
-            detections:     list of (cls_id, conf, (x1, y1, x2, y2)) từ CameraMonitor
-            board:          memory board hiện tại (10x9 list, biết quân nào ở đâu)
-            cchess_result:  (optional) kết quả từ CChessRecognizer.full_recognize()
-        
-        Returns:
-            (src, dst, piece_name) nếu phát hiện nước đi hợp lệ
-            (None, None, None) nếu không phát hiện được
-        """
-        self.last_detection_ambiguous = False
-        if self._baseline_occ is None:
-            print("[SNAPSHOT] ⚠️ Chưa có T1 baseline! Gọi capture_baseline() trước.")
-            return None, None, None
+    def _has_capture_visual_change(self, candidates, frame, min_mean_difference=8.0):
+        """Return True when a stable-occupancy black square changed visually."""
+        if self._baseline_frame is None or frame is None or not candidates:
+            return False
+        if not os.path.exists(self.perspective_path):
+            return False
+        try:
+            inv_M = np.linalg.inv(np.load(self.perspective_path))
+        except Exception:
+            return False
 
-        if frame is None:
-            print("[SNAPSHOT] ❌ Không có frame cho T2!")
-            return None, None, None
-
-        # Build T2 occupancy
-        t2_occ = self._build_occupancy(detections)
-
-        # Debug
-        n_occupied = sum(1 for r in t2_occ for cell in r if cell)
-        print(f"[SNAPSHOT] 📸 T2 captured: {n_occupied} quân detected")
-
-        # So sánh T1 vs T2 (dùng occupancy + memory board + CChess ONNX hỗ trợ)
-        return self._compare_snapshots(self._baseline_occ, t2_occ, board, frame, cchess_result=cchess_result)
-
-    def detect_move_observation(self, frame, detections, board, cchess_result=None, t2_occ=None):
-        """Phát hiện nước đi trả về MoveObservation có cấu trúc.
-        
-        Args:
-            frame: OpenCV frame (BGR)
-            detections: list of detections
-            board: current memory board
-            cchess_result: optional CChess result
-            t2_occ: optional precomputed occupancy grid
-            
-        Returns:
-            MoveObservation
-        """
-        self.last_detection_ambiguous = False
-        if self._baseline_occ is None:
-            return MoveObservation(success=False, error="Chưa có T1 baseline! Gọi capture_baseline() trước.")
-
-        if frame is None:
-            return MoveObservation(success=False, error="Không có frame cho T2!")
-
-        if t2_occ is None:
-            t2_occ = self._build_occupancy(detections)
-
-        src, dst, piece = self._compare_snapshots(
-            self._baseline_occ, t2_occ, board, frame, cchess_result=cchess_result
-        )
-
-        if src is not None and dst is not None:
-            dst_c, dst_r = dst
-            orig_dest = board[dst_r][dst_c]
-            is_capture = (orig_dest != ".")
-            captured_piece = orig_dest if is_capture else None
-            return MoveObservation(
-                success=True,
-                src=src,
-                dst=dst,
-                piece=piece,
-                is_capture=is_capture,
-                captured_piece=captured_piece,
-                confidence=1.0,
-            )
-
-        if self.last_detection_ambiguous:
-            return MoveObservation(
-                success=False,
-                is_ambiguous=True,
-                error="Mơ hồ: Có nhiều ứng viên nước đi hợp lệ nhưng không thể phân định duy nhất.",
-            )
-
-        return MoveObservation(
-            success=False,
-            error="Không phát hiện được nước đi hợp lệ từ thay đổi bàn cờ.",
-        )
-
-    def has_baseline(self):
-        """Kiểm tra đã có T1 baseline chưa."""
-        return self._baseline_occ is not None
+        for col, row in candidates:
+            box = self._get_pixel_box_from_grid(col, row, inv_M, frame.shape)
+            if box is None:
+                continue
+            x1, y1, x2, y2 = box
+            previous = self._baseline_frame[y1:y2, x1:x2]
+            current = frame[y1:y2, x1:x2]
+            if previous.size == 0 or current.size == 0:
+                continue
+            try:
+                difference = cv2.absdiff(
+                    cv2.cvtColor(previous, cv2.COLOR_BGR2GRAY),
+                    cv2.cvtColor(current, cv2.COLOR_BGR2GRAY),
+                )
+                if float(np.mean(difference)) >= float(min_mean_difference):
+                    return True
+            except cv2.error:
+                continue
+        return False
 
     def clear_baseline(self):
         """Xóa T1 baseline (dùng khi reset game)."""
@@ -422,7 +381,6 @@ class SnapshotDetector:
         """
         if self._baseline_frame is None:
             print("[SNAPSHOT] ⚠️ resolve_capture_ambiguity: không có baseline_frame!")
-            self.last_detection_ambiguous = True
             return None
         if curr_frame is None or len(candidates) == 0:
             return None
@@ -430,7 +388,6 @@ class SnapshotDetector:
         # Load perspective matrix để tính inverse
         if not os.path.exists(self.perspective_path):
             print("[SNAPSHOT] ⚠️ resolve_capture_ambiguity: không có perspective.npy!")
-            self.last_detection_ambiguous = True
             return None
 
         try:
@@ -438,11 +395,12 @@ class SnapshotDetector:
             inv_M = np.linalg.inv(M)
         except Exception as e:
             print(f"[SNAPSHOT] ⚠️ resolve_capture_ambiguity: lỗi load/invert M: {e}")
-            self.last_detection_ambiguous = True
             return None
 
-        scored_candidates = []
+        best_candidate = None
+        best_score = -1
         score_log = []
+        scored_candidates = []
 
         for (col, row) in candidates:
             box = self._get_pixel_box_from_grid(col, row, inv_M, curr_frame.shape)
@@ -464,39 +422,27 @@ class SnapshotDetector:
             curr_gray = cv2.cvtColor(curr_crop, cv2.COLOR_BGR2GRAY)
 
             diff = cv2.absdiff(prev_gray, curr_gray)
-            score = float(np.sum(diff))
+            score = int(np.sum(diff))
 
-            score_log.append(f"  ({col},{row}): score={score:.1f}")
-            scored_candidates.append(((col, row), score))
+            score_log.append(f"  ({col},{row}): score={score}")
+            scored_candidates.append((score, (col, row)))
+
+            if score > best_score:
+                best_score = score
+                best_candidate = (col, row)
 
         print("[SNAPSHOT] 🔬 Blind Capture Resolution scores:")
         for s in score_log:
             print(s)
+        print(f"[SNAPSHOT] ✅ Best candidate: {best_candidate} (score={best_score})")
 
-        if not scored_candidates:
+        scored_candidates.sort(reverse=True)
+        runner_up = scored_candidates[1][0] if len(scored_candidates) > 1 else 0.
+        if best_score < self.min_absdiff_score or best_score - runner_up < self.min_absdiff_margin:
             self.last_detection_ambiguous = True
+            self.last_detection_error = "Pixel change is too weak or candidates are tied"
             return None
-
-        # Sắp xếp điểm giảm dần
-        scored_candidates.sort(key=lambda item: item[1], reverse=True)
-        best_candidate, best_score = scored_candidates[0]
-
-        # Kiểm tra ngưỡng điểm tối thiểu (absolute threshold)
-        if best_score < self.min_absdiff_score:
-            print(f"[SNAPSHOT] ❌ Pixel absdiff score {best_score:.1f} < threshold {self.min_absdiff_score:.1f}. Failing closed.")
-            self.last_detection_ambiguous = True
-            return None
-
-        # Kiểm tra khoảng cách điểm với candidate thứ 2 (separation margin)
-        if len(scored_candidates) > 1:
-            second_score = scored_candidates[1][1]
-            margin = best_score - second_score
-            if margin < self.min_absdiff_margin:
-                print(f"[SNAPSHOT] ❌ Pixel absdiff margin {margin:.1f} < threshold {self.min_absdiff_margin:.1f} (1st={best_score:.1f}, 2nd={second_score:.1f}). Failing closed.")
-                self.last_detection_ambiguous = True
-                return None
-
-        print(f"[SNAPSHOT] ✅ Best candidate: {best_candidate} (score={best_score:.1f})")
+        self.last_detection_ambiguous = False
         return best_candidate
 
     # -------------------------------------------------------------------------
@@ -507,7 +453,7 @@ class SnapshotDetector:
         """So sánh T1 vs T2 occupancy, dùng memory board để xác định quân.
         
         Dùng VALIDATE-FIRST approach: tìm tất cả cặp (src, dst) khả dĩ
-        mà dst thuộc tập changed_to_true HOẶC là ô quân đen bị THAY ĐỔI
+        rồi validate bằng luật cờ. DST candidates chỉ dựa vào thay đổi
         THỰC SỰ từ camera (không quét toàn bộ quân đen để tránh false positives).
         
         Args:
@@ -526,9 +472,13 @@ class SnapshotDetector:
         except ImportError:
             xiangqi = None
 
+        self.last_detection_ambiguous = False
+        self.last_detection_error = None
+        if cchess_result and cchess_result.get("success"):
+            return self._detect_move_from_cchess(board, cchess_result.get("board", []))
+
         disappeared = []  # Ô T1 có quân → T2 trống
         appeared = []     # Ô T1 trống → T2 có quân
-        self.last_detection_ambiguous = False
 
         for r in range(self.num_rows):
             for c in range(self.num_cols):
@@ -551,33 +501,6 @@ class SnapshotDetector:
         # === SRC candidates: quân ĐỎ biến mất ===
         red_disappeared = [(c, r, p) for c, r, p in disappeared if p.startswith("r")]
         if not red_disappeared:
-            # Fallback về CChess ONNX recovery nếu có layout nhận diện đầy đủ bàn cờ
-            if cchess_result and cchess_result.get("success") and xiangqi:
-                rec_board = cchess_result.get("board", [])
-                if rec_board:
-                    c_src = []
-                    c_dst = []
-                    for r in range(self.num_rows):
-                        for c in range(self.num_cols):
-                            orig_p = board[r][c]
-                            rec_p = rec_board[r][c]
-                            if orig_p.startswith("r") and rec_p != orig_p:
-                                c_src.append(((c, r), orig_p))
-                            elif rec_p.startswith("r") and orig_p != rec_p:
-                                c_dst.append(((c, r), rec_p))
-                    valid_recovery = []
-                    for (s_c, s_r), p_src in c_src:
-                        for (d_c, d_r), p_dst in c_dst:
-                            if p_src == p_dst and xiangqi.is_valid_move((s_c, s_r), (d_c, d_r), board, "r"):
-                                valid_recovery.append(((s_c, s_r), (d_c, d_r), p_src))
-                    if len(valid_recovery) == 1:
-                        (s_c, s_r), (d_c, d_r), p_src = valid_recovery[0]
-                        print(f"[SNAPSHOT] ✅ Fallback (CChess ONNX Recovery from 0 disappeared): {p_src} ({s_c},{s_r})→({d_c},{d_r})")
-                        return (s_c, s_r), (d_c, d_r), p_src
-                    elif len(valid_recovery) > 1:
-                        print(f"[SNAPSHOT] ❌ Fallback (CChess ONNX Recovery from 0 disappeared): Ambiguous ({len(valid_recovery)} candidates). Failing closed.")
-                        self.last_detection_ambiguous = True
-                        return None, None, None
             print("[SNAPSHOT] ❌ Không có quân đỏ nào biến mất.")
             return None, None, None
 
@@ -625,11 +548,11 @@ class SnapshotDetector:
                     dst_piece = board[dst[1]][dst[0]]
                     move_type = "ăn quân" if dst_piece.startswith("b") else "di chuyển"
                     valid_moves.append((src, dst, piece, move_type))
-                    print(f"  ✅ Valid: {piece} {src}→{dst} ({move_type})")
+                    print(f"  ✅ Valid: {piece} {xiangqi.format_move(src, dst)} ({move_type})")
 
         if len(valid_moves) == 1:
             src, dst, piece, move_type = valid_moves[0]
-            print(f"[SNAPSHOT] ✅ Detected ({move_type}): {piece} {src}→{dst}")
+            print(f"[SNAPSHOT] ✅ Detected ({move_type}): {piece} {xiangqi.format_move(src, dst)}")
             return src, dst, piece
 
         if len(valid_moves) > 1:
@@ -644,7 +567,7 @@ class SnapshotDetector:
                     ]
                     if len(cchess_matched) == 1:
                         s, d, p, mt = cchess_matched[0]
-                        print(f"[SNAPSHOT] ✅ Detected ({mt}, CChess ONNX tiebreaker): {p} {s}→{d}")
+                        print(f"[SNAPSHOT] ✅ Detected ({mt}, CChess ONNX tiebreaker): {p} {xiangqi.format_move(s, d)}")
                         return s, d, p
 
             # 2. Pixel absdiff tiebreaker
@@ -653,15 +576,12 @@ class SnapshotDetector:
             best_dst = self._resolve_capture_ambiguity(dst_candidates, frame) if frame is not None else None
             if best_dst is not None:
                 matched = [(s, d, p, mt) for s, d, p, mt in valid_moves if d == best_dst]
-                if len(matched) == 1:
+                if matched:
                     src, dst, piece, move_type = matched[0]
-                    print(f"[SNAPSHOT] ✅ Detected ({move_type}, pixel absdiff of {len(valid_moves)}): {piece} {src}→{dst}")
+                    print(f"[SNAPSHOT] ✅ Detected ({move_type}, pixel absdiff of {len(valid_moves)}): {piece} {xiangqi.format_move(src, dst)}")
                     return src, dst, piece
-
-            # P0: REMOVE MANHATTAN GUESSING
-            # If multiple legal candidates cannot be uniquely resolved, FAIL CLOSED.
-            print(f"[SNAPSHOT] ❌ Ambiguous: {len(valid_moves)} valid moves remain unresolved. Failing closed.")
             self.last_detection_ambiguous = True
+            self.last_detection_error = "Multiple legal candidates; no verified winner"
             return None, None, None
 
         # === FALLBACK 1: Không có valid move qua occupancy grid ===
@@ -675,12 +595,8 @@ class SnapshotDetector:
             if len(black_disappeared) == 1:
                 dst = black_disappeared[0]
                 if xiangqi and xiangqi.is_valid_move(src, dst, board, "r"):
-                    print(f"[SNAPSHOT] ✅ Fallback (ăn quân, cả 2 biến mất): {piece} {src}→{dst}")
+                    print(f"[SNAPSHOT] ✅ Fallback (ăn quân, cả 2 biến mất): {piece} {xiangqi.format_move(src, dst)}")
                     return src, dst, piece
-            elif len(black_disappeared) > 1:
-                print(f"[SNAPSHOT] ❌ Fallback: Multiple black disappeared ({len(black_disappeared)}). Failing closed.")
-                self.last_detection_ambiguous = True
-                return None, None, None
 
             # Dùng pixel absdiff để tìm ô quân đen có thay đổi nhiều nhất
             black_candidates = [
@@ -693,7 +609,7 @@ class SnapshotDetector:
             if black_candidates:
                 best = self._resolve_capture_ambiguity(black_candidates, frame)
                 if best is not None:
-                    print(f"[SNAPSHOT] ✅ Fallback (pixel absdiff capture): {piece} {src}→{best}")
+                    print(f"[SNAPSHOT] ✅ Fallback (pixel absdiff capture): {piece} {xiangqi.format_move(src, best)}")
                     return src, best, piece
 
         # === FALLBACK 2: CCHESS RECOVERY (So sánh trực tiếp memory board vs CChess ONNX layout) ===
@@ -711,21 +627,11 @@ class SnapshotDetector:
                         elif rec_p.startswith("r") and orig_p != rec_p:
                             candidates_dst.append(((c, r), rec_p))
 
-                recovery_moves = []
                 for (s_c, s_r), p_src in candidates_src:
                     for (d_c, d_r), p_dst in candidates_dst:
                         if p_src == p_dst and xiangqi.is_valid_move((s_c, s_r), (d_c, d_r), board, "r"):
-                            recovery_moves.append(((s_c, s_r), (d_c, d_r), p_src))
-                if len(recovery_moves) == 1:
-                    (s_c, s_r), (d_c, d_r), p_src = recovery_moves[0]
-                    print(f"[SNAPSHOT] ✅ Fallback (CChess ONNX Recovery): {p_src} ({s_c},{s_r})→({d_c},{d_r})")
-                    return (s_c, s_r), (d_c, d_r), p_src
-                elif len(recovery_moves) > 1:
-                    print(f"[SNAPSHOT] ❌ Fallback (CChess ONNX Recovery): Ambiguous ({len(recovery_moves)} candidates). Failing closed.")
-                    self.last_detection_ambiguous = True
-                    return None, None, None
+                            print(f"[SNAPSHOT] ✅ Fallback (CChess ONNX Recovery): {p_src} {xiangqi.format_move((s_c, s_r), (d_c, d_r))}")
+                            return (s_c, s_r), (d_c, d_r), p_src
 
         print("[SNAPSHOT] ❌ Không tìm được nước đi hợp lệ.")
         return None, None, None
-
-

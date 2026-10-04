@@ -12,6 +12,7 @@ Simulates:
 
 from dataclasses import dataclass
 import json
+import os
 import math
 from pathlib import Path
 import time
@@ -112,7 +113,7 @@ class VirtualPhysicalWorld:
     ):
         shared_dir = Path(__file__).resolve().parent.parent.parent.parent / "shared"
         self.physics_config_path = Path(physics_config_path or (shared_dir / "virtual_physics.json"))
-        self.scene_config_path = Path(scene_config_path or (shared_dir / "virtual_fr3_scene.json"))
+        self.scene_config_path = Path(scene_config_path or os.environ.get("XIANGQI_SCENE_CONFIG") or (shared_dir / "virtual_fr3_scene.json"))
         self.gripper_profile_path = Path(gripper_profile_path or (shared_dir / "virtual_gripper_profile.json"))
         self.start_layout_path = Path(start_layout_path or (shared_dir / "xiangqi_start_layout.json"))
 

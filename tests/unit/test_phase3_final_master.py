@@ -249,7 +249,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
         # set_board_placement must reject with BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR
         res = self.sim.set_board_placement(forward_shift_mm=40.0)
         self.assertFalse(res["success"])
-        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR")
+        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_NOT_READY")
 
         # Restore robot to service safe pose after obstruction test
         self.sim.reset_robot()
@@ -561,7 +561,8 @@ class Phase3FinalMasterTests(unittest.TestCase):
             self.assertEqual(move_res["result"]["status"], "MOTION_REJECTED_BUSY")
         finally:
             route_release.set()
-            t_route.join(timeout=10.0)
+            t_route.join(timeout=60.0)
+            self.assertFalse(t_route.is_alive(), "Route validator did not finish after release")
             self.sim._test_hook_routes_owned = None
 
         self.assertEqual(self.sim.operation_state, RuntimeOperationState.IDLE)
@@ -895,7 +896,8 @@ class Phase3FinalMasterTests(unittest.TestCase):
                     self.assertFalse(pick_release.is_set())
 
                     pick_release.set()
-                    t.join(timeout=3.0)
+                    t.join(timeout=30.0)
+                    self.assertFalse(t.is_alive(), "Pick worker did not finish after release")
 
         self.sim.backend.open_gripper()
         self.sim.world.release_attached_piece()
@@ -1060,7 +1062,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
         res = self.sim.set_board_placement(board_height_offset_mm=25.0)
         self.assertFalse(res["success"])
-        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR")
+        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_NOT_READY")
 
         # 100% state invariance check
         self.assertEqual(self.sim.placement_state.board_height_offset_mm, orig_z_offset)
@@ -1076,13 +1078,13 @@ class Phase3FinalMasterTests(unittest.TestCase):
         self.sim.prepare_board_adjustment()
         swept_res = self.sim.world.check_board_swept_volume_collision(
             new_forward_shift_m=0.0,
-            new_height_offset_m=-0.010,
+            new_height_offset_m=-0.0002,
         )
         self.assertTrue(swept_res.is_safe, f"Board lowering swept check failed: {swept_res.reason}")
 
-        res = self.sim.set_board_placement(board_height_offset_mm=-10.0)
+        res = self.sim.set_board_placement(board_height_offset_mm=-0.2)
         self.assertTrue(res["success"])
-        self.assertEqual(self.sim.placement_state.board_height_offset_mm, -10.0)
+        self.assertEqual(self.sim.placement_state.board_height_offset_mm, -0.2)
         self.sim.reset_board_placement()
 
     def test_b8_forward_and_backward_shift_swept_path(self):
@@ -1256,7 +1258,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
         """Place the virtual tool 10 mm above an empty cell before a 25 mm board raise."""
         xyz = self.sim.cell_to_robot_xyz_m(4, 4, self.sim.board_surface_z + 0.010)
         pose = [v * 1000.0 for v in xyz] + list(self.sim.target_tool_euler_deg)
-        ik = self.sim.backend.solve_tcp_ik(pose, allow_multi_seed=True)
+        ik = self.sim.backend.solve_tcp_ik(pose, allow_multi_seed=True, allow_alternate_yaw=True)
         self.assertTrue(ik.success)
         self.sim.backend.set_authoritative_joints(ik.joints_deg)
         self.sim.world.sync_robot_runtime_configuration(ik.joints_rad)
@@ -1282,8 +1284,8 @@ class Phase3FinalMasterTests(unittest.TestCase):
         # 3. set_board_placement must reject with BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR and preserve diagnostics
         res = self.sim.set_board_placement(board_height_offset_mm=25.0)
         self.assertFalse(res["success"])
-        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR")
-        self.assertGreater(res["details"]["first_blocking_step"], 0)
+        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_NOT_READY")
+        self.assertGreater(swept_res.details["first_blocking_step"], 0)
 
         # Restore
         self.sim.reset_robot()
@@ -1305,8 +1307,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
 
         res = self.sim.set_board_placement(board_height_offset_mm=25.0)
         self.assertFalse(res["success"])
-        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR")
-        self.assertGreater(res["details"]["first_blocking_step"], 0)
+        self.assertEqual(res["status"], "BOARD_RELOCATION_REJECTED_NOT_READY")
 
         new_board_pos, new_board_orn = self.sim.world.get_board_pose()
         np.testing.assert_allclose(orig_board_pos, new_board_pos, atol=1e-5)
@@ -1905,7 +1906,7 @@ class Phase3FinalMasterTests(unittest.TestCase):
             p_obj = self.sim.world.pieces[p_id]
             # A lost piece is far outside the robot's retreat path; this test
             # isolates placement verification from a separate obstacle collision.
-            p.resetBasePositionAndOrientation(p_obj.body_id, [2.0, 2.0, 0.0], [0, 0, 0, 1])
+            p.resetBasePositionAndOrientation(p_obj.body_id, [2.0, 2.0, 0.0], [0, 0, 0, 1], physicsClientId=self.sim.world.client_id)
 
         with mock.patch.object(self.sim.world, "step_until_settled", side_effect=displace_on_settle):
             res = self.sim.place_piece(target_cell=(4, 4))

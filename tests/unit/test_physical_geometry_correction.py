@@ -225,17 +225,21 @@ class TestPhysicalGeometryCorrection(unittest.TestCase):
             sim.stop()
 
     def test_pick_place_rejects_unverified_jaw_contact(self):
-        """The current CAD stroke cannot claim a physical grip on a 22.5 mm piece."""
+        """A centered candidate cannot attach without actual contact on BOTH jaws."""
         sim = VirtualXiangqiSimulation(auto_sync_telemetry=False)
         sim.start()
         try:
-            self.assertTrue(sim.backend.collision_guard_enabled)
-            result = sim.execute_3stage_trajectory((0, 0), (4, 4), grasp_piece=True)
-            self.assertFalse(result["success"])
-            self.assertEqual(result["failed_stage"], "GRASP")
-            self.assertIn("NO_JAW_CONTACT", result["error"])
+            piece = sim.world.pieces["black_rook_0"]
+            sim.world.gripper.set_tcp_pose(*piece.get_pose_robot_base())
+            sim.world.gripper.set_gripper_state(True)
+            # Move one real collider away while preserving the capture volume.
+            import pybullet as p
+            p.resetBasePositionAndOrientation(sim.world.gripper.left_jaw_body_id,
+                [2., 2., 2.], [0., 0., 0., 1.], physicsClientId=sim.world.client_id)
+            result = sim.world.try_grasp(target_piece_id=piece.piece_id)
+            self.assertFalse(result.success)
+            self.assertEqual(result.status.value, "NO_JAW_CONTACT")
             self.assertIsNone(sim.world.get_attached_piece())
-            self.assertFalse(sim.world.gripper.is_closed)
         finally:
             sim.stop()
 

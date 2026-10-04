@@ -113,6 +113,7 @@ foreach ($t in $Tests) {
 }
 
 $overallExitCode = 0
+$ranAnyTests = $false
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
 # -------------------------------------------------------------------------
@@ -147,6 +148,7 @@ if (-not $SerialOnly) {
     } elseif ($exitA -eq 5) {
         Write-Host "Part A: No parallel tests collected." -ForegroundColor DarkGray
     } else {
+        $ranAnyTests = $true
         Write-Host "Part A PASSED." -ForegroundColor Green
     }
 }
@@ -181,8 +183,14 @@ if (-not $ParallelOnly -and $overallExitCode -eq 0) {
     } elseif ($exitB -eq 5) {
         Write-Host "Part B: No serial tests collected (none required)." -ForegroundColor DarkGray
     } else {
+        $ranAnyTests = $true
         Write-Host "Part B PASSED." -ForegroundColor Green
     }
+}
+
+if ($overallExitCode -eq 0 -and -not $ranAnyTests) {
+    Write-Host "No tests ran. Treating empty selection as a verification failure." -ForegroundColor Red
+    $overallExitCode = 5
 }
 
 $stopwatch.Stop()

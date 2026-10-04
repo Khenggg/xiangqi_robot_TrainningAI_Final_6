@@ -10,97 +10,11 @@ import config
 from src.core import xiangqi
 from src.core.xiangqi import get_board
 from src.core.game_state import GameState
-from src.ai.pikafish_engine import PikafishEngine, ELO_PRESETS, DEFAULT_ELO
 from src.ai.ai_controller import AIController
 
 
-class TestPikafishEngineLogic(unittest.TestCase):
-    """Kiểm tra logic chuyển đổi FEN, toạ độ và điều khiển ELO của PikafishEngine."""
-
-    def setUp(self):
-        with patch("os.path.isfile", return_value=True):
-            self.engine = PikafishEngine(config.PIKAFISH_EXE, config.PIKAFISH_NNUE)
-
-    def test_elo_presets_and_defaults(self):
-        """Kiểm tra danh sách nấc ELO từ 800 đến 3000."""
-        self.assertIn(800, ELO_PRESETS)
-        self.assertIn(1400, ELO_PRESETS)
-        self.assertIn(3000, ELO_PRESETS)
-        self.assertEqual(self.engine.get_current_elo(), DEFAULT_ELO)
-
-    def test_set_elo_and_step_elo(self):
-        """Kiểm tra gán ELO và tăng giảm nấc ELO."""
-        self.engine.set_elo(800)
-        self.assertEqual(self.engine.get_current_elo(), 800)
-        self.assertIn("800", self.engine.get_elo_title())
-
-        # Tăng 1 nấc -> 1100
-        self.engine.step_elo(1)
-        self.assertEqual(self.engine.get_current_elo(), 1100)
-
-        # Đặt ELO không chuẩn (1550) -> làm tròn về nấc gần nhất (1400 hoặc 1700)
-        self.engine.set_elo(1550)
-        self.assertIn(self.engine.get_current_elo(), [1400, 1700])
-
-        # Step xuống mức thấp nhất không bị âm
-        self.engine.set_elo(800)
-        self.engine.step_elo(-5)
-        self.assertEqual(self.engine.get_current_elo(), 800)
-
-        # Step lên mức cao nhất không vượt quá 3000
-        self.engine.step_elo(20)
-        self.assertEqual(self.engine.get_current_elo(), 3000)
-
-    def test_board_to_fen_initial(self):
-        """Kiểm tra sinh FEN từ bàn cờ ban đầu."""
-        board = get_board()
-        fen_red = self.engine.board_to_fen(board, 'r')
-        self.assertTrue(fen_red.endswith(" w - - 0 1"))
-        self.assertIn("rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR", fen_red)
-
-        fen_black = self.engine.board_to_fen(board, 'b')
-        self.assertTrue(fen_black.endswith(" b - - 0 1"))
-
-    def test_uci_to_move(self):
-        """Kiểm tra giải mã nước cờ UCI dạng a0a1, b7e7."""
-        # UCI: 'b7e7' -> col b=1, row 7 -> board col 1, row 9-7=2
-        # dst: e7 -> col e=4, row 7 -> board col 4, row 9-7=2
-        move = self.engine._uci_to_move("b7e7")
-        self.assertEqual(move, ((1, 2), (4, 2)))
-
-        # UCI: 'h2e2' (Pháo đỏ h2 vào trung lộ e2)
-        # col h=7, row 2 -> board row 9-2=7
-        move_red = self.engine._uci_to_move("h2e2")
-        self.assertEqual(move_red, ((7, 7), (4, 7)))
-
-        # Nước cờ rác hoặc không hợp lệ
-        self.assertIsNone(self.engine._uci_to_move("x"))
-        self.assertIsNone(self.engine._uci_to_move(""))
 
 
-class TestPikafishExecution(unittest.TestCase):
-    """Kiểm tra chạy engine thật nếu file exe tồn tại trên máy."""
-
-    @unittest.skipUnless(os.path.isfile(config.PIKAFISH_EXE), "Pikafish binary not found")
-    def test_real_engine_lifecycle_and_move(self):
-        engine = PikafishEngine(config.PIKAFISH_EXE, config.PIKAFISH_NNUE)
-        try:
-            engine.start(threads=1, hash_mb=32)
-            self.assertTrue(engine._ready)
-
-            board = get_board()
-            # Yêu cầu nước đi ở nấc Quán cóc 1400
-            move = engine.pick_best_move(board, 'b', elo=1400)
-            self.assertIsNotNone(move)
-            src, dst = move
-            self.assertEqual(len(src), 2)
-            self.assertEqual(len(dst), 2)
-            # Nước đi phải nằm trong bàn cờ 10x9
-            self.assertTrue(0 <= src[0] <= 8 and 0 <= src[1] <= 9)
-            self.assertTrue(0 <= dst[0] <= 8 and 0 <= dst[1] <= 9)
-        finally:
-            engine.stop()
-            self.assertFalse(engine._ready)
 
 
 class TestGameStateUndoRound(unittest.TestCase):
@@ -145,27 +59,6 @@ class TestGameStateUndoRound(unittest.TestCase):
         self.assertIn("AI đang tính toán", self.state.status_message)
 
 
-class TestAIControllerWithELO(unittest.TestCase):
-    """Kiểm tra AIController điều phối ELO mượt mà."""
-
-    def test_controller_delegates_elo(self):
-        mock_local = MagicMock()
-        mock_local.set_elo.return_value = 1700
-        mock_local.get_elo_title.return_value = "Cao thủ CLB (1700)"
-        mock_local.get_current_elo.return_value = 1700
-
-        ctrl = AIController(local_engine=mock_local, cloud_engine=None, config=config)
-        elo, title = ctrl.set_elo(1700)
-        self.assertEqual(elo, 1700)
-        self.assertEqual(title, "Cao thủ CLB (1700)")
-
-        # Thử pick_move
-        board = get_board()
-        mock_local.pick_best_move.return_value = ((1, 2), (4, 2))
-        mock_local.current_elo = 1700
-        move = ctrl.pick_move(board, 'b')
-        self.assertEqual(move, ((1, 2), (4, 2)))
-        mock_local.pick_best_move.assert_called_with(board, 'b', elo=1700)
 
 
 class TestCheckmateAndGameRules(unittest.TestCase):
