@@ -326,7 +326,10 @@ class BoardRenderer:
     def _draw_ai_status(self, game_state):
         """Render one live status, never a historical activity feed."""
         now = time.time()
-        if game_state.get("ai_thinking"):
+        if game_state.get("move_sync_error"):
+            message = f"Move stopped: {game_state['move_sync_error']}"
+            accent = VERMILION_COLOR
+        elif game_state.get("ai_thinking"):
             elapsed = now - game_state.get("ai_think_start", now)
             dots = "." * (int(elapsed) % 4)
             message = f"AI is thinking{dots} ({elapsed:.1f}s)"

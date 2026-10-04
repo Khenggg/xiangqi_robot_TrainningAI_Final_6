@@ -90,6 +90,7 @@ class GameState:
             "status_message": self.status_message,
             "status_color": self.status_color,
             "status_expiry": self.status_expiry,
+            "move_sync_error": self.move_sync_error,
             "manual_override_active": self.manual_override_active,
             "snapshot_continue_required": self.snapshot_continue_required,
             "emergency_mode": self.emergency_mode,

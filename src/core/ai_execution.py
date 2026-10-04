@@ -50,6 +50,7 @@ def execute_ai_move(state, hw, best_move, dry_run=False, visual_pick_enabled=Fal
             raise RuntimeError("Game changed during camera verification")
         return state.commit_pending_physical_move()
     except Exception as exc:
+        print(f"[AI MOVE STOPPED] {exc}")
         state.mark_move_failed(str(exc))
         state.move_sync_error = str(exc)
         state.physical_sync_fault = True

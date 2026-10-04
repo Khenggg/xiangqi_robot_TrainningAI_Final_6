@@ -92,5 +92,11 @@ def test_renderer_shows_offline_instructions_and_robot_turn(offline, monkeypatch
         renderer._draw_ai_status(state.get_render_state())
         assert any("Lượt robot" in text for text in recorded)
         assert not any("then confirm with SPACE" in text for text in recorded)
+        recorded.clear()
+        state.move_sync_error = "retained motion error"
+        state.status_expiry = 0
+        renderer._draw_ai_status(state.get_render_state())
+        assert any("retained motion error" in text for text in recorded)
+        assert not any("Lượt robot" in text for text in recorded)
     finally:
         pygame.display.quit()

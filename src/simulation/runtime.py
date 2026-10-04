@@ -654,7 +654,10 @@ class VirtualXiangqiSimulation:
 
                         # 6. Verify payload clearance away from board
                         self.backend.set_trajectory_stage("PAYLOAD_CLEAR")
-                        self.world.step_until_settled(max_steps=60)
+                        # Use the configured bounded settling budget. A fixed
+                        # 60-step cutoff can reject a quiet board before every
+                        # body has accumulated consecutive resting samples.
+                        self.world.step_until_settled(max_steps=self.world.max_settle_steps)
                         payload_rep = self.evaluate_payload_clearance(expected_piece_id=piece_id)
                         if not payload_rep.payload_clear:
                             self.backend.set_trajectory_stage("FAILED")

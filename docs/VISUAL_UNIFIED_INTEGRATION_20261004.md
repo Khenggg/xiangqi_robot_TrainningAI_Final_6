@@ -75,6 +75,14 @@ The retained profile declares TCP offset 168.3 mm, while the visual mesh's exten
 - Final full safe regression: `tools/test_fast.ps1 -Mode Full -Tests tests`, **732 passed**, exit 0, 470.09 s. Slow/hardware tests remain excluded; serial inventory has 732 deselected and no serial cases. Raw output: `reports/integration-20261004/capture-full-regression.log`; structured record: `capture-verification-summary.json`. This fresh full result supersedes the earlier incomplete integration regression for the current code, while preserving those historical records.
 - Limits: arbitrary placements/angles still need a reachable collision-free route; endpoint availability does not guarantee every segment. The code rejects a blocked route rather than weakening margins. Physical R_Trash, live camera parity and commissioning remain unverified.
 
+### Elephant capture settling and live world ownership
+
+- Recorded legal human move g9→e7, engine reply h2e2, pre-reply FEN `rnbakab2/9/1c7/p1p1n1p1p/9/9/P1P3P1P/Rc2B2r1/9/1NBAKA1NR b - - 0 16`. Live telemetry showed the elephant disposed on the floor and the rook still at source. The original UI error had expired, so the exact original live failure is not proven.
+- A regression using this board and actual PyBullet reproduced `PAYLOAD_UNSAFE_WORLD_NOT_SETTLED`: red_knight_1 was SETTLING after the fixed 60-step payload-clear wait. Pick now uses the existing configured 1200-step maximum. Velocity thresholds, consecutive resting samples and collision checks are unchanged; a persistent disturbance still rejects without committing the move.
+- Independently corrected a verified ownership bug: a borrowed virtual LiveTwinBridge no longer writes joints/gripper or steps the runtime-owned world from polling snapshots. Physical mirrors and bridge-owned worlds retain their previous behavior. A queued old snapshot regression checks joints, TCP and simulation time remain unchanged.
+- AI execution failures are printed to the log and retained in the GUI after the temporary status expires.
+- Targeted command: `tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_virtual_capture_execution.py,tests/unit/test_live_twin_physical_mirror.py,tests/unit/test_visual_unified_game_boundary.py,tests/unit/test_offline_mouse_confirmation.py`: **29 passed**, exit 0, 23 s. Before the settling correction, this gate failed with 27 passed / 1 failed. The earlier 732-pass full run predates this correction; it was not rerun for this scoped change.
+
 ### First offline AI approach recovery
 
 - Reproduced on baseline `e5e3b74`: human pawn e6→e5, engine UCCI h7e7 (black cannon from board cell (2,7) to (2,4)). Direct approach and elevated retry are collision-rejected: `Gripper colliding with obstacle piece red_rook_0 (clearance=1.37mm, required=2.00mm)`.

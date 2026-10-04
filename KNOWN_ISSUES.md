@@ -1,5 +1,11 @@
 # KNOWN_ISSUES.md — COMPACT ISSUE & REGRESSION TRACKER
 
+## 2026-10-04 elephant capture follow-up
+
+- Reproduced a premature `PAYLOAD_UNSAFE_WORLD_NOT_SETTLED` rejection on the recorded g9→e7 / h2e2 board: an unrelated knight was still accumulating resting samples at the fixed 60-step limit. Payload clearance now waits up to the existing configured settling budget and still rejects persistent movement.
+- Fixed independent borrowed-world polling ownership: the virtual bridge observes the runtime world without rewinding joints or stepping physics. Physical mirrors are unchanged.
+- 29 focused tests passed, including actual pre-commit capture physics, persistent-disturbance rejection and retained GUI errors. Exact cause of the original live failure remains unconfirmed because its expired error was not logged; subsequent failures are now retained and logged.
+
 ## 2026-10-04 simulated captures
 
 - Implemented victim-first disposal using actual collision-checked PyBullet pick/place, followed by attacker movement and game commit. The scene contains provisional board-relative capture slots on the simulated floor. Missing/full/unreachable areas reject before picking; a blocked landing preserves the payload and stops the game without committing FEN.

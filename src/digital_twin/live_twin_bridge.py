@@ -105,7 +105,12 @@ class LiveTwinBridge:
             if (self.board_pose_provider.get_board_placement_state() is not self.placement
                     or self.world.board_placement_state is not self.placement):
                 return self._fail("Physical board calibration changed; restart/reconcile the twin", recovery=True)
-            sync_world_from_robot_snapshot(self.world, snapshot)
+            # A borrowed virtual world already follows authoritative runtime
+            # callbacks. Polling must not rewind it with a snapshot read before
+            # waiting for the physics lock, or step physics during planning.
+            follows_runtime = not self.physical and not self.owns_world
+            if not follows_runtime:
+                sync_world_from_robot_snapshot(self.world, snapshot)
             self._last_measurement = measured
             self.latest_snapshot = snapshot
             tcp = np.asarray(snapshot.tcp_pose_mm_deg[:3], dtype=float)
@@ -113,7 +118,8 @@ class LiveTwinBridge:
                 float(np.linalg.norm(tcp - self.world.gripper.tcp_pos * 1000.0))
                 if getattr(snapshot, "tcp_valid", True) and np.all(np.isfinite(tcp)) else None
             )
-            self.world.step(1)
+            if not follows_runtime:
+                self.world.step(1)
             if self.telemetry is not None:
                 self.telemetry.update_from_snapshot(replace(snapshot, placement_version=self.placement.placement_version))
                 self._publish_world()
