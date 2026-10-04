@@ -1,0 +1,10 @@
+{
+  "source_commit": "9aea9c2",
+  "backend": "VIRTUAL",
+  "dry_run": true,
+  "pre_reply_fen": "rnbakab2/9/1c7/p1p1n1p1p/9/9/P1P3P1P/Rc2r4/4A4/1NB1KA1NR b - - 0 18",
+  "engine_reply_ucci": "e2e1",
+  "observed_robot": {"motion_state": "IDLE", "trajectory_stage": "COMPLETE", "last_error": null},
+  "observed_world": {"piece_count": 26, "red_advisor_0_present": false, "black_rook_1": {"nearest_row": 8, "nearest_col": 4, "physical_state": "RESTING", "attached": false}},
+  "verification": "Actual visible Pygame game, Moonfish engine and read-only ws://127.0.0.1:8878 telemetry. No AI MOVE STOPPED in this replay. 27 targeted tests passed; full suite not rerun. No physical hardware exercised."
+}
