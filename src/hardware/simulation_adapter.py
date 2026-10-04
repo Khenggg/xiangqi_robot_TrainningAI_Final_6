@@ -116,6 +116,19 @@ class VirtualVisualRobot:
 def execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
                          moving_visual_target=None, captured_visual_target=None,
                          piece_id=None, captured_piece_id=None, move_context=None, **kwargs):
+    from contextlib import nullcontext
+    from src.simulation.runtime import RuntimeOperationState, RuntimeOperationBusy
+    operation = getattr(runtime, "acquire_operation_state", None)
+    try:
+        with operation(RuntimeOperationState.GAME_MOVE) if callable(operation) else nullcontext():
+            return _execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
+                                         piece_id=piece_id, captured_piece_id=captured_piece_id)
+    except (RuntimeOperationBusy, ValueError, TypeError) as exc:
+        return rejected(str(exc))
+
+
+def _execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
+                          piece_id=None, captured_piece_id=None):
     from src.domain.board_pose import BoardCell
     try:
         BoardCell(s_row, s_col)
@@ -124,9 +137,6 @@ def execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
             raise ValueError("Source and destination must differ")
     except (TypeError, ValueError) as exc:
         return rejected(str(exc), MotionFailureCategory.TARGET_INVALID)
-    if is_capture:
-        return rejected("Simulation capture needs a validated disposal route; no piece is teleported",
-                        MotionFailureCategory.SAFETY_INTERLOCK)
     world = runtime.world
     if piece_id is None:
         matches = [pid for pid, piece in world.pieces.items()
@@ -135,11 +145,33 @@ def execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
         if len(matches) != 1:
             return rejected("Source must contain exactly one simulated piece", MotionFailureCategory.TARGET_INVALID)
         piece_id = matches[0]
-    if piece_id not in world.pieces or runtime.find_nearest_cell(world.pieces[piece_id].get_position_robot()) != (s_row, s_col):
+    if (piece_id not in world.pieces
+            or not runtime.placement_state.is_in_bounds_robot(world.pieces[piece_id].get_position_robot())
+            or runtime.find_nearest_cell(world.pieces[piece_id].get_position_robot()) != (s_row, s_col)):
         return rejected("Piece identity disagrees with source cell", MotionFailureCategory.TARGET_INVALID)
     target = runtime.placement_state.cell_to_robot_xyz(d_row, d_col)
-    if any(pid != piece_id and np.linalg.norm(piece.get_position_robot()[:2] - target[:2]) < 0.015
-           for pid, piece in world.pieces.items()):
+    victims = [pid for pid, piece in world.pieces.items() if pid != piece_id
+               and np.linalg.norm(piece.get_position_robot()[:2] - target[:2]) < 0.015]
+    if is_capture:
+        if (len(victims) != 1 or (captured_piece_id is not None and victims != [captured_piece_id])
+                or victims[0].split("_", 1)[0] == piece_id.split("_", 1)[0]):
+            return rejected("Captured identity must match one opponent at destination", MotionFailureCategory.TARGET_INVALID)
+        captured_piece_id = victims[0]
+        slot = select_capture_slot(runtime)
+        if slot is None:
+            return rejected("No free reachable simulated capture slot; configure capture_area in the scene",
+                            MotionFailureCategory.SAFETY_INTERLOCK)
+        removed = runtime.pick_piece(captured_piece_id)
+        if not removed.get("success", False):
+            return rejected(removed.get("error") or removed.get("status"), MotionFailureCategory.PAYLOAD_NOT_CONFIRMED)
+        disposed = runtime.place_piece(capture_slot_robot_m=slot)
+        if not disposed.get("success", False):
+            return rejected(disposed.get("error") or disposed.get("status"),
+                            MotionFailureCategory.MOTION_COMMAND_FAILED, MotionStage.RELEASE)
+        if (world.get_attached_piece() is not None
+                or np.linalg.norm(world.pieces[captured_piece_id].get_position_robot()[:2] - target[:2]) < 0.015):
+            return rejected("Capture square not physically cleared", MotionFailureCategory.SAFETY_INTERLOCK)
+    elif victims:
         return rejected("Destination is occupied", MotionFailureCategory.TARGET_INVALID)
     picked = runtime.pick_piece(piece_id)
     if not picked.get("success", False):
@@ -150,4 +182,29 @@ def execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
         return rejected(placed.get("error") or placed.get("status", "Virtual place failed"),
                         MotionFailureCategory.MOTION_COMMAND_FAILED, MotionStage.PLACE_LAND)
     return SimulationMotionResult.ok(payload_state=PayloadState.RELEASED,
-                                    metadata={"piece_id": piece_id, "physical_grasp_verified": False})
+                                    metadata={"piece_id": piece_id, "captured_piece_id": captured_piece_id,
+                                              "physical_grasp_verified": False})
+
+
+def select_capture_slot(runtime):
+    """Scene-defined board-relative slots; no physical teaching-point fallback."""
+    area = getattr(runtime, "capture_area", {})
+    if area.get("support") != "SIMULATED_FLOOR":
+        return None
+    for row, col in area.get("slots_in_board_grid", []):
+        if not np.all(np.isfinite([row, col])):
+            raise ValueError("Capture slot grid coordinates must be finite")
+        slot = runtime.placement_state.cell_to_robot_xyz(row, col)
+        slot[2] = 0.0
+        if runtime.placement_state.is_in_bounds_robot(slot, xy_margin_m=runtime.geom.piece_diameter_mm / 2000.0 + 0.005):
+            raise ValueError("Capture slot is inside the board")
+        spacing = runtime.geom.piece_diameter_mm / 1000.0 + 0.005
+        if any(np.linalg.norm(piece.get_position_robot()[:2] - slot[:2]) < spacing
+               for piece in runtime.world.pieces.values()):
+            continue
+        pose = list(slot * 1000.0) + list(runtime.target_tool_euler_deg)
+        pose[2] += runtime.geom.piece_height_mm / 2.0 + runtime.PLACE_RELEASE_CLEARANCE_M * 1000.0
+        ik = runtime.backend.solve_tcp_ik(pose, allow_multi_seed=True)
+        if ik.success:
+            return slot
+    return None

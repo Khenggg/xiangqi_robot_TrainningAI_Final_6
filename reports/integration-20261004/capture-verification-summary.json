@@ -1,0 +1,19 @@
+{
+  "baseline": "b0afeb2",
+  "scope": "simulation capture follow-up",
+  "command": "tools/test_fast.ps1 -Mode Full -Tests tests",
+  "exit_code": 0,
+  "passed": 732,
+  "runner_elapsed_s": 470.09,
+  "pytest_elapsed_s": 464.4,
+  "serial_selected": 0,
+  "hardware_operated": false,
+  "slow_and_hardware_excluded": true,
+  "actual_pybullet_reproduction": "recorded UCCI h9h2: victim floor placement and attacker at (7,7) checked before logical reconciliation",
+  "capture_targeted_passed": 6,
+  "limits": [
+    "Provisional simulated floor capture slots; not measured physical R_Trash.",
+    "Partial failure requires reconciliation/reset; no blind retry.",
+    "No guarantee of routes for arbitrary board placements."
+  ]
+}

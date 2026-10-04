@@ -56,6 +56,7 @@ from src.digital_twin.world_sync import sync_world_from_robot_snapshot
 class RuntimeOperationState(str, Enum):
     """Authoritative state machine for runtime operations and mutual exclusion."""
     IDLE = "IDLE"
+    GAME_MOVE = "GAME_MOVE"
     MOTION = "MOTION"
     VALIDATING_LOCAL = "VALIDATING_LOCAL"
     VALIDATING_ROUTES = "VALIDATING_ROUTES"
@@ -157,6 +158,7 @@ class VirtualXiangqiSimulation:
             with open(self.scene_config_path, "r", encoding="utf-8-sig") as f:
                 cfg = json.load(f)
             bp = cfg.get("virtual_board_placement", {})
+            self.capture_area = cfg.get("capture_area", {})
             self.grid_origin_robot = bp.get("grid_origin_in_robot_base_m", [-0.18, -0.16, 0.0105])
             self.board_surface_z = bp.get("board_surface_height_m", 0.0105)
             self.nominal_board_surface_z = float(self.board_surface_z)
@@ -169,6 +171,7 @@ class VirtualXiangqiSimulation:
             else:
                 self.target_tool_euler_deg = bp.get("target_tool_orientation_euler_deg", [180.0, 0.0, 90.0])
         else:
+            self.capture_area = {}
             self.grid_origin_robot = [-0.18, -0.16, 0.0105]
             self.board_surface_z = 0.0105
             self.nominal_board_surface_z = float(self.board_surface_z)
@@ -238,22 +241,28 @@ class VirtualXiangqiSimulation:
 
         Guarantees:
         - _operation_lock is NEVER held across the yield statement.
-        - Supports re-entrant acquisition by the owning thread when in RESETTING
-          or re-entering the SAME target state (tracking nesting depth via _operation_depth).
+        - GAME_MOVE owns the whole chess transaction; its owner may execute
+          sequential pick/place operations. Recursive motion remains rejected.
+        - RESETTING and matching validation states allow owned nested cleanup.
         - Any competing thread immediately gets RuntimeOperationBusy without blocking.
         - Outermost exit restores state to IDLE, clears owner, and resets depth to 0.
         """
         current_thread = threading.get_ident()
         with self._operation_lock:
             # Re-entrancy is permitted for RESETTING (cascading cleanup) and matching non-motion states.
-            # Physical motions (MOTION, SERVICE_MOVE) are strictly non-reentrant: any motion request while
-            # motion is active must be rejected with RuntimeOperationBusy.
+            # GAME_MOVE is a batch, not permission for another thread or a
+            # recursive pick to mutate an active trajectory.
             is_reentrant = (
                 self._operation_owner == current_thread and (
                     self._operation_state == RuntimeOperationState.RESETTING
+                    or (self._operation_state == RuntimeOperationState.GAME_MOVE
+                        and target_state in (RuntimeOperationState.MOTION, RuntimeOperationState.SERVICE_MOVE)
+                        and (self._operation_depth == 1
+                             or (target_state == RuntimeOperationState.SERVICE_MOVE and self._operation_depth == 2)))
                     or (
                         self._operation_state == target_state
-                        and target_state not in (RuntimeOperationState.MOTION, RuntimeOperationState.SERVICE_MOVE)
+                        and target_state not in (RuntimeOperationState.MOTION, RuntimeOperationState.SERVICE_MOVE,
+                                                RuntimeOperationState.GAME_MOVE)
                     )
                 )
             )
@@ -702,12 +711,14 @@ class VirtualXiangqiSimulation:
         col: Optional[int] = None,
         row: Optional[int] = None,
         target_cell: Optional[Tuple[int, int]] = None,
+        capture_slot_robot_m: Optional[Sequence[float]] = None,
         hover_height_m: Optional[float] = None,
         speed_factor: float = 50.0,
         **kwargs: Any,
     ) -> PlaceResult:
         """
         Execute place trajectory to target board cell with strict fail-fast semantics
+        or to an explicit off-board capture slot on the simulated floor.
         and post-operation safe retreat:
         1. Verify piece is currently attached
         2. Move to hover above cell (APPROACH)
@@ -747,7 +758,22 @@ class VirtualXiangqiSimulation:
                     if target_cell is None and "target_cell" in kwargs:
                         target_cell = kwargs["target_cell"]
 
-                    if target_cell is not None:
+                    if capture_slot_robot_m is not None:
+                        if target_cell is not None or row is not None or col is not None or args:
+                            raise ValueError("Capture slot and board destination are mutually exclusive")
+                        slot = np.asarray(capture_slot_robot_m, dtype=float)
+                        if (slot.shape != (3,) or not np.all(np.isfinite(slot))
+                                or abs(slot[2]) > 1e-9
+                                or self.placement_state.is_in_bounds_robot(slot,
+                                    xy_margin_m=self.geom.piece_diameter_mm / 2000.0 + 0.005)):
+                            raise ValueError("Capture slot must be finite, outside the board, on the simulated floor")
+                        if any(pid != placed_piece_id and np.linalg.norm(
+                                piece.get_position_robot()[:2] - slot[:2]) < self.geom.piece_diameter_mm / 1000.0 + 0.005
+                               for pid, piece in self.world.pieces.items()):
+                            raise ValueError("Capture slot is occupied")
+                        tx, ty, tz = slot.tolist()
+                        r_target = c_target = None
+                    elif target_cell is not None:
                         r_target, c_target = int(target_cell[0]), int(target_cell[1])
                         tx, ty, tz = self.cell_to_robot_xyz_m(r_target, c_target)
                     else:
@@ -776,7 +802,7 @@ class VirtualXiangqiSimulation:
                                 requires_recovery=False,
                             )
 
-                    target_cell_tuple = (r_target, c_target)
+                    target_cell_tuple = (r_target, c_target) if r_target is not None else None
 
                     piece_h = self.geom.piece_height_mm / 1000.0
                     piece_z = tz + piece_h / 2.0
@@ -891,6 +917,21 @@ class VirtualXiangqiSimulation:
                     self.backend.set_trajectory_stage("SETTLE")
                     self.world.step_until_settled(max_steps=self.POST_RELEASE_SETTLE_MAX_STEPS)
 
+                    if capture_slot_robot_m is not None:
+                        # Generic world settling ignores out-of-board bodies.
+                        # Wait for this payload specifically to rest on the floor.
+                        stable_samples = 0
+                        for _ in range(self.POST_RELEASE_SETTLE_MAX_STEPS):
+                            self.world.step(1)
+                            pos, _ = attached.get_pose_robot_base()
+                            linear, angular = attached.get_velocity()
+                            resting = (abs(pos[2] - piece_h / 2.0) < 0.001
+                                       and np.linalg.norm(linear) < 0.01
+                                       and np.linalg.norm(angular) < 0.1)
+                            stable_samples = stable_samples + 1 if resting else 0
+                            if stable_samples >= 8:
+                                break
+
                     # Physical placement verification
                     piece_released = True
                     piece_placed = False
@@ -908,8 +949,14 @@ class VirtualXiangqiSimulation:
                         if target_cell_tuple is not None:
                             cell_match = (r_p, c_p) == target_cell_tuple and d_p < 0.025
                         pos_m, _ = p_obj.get_pose_robot_base()
-                        expected_z = self.board_surface_z + (self.geom.piece_height_mm / 2000.0)
+                        expected_z = tz + (self.geom.piece_height_mm / 2000.0)
                         z_match = abs(pos_m[2] - expected_z) < 0.015
+
+                        if capture_slot_robot_m is not None:
+                            cell_match = np.linalg.norm(pos_m[:2] - slot[:2]) < 0.010
+                            z_match = abs(pos_m[2] - expected_z) < 0.001
+                            is_stable = stable_samples >= 8
+                            not_bad = not p_obj.attached_to_gripper
 
                         if is_stable and not_bad and cell_match and z_match:
                             piece_placed = True

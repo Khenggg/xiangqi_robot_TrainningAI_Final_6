@@ -1,3 +1,9 @@
+## 2026-10-04 simulation capture follow-up
+
+- Baseline b0afeb2: visual physical R_Trash capture already existed; the simulation adapter had a deliberate blanket capture interlock. Replaced it with identity-checked victim pick → floor-slot place/settle → attacker pick/place → game commit.
+- Scene capture slots follow the current board XY frame and use the simulated floor as support. A GAME_MOVE operation excludes concurrent mutations across the whole sequence. Existing checked trajectories, release fail-fast and service retreat remain mandatory.
+- Exact recorded h9h2 capture succeeds with actual PyBullet positions inspected before reconciliation; blocked landing retains the victim in the gripper and leaves FEN/turn unchanged. Targeted capture 6 passed, adapter/approach 10 passed, combined capture/fail-fast 25 passed. Final full safe regression: 732 passed, exit 0, 470.09 s; slow/hardware tests excluded. Raw evidence is recorded in reports/integration-20261004/capture-full-regression.log. No hardware was operated; arbitrary placement/route coverage is still not claimed.
+
 ## 2026-10-04 scoped AI approach correction
 
 - Baseline: `e5e3b74`. First human move `e6 -> e5` followed by AI UCCI `h7e7` reproduced an approach rejection: gripper/red_rook_0 clearance 1.37 mm versus the existing required 2.00 mm.

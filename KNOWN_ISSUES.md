@@ -1,10 +1,16 @@
 # KNOWN_ISSUES.md — COMPACT ISSUE & REGRESSION TRACKER
 
+## 2026-10-04 simulated captures
+
+- Implemented victim-first disposal using actual collision-checked PyBullet pick/place, followed by attacker movement and game commit. The scene contains provisional board-relative capture slots on the simulated floor. Missing/full/unreachable areas reject before picking; a blocked landing preserves the payload and stops the game without committing FEN.
+- Verified the recorded Xe h0→h7 / UCCI h9h2 capture before world reconciliation; capture/placement cannot be hidden by teleporting to the expected square. Physical visual capture still uses R_Trash and has not been exercised here.
+- OPEN: a partial capture requires reconciliation/reset, not a blind retry. Collision-free disposal routes for arbitrary placements are not guaranteed. Configure scene slots appropriately; neither the provisional area nor simulation thresholds establish physical calibration.
+
 ## 2026-10-04 offline AI approach
 
 - RESOLVED for the reproduced first reply `h7e7`: the lifted joint interpolation swept within 1.37 mm of red_rook_0, below the unchanged 2.00 mm guard margin. SERVICE_SAFE fallback previously ran only for a J5 branch flip; it now also handles collision rejections without that flip, with every segment still validated.
 - Actual PyBullet pick/place and pre-commit destination verification pass; blocking the service route stops the move without changing FEN/turn. Final targeted gate: 14 passed, exit 0. The older collision entries below are historical and do not establish current all-route coverage.
-- OPEN: collision-free routes for every board placement and every legal chess move are not established. Virtual captures still require the separate validated disposal route. Physical hardware remains unverified.
+- OPEN: collision-free routes for every board placement and every legal chess move are not established. Virtual captures now have a checked disposal sequence as documented above; physical hardware remains unverified.
 
 ## 2026-09-29 camera twin remaining verification
 

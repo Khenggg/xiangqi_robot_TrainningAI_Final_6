@@ -89,9 +89,14 @@ def test_virtual_failed_pick_never_places_or_reports_success():
     runtime.place_piece.assert_not_called()
 
 
-def test_virtual_capture_is_rejected_before_pick():
-    runtime = SimpleNamespace(pick_piece=Mock())
-    result = execute_virtual_move(runtime, 0, 0, 0, 1, True)
+def test_virtual_capture_without_configured_disposal_is_rejected_before_pick():
+    state = BoardPlacementState.compute(0.0)
+    runtime = SimpleNamespace(pick_piece=Mock(), capture_area={}, placement_state=state,
+        find_nearest_cell=lambda pos: (0, 0) if np.allclose(pos, state.cell_to_robot_xyz(0, 0)) else (1, 0),
+        world=SimpleNamespace(pieces={
+            "black_rook_0": SimpleNamespace(get_position_robot=lambda: state.cell_to_robot_xyz(0, 0)),
+            "red_rook_0": SimpleNamespace(get_position_robot=lambda: state.cell_to_robot_xyz(1, 0))}))
+    result = execute_virtual_move(runtime, 0, 0, 0, 1, True, piece_id="black_rook_0")
     assert not result
     runtime.pick_piece.assert_not_called()
 
