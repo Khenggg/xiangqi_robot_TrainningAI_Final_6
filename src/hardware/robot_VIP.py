@@ -564,12 +564,24 @@ class FR5Robot:
         else:
             pose_safe = self.board_to_pose(col, row, config.SAFE_Z, rotation=pick_rotation)
             pose_pick = self.board_to_pose(col, row, config.PICK_Z, rotation=pick_rotation)
+            reference = pose_pick
+        self.visual_pick_correction = {
+            "dx_mm": pose_pick[0] - reference[0],
+            "dy_mm": pose_pick[1] - reference[1],
+            "cell": [col, row],
+            "target": [visual_target.col, visual_target.row] if visual_target is not None else [col, row],
+            "visual": visual_target is not None,
+            "active": True,
+        }
         print(f"[ROBOT] 🤏 Gắp tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
-        self.move_safe_pose(pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
-        self.movel_pose(pose_pick)                # Hạ xuống
-        self.gripper_ctrl(config.GRIPPER_ACTION_CLOSE)
-        self.movel_pose(pose_safe)                # Nhấc lên
+        try:
+            self.move_safe_pose(pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
+            self.movel_pose(pose_pick)                # Hạ xuống
+            self.gripper_ctrl(config.GRIPPER_ACTION_CLOSE)
+            self.movel_pose(pose_safe)                # Nhấc lên
+        finally:
+            self.visual_pick_correction = {**self.visual_pick_correction, "active": False}
         print(f"[ROBOT] ✅ Gắp xong ({col},{row})")
 
     def place_at(self, col, row):
