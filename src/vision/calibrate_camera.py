@@ -71,6 +71,8 @@ def calibrate_perspective_camera(cap, save_path):
     print("   2️⃣  Góc Xe Đen (Phải)")
     print("   3️⃣  Góc Xe Đỏ (Phải)")
     print("   4️⃣  Góc Xe Đỏ (Trái)")
+    print("Click GIAO DIEM LUOI tren mat ban, KHONG click vien trang tri/tam quan.")
+    print("Kiem tra luoi o ca ria va ben trong truoc khi bam S.")
     print("---------------------------------------------")
     print("⌨️  Phím tắt: 'R'=Làm lại | 'S'=Lưu file | 'Q'=Thoát")
 
@@ -100,13 +102,19 @@ def calibrate_perspective_camera(cap, save_path):
         # Khi đủ 4 điểm → tính matrix và vẽ lưới
         if len(points) == 4:
             src = np.array(points, dtype=np.float32)
+            # Lazy import avoids the module-level auto/manual calibration cycle.
+            from src.vision.auto_calibrate import AutoCalibrator
+            valid, reason = AutoCalibrator().sanity_check_geometry(src, frame.shape[1], frame.shape[0])
             dst = np.array([
                 [0, 0],   # 1. Đen Trái
                 [8, 0],   # 2. Đen Phải
                 [8, 9],   # 3. Đỏ Phải
                 [0, 9],   # 4. Đỏ Trái
             ], dtype=np.float32)
-            M = cv2.getPerspectiveTransform(src, dst)
+            M = cv2.getPerspectiveTransform(src, dst) if valid else None
+            if not valid:
+                cv2.putText(display, "Invalid corners: R=reset", (20, 45),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
         # Vẽ lưới perspective nếu đã có M
         if M is not None:
@@ -137,8 +145,8 @@ def calibrate_perspective_camera(cap, save_path):
 
         cv2.imshow(window, display)
 
-        key = cv2.waitKey(1)
-        if key == ord('q'):
+        key = cv2.waitKey(1) & 0xFF
+        if key in (ord('q'), 27) or cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
             M = None
             break
         elif key == ord('r'):
