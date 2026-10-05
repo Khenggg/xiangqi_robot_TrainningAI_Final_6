@@ -53,6 +53,7 @@ BTN_CONFIRM_MOVE_RECT = pygame.Rect(CLIENT_ACTION_X, 422, CLIENT_ACTION_WIDTH, 6
 BTN_EMERGENCY_RECT = pygame.Rect(CLIENT_ACTION_X, 502, CLIENT_ACTION_WIDTH, 64)
 BTN_ROLLBACK_RECT = pygame.Rect(CLIENT_ACTION_X, 582, CLIENT_ACTION_WIDTH, 64)
 BTN_CONTINUE_RECT = pygame.Rect(CLIENT_ACTION_X, 662, CLIENT_ACTION_WIDTH, 64)
+BTN_PICK_TEST_RECT = pygame.Rect(CLIENT_ACTION_X, 742, CLIENT_ACTION_WIDTH, 64)
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 240, 650, 480, 104)
 HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 230, 42, 180, 58)
 SETTINGS_BACK_RECT = pygame.Rect(48, 42, 168, 58)
@@ -255,10 +256,12 @@ class BoardRenderer:
             (BTN_CONFIRM_MOVE_RECT, "SPACE", ("XÁC NHẬN", "NƯỚC ĐỎ"), JADE_DARK),
             (BTN_EMERGENCY_RECT, "M", ("EMERGENCY MODE",), VERMILION_COLOR),
             (BTN_ROLLBACK_RECT, "Z", ("ROLLBACK",), AMBER_COLOR),
+            (BTN_PICK_TEST_RECT, "T", ("TEST GẮP / THẢ",), JADE_COLOR),
         )
         emergency_active = game_state.get("emergency_mode", False)
         for rect, key, label_lines, color in actions:
-            button_color = (139, 48, 38) if key == "M" and emergency_active else color
+            active = (key == "M" and emergency_active) or (key == "T" and game_state.get("pick_test_mode", False))
+            button_color = (139, 48, 38) if active else color
             pygame.draw.rect(self.screen, button_color, rect, border_radius=12)
             key_surf = self.ui_font.render(key, True, (255, 255, 255))
             self.screen.blit(key_surf, (rect.x + 18, rect.y + 17))
@@ -279,7 +282,8 @@ class BoardRenderer:
         self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 18, BTN_CONTINUE_RECT.y + 17))
         self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 66, BTN_CONTINUE_RECT.y + 17))
 
-        note = "M đang bật: đi tay Đỏ / Đen" if emergency_active else "Chọn phím hoặc bấm nút"
+        note = ("T: chọn quân → chọn ô trống" if game_state.get("pick_test_mode", False)
+                else "M đang bật: đi tay Đỏ / Đen" if emergency_active else "Chọn phím hoặc bấm nút")
         note_surf = self.log_font.render(note, True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(note_surf, note_surf.get_rect(center=(panel.centerx, 816)))
 
@@ -320,7 +324,10 @@ class BoardRenderer:
     def _draw_ai_status(self, game_state):
         """Render one live status, never a historical activity feed."""
         now = time.time()
-        if game_state.get("ai_thinking"):
+        if game_state.get("pick_test_mode"):
+            message = display_text(game_state.get("status_message", "")) if now < game_state.get("status_expiry", 0) else "TEST: chọn quân Đỏ/Đen rồi chọn ô trống. T để thoát."
+            accent = AMBER_COLOR
+        elif game_state.get("ai_thinking"):
             elapsed = now - game_state.get("ai_think_start", now)
             dots = "." * (int(elapsed) % 4)
             message = f"AI is thinking{dots} ({elapsed:.1f}s)"

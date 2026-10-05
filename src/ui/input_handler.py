@@ -3,7 +3,7 @@ import math
 from src.core import xiangqi  # type: ignore
 from src.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT,
                                    BTN_CONTINUE_RECT, BTN_SCAN_FEN_RECT, BTN_CONFIRM_MOVE_RECT,
-                                   BTN_EMERGENCY_RECT, BTN_ROLLBACK_RECT, NUM_COLS, NUM_ROWS)  # type: ignore
+                                   BTN_EMERGENCY_RECT, BTN_ROLLBACK_RECT, BTN_PICK_TEST_RECT, NUM_COLS, NUM_ROWS)  # type: ignore
 from src.vision.board_stability_monitor import BoardStabilityMonitor
 from src.vision.player_turn_arbiter import PlayerTurnArbiter
 from src.vision.player_turn_types import BoardObservation, CommitRequest, InteractionCapability, PlayerTurnMode, Visibility
@@ -192,6 +192,7 @@ class InputHandler:
             (BTN_CONFIRM_MOVE_RECT, pygame.K_SPACE),
             (BTN_EMERGENCY_RECT, pygame.K_m),
             (BTN_ROLLBACK_RECT, pygame.K_z),
+            (BTN_PICK_TEST_RECT, pygame.K_t),
         )
         for rect, key in client_actions:
             if rect.collidepoint(mx, my) and not self.state.game_over:
@@ -199,6 +200,8 @@ class InputHandler:
                 return
 
         if BTN_CONTINUE_RECT.collidepoint(mx, my):
+            if getattr(self.state, "pick_test_mode", False) or getattr(self.state, "pick_test_resume_required", False):
+                return
             if (getattr(self.state, "snapshot_continue_required", False)
                     and not self.state.game_over):
                 self._continue_after_snapshot_pause()
@@ -214,6 +217,12 @@ class InputHandler:
         # New Game Button
         if BTN_NEW_GAME_RECT.collidepoint(mx, my):
             self.state.reset_game(self.hw)
+            return
+
+        if getattr(self.state, "pick_test_mode", False):
+            self._handle_pick_test_click(mx, my)
+            return
+        if getattr(self.state, "pick_test_resume_required", False):
             return
 
         # Manual Override (Mouse Drag)
@@ -276,6 +285,51 @@ class InputHandler:
                         self.state.set_invalid_flash(dst[0], dst[1])
                         self.state.selected_pos = None
 
+    def _toggle_pick_test(self):
+        if getattr(self.state, "pick_test_mode", False):
+            self.state.pick_test_mode = False
+            self.state.selected_pos = None
+            self.state.set_status("Test đã tắt. Khôi phục bàn ban đầu rồi New Game để chơi; T để test tiếp.", duration=30)
+            return
+        worker = getattr(self.state, "ai_thread", None)
+        if (getattr(self.state, "ai_thinking", False)
+                or (worker is not None and worker.is_alive())
+                or getattr(self.state, "pending_ai_move", None)):
+            self.state.set_status("Chờ hoàn tất/xử lý lượt AI trước khi vào test.", duration=8)
+            return
+        if getattr(self.state, "pick_test_board", None) is None:
+            self.state.pick_test_board = [row[:] for row in self.state.board]
+        self.state.pick_test_mode = True
+        self.state.pick_test_resume_required = True
+        self.state.emergency_mode = False
+        self.state.selected_pos = None
+        self._board_stability_monitor.reset()
+        self.state.set_status("TEST: chọn quân Đỏ/Đen rồi chọn ô trống. T để thoát.", duration=30)
+
+    def _handle_pick_test_click(self, mx, my):
+        col, row = BoardRenderer.pixel_to_grid(mx, my)
+        if not (0 <= col < NUM_COLS and 0 <= row < NUM_ROWS):
+            return
+        board = self.state.pick_test_board
+        if board[row][col] != ".":
+            self.state.selected_pos = (col, row)
+            self.state.set_status(f"TEST: đã chọn ({col},{row}); chọn ô trống để chạy arm.", duration=20)
+            return
+        source = self.state.selected_pos
+        if source is None:
+            return
+        destination = (col, row)
+        self.state.selected_pos = None
+        try:
+            self.state.set_status("TEST: arm đang gắp/thả...", duration=30)
+            target = self.hw.execute_pick_place_test(source, destination)
+            board[row][col] = board[source[1]][source[0]]
+            board[source[1]][source[0]] = "."
+            self.state.set_status(f"TEST xong: ({target.col:.3f},{target.row:.3f}) → ({col},{row}). Chọn quân để test tiếp.", duration=20)
+        except Exception as exc:
+            print(f"[PICK TEST] {exc}")
+            self.state.set_status(f"TEST dừng: {exc}", color=(180, 0, 0), duration=30)
+
     def resume_automatic_scanning(self):
         """Install a fresh physical baseline, then re-enable automatic polling.
 
@@ -328,6 +382,13 @@ class InputHandler:
     def handle_keyboard(self, key):
         import pygame  # type: ignore
         if self.state.game_over:
+            return
+
+        if key == pygame.K_t:
+            self._toggle_pick_test()
+            return
+        if getattr(self.state, "pick_test_mode", False) or getattr(self.state, "pick_test_resume_required", False):
+            self.state.set_status("Test đang tạm dừng game. T để test; khôi phục bàn rồi New Game để chơi.", duration=15)
             return
 
         if key == pygame.K_v:
@@ -614,6 +675,8 @@ class InputHandler:
     def poll_board_stability(self):
         """Commit one legal Red move after repeated stable board observations."""
         if (self.state.turn != "r" or self.state.game_over
+                or getattr(self.state, "pick_test_mode", False)
+                or getattr(self.state, "pick_test_resume_required", False)
                 or getattr(self.state, "manual_override_active", False)):
             self._board_stability_monitor.reset()
             return False

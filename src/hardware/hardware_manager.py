@@ -338,6 +338,24 @@ class HardwareManager:
               "using legacy foot-point correction.")
         return self.get_visual_pick_targets(expected_cells)
 
+    def execute_pick_place_test(self, source, destination):
+        """Run the production geometry path without AI, rules or FEN commits."""
+        if not self.robot or not self.robot.connected:
+            raise RuntimeError("Robot chưa kết nối")
+        if not self.center_pick_estimator or not self.cam_monitor:
+            raise RuntimeError("Camera/visual correction chưa sẵn sàng")
+        if not self.is_cell_visually_clear(destination):
+            raise RuntimeError("Ô đích chưa trống hoặc camera không xác nhận được")
+        target = self.get_robot_center_pick_targets({"moving": source}).get("moving")
+        if target is None:
+            raise RuntimeError("Không có visual target ổn định; chưa chạy arm")
+        print(f"[PICK TEST] logical={source} visual=({target.col:.4f},{target.row:.4f}) "
+              f"destination={destination} conf={target.confidence:.3f} offset={target.offset_cells:.4f}")
+        self.robot.move_piece(*source, *destination, False, moving_visual_target=target)
+        if not self.verify_visual_move(source, destination):
+            raise RuntimeError("Đã chạy arm nhưng chưa xác nhận được quân ở ô đích; kiểm tra bàn thật")
+        return target
+
     def _cell_has_center_detection(self, detections, cell):
         """Whether best.pt sees a confident box centre at a calibrated cell."""
         col, row = cell

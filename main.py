@@ -144,7 +144,7 @@ try:
             renderer.draw_home_screen()
         else:
             renderer.draw_ui(state.get_render_state())
-            renderer.draw_pieces(state.board)
+            renderer.draw_pieces(state.pick_test_board if state.pick_test_mode else state.board)
             renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
             if state.game_over:
                 renderer.draw_game_over(state.winner)

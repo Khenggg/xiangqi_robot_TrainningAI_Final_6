@@ -56,6 +56,9 @@ class GameState:
         self.snapshot_continue_required: bool = False
         self.snapshot_continue_can_commit_pending: bool = False
         self.emergency_mode: bool = False
+        self.pick_test_mode = False
+        self.pick_test_board = None
+        self.pick_test_resume_required = False
         # A failed post-move camera check means the physical board may have
         # changed while FEN was intentionally left untouched.  Do not retry the
         # same robot command until an operator resolves the discrepancy.
@@ -80,6 +83,7 @@ class GameState:
             "manual_override_active": self.manual_override_active,
             "snapshot_continue_required": self.snapshot_continue_required,
             "emergency_mode": self.emergency_mode,
+            "pick_test_mode": self.pick_test_mode,
             "recent_moves": self.move_log[-8:],
         }
 
@@ -127,6 +131,9 @@ class GameState:
         self.snapshot_continue_required = False
         self.snapshot_continue_can_commit_pending = False
         self.emergency_mode = False
+        self.pick_test_mode = False
+        self.pick_test_board = None
+        self.pick_test_resume_required = False
         self.physical_sync_fault = False
         self.pending_ai_move = None
 
@@ -250,7 +257,9 @@ class GameState:
     def can_start_ai_turn(self):
         """Whether the main loop may create exactly one Black AI worker."""
         return (
-            not self.ai_thinking
+            not getattr(self, "pick_test_mode", False)
+            and not getattr(self, "pick_test_resume_required", False)
+            and not self.ai_thinking
             and self.ai_thread is None
             and (
                 self.human_commit_generation > self.ai_started_for_human_commit_generation
