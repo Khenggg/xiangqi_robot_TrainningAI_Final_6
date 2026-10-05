@@ -137,8 +137,10 @@ class FR5Robot:
 
             self._validate_gripper_config()
             self._set_gripper_safe_idle()
-            # Establish a known jaw state before HardwareManager moves to HOMECHESS.
-            self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
+            # The gripper is empty at startup: establish the same safe gap
+            # used while travelling to every later pick.
+            self.gripper_ctrl(config.GRIPPER_ACTION_OPEN_MAX)
+            self.gripper_ctrl(config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
 
             # Load teaching points để tránh Singularity
             self._load_teaching_points()
@@ -487,8 +489,9 @@ class FR5Robot:
             raise GripperCommandError("Gripper Tool DO IDs must be 0 or 1")
         timing_values = (
             config.GRIPPER_DIRECTION_DEADTIME_SEC,
-            config.GRIPPER_OPEN_PULSE_SEC,
+            config.GRIPPER_OPEN_MAX_PULSE_SEC,
             config.GRIPPER_CLOSE_PULSE_SEC,
+            config.GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC,
             config.GRIPPER_OPEN_SETTLE_SEC,
             config.GRIPPER_CLOSE_SETTLE_SEC,
         )
@@ -519,11 +522,16 @@ class FR5Robot:
     def gripper_ctrl(self, action):
         """Pulse one gripper motor direction, then leave both Tool DO outputs LOW."""
         self._validate_gripper_config()
-        if action == config.GRIPPER_ACTION_OPEN:
+        if action == config.GRIPPER_ACTION_OPEN_MAX:
             target_id = self.gripper_open_do_id
-            pulse_seconds = config.GRIPPER_OPEN_PULSE_SEC
+            pulse_seconds = config.GRIPPER_OPEN_MAX_PULSE_SEC
             settle_seconds = config.GRIPPER_OPEN_SETTLE_SEC
-            label = "OPEN"
+            label = "OPEN MAX"
+        elif action == config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP:
+            target_id = self.gripper_close_do_id
+            pulse_seconds = config.GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC
+            settle_seconds = config.GRIPPER_CLOSE_SETTLE_SEC
+            label = "CLOSE TO SAFE GAP"
         elif action == config.GRIPPER_ACTION_CLOSE:
             target_id = self.gripper_close_do_id
             pulse_seconds = config.GRIPPER_CLOSE_PULSE_SEC
@@ -533,16 +541,20 @@ class FR5Robot:
             raise GripperCommandError(f"Unknown gripper action: {action!r}")
 
         with self._gripper_lock:
-            self._set_gripper_safe_idle()
-            time.sleep(config.GRIPPER_DIRECTION_DEADTIME_SEC)
-            try:
-                print(f"[ROBOT] Gripper {label}: DO{target_id} ON for {pulse_seconds:.2f}s")
-                self._set_tool_do(target_id, config.GRIPPER_ACTIVE_STATUS)
-                time.sleep(pulse_seconds)
-            finally:
-                self._set_gripper_safe_idle()
+            self._pulse_gripper_direction(target_id, pulse_seconds, label)
             time.sleep(settle_seconds)
         return 0
+
+    def _pulse_gripper_direction(self, target_id, pulse_seconds, label):
+        """Interlocked single-direction pulse; callers must hold _gripper_lock."""
+        self._set_gripper_safe_idle()
+        time.sleep(config.GRIPPER_DIRECTION_DEADTIME_SEC)
+        try:
+            print(f"[ROBOT] Gripper {label}: DO{target_id} ON for {pulse_seconds:.2f}s")
+            self._set_tool_do(target_id, config.GRIPPER_ACTIVE_STATUS)
+            time.sleep(pulse_seconds)
+        finally:
+            self._set_gripper_safe_idle()
 
     # -------------------------------------------------------------------------
     # QUY TRÌNH GẮP / ĐẶT / ĂN QUÂN
@@ -570,7 +582,6 @@ class FR5Robot:
             pose_pick = self.board_to_pose(col, row, config.PICK_Z, rotation=pick_rotation)
         print(f"[ROBOT] 🤏 Gắp tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
-        self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
         self.move_safe_pose(pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
         self.movel_pose(pose_pick)                # Hạ xuống
         self.gripper_ctrl(config.GRIPPER_ACTION_CLOSE)
@@ -586,8 +597,9 @@ class FR5Robot:
 
         self.move_safe_pose(pose_safe, col=col, row=row)  # Đến vị trí an toàn
         self.movel_pose(pose_place)               # Hạ xuống
-        self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
+        self.gripper_ctrl(config.GRIPPER_ACTION_OPEN_MAX)
         self.movel_pose(pose_safe)                # Nhấc lên
+        self.gripper_ctrl(config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
         print(f"[ROBOT] ✅ Đặt xong ({col},{row})")
     
     def move_to_extra_safe(self, col, row, visual_target=None):
@@ -642,11 +654,12 @@ class FR5Robot:
             self.move_safe_pose(pose_safe)
         
         # Bước 3: Thả quân
-        self.gripper_ctrl(config.GRIPPER_ACTION_OPEN)
+        self.gripper_ctrl(config.GRIPPER_ACTION_OPEN_MAX)
         
         # Bước 4: Về home sau khi thả xong (chuẩn bị cho bước tiếp theo)
         print(f"[ROBOT] 🏠 Về home sau khi thả quân (chuẩn bị bước tiếp theo)")
         self.go_to_home_chess()
+        self.gripper_ctrl(config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
         
         print("[ROBOT] ✅ Đã thả quân bị ăn.")
 

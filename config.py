@@ -33,13 +33,16 @@ CAPTURE_BIN_Z = 291.68  # [QUAN TRỌNG] Độ cao khi thả quân vào thùng
 
 # Độ cao an toàn (mm)
 SAFE_Z  = 210.0    # Độ cao an toàn khi di chuyển giữa các ô (tăng lên để tránh hất quân)
-PICK_Z  = 180.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
-PLACE_Z = 180.0   # Hạ xuống đặt
+PICK_Z  = 178.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
+PLACE_Z = 178.0   # Hạ xuống đặt
 
 # Cấu hình kẹp: motor 2 chiều dùng Tool DO trên đầu robot.
 # Verified wiring: DO1 chạy hướng MỞ, DO0 chạy hướng ĐÓNG. Không bao giờ bật cả hai cùng lúc.
-GRIPPER_ACTION_OPEN = "open"
 GRIPPER_ACTION_CLOSE = "close"
+# There is no jaw-position sensor: each state below is established only by
+# calibrated motor timing on the real gripper.
+GRIPPER_ACTION_OPEN_MAX = "open_max"
+GRIPPER_ACTION_CLOSE_TO_SAFE_GAP = "close_to_safe_gap"
 GRIPPER_OPEN_DO_ID = 1
 GRIPPER_CLOSE_DO_ID = 0
 GRIPPER_IDLE_STATUS = 0
@@ -48,14 +51,19 @@ GRIPPER_ACTIVE_STATUS = 1
 # Motor không có công tắc hành trình: chỉ cấp điện theo xung ngắn rồi tắt cả hai DO.
 # Tinh chỉnh hai PULSE riêng sau khi thử với tay robot đứng yên và không có quân cờ.
 GRIPPER_DIRECTION_DEADTIME_SEC = 0.10
-GRIPPER_OPEN_PULSE_SEC = 0.3
-GRIPPER_CLOSE_PULSE_SEC = 0.3
+# Open fully before a release or before establishing the safe travelling gap.
+# Tune this to the shortest pulse that reaches the physical open limit.
+GRIPPER_OPEN_MAX_PULSE_SEC = 0.3
+GRIPPER_CLOSE_PULSE_SEC = 0.8
+# Starting from fully open, close only to the travelling/pre-pick safe gap.
+# Increase to narrow the gap; decrease to widen it. Do not drive into hard stop.
+GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC = 0.06
 GRIPPER_OPEN_SETTLE_SEC = 0.25
 GRIPPER_CLOSE_SETTLE_SEC = 0.25
-MOVE_SPEED = 60 #Percentage based
+MOVE_SPEED = 70 #Percentage based
 
 # Góc xoay của đầu Robot (Rx, Ry, Rz)
-ROTATION = [179.861, 0.555, -42]
+ROTATION = [-179, -1.5, -11.3]
 
 # --- PHYSICAL PICK / PLACE MOTION PROFILE ---
 # Các pose Cartesian FR5 gồm [X, Y, Z, Rx, Ry, Rz]. XY được nội suy từ R1-R4;
@@ -108,7 +116,6 @@ BOARD_STABILITY_SAMPLE_INTERVAL_SECONDS = 0.10
 BOARD_WARNING_CHECK_INTERVAL_SECONDS = 2.0
 BOARD_WARNING_MIN_STABLE_SAMPLES = 2
 
-# --- THÔNG SỐ AI ---
 # --- UNIFIED PLAYER-TURN STATE MACHINE ---
 # SHADOW is safe until a real detector can continuously see hands *and* other
 # stationary obstructions over the board.  UNIFIED refuses to auto-commit
@@ -123,11 +130,12 @@ PLAYER_TURN_IDLE_SETTLE_SAMPLES = 5
 # stationary hand, sleeve, and non-hand object on the board continuously.
 PLAYER_TURN_INTERACTION_CAPABILITY = "UNAVAILABLE"
 
+# --- THÔNG SỐ AI ---
 AI_THINK_TIME = 10  # Time per move in seconds — AI gets 10s after subtracting TIME_BUFFER (0.5)
 AI_DEPTH = 30          # Độ sâu mặc định (sẽ bị ghi đè bởi logic tự động)
 
 # --- AI ENGINE CONFIGURATION ---
-ENGINE_TYPE = "HYBRID" # "HYPrefixBRID" (Ưu tiên Cloud), "CLOUD" (Chỉ Cloud), "LOCAL" (Chỉ Local)
+ENGINE_TYPE = "LOCAL" # "HYPrefixBRID" (Ưu tiên Cloud), "CLOUD" (Chỉ Cloud), "LOCAL" (Chỉ Local)
 CLOUD_API_URL = "https://tuongkydaisu.com/api/engine/bestmove"
 CLOUD_TIMEOUT_SEC = 5
 

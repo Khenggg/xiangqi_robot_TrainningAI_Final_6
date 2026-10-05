@@ -43,8 +43,8 @@ def pulse(robot, label, output_id, seconds):
 def main():
     print("MANUAL HARDWARE TEST — Tool DO1=open, Tool DO0=close")
     print("No RobotEnable or motion commands are issued by this script.")
-    print(f"Open pulse: {config.GRIPPER_OPEN_PULSE_SEC:.2f}s; "
-          f"close pulse: {config.GRIPPER_CLOSE_PULSE_SEC:.2f}s")
+    print(f"Open-max pulse: {config.GRIPPER_OPEN_MAX_PULSE_SEC:.2f}s; "
+          f"safe-gap close: {config.GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC:.2f}s")
     if input("Type ARM CLEAR to continue: ").strip() != "ARM CLEAR":
         print("Cancelled; no output was energized.")
         return
@@ -56,9 +56,10 @@ def main():
     try:
         set_low(robot)
         if input("Press ENTER to pulse OPEN, or type anything to skip: ") == "":
-            pulse(robot, "OPEN", config.GRIPPER_OPEN_DO_ID, config.GRIPPER_OPEN_PULSE_SEC)
-        if input("Press ENTER to pulse CLOSE, or type anything to skip: ") == "":
-            pulse(robot, "CLOSE", config.GRIPPER_CLOSE_DO_ID, config.GRIPPER_CLOSE_PULSE_SEC)
+            pulse(robot, "OPEN MAX", config.GRIPPER_OPEN_DO_ID, config.GRIPPER_OPEN_MAX_PULSE_SEC)
+        if input("Press ENTER to close to the safe gap, or type anything to skip: ") == "":
+            pulse(robot, "CLOSE TO SAFE GAP", config.GRIPPER_CLOSE_DO_ID,
+                  config.GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC)
     finally:
         set_low(robot)
         print("Both gripper outputs set LOW.")

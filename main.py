@@ -60,10 +60,27 @@ _kill_zombie_processes()
 pygame.init()
 pygame.font.init()
 
-from src.ui.board_renderer import BoardRenderer, BTN_NEW_GAME_RECT, SCREEN_WIDTH, SCREEN_HEIGHT  # type: ignore
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+from src.ui.board_renderer import (  # type: ignore
+    BoardRenderer, BTN_NEW_GAME_RECT, SCREEN_WIDTH, SCREEN_HEIGHT,
+    SELF_PLAY_NEXT_RECT, SELF_PLAY_MODE_RECT, SELF_PLAY_END_RECT,
+)
+# Keep the UI authored at its original canvas size, then present it a little
+# smaller so the full client fits on more displays without rearranging controls.
+DISPLAY_SCALE = 0.9
+WINDOW_WIDTH = round(SCREEN_WIDTH * DISPLAY_SCALE)
+WINDOW_HEIGHT = round(SCREEN_HEIGHT * DISPLAY_SCALE)
+window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+screen = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption(f"Xiangqi Robot VIP - { _mode_label }")
 renderer = BoardRenderer(screen)
+
+
+def canvas_position(position):
+    """Convert a click in the scaled window to the renderer's canvas space."""
+    return (
+        round(position[0] * SCREEN_WIDTH / WINDOW_WIDTH),
+        round(position[1] * SCREEN_HEIGHT / WINDOW_HEIGHT),
+    )
 
 # Khởi tạo các module quản lý SRP
 state = GameState(allow_mouse_move=config.DRY_RUN)
@@ -159,7 +176,7 @@ try:
             elif home_screen_active:
                 start_vs_robot = event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)
                 if event.type == pygame.MOUSEBUTTONDOWN:
-                    start_vs_robot = renderer.home_action_from_pixel(event.pos[0], event.pos[1]) == "vs_robot"
+                    start_vs_robot = renderer.home_action_from_pixel(*canvas_position(event.pos)) == "vs_robot"
                 if start_vs_robot:
                     # Connecting to the robot and calibrating the camera can block, so defer
                     # both until the player explicitly chooses to play against the robot.
@@ -170,10 +187,10 @@ try:
                         debug_dashboard.activity = "Game setup"
                     home_screen_active = False
                     difficulty_menu_active = True
-                elif event.type == pygame.MOUSEBUTTONDOWN and renderer.home_action_from_pixel(event.pos[0], event.pos[1]) == "settings":
+                elif event.type == pygame.MOUSEBUTTONDOWN and renderer.home_action_from_pixel(*canvas_position(event.pos)) == "settings":
                     home_screen_active = False
                     settings_menu_active = True
-                elif event.type == pygame.MOUSEBUTTONDOWN and renderer.home_action_from_pixel(event.pos[0], event.pos[1]) == "robot_vs_robot":
+                elif event.type == pygame.MOUSEBUTTONDOWN and renderer.home_action_from_pixel(*canvas_position(event.pos)) == "robot_vs_robot":
                     hw = HardwareManager(config, _BASE_DIR).initialize_all()
                     input_mgr = InputHandler(state, hw)
                     home_screen_active = False
@@ -184,7 +201,7 @@ try:
                     settings_menu_active = False
                     home_screen_active = True
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    action = renderer.settings_action_from_pixel(event.pos[0], event.pos[1])
+                    action = renderer.settings_action_from_pixel(*canvas_position(event.pos))
                     if action == "home":
                         settings_menu_active = False
                         home_screen_active = True
@@ -205,7 +222,7 @@ try:
                 if event.type == pygame.KEYDOWN:
                     choice = {pygame.K_1: "easy", pygame.K_2: "medium", pygame.K_3: "hard", pygame.K_4: "impossible"}.get(event.key)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    choice = renderer.difficulty_from_pixel(event.pos[0], event.pos[1])
+                    choice = renderer.difficulty_from_pixel(*canvas_position(event.pos))
                 if choice:
                     if self_play_setup_stage:
                         ok, reason = hw.difficulty_availability().get(choice, False), f"{choice.title()} selected"
@@ -243,12 +260,13 @@ try:
                 else:
                     input_mgr.handle_keyboard(event.key)
             elif event.type == pygame.MOUSEBUTTONDOWN:
+                click_position = canvas_position(event.pos)
                 # An ended autonomous session owns the board controls, but the
                 # standard New Game button must remain an exit route.  Return
                 # to the launcher rather than silently switching to human-vs-AI.
                 if (self_play_controller is not None
                         and self_play_controller.status in {SelfPlayStatus.ENDED, SelfPlayStatus.FINISHED}
-                        and BTN_NEW_GAME_RECT.collidepoint(event.pos)):
+                        and BTN_NEW_GAME_RECT.collidepoint(click_position)):
                     state.reset_game(create_api_match=False)
                     state.physical_sync_fault = True
                     state.set_status("Restore the opening layout before starting the new match.", color=(180, 100, 0), duration=10.0)
@@ -261,17 +279,16 @@ try:
                     home_screen_active = True
                     continue
                 if self_play_controller is not None and self_play_controller.human_input_disabled:
-                    if event.pos[0] < 155 and event.pos[1] > SCREEN_HEIGHT - 70:
+                    if SELF_PLAY_NEXT_RECT.collidepoint(click_position) and self_play_controller.accepts_next:
                         self_play_controller.request_next_move()
-                    elif (SCREEN_WIDTH // 2 - 100 < event.pos[0] < SCREEN_WIDTH // 2 + 100
-                          and event.pos[1] > SCREEN_HEIGHT - 70):
+                    elif SELF_PLAY_MODE_RECT.collidepoint(click_position):
                         self_play_controller.set_run_mode(
                             "continuous" if self_play_controller.run_mode == "step" else "step"
                         )
-                    elif event.pos[0] > SCREEN_WIDTH - 160 and event.pos[1] > SCREEN_HEIGHT - 70:
+                    elif SELF_PLAY_END_RECT.collidepoint(click_position):
                         self_play_controller.end_match()
                 else:
-                    input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
+                    input_mgr.handle_mouse_down(*click_position)
 
         # 2c. Camera Feed update
         if hw is not None and hw.cam_monitor is not None:
@@ -446,6 +463,7 @@ try:
                         state.handle_game_over("r")
                         state.api_client.end_match(winner="RED", reason="CHECKMATE")
 
+        window.blit(pygame.transform.smoothscale(screen, (WINDOW_WIDTH, WINDOW_HEIGHT)), (0, 0))
         pygame.display.flip()
         clock.tick(30)
 
