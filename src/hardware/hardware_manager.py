@@ -298,14 +298,12 @@ class HardwareManager:
         """Locate robot pick points from centres of fresh ``best.pt`` boxes.
 
         CChess calibration owns ``perspective.npy`` (pixel -> 9x10 grid); YOLO
-        measures where a physical piece actually is.  After three unsuccessful
-        centre-box samples, retain the prior foot-point visual correction as a
-        fallback instead of making CChess/FEN identity a motion gate.
+        measures where a physical piece actually is. Robot picks require a
+        stable box centre; never silently substitute a lower foot point.
         """
         targets = {name: None for name in expected_cells}
         if not self.center_pick_estimator or not self.cam_monitor:
-            print("[CENTER PICK] Unavailable; using legacy visual-pick fallback.")
-            return self.get_visual_pick_targets(expected_cells)
+            raise RuntimeError("Center pick unavailable: camera/centre estimator not ready")
 
         samples = {name: [] for name in expected_cells}
         attempts = max(1, int(getattr(self.config, "VISUAL_CENTER_PICK_ATTEMPTS", 3)))
@@ -334,9 +332,7 @@ class HardwareManager:
             return targets
 
         missing = [name for name, target in targets.items() if target is None]
-        print(f"[CENTER PICK] No stable box centre after {attempts} attempts for {missing}; "
-              "using legacy foot-point correction.")
-        return self.get_visual_pick_targets(expected_cells)
+        raise RuntimeError(f"No stable box centre after {attempts} attempts for {missing}; robot pick blocked")
 
     def execute_pick_place_test(self, source, destination):
         """Run the production geometry path without AI, rules or FEN commits."""

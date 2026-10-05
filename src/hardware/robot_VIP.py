@@ -555,6 +555,12 @@ class FR5Robot:
             )
             print(f"[ROBOT] 👁️ Visual pick offset={visual_target.offset_cells:.3f} cells, "
                   f"conf={visual_target.confidence:.2f}")
+            reference = self.board_to_pose_bilinear(col, row, config.PICK_Z, rotation=pick_rotation)
+            print(f"[CENTER XY] expected grid=({col},{row}), measured grid="
+                  f"({visual_target.col:.4f},{visual_target.row:.4f}); "
+                  f"delta X={pose_pick[0] - reference[0]:+.2f}mm, "
+                  f"delta Y={pose_pick[1] - reference[1]:+.2f}mm; "
+                  f"command XY=({pose_pick[0]:.2f},{pose_pick[1]:.2f})")
         else:
             pose_safe = self.board_to_pose(col, row, config.SAFE_Z, rotation=pick_rotation)
             pose_pick = self.board_to_pose(col, row, config.PICK_Z, rotation=pick_rotation)
