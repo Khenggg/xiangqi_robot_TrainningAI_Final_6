@@ -207,6 +207,7 @@ def robot_measure(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_subparsers(dest='mode', required=True)
+    modes.add_parser('gui', help='Vietnamese step-by-step measurement client')
     camera = modes.add_parser('camera', help='Freeze frame and click 9 known intersections')
     camera.add_argument('--camera', type=int, default=config.VIDEO_SOURCE)
     camera.add_argument('--image', type=Path)
@@ -215,7 +216,10 @@ def main():
     robot.add_argument('--move', action='store_true')
     robot.add_argument('--z', type=float, default=config.PICK_Z, help='Pendant measurement height; not an automatic descent')
     args = parser.parse_args()
-    if args.mode == 'camera':
+    if args.mode == 'gui':
+        from src.ui.measurement_client import launch
+        launch()
+    elif args.mode == 'camera':
         camera_measure(args)
     else:
         if not np.isfinite(args.z):
