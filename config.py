@@ -95,13 +95,36 @@ VISUAL_PICK_SAMPLE_COUNT = 3
 VISUAL_PICK_MIN_STABLE_SAMPLES = 2
 VISUAL_CENTER_PICK_ATTEMPTS = 3
 VISUAL_CENTER_PICK_MAX_JITTER_CELLS = 0.12
+# Top-face temporal consensus only; legacy sampling settings remain unchanged.
+VISUAL_PICK_CONSENSUS_INITIAL_SAMPLES = 3
+VISUAL_PICK_CONSENSUS_MAX_SAMPLES = 6
+VISUAL_PICK_CONSENSUS_TIMEOUT_SEC = 3.0  # soft budget: reject late blocking results
+VISUAL_PICK_CONSENSUS_RADIUS_MM = 3.75  # median radius, NOT measured jaw tolerance
+# Top-face mode requires a NEW commissioned camera profile. Missing profile
+# blocks picking; it never silently reuses box/foot/logical centers.
+VISUAL_TOP_FACE_ENABLED = True
+VISUAL_PICK_GEOMETRY_PATH = "calibration/pick_geometry.json"
+VISUAL_BOARD_WIDTH_MM = 250.0
+VISUAL_BOARD_HEIGHT_MM = 281.25  # includes river: 9 intervals of 31.25mm
+VISUAL_PIECE_HEIGHT_MM = 10.0  # BOARD -> piece TOP, NOT camera -> board
+VISUAL_GEOMETRY_CORNER_TOLERANCE_PX = 4.0
+VISUAL_TOP_MAX_RESIDUAL = 0.045
+VISUAL_TOP_MIN_COVERAGE = 0.83
+VISUAL_TOP_MIN_BOX_FRACTION = 0.55
+VISUAL_TOP_RADIUS_MM = (5.0, 15.0)  # quality gate; measure/tune for actual pieces
+VISUAL_TOP_AMBIGUITY_MM = 1.5
+VISUAL_TOP_MAX_ENCLOSING_AREA_RATIO = 0.80
+VISUAL_TOP_ANNULUS_OFFSET_MM = 1.2
+VISUAL_TOP_MIN_WHITE_ANNULUS_FRACTION = 0.75
+VISUAL_TOP_MAX_WHITE_SATURATION = 80
+VISUAL_TOP_MIN_WHITE_VALUE = 130
 # Occupancy checks use the whole calibrated square, not the narrower safe-pick radius.
 VISUAL_OCCUPANCY_CELL_HALF_WIDTH = 0.50
 # When enabled, physical robot moves require CChess layout identity checks to
 # match the in-memory FEN before the gripper may pick.  Set False only for
 # supervised fallback operation when the layout model is unavailable.
 # Kept only for legacy/manual verification calls. Robot motion now uses CChess
-# calibration plus best.pt box centres, so CChess identity cannot block a move.
+# calibration plus best.pt ROI/top-face geometry, so identity is not the pick gate.
 VISUAL_BOARD_SYNC_REQUIRED = False
 
 # --- BOARD-STABILITY AUTO MOVE CONFIRMATION ---
