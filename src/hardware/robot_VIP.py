@@ -538,6 +538,38 @@ class FR5Robot:
     # QUY TRÌNH GẮP / ĐẶT / ĂN QUÂN
     # -------------------------------------------------------------------------
 
+    def _pick_outward_offset(self, col, row):
+        """XY displacement along real board axes, away from grid (4, 4.5)."""
+        if not getattr(config, "PICK_OUTWARD_COMPENSATION_ENABLED", False):
+            return np.zeros(2)
+        col_rate = float(config.PICK_OUTWARD_COL_MM_PER_CELL)
+        row_rate = float(config.PICK_OUTWARD_ROW_MM_PER_CELL)
+        limit = float(config.PICK_OUTWARD_MAX_CELLS)
+        if (not np.isfinite([col, row, col_rate, row_rate, limit]).all()
+                or not 0 <= col <= 8 or not 0 <= row <= 9
+                or min(col_rate, row_rate, limit) < 0):
+            raise ValueError("Invalid outward pick compensation configuration/cell")
+        corners = np.array([self.teaching_points[name]["pose"][:2]
+                            for name in ("R1", "R2", "R3", "R4")], dtype=float)
+        if corners.shape != (4, 2) or not np.isfinite(corners).all():
+            raise ValueError("Invalid R1-R4 board axes")
+        r1, r2, r3, r4 = corners
+        # Local derivatives of the same bilinear board mapping used for XY.
+        col_axis = (1-row/9)*(r2-r1) + (row/9)*(r3-r4)
+        row_axis = (1-col/8)*(r4-r1) + (col/8)*(r3-r2)
+        if min(np.linalg.norm(col_axis), np.linalg.norm(row_axis)) < 1e-6:
+            raise ValueError("Degenerate R1-R4 board axes")
+        col_mm = np.clip(col-4, -limit, limit) * col_rate
+        # Count only whole row intervals from the river centre; discard the half cell.
+        row_cells = np.sign(row-4.5) * np.floor(abs(row-4.5))
+        row_mm = np.clip(row_cells, -limit, limit) * row_rate
+        return col_mm*col_axis/np.linalg.norm(col_axis) + row_mm*row_axis/np.linalg.norm(row_axis)
+
+    def _apply_pick_outward_offset(self, pose, col, row):
+        result = list(pose)
+        result[:2] = (np.asarray(result[:2]) + self._pick_outward_offset(col, row)).tolist()
+        return result
+
     def pick_at(self, col, row, visual_target=None):
         """Gắp quân tại XY thực tế, với tool rotation đã dạy trong config.
 
@@ -565,6 +597,13 @@ class FR5Robot:
             pose_safe = self.board_to_pose(col, row, config.SAFE_Z, rotation=pick_rotation)
             pose_pick = self.board_to_pose(col, row, config.PICK_Z, rotation=pick_rotation)
             reference = pose_pick
+        # Apply once after visual/global corrections. Copy poses so taught
+        # points/reference poses remain unchanged; Z/tool rotation are retained.
+        outward = self._pick_outward_offset(col, row)
+        pose_safe = self._apply_pick_outward_offset(pose_safe, col, row)
+        pose_pick = self._apply_pick_outward_offset(pose_pick, col, row)
+        print(f"[PICK BIAS] logical=({col},{row}) outward XY=({outward[0]:+.2f},{outward[1]:+.2f})mm "
+              f"command XY=({pose_pick[0]:.2f},{pose_pick[1]:.2f})")
         self.visual_pick_correction = {
             "dx_mm": pose_pick[0] - reference[0],
             "dy_mm": pose_pick[1] - reference[1],
@@ -572,6 +611,8 @@ class FR5Robot:
             "target": [visual_target.col, visual_target.row] if visual_target is not None else [col, row],
             "visual": visual_target is not None,
             "active": True,
+            "outward_dx_mm": float(outward[0]),
+            "outward_dy_mm": float(outward[1]),
         }
         print(f"[ROBOT] 🤏 Gắp tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
@@ -607,6 +648,7 @@ class FR5Robot:
             )
         else:
             pose_safe = self.board_to_pose(col, row, config.SAFE_Z, rotation=pick_rotation)
+        pose_safe = self._apply_pick_outward_offset(pose_safe, col, row)
         print(f"[ROBOT] ⬆️ Nâng lên độ cao an toàn tại ({col},{row}) Z={config.SAFE_Z}")
         self.move_safe_pose(pose_safe, col=col, row=row)
 

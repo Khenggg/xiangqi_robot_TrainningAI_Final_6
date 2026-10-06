@@ -69,6 +69,8 @@ class CameraMonitor:
         self._lock = threading.Lock()       # Bảo vệ _last_frame/_last_detections
         self._cam_lock = threading.Lock()   # Bảo vệ truy cập camera (cap.read/grab)
         self._inference_lock = threading.Lock()
+        self._pick_scan_active = threading.Event()
+        self._pick_scan_lock = threading.Lock()
         self._last_pick_diagnostic = None
         self._pick_diagnostic_until = 0.0
         self._board_polygon = None  # Cache polygon bàn cờ trong pixel space (4 điểm)
@@ -189,6 +191,9 @@ class CameraMonitor:
         """Luồng 1: Chuyên đọc frame liên tục từ camera ở tốc độ cao nhất (30-60 FPS).
         Đảm bảo cửa sổ hiển thị mượt mà 100%, không bao giờ bị nghẽn bởi YOLO."""
         while not self._stop_event.is_set():
+            if self._pick_scan_active.is_set():
+                self._stop_event.wait(.01)
+                continue
             if self.cap is None or not self.cap.isOpened():
                 time.sleep(0.1)
                 continue
@@ -213,6 +218,9 @@ class CameraMonitor:
         """Luồng 2: Chạy nền độc lập (Async) nhận diện cờ định kỳ.
         Ưu tiên CChessRecognizer ONNX (layout_nano_v3.onnx), fallback về YOLO nếu không có CChess."""
         while not self._stop_event.is_set():
+            if self._pick_scan_active.is_set():
+                self._stop_event.wait(.02)
+                continue
             if self.cchess_recognizer is None and self.model is None:
                 time.sleep(0.2)
                 continue
@@ -388,6 +396,20 @@ class CameraMonitor:
         A valid empty detection list must remain distinct from failed inference.
         """
         return self.get_fresh_snapshot(raw_pick=True)
+
+    def pick_scan_session(self):
+        """Pause background inference; all actual camera reads retain _cam_lock."""
+        from contextlib import contextmanager
+
+        @contextmanager
+        def session():
+            with self._pick_scan_lock:
+                self._pick_scan_active.set()
+                try:
+                    yield
+                finally:
+                    self._pick_scan_active.clear()
+        return session()
 
     def get_fresh_snapshot(self, raw_pick=False):
         """Chụp 1 snapshot MỚI: flush buffer + read.

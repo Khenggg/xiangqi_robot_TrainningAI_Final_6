@@ -41,8 +41,9 @@ def execute_pending_ai_motion(state, hw, config, stage="pre_pick"):
     elif checkpoint_matches:
         raise RuntimeError("Capture already removed; full capture replay forbidden")
 
-    visual = bool(getattr(config, "VISUAL_PICK_ENABLED", False))
-    required = visual and bool(getattr(config, "VISUAL_TOP_FACE_ENABLED", False))
+    height = bool(getattr(config, "VISUAL_HEIGHT_PICK_ENABLED", False))
+    visual = bool(getattr(config, "VISUAL_PICK_ENABLED", False)) or height
+    required = height or (visual and bool(getattr(config, "VISUAL_TOP_FACE_ENABLED", False)))
     physical_capture = capture and stage != "capture_removed"
     name = "captured" if physical_capture else "moving"
     cell = destination if physical_capture else source

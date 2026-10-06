@@ -12,10 +12,10 @@ from src.ai.cloud_engine import CloudEngine
 from src.ai.ai_controller import AIController
 from src.vision.camera_monitor import CameraMonitor
 from src.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetector
-from src.vision.visual_pick_estimator import VisualPickEstimator
+from src.vision.visual_pick_estimator import VisualPickEstimator, GridTarget
 from src.vision.pick_geometry import PickGeometry
+from src.vision.height_pick_geometry import geometry_from_board, HeightPickEstimator, aggregate_height_targets
 from src.vision.top_face_pick_estimator import TopFacePickEstimator
-from src.vision.homography_pick_geometry import HomographyPickGeometry
 from src.vision.pick_consensus import select_consensus, FreshPickTransientError, require_pick_target
 from src.vision.board_reconciler import BoardReconciler
 from src.vision.calibrate_camera import calibrate_perspective_camera
@@ -272,21 +272,20 @@ class HardwareManager:
                     )
                     self.board_reconciler = BoardReconciler(self.pick_estimator)
                     print("[INIT] ✅ Visual pick / board reconciliation initialized.")
+                    if getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False):
+                        intrinsic_path = Path(self.project_dir) / self.config.VISUAL_CAMERA_INTRINSICS_PATH
+                        if not intrinsic_path.exists():
+                            print("[HEIGHT PICK] Camera intrinsics missing. Run CALIBRATE_CAMERA_INTRINSICS.bat "
+                                  "--square-mm MEASURED_VALUE with RUN closed. Height-mode picks are blocked until ready.")
+                        else:
+                            print(f"[HEIGHT PICK] Enabled; piece height={self.config.VISUAL_HEIGHT_PIECE_MM}mm. "
+                                  "Camera pose will be rebuilt from current board calibration before picking.")
                 except Exception as e:
                     print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
             if self._top_face_enabled():
                 try:
+                    geometry = PickGeometry.load(Path(self.project_dir) / self.config.VISUAL_PICK_GEOMETRY_PATH)
                     frame, _ = self.cam_monitor.get_fresh_pick_snapshot()
-                    mode = getattr(self.config, "VISUAL_TOP_FACE_GEOMETRY_MODE", "metric")
-                    if mode == "homography":
-                        geometry = HomographyPickGeometry(
-                            np.load(self.perspective_path), self.actual_camera_index,
-                            frame.shape[1::-1],
-                            (self.config.VISUAL_BOARD_WIDTH_MM, self.config.VISUAL_BOARD_HEIGHT_MM))
-                    elif mode == "metric":
-                        geometry = PickGeometry.load(Path(self.project_dir) / self.config.VISUAL_PICK_GEOMETRY_PATH)
-                    else:
-                        raise ValueError(f"Unknown top-face geometry mode: {mode}")
                     geometry.validate_context(
                         self.actual_camera_index, frame.shape[1::-1],
                         (self.config.VISUAL_BOARD_WIDTH_MM, self.config.VISUAL_BOARD_HEIGHT_MM),
@@ -303,10 +302,10 @@ class HardwareManager:
                         min_white_annulus_fraction=self.config.VISUAL_TOP_MIN_WHITE_ANNULUS_FRACTION,
                         max_white_saturation=self.config.VISUAL_TOP_MAX_WHITE_SATURATION,
                         min_white_value=self.config.VISUAL_TOP_MIN_WHITE_VALUE)
-                    print(f"[TOP PICK] mode={mode}; geometry={geometry.profile_id}")
+                    print(f"[TOP PICK] Calibrated profile {geometry.profile_id} loaded.")
                 except Exception as exc:
                     self.top_face_pick_estimator = None
-                    print(f"[TOP PICK] BLOCKED: {exc}. Check selected geometry mode and recalibrate with RUN closed.")
+                    print(f"[TOP PICK] BLOCKED: {exc}. Run CALIBRATE_PICK_GEOMETRY.bat with RUN closed.")
 
     def cleanup(self):
         print("[CLEANUP] Đang dọn dẹp hardware...")
@@ -346,8 +345,8 @@ class HardwareManager:
         self.last_pick_resolution = {"failure": "hard", "reason": "not measured", "attempts": 0, "elapsed_sec": 0.0}
         estimator = getattr(self, "top_face_pick_estimator", None)
         if estimator is None or not self.cam_monitor:
-            self.last_pick_resolution["reason"] = "Missing top-face geometry/camera"
-            print("[TOP PICK] Missing top-face geometry/camera; no fallback.")
+            self.last_pick_resolution["reason"] = "Missing commissioned geometry/camera"
+            print("[TOP PICK] Missing commissioned geometry/camera; no fallback.")
             return targets
         samples = {name: [] for name in expected_cells}
         try:
@@ -440,13 +439,15 @@ class HardwareManager:
         return targets
 
     def get_robot_center_pick_targets(self, expected_cells):
-        """Shared T/game resolver: selected top-rim geometry, or explicitly legacy.
+        """Shared T/game resolver: calibrated top rims, or explicitly legacy.
 
         Top mode fails closed. Only when that mode is disabled does the old
         box-center/foot fallback path below remain available.
         """
         if self._top_face_enabled():
             return self._get_top_face_targets(expected_cells)
+        if getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False):
+            return self._get_height_pick_targets(expected_cells)
         targets = {name: None for name in expected_cells}
         if not self.center_pick_estimator or not self.cam_monitor:
             print("[CENTER PICK] Unavailable; using legacy visual-pick fallback.")
@@ -483,6 +484,93 @@ class HardwareManager:
               "using legacy foot-point correction.")
         return self.get_visual_pick_targets(expected_cells)
 
+    def _get_height_pick_targets(self, expected_cells):
+        """Raw measured bbox -> height plane, without rim/profile commissioning gates.
+
+        Invalid geometry or unstable observation blocks the pick. It never mixes
+        foot points or logical-cell substitutes with the top-plane calibration.
+        """
+        targets = {name: None for name in expected_cells}
+        self.last_height_pick_resolution = {"mode": "blocked", "reason": ""}
+        self.last_pick_resolution = {"failure": "hard", "reason": ""}
+        if not self.cam_monitor:
+            self.last_height_pick_resolution["reason"] = "Camera unavailable"
+            self.last_pick_resolution["reason"] = "Camera unavailable"
+            return targets
+        samples = {name: [] for name in expected_cells}
+        estimator = None
+        try:
+            # Reload each pick cycle: moving camera/recalibrating board must not reuse old pose.
+            matrix = np.load(self.perspective_path)
+            count = int(getattr(self.config, "VISUAL_HEIGHT_SAMPLE_COUNT", 5))
+            window = float(getattr(self.config, "VISUAL_HEIGHT_SAMPLE_WINDOW_SEC", 2.0))
+            if not 1 <= count <= 5 or not np.isfinite(window) or window <= 0:
+                raise ValueError("Invalid height scan limits")
+            started = time.monotonic()
+            deadline = started + window
+            attempts = 0
+            from contextlib import ExitStack
+            with ExitStack() as scan_session:
+                session_factory = getattr(self.cam_monitor, "pick_scan_session", None)
+                if callable(session_factory):
+                    scan_session.enter_context(session_factory())
+                for index in range(count):
+                    # Spread captures across the window, leaving room for final inference.
+                    scheduled = started + index * window / count
+                    delay = scheduled-time.monotonic()
+                    if delay > 0:
+                        time.sleep(delay)
+                    if time.monotonic() >= deadline:
+                        break
+                    attempts += 1
+                    try:
+                        frame, detections = self.cam_monitor.get_fresh_pick_snapshot()
+                    except FreshPickTransientError as exc:
+                        print(f"[HEIGHT PICK] Retrying snapshot: {exc}")
+                        continue
+                    # A late blocking call cannot contribute an out-of-window sample.
+                    if time.monotonic() > deadline:
+                        break
+                    if frame is None:
+                        continue
+                    if estimator is None:
+                        geometry = geometry_from_board(
+                            Path(self.project_dir) / self.config.VISUAL_CAMERA_INTRINSICS_PATH,
+                            matrix, self.actual_camera_index, frame.shape[1::-1],
+                            self.config.VISUAL_HEIGHT_BOARD_MM, self.config.VISUAL_HEIGHT_PIECE_MM,
+                            self.config.VISUAL_HEIGHT_POSE_MAX_ERROR_PX)
+                        estimator = HeightPickEstimator(geometry, self.config.VISUAL_PICK_MIN_CONFIDENCE,
+                                                        self.config.VISUAL_PICK_MAX_OFFSET_CELLS)
+                    elif tuple(frame.shape[1::-1]) != estimator.geometry.frame_size:
+                        raise ValueError("Camera resolution changed during pick sampling")
+                    for name, cell in expected_cells.items():
+                        samples[name].append(estimator.estimate_pick_target(detections, *cell))
+            methods = {}
+            for name, values in samples.items():
+                targets[name], methods[name] = aggregate_height_targets(
+                    values, expected_cells[name],
+                    getattr(self.config, "VISUAL_HEIGHT_MIN_SAMPLES", 2),
+                    getattr(self.config, "VISUAL_HEIGHT_MAX_SPREAD_CELLS", .12))
+            elapsed = time.monotonic()-started
+            self.last_height_pick_resolution = {
+                "mode": "height" if all(t is not None for t in targets.values()) else "blocked",
+                "reason": "; ".join(f"{name}: {methods[name]}" for name in targets if targets[name] is None),
+                "attempts": attempts, "elapsed_sec": elapsed,
+                "valid_samples": {name: sum(t is not None for t in values) for name, values in samples.items()},
+                "methods": methods,
+            }
+            self.last_pick_resolution = {
+                "failure": "" if all(t is not None for t in targets.values()) else "consensus",
+                "reason": self.last_height_pick_resolution["reason"],
+            }
+            print(f"[HEIGHT PICK] {self.last_height_pick_resolution}; targets={targets}")
+        except Exception as exc:
+            targets = {name: None for name in expected_cells}
+            self.last_height_pick_resolution["reason"] = str(exc)
+            self.last_pick_resolution = {"failure": "hard", "reason": str(exc)}
+            print(f"[HEIGHT PICK] BLOCKED: {exc}; no foot/logical fallback.")
+        return targets
+
     def execute_pick_place_test(self, source, destination, validate_request=None):
         """Run the production geometry path without AI, rules or FEN commits."""
         if validate_request:
@@ -494,19 +582,26 @@ class HardwareManager:
         if not self.is_cell_visually_clear(destination):
             raise RuntimeError("Ô đích chưa trống hoặc camera không xác nhận được")
         target = self.get_robot_center_pick_targets({"moving": source}).get("moving")
-        if target is None:
+        required = self._top_face_enabled() or bool(getattr(getattr(self, "config", None),
+                                                          "VISUAL_HEIGHT_PICK_ENABLED", False))
+        if target is None and required:
             require_pick_target(self, {"moving": None}, "moving")
         if validate_request:
             validate_request()
-        print(f"[PICK TEST] logical={source} visual=({target.col:.4f},{target.row:.4f}) "
-              f"destination={destination} conf={target.confidence:.3f} offset={target.offset_cells:.4f}")
+        if target is None:
+            print(f"[PICK TEST] Visual correction unavailable; logical source={source}, destination={destination}")
+        else:
+            print(f"[PICK TEST] logical={source} visual=({target.col:.4f},{target.row:.4f}) "
+                  f"destination={destination} conf={target.confidence:.3f} offset={target.offset_cells:.4f}")
         self.robot.move_piece(*source, *destination, False, moving_visual_target=target,
-                              require_visual_target=True)
+                              require_visual_target=required)
         if not self.verify_visual_move(source, destination):
             raise RuntimeError("Đã chạy arm nhưng chưa xác nhận được quân ở ô đích; kiểm tra bàn thật")
         if validate_request:
             validate_request()
-        return target
+        # Return the commanded coordinate for the test UI; zero confidence
+        # explicitly marks the logical-cell fallback, not a camera measurement.
+        return target if target is not None else GridTarget(float(source[0]), float(source[1]), 0.0, 0.0)
 
     def _cell_has_center_detection(self, detections, cell):
         """Whether best.pt sees a confident box centre at a calibrated cell."""

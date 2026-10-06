@@ -264,6 +264,29 @@ class BoundedAcquisitionTests(unittest.TestCase):
 
 
 class MotionCoordinatorTests(unittest.TestCase):
+    def test_default_height_ai_motion_blocks_missing_visual_center(self):
+        config = importlib.import_module('config')
+        self.assertTrue(config.VISUAL_PICK_ENABLED)
+        self.assertFalse(config.VISUAL_TOP_FACE_ENABLED)
+        state, hw = state_with_pending(), self.hardware()
+        hw.get_robot_center_pick_targets.return_value = {'moving': None}
+        with self.assertRaises(RuntimeError):
+            coordinator()(state, hw, config)
+        hw.robot.move_piece.assert_not_called()
+        hw.verify_visual_move.assert_not_called()
+
+    def test_explicit_legacy_ai_mode_can_use_logical_cell(self):
+        config = SimpleNamespace(VISUAL_PICK_ENABLED=True, VISUAL_HEIGHT_PICK_ENABLED=False,
+                                 VISUAL_TOP_FACE_ENABLED=False)
+        state, hw = state_with_pending(), self.hardware()
+        hw.get_robot_center_pick_targets.return_value = {'moving': None}
+        coordinator()(state, hw, config)
+        kwargs = hw.robot.move_piece.call_args.kwargs
+        self.assertFalse(kwargs['require_visual_target'])
+        self.assertIsNone(kwargs['moving_visual_target'])
+        self.assertIsNone(kwargs['refresh_moving_visual_target']())
+        hw.verify_visual_move.assert_called_once()
+
     def hardware(self):
         hw = SimpleNamespace(robot=Mock(connected=True),
             get_robot_center_pick_targets=Mock(return_value={'moving': target(), 'captured': target()}),
@@ -436,10 +459,11 @@ class MotionCoordinatorTests(unittest.TestCase):
         from pathlib import Path
         tree = ast.parse((Path(__file__).parents[1] / 'main.py').read_text(encoding='utf-8'))
         guarded = [node for node in ast.walk(tree) if isinstance(node, ast.Try)
-                   and any(isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)
-                           and isinstance(statement.value.func, ast.Name)
-                           and statement.value.func.id == 'execute_pending_ai_motion'
-                           for statement in node.body)]
+                   and any(isinstance(child, ast.Expr) and isinstance(child.value, ast.Call)
+                           and isinstance(child.value.func, ast.Name)
+                           and child.value.func.id == 'execute_pending_ai_motion'
+                           for statement in node.body if isinstance(statement, (ast.Expr, ast.If))
+                           for child in ast.walk(statement))]
         self.assertEqual(len(guarded), 1)
         for handler in guarded[0].handlers:
             self.assertTrue(any(isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)

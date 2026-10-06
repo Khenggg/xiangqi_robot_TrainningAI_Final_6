@@ -26,6 +26,7 @@ class InputHandler:
     def __init__(self, game_state, hw_manager):
         self.state = game_state
         self.hw = hw_manager
+        self._motion_thread = None
         self._last_move_confirmation_failure = None
         stability_config = getattr(self.hw, "config", None)
         self._board_stability_monitor = BoardStabilityMonitor(
@@ -189,8 +190,49 @@ class InputHandler:
             self._unified_active = self._player_turn_arbiter.state.name != "INACTIVE"
         return self._unified_active
 
+    def _defer_motion(self, operation):
+        """One physical job at a time; the worker owns state until completion."""
+        import threading
+        if not getattr(getattr(self.hw, "config", None), "VISUAL_MOTION_ASYNC_ENABLED", False):
+            return False
+        if threading.current_thread() is getattr(self, "_motion_thread", None):
+            return False
+        if getattr(self.state, "physical_motion_busy", False):
+            return True
+        self.state.physical_motion_busy = True
+        def run():
+            try:
+                operation()
+            finally:
+                self.state.physical_motion_busy = False
+        self._motion_thread = threading.Thread(target=run, name="visual-robot-motion", daemon=True)
+        self._motion_thread.start()
+        return True
+
+    def start_pending_ai_motion(self):
+        if self._defer_motion(self.start_pending_ai_motion):
+            return
+        source, destination = self.state.pending_ai_move["move"]
+        try:
+            execute_pending_ai_motion(self.state, self.hw, self.hw.config)
+            self._finalize_pending_ai_move("Your turn!", (0, 100, 180))
+        except PickTargetUnavailable as exc:
+            self.state.pause_visual_pick("ai", source, destination, exc)
+        except Exception as exc:
+            if self.state.pending_ai_move is None:
+                self.state.manual_override_active = True
+                self.state.set_status(f"FEN đã cập nhật; lỗi đồng bộ: {exc}. V để lấy lại baseline.", duration=30)
+                return
+            self.state.physical_sync_fault = True
+            self.state.snapshot_continue_required = True
+            self.state.snapshot_continue_can_commit_pending = False
+            self.state.set_status(f"Robot dừng: {exc}. Kiểm tra bàn thật rồi V.",
+                                  color=(180, 0, 0), duration=3600)
+
     def handle_mouse_down(self, mx, my):
         import pygame  # type: ignore
+        if getattr(self.state, "physical_motion_busy", False):
+            return
         if getattr(self.state, "visual_pick_retry", None):
             if BTN_PICK_RETRY_RECT.collidepoint(mx, my):
                 self.handle_keyboard(pygame.K_r)
@@ -337,6 +379,8 @@ class InputHandler:
         self._run_pick_test(source, destination)
 
     def _run_pick_test(self, source, destination, request=None):
+        if self._defer_motion(lambda: self._run_pick_test(source, destination, request)):
+            return
         board = self.state.pick_test_board
 
         def validate_request():
@@ -346,8 +390,7 @@ class InputHandler:
         try:
             self.state.set_status("TEST: arm đang gắp/thả...", duration=30)
             validate_request()
-            # Sampling is synchronous; the callback additionally guards the
-            # motion boundary for a queued operator retry.
+            # The worker owns this request; also validate at the motion boundary.
             if request is not None:
                 target = self.hw.execute_pick_place_test(source, destination, validate_request=validate_request)
             else:
@@ -370,6 +413,8 @@ class InputHandler:
             self.state.set_status(f"TEST dừng: {exc}", color=(180, 0, 0), duration=30)
 
     def _retry_visual_pick(self):
+        if self._defer_motion(self._retry_visual_pick):
+            return
         request = self.state.visual_pick_retry
         if not self.state.visual_pick_retry_is_current(request):
             self.state.visual_pick_retry = None
@@ -454,6 +499,8 @@ class InputHandler:
 
     def handle_keyboard(self, key):
         import pygame  # type: ignore
+        if getattr(self.state, "physical_motion_busy", False):
+            return
         if self.state.game_over:
             return
 
@@ -758,7 +805,8 @@ class InputHandler:
 
     def poll_board_stability(self):
         """Commit one legal Red move after repeated stable board observations."""
-        if (self.state.turn != "r" or self.state.game_over
+        if (getattr(self.state, "physical_motion_busy", False)
+                or self.state.turn != "r" or self.state.game_over
                 or getattr(self.state, "visual_pick_retry", None)
                 or getattr(self.state, "pick_test_mode", False)
                 or getattr(self.state, "pick_test_resume_required", False)

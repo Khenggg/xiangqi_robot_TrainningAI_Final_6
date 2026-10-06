@@ -922,25 +922,67 @@ Robot ở tư thế khớp thẳng hàng, đặc biệt khi di chuyển đến c
 
 ---
 
-### Visual correction bằng homography mặt bàn
+### Visual correction hiện tại
 
-Mặc định `VISUAL_TOP_FACE_ENABLED = True` và
-`VISUAL_TOP_FACE_GEOMETRY_MODE = "homography"`: YOLO khoanh vùng quân,
-viền in trên mặt quân xác định tâm qua phép đổi phối cảnh mặt bàn.
-Chế độ này không tải `calibration/pick_geometry.json`, không cần quy trình
-commissioning của profile camera. Các khoảng cách mm là ước lượng theo mặt bàn;
-không bù méo lens hoặc chiều cao quân và không chứng minh sai số gắp thực tế.
+Nhánh mặc định giữ AUTO CALIBRATION lưới và R1–R4, dùng tâm bbox ảnh gốc
+qua phép giao tia nhìn với mặt phẳng mặt quân cao **9 mm**. Tư thế camera
+được tính lại từ bốn góc trong `perspective.npy` mỗi chu kỳ lấy điểm gắp.
+AI/nhận diện trạng thái bàn, tọa độ ô và đường đặt quân không đổi.
 
-Sau khi chuyển camera, calibrate lại `perspective.npy` đúng hướng logic
-(đen hàng 0, đỏ hàng 9), kiểm tra lưới overlay rồi khởi động lại RUN.
-Bàn/quân giữ nguyên so với arm thì giữ R1–R4. Kích thước bàn trong config
-phải khớp khoảng cách giữa các giao điểm ngoài cùng của lưới chơi.
-Thiếu viền, tâm mơ hồ, ảnh lỗi hoặc consensus không đạt sẽ chặn gắp;
-không tự chuyển sang tâm bounding box hay tâm ô logic.
+Thiết lập một lần (đóng RUN để giải phóng camera):
 
-Để dùng lại nhánh bù lens/chiều cao, chọn
-`VISUAL_TOP_FACE_GEOMETRY_MODE = "metric"` và tạo profile hợp lệ cho góc camera đó.
-Homography được giữ cố định trong một lần RUN: đổi file calibration phải khởi động lại.
-Kiểm tra context không tự phát hiện camera/bàn dịch chuyển nếu file vẫn giữ nguyên.
+1. In `assets/calibration/checkerboard-20mm.svg` ở Actual Size; đo cạnh ô in thực tế.
+2. Chạy `CALIBRATE_CAMERA_INTRINSICS.bat --square-mm 20` (thay `20` bằng số đo thực).
+   Chọn camera bằng `--camera INDEX` nếu cần; phải cùng camera/resolution/focus/zoom với RUN.
+3. Di chuyển/nghiêng bảng chuẩn qua giữa và rìa ảnh. `S` lưu mẫu, `C` tính khi đủ ít nhất
+   12 ảnh đa dạng; `R` làm lại, `ESC` hủy. Công cụ chỉ calibrate ống kính,
+   không yêu cầu click quân chuẩn, test arm hay profile sai số gắp.
+4. Chạy RUN và AUTO CALIBRATION lưới như trước. File `calibration/camera_intrinsics.json`
+   lưu K/D; camera đổi vị trí thì calibrate lại lưới. Đổi camera, độ phân giải,
+   focus/zoom thì calibrate nội tại lại.
+
+Cấu hình: `VISUAL_HEIGHT_PICK_ENABLED = True`, `VISUAL_HEIGHT_PIECE_MM = 9.0`,
+`VISUAL_HEIGHT_BOARD_MM = (366.0, 410.0)` là kích thước giữa giao điểm ngoài cùng,
+`VISUAL_TOP_FACE_ENABLED = False`, `PICK_OUTWARD_COMPENSATION_ENABLED = False`.
+Không cộng bù cố định cùng bù độ cao. Kích thước lưới cần đúng số đo thực tế.
+
+Log `[HEIGHT PICK]` cho biết dùng bù độ cao hay fallback. Thiếu/sai K/D, sai
+resolution hoặc pose không hợp lệ: **chặn gắp** và báo lý do;
+không giả định thông số camera và không đưa foot-point qua mặt phẳng mặt quân.
+Mỗi lần cần gắp lấy tối đa **5 ảnh mới trong cửa sổ 2 giây** (từ lúc vào
+phiên quét). Inference chậm có thể khiến ít hơn 5 ảnh; kết quả trả về sau
+deadline không được dùng. Một lệnh camera/model đang chạy có thể làm thời gian
+thực vượt cửa sổ; log `[HEIGHT PICK]` ghi thời gian, số lần và số mẫu hợp lệ.
+Cần ít nhất 2 mẫu: các tâm gần nhau thì lấy trung bình tất cả; nếu dao động,
+lấy median từng trục của 3 tâm confidence cao nhất, chỉ dùng khi nhóm đó đủ gần
+nhau. Confidence cao không thay thế kiểm tra độ phân tán.
+
+Quét/gắp lượt robot, chế độ test và Retry chạy trên một worker. UI tiếp tục
+vẽ, các thao tác thay đổi trạng thái và poll lượt người tạm khóa trong job;
+nhận diện nền/capture nhường camera trong phiên quét gắp. Kết thúc job thì
+trả tài nguyên; phép xác nhận nước người và checkpoint nước ăn không đổi.
+Không chạy thêm AI job khi worker vật lý còn hoạt động.
+
+BBox không ổn định: thử nhiều snapshot; hết lượt vẫn thiếu thì chặn gắp,
+giữ nước đi đang chờ và cho phép Retry bằng `R` qua luồng retry hiện tại.
+Không tự dùng tâm ô logic; không yêu cầu nhận được vành quân mới gắp.
+Manual calibration vẫn cung cấp cùng `perspective.npy`, nên bù độ cao không đổi.
+Kiểm tra ô đích trống và xác minh sau chuyển động giữ nguyên. Bù hình học không
+khắc phục sai tâm bbox, TCP, R1–R4 hoặc sai số cơ khí arm.
+
+Nhánh bù cố định trước đây hiện đã tắt; nếu dùng riêng nhánh legacy:
+ngang `0.6 mm/ô`, dọc `0.7 mm/ô`, mỗi hướng giới hạn `4 ô`.
+Dọc chỉ tính số ô nguyên cách hàng `4.5`, bỏ phần nửa ô: hàng `4/5` bù `0`, hàng `3/6` bù `0.7 mm`. Ô `(6,6)` bù ngang `1.2 mm`, dọc `0.7 mm`.
+Mức bù tính từ ô nguồn logic; hướng lấy từ các trục nội suy R1–R4,
+áp dụng sau visual correction/offset toàn bàn cho tiếp cận, hạ gắp và nâng.
+Vị trí đặt và Z/hướng kẹp giữ nguyên. Log `[PICK BIAS]` ghi bù XY và tọa độ
+gắp cuối; `PICK_OUTWARD_COMPENSATION_ENABLED = False` tắt lớp bù này.
+
+Khi tắt `VISUAL_HEIGHT_PICK_ENABLED` và `VISUAL_TOP_FACE_ENABLED`,
+luồng legacy dùng tâm bounding box từ ảnh mới; nếu không ổn định thì thử
+foot-point correction. Nếu vẫn thiếu visual target, arm gắp tại tâm ô logic
+đã hiệu chuẩn từ R1–R4. Luồng AI và chế độ gắp thử không yêu cầu viền mặt
+quân hay profile geometry để cho phép gắp. Kiểm tra kết nối robot, ô đích
+trống và xác minh sau chuyển động vẫn áp dụng.
 
 **🎉 Chúc bạn thành công với dự án Xiangqi Robot!**

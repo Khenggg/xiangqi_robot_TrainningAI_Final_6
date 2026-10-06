@@ -15,6 +15,13 @@ BOARD_ORIGIN_Y = -100.0
 OFFSET_X = 5.0   # Robot gắp lệch lên trên 5mm → cần dịch xuống 5mm
 OFFSET_Y = 0.0   # Không lệch ngang
 
+# Bù gắp RA XA tâm lưới thực tế (4, 4.5), theo các trục R1-R4.
+# Tính từ ô nguồn logic; chỉ bù XY gắp, không bù vị trí đặt.
+PICK_OUTWARD_COMPENSATION_ENABLED = False  # Height geometry replaces empirical cell offsets.
+PICK_OUTWARD_COL_MM_PER_CELL = 0.6
+PICK_OUTWARD_ROW_MM_PER_CELL = 0.7
+PICK_OUTWARD_MAX_CELLS = 4.0
+
 # Chiều hướng di chuyển so với gốc R1 (1 hoặc -1)
 # LƯU Ý: Hệ tọa độ robot: X=dọc (row), Y=ngang (col)
 # 1: row tăng thì X tăng, col tăng thì Y tăng
@@ -95,16 +102,25 @@ VISUAL_PICK_SAMPLE_COUNT = 3
 VISUAL_PICK_MIN_STABLE_SAMPLES = 2
 VISUAL_CENTER_PICK_ATTEMPTS = 3
 VISUAL_CENTER_PICK_MAX_JITTER_CELLS = 0.12
+# BBox -> piece-height plane; pose refreshed from current auto/manual board calibration.
+VISUAL_HEIGHT_PICK_ENABLED = True
+VISUAL_CAMERA_INTRINSICS_PATH = "calibration/camera_intrinsics.json"
+VISUAL_HEIGHT_BOARD_MM = (366.0, 410.0)  # Outer PLAYING intersections, not decorative border.
+VISUAL_HEIGHT_PIECE_MM = 9.0  # User-measured board surface -> top face.
+VISUAL_HEIGHT_POSE_MAX_ERROR_PX = 3.0
+VISUAL_HEIGHT_SAMPLE_COUNT = 5
+VISUAL_HEIGHT_SAMPLE_WINDOW_SEC = 2.0
+VISUAL_HEIGHT_MIN_SAMPLES = 2
+VISUAL_HEIGHT_MAX_SPREAD_CELLS = 0.12
+VISUAL_MOTION_ASYNC_ENABLED = True
 # Top-face temporal consensus only; legacy sampling settings remain unchanged.
 VISUAL_PICK_CONSENSUS_INITIAL_SAMPLES = 3
 VISUAL_PICK_CONSENSUS_MAX_SAMPLES = 6
 VISUAL_PICK_CONSENSUS_TIMEOUT_SEC = 3.0  # soft budget: reject late blocking results
 VISUAL_PICK_CONSENSUS_RADIUS_MM = 3.75  # median radius, NOT measured jaw tolerance
-# Top-rim picking fails closed; never falls back to box/foot/logical centers.
-VISUAL_TOP_FACE_ENABLED = True
-# "homography": approximate board-plane XY, no commissioned camera profile.
-# "metric": calibrated lens/height compensation, requires pick_geometry.json.
-VISUAL_TOP_FACE_GEOMETRY_MODE = "homography"
+# Top-face mode requires a NEW commissioned camera profile. Missing profile
+# blocks picking; it never silently reuses box/foot/logical centers.
+VISUAL_TOP_FACE_ENABLED = False  # Restore box-center -> foot-point -> logical-cell correction.
 VISUAL_PICK_GEOMETRY_PATH = "calibration/pick_geometry.json"
 VISUAL_BOARD_WIDTH_MM = 250.0
 VISUAL_BOARD_HEIGHT_MM = 281.25  # includes river: 9 intervals of 31.25mm

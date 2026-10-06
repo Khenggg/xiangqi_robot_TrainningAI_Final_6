@@ -112,6 +112,10 @@ def _start_selected_game():
 
 def _cleanup_all():
     print("\n[CLEANUP] Đang dọn dẹp hệ thống...")
+    # Never close camera/SDK while the physical worker still owns them.
+    motion_worker = getattr(input_mgr, "_motion_thread", None)
+    if motion_worker is not None and motion_worker.is_alive():
+        motion_worker.join()
     # [API] Force Kết thúc trận đấu khi thoát chương trình
     try:
         if state and state.api_client:
@@ -156,6 +160,9 @@ try:
         # 2b. Xử lý Input
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                if getattr(state, "physical_motion_busy", False):
+                    state.set_status("Arm đang xử lý; chờ hoàn tất trước khi đóng client.", duration=10)
+                    continue
                 running = False
             elif home_screen_active:
                 start_vs_robot = event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)
@@ -208,7 +215,7 @@ try:
         # 2c. Camera Feed update
         if hw is not None and hw.cam_monitor is not None:
             key = hw.cam_monitor.update_display()
-            if key == ord("q"): running = False
+            if key == ord("q") and not getattr(state, "physical_motion_busy", False): running = False
 
         # Inspect the board itself rather than the object moving a piece.
         # SPACE remains the safe manual fallback when camera confidence is poor.
@@ -282,7 +289,11 @@ try:
                             if hw.robot.connected:
                                 print(f"[AI] Robot executing move: {xiangqi.format_move(s, d)}")
                                 try:
-                                    execute_pending_ai_motion(state, hw, config)
+                                    if getattr(config, "VISUAL_MOTION_ASYNC_ENABLED", False):
+                                        input_mgr.start_pending_ai_motion()
+                                        robot_success = False  # Worker verifies and commits exactly once.
+                                    else:
+                                        execute_pending_ai_motion(state, hw, config)
                                 except PickTargetUnavailable as exc:
                                     robot_success = False
                                     state.pause_visual_pick("ai", s, d, exc)

@@ -84,12 +84,13 @@ class PickPlaceModeTests(unittest.TestCase):
         target = hardware.execute_pick_place_test((0, 0), (3, 4))
         hardware.robot.move_piece.assert_called_once_with(0, 0, 3, 4, False,
                                                         moving_visual_target=target,
-                                                        require_visual_target=True)
+                                                        require_visual_target=False)
         hardware.verify_visual_move.assert_called_once_with((0, 0), (3, 4))
 
     def test_missing_target_or_occupied_destination_blocks_motion(self):
         for blocked_vision in (True, False):
             hardware = self.make_hardware()
+            hardware.config = SimpleNamespace(VISUAL_TOP_FACE_ENABLED=True)
             if blocked_vision:
                 hardware.get_robot_center_pick_targets.return_value = {"moving": None}
             else:
@@ -97,6 +98,15 @@ class PickPlaceModeTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 hardware.execute_pick_place_test((0, 0), (3, 4))
             hardware.robot.move_piece.assert_not_called()
+
+    def test_legacy_missing_visual_target_uses_logical_cell(self):
+        hardware = self.make_hardware()
+        hardware.get_robot_center_pick_targets.return_value = {"moving": None}
+        target = hardware.execute_pick_place_test((2, 3), (4, 5))
+        hardware.robot.move_piece.assert_called_once_with(2, 3, 4, 5, False,
+            moving_visual_target=None, require_visual_target=False)
+        self.assertEqual((target.col, target.row, target.confidence), (2, 3, 0))
+        hardware.verify_visual_move.assert_called_once_with((2, 3), (4, 5))
 
 
 if __name__ == '__main__':

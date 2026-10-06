@@ -161,6 +161,7 @@ class GripperControlTests(unittest.TestCase):
         robot = FR5Robot()
         events = []
         with patch.object(robot, "board_to_pose", return_value=[0, 0, 0, 0, 0, 0]), \
+                patch.object(robot, "_pick_outward_offset", return_value=[0, 0]), \
                 patch.object(robot, "move_safe_pose", side_effect=lambda *_args, **_kwargs: events.append("approach")), \
                 patch.object(robot, "movel_pose", side_effect=lambda *_args, **_kwargs: events.append("descend_or_lift")), \
                 patch.object(robot, "gripper_ctrl", side_effect=lambda action: events.append(action)), \

@@ -334,7 +334,8 @@ class GameState:
     def can_start_ai_turn(self):
         """Whether the main loop may create exactly one Black AI worker."""
         return (
-            not getattr(self, "pick_test_mode", False)
+            not getattr(self, "physical_motion_busy", False)
+            and not getattr(self, "pick_test_mode", False)
             and not getattr(self, "visual_pick_retry", None)
             and not getattr(self, "physical_sync_fault", False)
             and not getattr(self, "pick_test_resume_required", False)
