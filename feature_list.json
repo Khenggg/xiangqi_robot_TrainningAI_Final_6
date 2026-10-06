@@ -135,5 +135,55 @@
     "evidence": "",
     "notes": "",
     "priority": "P3"
+  },
+  {
+    "id": "top-face-pick",
+    "title": "Find physical top-face centers inside best.pt ROIs",
+    "user_visible_behavior": "so that side walls do not define pick centers",
+    "verification_command": "Synthetic rim, ambiguity and ROI tests pass",
+    "status": "passing",
+    "evidence": "150 full-suite tests passed (34 new optical/motion tests); raster silhouette red/green regression and independent review.",
+    "notes": "Software evidence only; white concentric printed-rim requirement. No old measurement data; physical commissioning and human approval pending.",
+    "priority": "P1"
+  },
+  {
+    "id": "height-aware-geometry",
+    "title": "Map the 10 mm piece plane with freshly calibrated camera geometry",
+    "user_visible_behavior": "so that height parallax is handled explicitly",
+    "verification_command": "Distorted projection/inverse projection and profile validation tests pass",
+    "status": "passing",
+    "evidence": "150 full-suite tests passed; both normal signs, real synthetic intrinsic calibration, distortion/pose/height/context gates tested; compileall passed.",
+    "notes": "250 x 281.25 mm grid, 31.25 mm pitch, 10 mm piece height. Actual camera commissioning and physical accuracy unverified.",
+    "priority": "P1"
+  },
+  {
+    "id": "guarded-top-pick",
+    "title": "Stop visual-enabled picks without a reliable calibrated target",
+    "user_visible_behavior": "so that failures cannot silently use foot or logical centers",
+    "verification_command": "Missing capture, source refresh and test-mode guards issue no affected pick",
+    "status": "passing",
+    "evidence": "150 full-suite tests passed; mandatory source/capture/refresh guards, no top-mode fallback, strict inference and independent occupancy tested.",
+    "notes": "No camera/robot activated. Human review approval pending; no commit/push authorized.",
+    "priority": "P1"
+  },
+  {
+    "id": "pick-consensus",
+    "title": "Select a fresh metric majority rather than require every frame to agree",
+    "user_visible_behavior": "so that isolated outliers do not bias a pick",
+    "verification_command": "Consensus, latest-member, bounded sampling and late-result tests pass",
+    "status": "passing",
+    "evidence": "46 consensus/retry tests and 196 full-suite tests passed; compileall and diff-check exit 0. Independent review approved 94/100.",
+    "notes": "HARD --tdd; 3 initial/6 maximum samples, soft 3s budget. Human review pending; physical accuracy unverified.",
+    "priority": "P1"
+  },
+  {
+    "id": "safe-retry",
+    "title": "Retry the same pending pick without replaying a completed capture",
+    "user_visible_behavior": "so that observation failures cannot silently advance FEN",
+    "verification_command": "Stale, cancel, pre-pick and capture-removed recovery tests pass",
+    "status": "passing",
+    "evidence": "196 full-suite tests passed, including 46 consensus/retry tests, real move_piece orchestration with mocked hardware, stale ownership and single capture commit. Independent review approved 94/100.",
+    "notes": "Retry/Cancel rendered offscreen; labels fit. No changes to gripper pulses, teaching or AI choice; physical recovery and human approval pending.",
+    "priority": "P1"
   }
 ]

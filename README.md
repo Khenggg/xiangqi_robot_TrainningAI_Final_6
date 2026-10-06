@@ -5,6 +5,15 @@
 
 ---
 
+## Visual correction mặt trên quân (10 mm)
+
+Mode mới dùng `best.pt` làm ROI, vành mặt trên và camera geometry mới để tìm XY;
+thiếu calibration hoặc tâm không đủ tin cậy sẽ dừng gắp, không fallback.
+Chạy `CALIBRATE_PICK_GEOMETRY.bat` khi RUN đã đóng và làm theo
+[hướng dẫn commissioning và R/X thử lại](docs/top-face-visual-pick.md). Kích thước vùng giao điểm
+250 × 281,25 mm; 10 mm là chiều cao quân, không phải khoảng cách camera.
+Chưa có xác nhận độ chính xác gắp thật chỉ từ kiểm thử phần mềm.
+
 ## 📋 **TỔNG QUAN HỆ THỐNG**
 
 ### **Hệ thống là gì?**
