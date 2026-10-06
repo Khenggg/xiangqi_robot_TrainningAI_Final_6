@@ -922,4 +922,25 @@ Robot ở tư thế khớp thẳng hàng, đặc biệt khi di chuyển đến c
 
 ---
 
+### Visual correction bằng homography mặt bàn
+
+Mặc định `VISUAL_TOP_FACE_ENABLED = True` và
+`VISUAL_TOP_FACE_GEOMETRY_MODE = "homography"`: YOLO khoanh vùng quân,
+viền in trên mặt quân xác định tâm qua phép đổi phối cảnh mặt bàn.
+Chế độ này không tải `calibration/pick_geometry.json`, không cần quy trình
+commissioning của profile camera. Các khoảng cách mm là ước lượng theo mặt bàn;
+không bù méo lens hoặc chiều cao quân và không chứng minh sai số gắp thực tế.
+
+Sau khi chuyển camera, calibrate lại `perspective.npy` đúng hướng logic
+(đen hàng 0, đỏ hàng 9), kiểm tra lưới overlay rồi khởi động lại RUN.
+Bàn/quân giữ nguyên so với arm thì giữ R1–R4. Kích thước bàn trong config
+phải khớp khoảng cách giữa các giao điểm ngoài cùng của lưới chơi.
+Thiếu viền, tâm mơ hồ, ảnh lỗi hoặc consensus không đạt sẽ chặn gắp;
+không tự chuyển sang tâm bounding box hay tâm ô logic.
+
+Để dùng lại nhánh bù lens/chiều cao, chọn
+`VISUAL_TOP_FACE_GEOMETRY_MODE = "metric"` và tạo profile hợp lệ cho góc camera đó.
+Homography được giữ cố định trong một lần RUN: đổi file calibration phải khởi động lại.
+Kiểm tra context không tự phát hiện camera/bàn dịch chuyển nếu file vẫn giữ nguyên.
+
 **🎉 Chúc bạn thành công với dự án Xiangqi Robot!**

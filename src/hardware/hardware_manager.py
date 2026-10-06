@@ -15,6 +15,7 @@ from src.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetecto
 from src.vision.visual_pick_estimator import VisualPickEstimator
 from src.vision.pick_geometry import PickGeometry
 from src.vision.top_face_pick_estimator import TopFacePickEstimator
+from src.vision.homography_pick_geometry import HomographyPickGeometry
 from src.vision.pick_consensus import select_consensus, FreshPickTransientError, require_pick_target
 from src.vision.board_reconciler import BoardReconciler
 from src.vision.calibrate_camera import calibrate_perspective_camera
@@ -275,8 +276,17 @@ class HardwareManager:
                     print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
             if self._top_face_enabled():
                 try:
-                    geometry = PickGeometry.load(Path(self.project_dir) / self.config.VISUAL_PICK_GEOMETRY_PATH)
                     frame, _ = self.cam_monitor.get_fresh_pick_snapshot()
+                    mode = getattr(self.config, "VISUAL_TOP_FACE_GEOMETRY_MODE", "metric")
+                    if mode == "homography":
+                        geometry = HomographyPickGeometry(
+                            np.load(self.perspective_path), self.actual_camera_index,
+                            frame.shape[1::-1],
+                            (self.config.VISUAL_BOARD_WIDTH_MM, self.config.VISUAL_BOARD_HEIGHT_MM))
+                    elif mode == "metric":
+                        geometry = PickGeometry.load(Path(self.project_dir) / self.config.VISUAL_PICK_GEOMETRY_PATH)
+                    else:
+                        raise ValueError(f"Unknown top-face geometry mode: {mode}")
                     geometry.validate_context(
                         self.actual_camera_index, frame.shape[1::-1],
                         (self.config.VISUAL_BOARD_WIDTH_MM, self.config.VISUAL_BOARD_HEIGHT_MM),
@@ -293,10 +303,10 @@ class HardwareManager:
                         min_white_annulus_fraction=self.config.VISUAL_TOP_MIN_WHITE_ANNULUS_FRACTION,
                         max_white_saturation=self.config.VISUAL_TOP_MAX_WHITE_SATURATION,
                         min_white_value=self.config.VISUAL_TOP_MIN_WHITE_VALUE)
-                    print(f"[TOP PICK] Calibrated profile {geometry.profile_id} loaded.")
+                    print(f"[TOP PICK] mode={mode}; geometry={geometry.profile_id}")
                 except Exception as exc:
                     self.top_face_pick_estimator = None
-                    print(f"[TOP PICK] BLOCKED: {exc}. Run CALIBRATE_PICK_GEOMETRY.bat with RUN closed.")
+                    print(f"[TOP PICK] BLOCKED: {exc}. Check selected geometry mode and recalibrate with RUN closed.")
 
     def cleanup(self):
         print("[CLEANUP] Đang dọn dẹp hardware...")
@@ -336,8 +346,8 @@ class HardwareManager:
         self.last_pick_resolution = {"failure": "hard", "reason": "not measured", "attempts": 0, "elapsed_sec": 0.0}
         estimator = getattr(self, "top_face_pick_estimator", None)
         if estimator is None or not self.cam_monitor:
-            self.last_pick_resolution["reason"] = "Missing commissioned geometry/camera"
-            print("[TOP PICK] Missing commissioned geometry/camera; no fallback.")
+            self.last_pick_resolution["reason"] = "Missing top-face geometry/camera"
+            print("[TOP PICK] Missing top-face geometry/camera; no fallback.")
             return targets
         samples = {name: [] for name in expected_cells}
         try:
@@ -430,7 +440,7 @@ class HardwareManager:
         return targets
 
     def get_robot_center_pick_targets(self, expected_cells):
-        """Shared T/game resolver: calibrated top rims, or explicitly legacy.
+        """Shared T/game resolver: selected top-rim geometry, or explicitly legacy.
 
         Top mode fails closed. Only when that mode is disabled does the old
         box-center/foot fallback path below remain available.

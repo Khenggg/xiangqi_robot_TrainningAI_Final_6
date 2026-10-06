@@ -100,9 +100,11 @@ VISUAL_PICK_CONSENSUS_INITIAL_SAMPLES = 3
 VISUAL_PICK_CONSENSUS_MAX_SAMPLES = 6
 VISUAL_PICK_CONSENSUS_TIMEOUT_SEC = 3.0  # soft budget: reject late blocking results
 VISUAL_PICK_CONSENSUS_RADIUS_MM = 3.75  # median radius, NOT measured jaw tolerance
-# Top-face mode requires a NEW commissioned camera profile. Missing profile
-# blocks picking; it never silently reuses box/foot/logical centers.
+# Top-rim picking fails closed; never falls back to box/foot/logical centers.
 VISUAL_TOP_FACE_ENABLED = True
+# "homography": approximate board-plane XY, no commissioned camera profile.
+# "metric": calibrated lens/height compensation, requires pick_geometry.json.
+VISUAL_TOP_FACE_GEOMETRY_MODE = "homography"
 VISUAL_PICK_GEOMETRY_PATH = "calibration/pick_geometry.json"
 VISUAL_BOARD_WIDTH_MM = 250.0
 VISUAL_BOARD_HEIGHT_MM = 281.25  # includes river: 9 intervals of 31.25mm
