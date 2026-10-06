@@ -53,6 +53,8 @@ BTN_CONFIRM_MOVE_RECT = pygame.Rect(CLIENT_ACTION_X, 422, CLIENT_ACTION_WIDTH, 6
 BTN_EMERGENCY_RECT = pygame.Rect(CLIENT_ACTION_X, 502, CLIENT_ACTION_WIDTH, 64)
 BTN_ROLLBACK_RECT = pygame.Rect(CLIENT_ACTION_X, 582, CLIENT_ACTION_WIDTH, 64)
 BTN_CONTINUE_RECT = pygame.Rect(CLIENT_ACTION_X, 662, CLIENT_ACTION_WIDTH, 64)
+BTN_PICK_RETRY_RECT = pygame.Rect(CLIENT_ACTION_X, 662, 148, 64)
+BTN_PICK_CANCEL_RECT = pygame.Rect(CLIENT_ACTION_X + 156, 662, 148, 64)
 BTN_PICK_TEST_RECT = pygame.Rect(CLIENT_ACTION_X, 742, CLIENT_ACTION_WIDTH, 64)
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 240, 650, 480, 104)
 HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 230, 42, 180, 58)
@@ -274,13 +276,20 @@ class BoardRenderer:
                     label_surf = self.button_font.render(label, True, (255, 255, 255))
                     self.screen.blit(label_surf, (label_x, rect.y + 9 + line_index * 25))
 
-        can_continue = game_state.get("snapshot_continue_required", False)
-        continue_color = JADE_COLOR if can_continue else (121, 116, 100)
-        pygame.draw.rect(self.screen, continue_color, BTN_CONTINUE_RECT, border_radius=12)
-        continue_key = self.ui_font.render("▶", True, (255, 255, 255))
-        continue_label = self.ui_font.render("CONTINUE", True, (255, 255, 255))
-        self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 18, BTN_CONTINUE_RECT.y + 17))
-        self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 66, BTN_CONTINUE_RECT.y + 17))
+        if game_state.get("visual_pick_retry"):
+            for rect, label, color in ((BTN_PICK_RETRY_RECT, "R: THỬ LẠI", JADE_COLOR),
+                                       (BTN_PICK_CANCEL_RECT, "X: HỦY", VERMILION_COLOR)):
+                pygame.draw.rect(self.screen, color, rect, border_radius=12)
+                text = self.button_font.render(label, True, (255, 255, 255))
+                self.screen.blit(text, text.get_rect(center=rect.center))
+        else:
+            can_continue = game_state.get("snapshot_continue_required", False)
+            continue_color = JADE_COLOR if can_continue else (121, 116, 100)
+            pygame.draw.rect(self.screen, continue_color, BTN_CONTINUE_RECT, border_radius=12)
+            continue_key = self.ui_font.render("▶", True, (255, 255, 255))
+            continue_label = self.ui_font.render("CONTINUE", True, (255, 255, 255))
+            self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 18, BTN_CONTINUE_RECT.y + 17))
+            self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 66, BTN_CONTINUE_RECT.y + 17))
 
         note = ("T: chọn quân → chọn ô trống" if game_state.get("pick_test_mode", False)
                 else "M đang bật: đi tay Đỏ / Đen" if emergency_active else "Chọn phím hoặc bấm nút")

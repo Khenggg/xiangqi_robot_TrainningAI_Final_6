@@ -13,6 +13,9 @@ from src.ai.ai_controller import AIController
 from src.vision.camera_monitor import CameraMonitor
 from src.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetector
 from src.vision.visual_pick_estimator import VisualPickEstimator
+from src.vision.pick_geometry import PickGeometry
+from src.vision.top_face_pick_estimator import TopFacePickEstimator
+from src.vision.pick_consensus import select_consensus, FreshPickTransientError, require_pick_target
 from src.vision.board_reconciler import BoardReconciler
 from src.vision.calibrate_camera import calibrate_perspective_camera
 from src.vision.auto_calibrate import run_calibration_flow
@@ -40,6 +43,8 @@ class HardwareManager:
         self.cchess_recognizer = None
         self.pick_estimator = None
         self.center_pick_estimator = None
+        self.top_face_pick_estimator = None
+        self.actual_camera_index = None
         self.board_reconciler = None
         self._difficulty_availability = {"easy": False, "medium": False, "hard": False}
         self.perspective_path = Path(project_dir) / "perspective.npy"
@@ -212,6 +217,7 @@ class HardwareManager:
             cap_try = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
             if cap_try.isOpened():
                 self.cap = cap_try
+                self.actual_camera_index = idx
                 print(f"✅ Camera opened at index {idx}")
                 break
             else:
@@ -254,9 +260,8 @@ class HardwareManager:
                         max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
                         foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
                     )
-                    # The primary robot path picks at the geometric centre of
-                    # best.pt's measured box.  The existing foot-point estimator
-                    # stays available as the supervised fallback.
+                    # Box center remains occupancy evidence and the explicitly
+                    # selected legacy path, never a top-face fallback.
                     self.center_pick_estimator = VisualPickEstimator(
                         self.perspective_path,
                         min_confidence=self.config.VISUAL_PICK_MIN_CONFIDENCE,
@@ -268,6 +273,30 @@ class HardwareManager:
                     print("[INIT] ✅ Visual pick / board reconciliation initialized.")
                 except Exception as e:
                     print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
+            if self._top_face_enabled():
+                try:
+                    geometry = PickGeometry.load(Path(self.project_dir) / self.config.VISUAL_PICK_GEOMETRY_PATH)
+                    frame, _ = self.cam_monitor.get_fresh_pick_snapshot()
+                    geometry.validate_context(
+                        self.actual_camera_index, frame.shape[1::-1],
+                        (self.config.VISUAL_BOARD_WIDTH_MM, self.config.VISUAL_BOARD_HEIGHT_MM),
+                        self.config.VISUAL_PIECE_HEIGHT_MM, np.load(self.perspective_path),
+                        self.config.VISUAL_GEOMETRY_CORNER_TOLERANCE_PX)
+                    self.top_face_pick_estimator = TopFacePickEstimator(
+                        geometry, self.config.VISUAL_PICK_MIN_CONFIDENCE,
+                        self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
+                        self.config.VISUAL_TOP_MAX_RESIDUAL, self.config.VISUAL_TOP_MIN_COVERAGE,
+                        self.config.VISUAL_TOP_MIN_BOX_FRACTION, self.config.VISUAL_TOP_RADIUS_MM,
+                        self.config.VISUAL_TOP_AMBIGUITY_MM,
+                        max_enclosing_area_ratio=self.config.VISUAL_TOP_MAX_ENCLOSING_AREA_RATIO,
+                        annulus_offset_mm=self.config.VISUAL_TOP_ANNULUS_OFFSET_MM,
+                        min_white_annulus_fraction=self.config.VISUAL_TOP_MIN_WHITE_ANNULUS_FRACTION,
+                        max_white_saturation=self.config.VISUAL_TOP_MAX_WHITE_SATURATION,
+                        min_white_value=self.config.VISUAL_TOP_MIN_WHITE_VALUE)
+                    print(f"[TOP PICK] Calibrated profile {geometry.profile_id} loaded.")
+                except Exception as exc:
+                    self.top_face_pick_estimator = None
+                    print(f"[TOP PICK] BLOCKED: {exc}. Run CALIBRATE_PICK_GEOMETRY.bat with RUN closed.")
 
     def cleanup(self):
         print("[CLEANUP] Đang dọn dẹp hardware...")
@@ -294,14 +323,120 @@ class HardwareManager:
             except: pass
 
     # --- WRAPPER VISION UTILS ---
-    def get_robot_center_pick_targets(self, expected_cells):
-        """Locate robot pick points from centres of fresh ``best.pt`` boxes.
+    def _top_face_enabled(self):
+        return bool(getattr(getattr(self, "config", None), "VISUAL_TOP_FACE_ENABLED", False))
 
-        CChess calibration owns ``perspective.npy`` (pixel -> 9x10 grid); YOLO
-        measures where a physical piece actually is. If centre samples are
-        unavailable or unstable, retain the established foot-point correction
-        fallback so a transient detector miss does not block the whole turn.
+    def _occupancy_snapshot(self):
+        if self._top_face_enabled():
+            return self.cam_monitor.get_fresh_pick_snapshot()
+        return self.cam_monitor.get_fresh_snapshot()
+
+    def _get_top_face_targets(self, expected_cells):
+        targets = {name: None for name in expected_cells}
+        self.last_pick_resolution = {"failure": "hard", "reason": "not measured", "attempts": 0, "elapsed_sec": 0.0}
+        estimator = getattr(self, "top_face_pick_estimator", None)
+        if estimator is None or not self.cam_monitor:
+            self.last_pick_resolution["reason"] = "Missing commissioned geometry/camera"
+            print("[TOP PICK] Missing commissioned geometry/camera; no fallback.")
+            return targets
+        samples = {name: [] for name in expected_cells}
+        try:
+            initial = getattr(self.config, "VISUAL_PICK_CONSENSUS_INITIAL_SAMPLES", 3)
+            maximum = getattr(self.config, "VISUAL_PICK_CONSENSUS_MAX_SAMPLES", 6)
+            minimum = getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2)
+            budget = float(getattr(self.config, "VISUAL_PICK_CONSENSUS_TIMEOUT_SEC", 3.0))
+            radius = float(getattr(self.config, "VISUAL_PICK_CONSENSUS_RADIUS_MM", 3.75))
+            pitch = np.array([self.config.VISUAL_BOARD_WIDTH_MM / 8,
+                              self.config.VISUAL_BOARD_HEIGHT_MM / 9], dtype=float)
+            if (any(isinstance(v, bool) or int(v) != v for v in (initial, maximum, minimum))
+                    or not 3 <= initial <= maximum <= 6 or not 2 <= minimum <= maximum
+                    or not np.isfinite([budget, radius, *pitch]).all() or budget <= 0
+                    or np.any(pitch <= 0) or not 0 < radius <= min(pitch) * .25):
+                raise ValueError("Invalid consensus sampling configuration")
+        except Exception as exc:
+            self.last_pick_resolution["reason"] = str(exc)
+            return targets
+        started = time.monotonic()
+        deadline = started + budget
+
+        def expired():
+            now = time.monotonic()
+            self.last_pick_resolution["elapsed_sec"] = max(0.0, now - started)
+            if now < deadline:
+                return False
+            self.last_pick_resolution.update(failure="deadline", reason="Pick sampling budget exhausted; late results rejected")
+            print("[TOP PICK] Sampling deadline; no fallback.")
+            return True
+
+        for attempt in range(int(maximum)):
+            if expired():
+                return targets
+            self.last_pick_resolution["attempts"] = attempt + 1
+            try:
+                frame, detections = self.cam_monitor.get_fresh_pick_snapshot()
+                if expired():
+                    return targets
+                estimator.geometry.validate_context(
+                    self.actual_camera_index, frame.shape[1::-1],
+                    (self.config.VISUAL_BOARD_WIDTH_MM, self.config.VISUAL_BOARD_HEIGHT_MM),
+                    self.config.VISUAL_PIECE_HEIGHT_MM, np.load(self.perspective_path),
+                    self.config.VISUAL_GEOMETRY_CORNER_TOLERANCE_PX)
+                for name, (col, row) in expected_cells.items():
+                    samples[name].append(estimator.estimate_pick_target(frame, detections, col, row))
+                    print(f"[TOP PICK] {name}: {estimator.last_reason}; profile={estimator.geometry.profile_id}")
+                    self.cam_monitor.publish_pick_diagnostic(estimator.diagnostic)
+                if expired():
+                    return targets
+            except FreshPickTransientError as exc:
+                for values in samples.values():
+                    values.append(None)
+                print(f"[TOP PICK] Transient attempt {attempt + 1}: {exc}")
+            except Exception as exc:
+                self.last_pick_resolution.update(failure="hard", reason=str(exc))
+                print(f"[TOP PICK] Snapshot rejected: {exc}")
+                return targets
+            if expired():
+                return targets
+            if attempt + 1 < initial:
+                continue
+            try:
+                results = {name: select_consensus(values, pitch, minimum, radius)
+                           for name, values in samples.items()}
+                if expired():
+                    return targets
+                for name, result in results.items():
+                    print(f"[TOP PICK] attempt={attempt + 1}/{maximum} {name}: {result.reason}; support={result.support}")
+                    if result.target is not None:
+                        col, row = expected_cells[name]
+                        offset = np.hypot(result.target.col - col, result.target.row - row)
+                        if offset > getattr(self.config, "VISUAL_PICK_MAX_OFFSET_CELLS", .25):
+                            raise ValueError("Consensus center outside expected-cell correction limit")
+                if all(result.target is not None for result in results.values()):
+                    for name, result in results.items():
+                        print(f"[TOP PICK] selected {name} grid=({result.target.col:.4f},{result.target.row:.4f}) "
+                              f"support={result.support} valid={result.valid_count}")
+                    if expired():
+                        return targets
+                    self.last_pick_resolution.update(failure="", reason="; ".join(r.reason for r in results.values()))
+                    print(f"[TOP PICK] sampling={self.last_pick_resolution['elapsed_sec']:.3f}s")
+                    if expired():
+                        return targets
+                    return {name: result.target for name, result in results.items()}
+                self.last_pick_resolution.update(failure="consensus", reason="; ".join(
+                    f"{name}: {result.reason}" for name, result in results.items()))
+            except Exception as exc:
+                self.last_pick_resolution.update(failure="hard", reason=str(exc))
+                return targets
+        return targets
+
+    def get_robot_center_pick_targets(self, expected_cells):
+        """Shared T/game resolver: calibrated top rims, or explicitly legacy.
+
+        Top mode fails closed. Only when that mode is disabled does the old
+        box-center/foot fallback path below remain available.
         """
+        if self._top_face_enabled():
+            return self._get_top_face_targets(expected_cells)
         targets = {name: None for name in expected_cells}
         if not self.center_pick_estimator or not self.cam_monitor:
             print("[CENTER PICK] Unavailable; using legacy visual-pick fallback.")
@@ -338,8 +473,10 @@ class HardwareManager:
               "using legacy foot-point correction.")
         return self.get_visual_pick_targets(expected_cells)
 
-    def execute_pick_place_test(self, source, destination):
+    def execute_pick_place_test(self, source, destination, validate_request=None):
         """Run the production geometry path without AI, rules or FEN commits."""
+        if validate_request:
+            validate_request()
         if not self.robot or not self.robot.connected:
             raise RuntimeError("Robot chưa kết nối")
         if not self.center_pick_estimator or not self.cam_monitor:
@@ -348,12 +485,17 @@ class HardwareManager:
             raise RuntimeError("Ô đích chưa trống hoặc camera không xác nhận được")
         target = self.get_robot_center_pick_targets({"moving": source}).get("moving")
         if target is None:
-            raise RuntimeError("Không có visual target ổn định; chưa chạy arm")
+            require_pick_target(self, {"moving": None}, "moving")
+        if validate_request:
+            validate_request()
         print(f"[PICK TEST] logical={source} visual=({target.col:.4f},{target.row:.4f}) "
               f"destination={destination} conf={target.confidence:.3f} offset={target.offset_cells:.4f}")
-        self.robot.move_piece(*source, *destination, False, moving_visual_target=target)
+        self.robot.move_piece(*source, *destination, False, moving_visual_target=target,
+                              require_visual_target=True)
         if not self.verify_visual_move(source, destination):
             raise RuntimeError("Đã chạy arm nhưng chưa xác nhận được quân ở ô đích; kiểm tra bàn thật")
+        if validate_request:
+            validate_request()
         return target
 
     def _cell_has_center_detection(self, detections, cell):
@@ -373,7 +515,11 @@ class HardwareManager:
         required = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
         clear_samples = 0
         for _ in range(attempts):
-            frame, detections = self.cam_monitor.get_fresh_snapshot()
+            try:
+                frame, detections = self._occupancy_snapshot()
+            except Exception as exc:
+                print(f"[TOP PICK] Occupancy unavailable: {exc}")
+                return False
             if frame is not None and not self._cell_has_center_detection(detections, cell):
                 clear_samples += 1
         cleared = clear_samples >= required
@@ -389,7 +535,11 @@ class HardwareManager:
         required = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
         matching_samples = 0
         for _ in range(attempts):
-            frame, detections = self.cam_monitor.get_fresh_snapshot()
+            try:
+                frame, detections = self._occupancy_snapshot()
+            except Exception as exc:
+                print(f"[TOP PICK] Move verification unavailable: {exc}")
+                return False
             if frame is None:
                 continue
             source_clear = not self._cell_has_center_detection(detections, source_cell)

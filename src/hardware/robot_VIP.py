@@ -653,7 +653,8 @@ class FR5Robot:
 
     def move_piece(self, s_col, s_row, d_col, d_row, is_capture,
                    moving_visual_target=None, captured_visual_target=None,
-                   refresh_moving_visual_target=None, verify_capture_cleared=None):
+                   refresh_moving_visual_target=None, verify_capture_cleared=None,
+                   require_visual_target=False):
         """Quy trình di chuyển hoàn chỉnh, bao gồm xử lý ăn quân.
         
         Args:
@@ -668,6 +669,23 @@ class FR5Robot:
         print(f"[ROBOT] ♟️ Di chuyển: ({s_col},{s_row}) → ({d_col},{d_row})"
               + (" [ĂN QUÂN]" if is_capture else ""))
         print(f"[ROBOT] 🔍 DEBUG: s_col={s_col}, s_row={s_row}, d_col={d_col}, d_row={d_row}")
+
+        def require_target(target, label):
+            if target is None or not np.isfinite([target.col, target.row]).all():
+                raise RuntimeError(f"Missing/nonfinite {label} visual target; pick cancelled")
+
+        if require_visual_target:
+            # Validate BEFORE connect/approach/close. A capture source is measured
+            # after removal, but its callback must exist before removing anything.
+            if is_capture:
+                require_target(captured_visual_target, "capture")
+                if refresh_moving_visual_target is None or verify_capture_cleared is None:
+                    raise RuntimeError("Visual capture requires fresh source and cleared-square verification")
+            else:
+                if refresh_moving_visual_target is not None:
+                    moving_visual_target = refresh_moving_visual_target()
+                    refresh_moving_visual_target = None
+                require_target(moving_visual_target, "source")
 
         if not self.connected and not self.dry:
             try:
@@ -699,7 +717,12 @@ class FR5Robot:
         if refresh_moving_visual_target is not None:
             moving_visual_target = refresh_moving_visual_target()
             if moving_visual_target is None:
+                if require_visual_target:
+                    raise RuntimeError("Source refresh failed; no stale/logical pick fallback")
                 print("[ROBOT] Visual correction unavailable after refresh; picking logical cell centre.")
+
+        if require_visual_target:
+            require_target(moving_visual_target, "source")
 
         # 2. Gắp quân mình ở nguồn
         print(f"[ROBOT] 🤏 Gắp quân mình tại nguồn ({s_col},{s_row})")

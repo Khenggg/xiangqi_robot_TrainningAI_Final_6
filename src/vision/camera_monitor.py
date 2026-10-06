@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import time
 import threading
+from src.vision.pick_consensus import FreshPickTransientError
 import os
 
 # Màu hiển thị
@@ -67,6 +68,9 @@ class CameraMonitor:
         self._detect_thread = None          # Detect thread (Async background)
         self._lock = threading.Lock()       # Bảo vệ _last_frame/_last_detections
         self._cam_lock = threading.Lock()   # Bảo vệ truy cập camera (cap.read/grab)
+        self._inference_lock = threading.Lock()
+        self._last_pick_diagnostic = None
+        self._pick_diagnostic_until = 0.0
         self._board_polygon = None  # Cache polygon bàn cờ trong pixel space (4 điểm)
 
         # Tự động chọn GPU nếu có CUDA, ngược lại CPU
@@ -263,10 +267,7 @@ class CameraMonitor:
             elif self.model is not None:
                 try:
                     frame_rgb = cv2.cvtColor(frame_to_detect, cv2.COLOR_BGR2RGB)
-                    results = self.model.predict(
-                        frame_rgb, conf=self.conf, iou=0.35,
-                        imgsz=640, device=self.device, verbose=False
-                    )
+                    results = self._predict_yolo(frame_rgb)
                     for box in results[0].boxes:
                         cls_id = int(box.cls[0])
                         conf = float(box.conf[0])
@@ -285,6 +286,15 @@ class CameraMonitor:
 
     def _draw_overlay(self, frame, detections):
         """Vẽ hiển thị bàn cờ: Lưới phối cảnh + Quân cờ CChess (hoặc bounding box YOLO)."""
+        with self._lock:
+            if self._last_pick_diagnostic is not None:
+                if self._pick_diagnostic_until == 0.0:
+                    # Robot motion blocks the UI loop; start the eight seconds
+                    # on first display, not before a long pick/place operation.
+                    self._pick_diagnostic_until = time.monotonic() + 8.0
+                if time.monotonic() < self._pick_diagnostic_until:
+                    return self._last_pick_diagnostic.copy()
+                self._last_pick_diagnostic = None
         display = frame.copy()
 
         # --- 1. Vẽ lưới perspective ---
@@ -345,6 +355,7 @@ class CameraMonitor:
         # --- 3. Fallback YOLO nếu chưa có CChess ---
         if not has_cchess and detections:
             for (cls_id, conf, (x1, y1, x2, y2)) in detections:
+                x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
                 cv2.rectangle(display, (x1, y1), (x2, y2), _PIECE_COLOR, 2)
                 text = f"piece {conf:.0%}"
                 (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
@@ -359,7 +370,26 @@ class CameraMonitor:
 
         return display
 
-    def get_fresh_snapshot(self):
+    def publish_pick_diagnostic(self, frame):
+        """Display the exact measured snapshot, not an overlay on a newer frame."""
+        with self._lock:
+            self._last_pick_diagnostic = frame.copy()
+            self._pick_diagnostic_until = 0.0
+
+    def _predict_yolo(self, image):
+        with self._inference_lock:
+            return self.model.predict(image, conf=self.conf, iou=0.35,
+                                      imgsz=640, device=self.device, verbose=False)
+
+    def get_fresh_pick_snapshot(self):
+        """Raw float best.pt boxes on this exact frame; inference failure raises.
+
+        No 85%-foot board filter and no theoretical CChess boxes are allowed.
+        A valid empty detection list must remain distinct from failed inference.
+        """
+        return self.get_fresh_snapshot(raw_pick=True)
+
+    def get_fresh_snapshot(self, raw_pick=False):
         """Chụp 1 snapshot MỚI: flush buffer + read.
         Cập nhật đồng thời CChess layout recognition và detections.
         
@@ -367,6 +397,8 @@ class CameraMonitor:
             (frame, detections) — giữ nguyên signature để tương thích các module gọi
         """
         if self.cap is None or not self.cap.isOpened():
+            if raw_pick:
+                raise RuntimeError("Pick camera unavailable")
             return None, []
 
         with self._cam_lock:
@@ -375,12 +407,14 @@ class CameraMonitor:
             ret, frame = self.cap.read()
 
         if not ret or frame is None:
+            if raw_pick:
+                raise FreshPickTransientError("Fresh pick frame unavailable")
             print("[CAM MONITOR] Camera read failed in get_fresh_snapshot!")
             return None, []
 
         detections = []
         # Chạy CChess nếu có
-        if self.cchess_recognizer is not None and self._inv_M is not None:
+        if not raw_pick and self.cchess_recognizer is not None and self._inv_M is not None:
             try:
                 grid_kpts = np.array([
                     [[0.0, 0.0]], [[8.0, 0.0]], [[0.0, 9.0]], [[8.0, 9.0]]
@@ -406,19 +440,23 @@ class CameraMonitor:
         # cell centres are theoretical, not physical piece positions.
         if self.model is not None:
             try:
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = self.model.predict(
-                    frame_rgb, conf=self.conf, iou=0.35,
-                    imgsz=640, device=self.device, verbose=False
-                )
+                # Ultralytics accepts OpenCV/NumPy BGR. Preserve legacy input
+                # outside this new path; raw picks must not swap channels twice.
+                image = frame if raw_pick else cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                results = self._predict_yolo(image)
                 for box in results[0].boxes:
                     cls_id = int(box.cls[0])
                     conf = float(box.conf[0])
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    x1, y1, x2, y2 = map(float, box.xyxy[0])
                     detections.append((cls_id, conf, (x1, y1, x2, y2)))
-                detections = self._filter_by_board(detections)
+                if not raw_pick:
+                    detections = self._filter_by_board(detections)
             except Exception as e:
+                if raw_pick:
+                    raise FreshPickTransientError("best.pt inference failed; cannot confirm pick/empty cell") from e
                 print(f"[CAM MONITOR] YOLO error in snapshot: {e}")
+        elif raw_pick:
+            raise RuntimeError("best.pt unavailable; no measured pick/occupancy evidence")
 
         with self._lock:
             self._last_frame = frame.copy()

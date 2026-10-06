@@ -6,6 +6,16 @@ from src.core.fen_utils import board_array_to_fen, fen_to_board_array, INITIAL_F
 from src.api.simulation_client import TuongKyDaiSuClient  # type: ignore
 import config  # type: ignore
 
+
+def pending_move_signature(pending):
+    """Immutable intended transition; identity alone cannot detect dict edits."""
+    if pending is None:
+        return None
+    source, destination = pending["move"]
+    return (tuple(source), tuple(destination), pending["captured_piece"],
+            tuple(tuple(row) for row in pending["expected_board"]))
+
+
 class GameState:
     def __init__(self, allow_mouse_move=False):
         self.allow_mouse_move = allow_mouse_move
@@ -64,6 +74,8 @@ class GameState:
         # same robot command until an operator resolves the discrepancy.
         self.physical_sync_fault: bool = False
         self.pending_ai_move: Optional[Dict[str, Any]] = None
+        self.visual_pick_retry = None
+        self.visual_capture_checkpoint = None
 
     def update_fen_from_board(self):
         """Cập nhật current_fen từ board array hiện tại."""
@@ -84,6 +96,10 @@ class GameState:
             "snapshot_continue_required": self.snapshot_continue_required,
             "emergency_mode": self.emergency_mode,
             "pick_test_mode": self.pick_test_mode,
+            "visual_pick_retry": ({"owner": self.visual_pick_retry["owner"],
+                                   "reason": self.visual_pick_retry["reason"],
+                                   "stage": self.visual_pick_retry["stage"]}
+                                  if getattr(self, "visual_pick_retry", None) else None),
             "recent_moves": self.move_log[-8:],
         }
 
@@ -137,6 +153,9 @@ class GameState:
         self.physical_sync_fault = False
         self.pending_ai_move = None
 
+        self.visual_pick_retry = None
+        self.visual_capture_checkpoint = None
+
         print("[GAME] 🔄 New game started!")
         print(f"[FEN] {self.current_fen}")
         
@@ -157,6 +176,7 @@ class GameState:
         self.invalid_flash_expiry = time.time() + duration
 
     def handle_game_over(self, the_winner):
+        self.visual_pick_retry = None
         self.winner = the_winner
         self.game_over = True
         self.ai_epoch += 1
@@ -186,6 +206,8 @@ class GameState:
             return
 
         print("[ROLLBACK] ↩️ Khôi phục trạng thái trước SPACE...")
+        self.visual_pick_retry = None
+        self.visual_capture_checkpoint = None
         self.game_epoch += 1
         self.ai_epoch += 1
         self.ai_job_token = None
@@ -226,10 +248,65 @@ class GameState:
             "expected_board": [row[:] for row in expected_board],
             "captured_piece": captured_piece,
         }
+        self.visual_capture_checkpoint = None
 
     def clear_pending_ai_move(self):
         self.pending_ai_move = None
         self.physical_sync_fault = False
+        self.visual_pick_retry = None
+        self.visual_capture_checkpoint = None
+
+    def pause_visual_pick(self, owner, source, destination, exc):
+        """Bind Retry to this exact game/test board, never a cached target."""
+        if owner not in {"ai", "test"} or exc.stage not in {"pre_pick", "capture_removed"}:
+            raise ValueError("Invalid visual retry ownership/stage")
+        test_board = getattr(self, "pick_test_board", None)
+        self.visual_pick_retry = dict(
+            owner=owner, source=tuple(source), destination=tuple(destination),
+            stage=exc.stage, reason=str(exc),
+            token=tuple(getattr(self, name, 0) for name in
+                        ("game_epoch", "ai_epoch", "human_commit_generation")),
+            pending=getattr(self, "pending_ai_move", None) if owner == "ai" else None,
+            pending_signature=pending_move_signature(getattr(self, "pending_ai_move", None)) if owner == "ai" else None,
+            board=tuple(tuple(row) for row in (self.board if owner == "ai" else test_board)),
+            test_board=tuple(tuple(row) for row in test_board) if owner == "test" else None)
+        if owner == "ai":
+            self.physical_sync_fault = True
+            self.snapshot_continue_required = True
+            self.snapshot_continue_can_commit_pending = False
+        hint = " (quân bị ăn đã được bỏ ra)" if exc.stage == "capture_removed" else ""
+        self.set_status(f"Chưa xác nhận tâm{hint}: {exc}. R: thử lại / X: hủy.",
+                        color=(180, 100, 0), duration=3600)
+
+    def visual_pick_retry_is_current(self, request=None):
+        request = request if request is not None else getattr(self, "visual_pick_retry", None)
+        if request is None or request is not getattr(self, "visual_pick_retry", None) or self.game_over:
+            return False
+        token = tuple(getattr(self, name, 0) for name in
+                      ("game_epoch", "ai_epoch", "human_commit_generation"))
+        if token != request["token"]:
+            return False
+        if request["owner"] == "test":
+            board = getattr(self, "pick_test_board", None)
+            return (getattr(self, "pick_test_mode", False) and board is not None
+                    and tuple(tuple(row) for row in board) == request["test_board"])
+        pending = getattr(self, "pending_ai_move", None)
+        return (self.turn == "b" and pending is request["pending"] and pending is not None
+                and pending["move"] == (request["source"], request["destination"])
+                and pending_move_signature(pending) == request["pending_signature"]
+                and tuple(tuple(row) for row in self.board) == request["board"])
+
+    def cancel_visual_pick_retry(self):
+        request = getattr(self, "visual_pick_retry", None)
+        self.visual_pick_retry = None
+        self.selected_pos = None
+        if request and request["owner"] == "ai":
+            self.physical_sync_fault = True
+            self.snapshot_continue_required = True
+            self.snapshot_continue_can_commit_pending = False
+            self.set_status("Đã hủy thử lại; FEN giữ nguyên. Kiểm tra/phục hồi bàn thật rồi V để đối soát.", duration=3600)
+        else:
+            self.set_status("Đã hủy thử lại. TEST: chọn quân và ô trống để test tiếp.", duration=30)
 
     def prepare_ai_retry_after_physical_miss(self):
         """Re-open the current Black AI turn after a verified missed pickup.
@@ -258,6 +335,8 @@ class GameState:
         """Whether the main loop may create exactly one Black AI worker."""
         return (
             not getattr(self, "pick_test_mode", False)
+            and not getattr(self, "visual_pick_retry", None)
+            and not getattr(self, "physical_sync_fault", False)
             and not getattr(self, "pick_test_resume_required", False)
             and not self.ai_thinking
             and self.ai_thread is None
@@ -295,6 +374,8 @@ class GameState:
         self.update_fen_from_board()
         self.pending_ai_move = None
         self.physical_sync_fault = False
+        self.visual_pick_retry = None
+        self.visual_capture_checkpoint = None
         return True
 
     def process_human_move(self, src, dst, p_name):
@@ -332,6 +413,8 @@ class GameState:
         # An operator edit supersedes any unverified robot transition.  Never
         # let a later Continue overwrite the corrected client position.
         self.pending_ai_move = None
+        self.visual_pick_retry = None
+        self.visual_capture_checkpoint = None
         self.physical_sync_fault = False
         self.snapshot_continue_required = False
         self.snapshot_continue_can_commit_pending = False

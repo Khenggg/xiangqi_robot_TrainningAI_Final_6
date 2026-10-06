@@ -4,6 +4,10 @@ from src.core import xiangqi  # type: ignore
 from src.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT,
                                    BTN_CONTINUE_RECT, BTN_SCAN_FEN_RECT, BTN_CONFIRM_MOVE_RECT,
                                    BTN_EMERGENCY_RECT, BTN_ROLLBACK_RECT, BTN_PICK_TEST_RECT, NUM_COLS, NUM_ROWS)  # type: ignore
+from src.ui.board_renderer import BTN_PICK_RETRY_RECT, BTN_PICK_CANCEL_RECT
+from src.core.game_state import GameState
+from src.core.visual_move_coordinator import execute_pending_ai_motion
+from src.vision.pick_consensus import PickTargetUnavailable
 from src.vision.board_stability_monitor import BoardStabilityMonitor
 from src.vision.player_turn_arbiter import PlayerTurnArbiter
 from src.vision.player_turn_types import BoardObservation, CommitRequest, InteractionCapability, PlayerTurnMode, Visibility
@@ -187,6 +191,15 @@ class InputHandler:
 
     def handle_mouse_down(self, mx, my):
         import pygame  # type: ignore
+        if getattr(self.state, "visual_pick_retry", None):
+            if BTN_PICK_RETRY_RECT.collidepoint(mx, my):
+                self.handle_keyboard(pygame.K_r)
+                return
+            if BTN_PICK_CANCEL_RECT.collidepoint(mx, my):
+                self.handle_keyboard(pygame.K_x)
+                return
+            if not (BTN_NEW_GAME_RECT.collidepoint(mx, my) or BTN_SURRENDER_RECT.collidepoint(mx, my)):
+                return
         client_actions = (
             (BTN_SCAN_FEN_RECT, pygame.K_v),
             (BTN_CONFIRM_MOVE_RECT, pygame.K_SPACE),
@@ -287,6 +300,7 @@ class InputHandler:
 
     def _toggle_pick_test(self):
         if getattr(self.state, "pick_test_mode", False):
+            self.state.visual_pick_retry = None
             self.state.pick_test_mode = False
             self.state.selected_pos = None
             self.state.set_status("Test đã tắt. Khôi phục bàn ban đầu rồi New Game để chơi; T để test tiếp.", duration=30)
@@ -320,15 +334,74 @@ class InputHandler:
             return
         destination = (col, row)
         self.state.selected_pos = None
+        self._run_pick_test(source, destination)
+
+    def _run_pick_test(self, source, destination, request=None):
+        board = self.state.pick_test_board
+
+        def validate_request():
+            if request is not None and not self.state.visual_pick_retry_is_current(request):
+                raise RuntimeError("Stale test retry; no motion/board update authorized")
+
         try:
             self.state.set_status("TEST: arm đang gắp/thả...", duration=30)
-            target = self.hw.execute_pick_place_test(source, destination)
+            validate_request()
+            # Sampling is synchronous; the callback additionally guards the
+            # motion boundary for a queued operator retry.
+            if request is not None:
+                target = self.hw.execute_pick_place_test(source, destination, validate_request=validate_request)
+            else:
+                target = self.hw.execute_pick_place_test(source, destination)
+            validate_request()
+            col, row = destination
             board[row][col] = board[source[1]][source[0]]
             board[source[1]][source[0]] = "."
+            self.state.visual_pick_retry = None
             self.state.set_status(f"TEST xong: ({target.col:.3f},{target.row:.3f}) → ({col},{row}). Chọn quân để test tiếp.", duration=20)
+        except PickTargetUnavailable as exc:
+            if exc.stage != "pre_pick":
+                self.state.visual_pick_retry = None
+                self.state.set_status("TEST dừng sau chuyển động; kiểm tra bàn thật, không tự thử lại.", duration=30)
+            else:
+                GameState.pause_visual_pick(self.state, "test", source, destination, exc)
         except Exception as exc:
+            self.state.visual_pick_retry = None
             print(f"[PICK TEST] {exc}")
             self.state.set_status(f"TEST dừng: {exc}", color=(180, 0, 0), duration=30)
+
+    def _retry_visual_pick(self):
+        request = self.state.visual_pick_retry
+        if not self.state.visual_pick_retry_is_current(request):
+            self.state.visual_pick_retry = None
+            self.state.set_status("Yêu cầu thử lại đã hết hiệu lực; không chạy arm.", duration=30)
+            return
+        if request["owner"] == "test":
+            self._run_pick_test(request["source"], request["destination"], request)
+            return
+        finalization_started = False
+        try:
+            execute_pending_ai_motion(self.state, self.hw, self.hw.config, request["stage"])
+            if not self.state.visual_pick_retry_is_current(request):
+                raise RuntimeError("Retry changed ownership before finalization")
+            finalization_started = True
+            self._finalize_pending_ai_move("Đã xác nhận nước đi — đến lượt bạn.", (0, 120, 0))
+        except PickTargetUnavailable as exc:
+            self.state.pause_visual_pick("ai", request["source"], request["destination"], exc)
+        except Exception as exc:
+            self.state.visual_pick_retry = None
+            if finalization_started and self.state.pending_ai_move is None:
+                # Commit already succeeded. API/baseline failure must neither
+                # replay the arm nor pretend the FEN stayed at the old board.
+                self.state.physical_sync_fault = False
+                self.state.snapshot_continue_required = False
+                self.state.snapshot_continue_can_commit_pending = False
+                self.state.manual_override_active = True
+                self.state.set_status(f"Nước đi đã hoàn tất/FEN đã cập nhật; lỗi đồng bộ: {exc}. V để lấy lại baseline.", duration=30)
+                return
+            self.state.physical_sync_fault = True
+            self.state.snapshot_continue_required = True
+            self.state.snapshot_continue_can_commit_pending = False
+            self.state.set_status(f"Thử lại dừng: {exc}. Kiểm tra bàn thật rồi V; FEN giữ nguyên.", duration=3600)
 
     def resume_automatic_scanning(self):
         """Install a fresh physical baseline, then re-enable automatic polling.
@@ -382,6 +455,17 @@ class InputHandler:
     def handle_keyboard(self, key):
         import pygame  # type: ignore
         if self.state.game_over:
+            return
+
+        if getattr(self.state, "visual_pick_retry", None):
+            if key == pygame.K_r:
+                self._retry_visual_pick()
+            elif key == pygame.K_x:
+                self.state.cancel_visual_pick_retry()
+            elif key == pygame.K_t and self.state.visual_pick_retry["owner"] == "test":
+                self._toggle_pick_test()
+            else:
+                self.state.set_status("Đang chờ đo tâm: R thử lại cùng nước đi / X hủy.", duration=30)
             return
 
         if key == pygame.K_t:
@@ -675,6 +759,7 @@ class InputHandler:
     def poll_board_stability(self):
         """Commit one legal Red move after repeated stable board observations."""
         if (self.state.turn != "r" or self.state.game_over
+                or getattr(self.state, "visual_pick_retry", None)
                 or getattr(self.state, "pick_test_mode", False)
                 or getattr(self.state, "pick_test_resume_required", False)
                 or getattr(self.state, "manual_override_active", False)):

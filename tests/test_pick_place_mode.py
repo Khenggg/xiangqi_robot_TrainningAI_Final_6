@@ -82,7 +82,9 @@ class PickPlaceModeTests(unittest.TestCase):
     def test_hardware_passes_measured_target_to_production_motion(self):
         hardware = self.make_hardware()
         target = hardware.execute_pick_place_test((0, 0), (3, 4))
-        hardware.robot.move_piece.assert_called_once_with(0, 0, 3, 4, False, moving_visual_target=target)
+        hardware.robot.move_piece.assert_called_once_with(0, 0, 3, 4, False,
+                                                        moving_visual_target=target,
+                                                        require_visual_target=True)
         hardware.verify_visual_move.assert_called_once_with((0, 0), (3, 4))
 
     def test_missing_target_or_occupied_destination_blocks_motion(self):

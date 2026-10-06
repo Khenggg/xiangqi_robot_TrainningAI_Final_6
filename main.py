@@ -27,6 +27,8 @@ import config  # type: ignore
 from src.core import xiangqi  # type: ignore
 
 from src.core.game_state import GameState  # type: ignore
+from src.core.visual_move_coordinator import execute_pending_ai_motion
+from src.vision.pick_consensus import PickTargetUnavailable
 from src.hardware.hardware_manager import HardwareManager  # type: ignore
 from src.ui.input_handler import InputHandler  # type: ignore
 from src.ui.debug_dashboard import DebugDashboard  # type: ignore
@@ -280,61 +282,24 @@ try:
                             if hw.robot.connected:
                                 print(f"[AI] Robot executing move: {xiangqi.format_move(s, d)}")
                                 try:
-                                    pick_targets = {"moving": None, "captured": None}
-                                    # CChess creates the calibration matrix; best.pt measures
-                                    # the physical box centre used for each robot pick.
-                                    expected_cells = {"captured": d} if is_cap else {"moving": s}
-                                    if getattr(config, "VISUAL_PICK_ENABLED", False):
-                                        pick_targets = hw.get_robot_center_pick_targets(expected_cells)
-                                    if robot_success:
-                                        def refresh_moving_target():
-                                            if not is_cap:
-                                                return pick_targets.get("moving")
-                                            refreshed = hw.get_robot_center_pick_targets({"moving": s})
-                                            return refreshed.get("moving")
-
-                                        def verify_capture_cleared():
-                                            return not is_cap or hw.is_cell_visually_clear(d)
-
-                                        hw.robot.move_piece(
-                                            s[0], s[1], d[0], d[1], is_cap,
-                                            moving_visual_target=pick_targets.get("moving"),
-                                            captured_visual_target=pick_targets.get("captured"),
-                                            refresh_moving_visual_target=refresh_moving_target,
-                                            verify_capture_cleared=verify_capture_cleared,
-                                        )
-                                        # Confirm the observed source->destination geometry. CChess
-                                        # identity/FEN is deliberately not a robot-motion gate.
-                                        if getattr(config, "VISUAL_PICK_ENABLED", False):
-                                            if not hw.verify_visual_move(s, d):
-                                                robot_success = False
-                                                state.physical_sync_fault = True
-                                                state.snapshot_continue_required = True
-                                                # A half-completed capture has three physical
-                                                # states, so CONTINUE must not commit FEN blindly.
-                                                # The operator completes Black's move then V
-                                                # verifies the exact expected board.
-                                                state.snapshot_continue_can_commit_pending = not is_cap
-                                                recovery_hint = (
-                                                    "⚠️ Nước ăn chưa hoàn tất: chuyển quân Đen "
-                                                    f"({s[0]},{s[1]})→({d[0]},{d[1]}) rồi nhấn V."
-                                                    if is_cap else
-                                                    "⚠️ Không xác nhận được vị trí quân sau khi thả — FEN chưa được cập nhật."
-                                                )
-                                                state.set_status(
-                                                    recovery_hint,
-                                                    color=(180, 100, 0), duration=20.0,
-                                                )
+                                    execute_pending_ai_motion(state, hw, config)
+                                except PickTargetUnavailable as exc:
+                                    robot_success = False
+                                    state.pause_visual_pick("ai", s, d, exc)
                                 except Exception as e:
+                                    # Even 112/MoveCart errors are NOT proof of completion.
+                                    robot_success = False
+                                    state.physical_sync_fault = True
+                                    state.snapshot_continue_required = True
+                                    state.snapshot_continue_can_commit_pending = False
                                     error_str = str(e)
                                     print(f"⚠️ Robot error: {error_str}")
+                                    state.set_status(f"Robot dừng: {error_str}. Kiểm tra bàn thật rồi V; FEN giữ nguyên.",
+                                                     color=(180, 0, 0), duration=3600)
                                     if "112" in error_str or "MoveCart" in error_str:
                                         print("[ROBOT] Recoverable motion error; camera verification is required before FEN commit.")
                                     else:
                                         print("❌ [CRITICAL] Robot critical error, stopping game.")
-                                        robot_success = False
-                                        state.physical_sync_fault = True
-                                        state.snapshot_continue_required = True
                                         time.sleep(2)
                             else:
                                 print(f"\n{'='*50}")
