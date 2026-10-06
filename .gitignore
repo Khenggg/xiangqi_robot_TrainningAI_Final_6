@@ -4,6 +4,7 @@
 
 # Ma trận hiệu chỉnh Camera (mỗi người dùng máy khác nhau)
 perspective.npy
+calibration/pick_geometry.json*
 
 # Python cache files
 __pycache__/
