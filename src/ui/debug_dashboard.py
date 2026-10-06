@@ -1,10 +1,31 @@
 """Optional, read-only robot telemetry window."""
 import json
+import math
+from functools import lru_cache
 from pathlib import Path
 import subprocess
 import sys
 import threading
 import time
+
+
+@lru_cache(maxsize=1)
+def _camera_inverse(path, modified):
+    import numpy as np
+    return np.linalg.inv(np.load(path))
+
+
+def camera_correction(correction):
+    """Project the final nominal/corrected grid points into camera pixels."""
+    import cv2
+    import numpy as np
+    path = Path(__file__).resolve().parents[2] / "perspective.npy"
+    points = np.array([[correction["cell"], correction["target"]]], dtype=np.float64)
+    pixels = cv2.perspectiveTransform(points, _camera_inverse(str(path), path.stat().st_mtime_ns))[0]
+    delta = pixels[1] - pixels[0]
+    if not np.isfinite(delta).all():
+        raise ValueError("Invalid camera projection")
+    return float(delta[0]), float(delta[1])
 
 
 class DebugDashboard:
@@ -39,10 +60,19 @@ class DebugDashboard:
             "motion": "Unavailable",
             "tcp_speed": "Unavailable",
             "age": "No telemetry received",
+            "correction": None,
         }
         robot = self.robot
         if robot is None:
             return data
+        correction = getattr(robot, "visual_pick_correction", None)
+        if correction is not None:
+            data["correction"] = dict(correction)
+            try:
+                dx, dy = camera_correction(correction)
+                data["correction"].update(dx_px=dx, dy_px=dy)
+            except (OSError, ValueError, KeyError):
+                data["correction"].update(dx_px=None, dy_px=None)
         planned_command = getattr(robot, "get_planned_command", lambda: None)()
         if planned_command is not None:
             x, y, z, rx, ry, rz = planned_command["pose"]
@@ -111,17 +141,68 @@ class DebugDashboard:
             self._thread.join(timeout=1)
 
 
+def dial_vector(x, y, rotation):
+    """Robot +X points right, +Y up; rotation is clockwise on screen."""
+    angle = math.radians(rotation)
+    return (x * math.cos(angle) + y * math.sin(angle),
+            x * math.sin(angle) - y * math.cos(angle))
+
+
+def draw_correction_dial(screen, pygame, font, correction, rotation):
+    center, radius = (800, 250), 120
+    muted, white, red = (148, 164, 182), (228, 234, 242), (255, 100, 100)
+    pygame.draw.circle(screen, muted, center, radius, 2)
+    for x, y, label in ((1, 0, "X"), (0, 1, "Y")):
+        vx, vy = dial_vector(x, y, rotation)
+        start = (center[0] - vx * 145, center[1] - vy * 145)
+        end = (center[0] + vx * 145, center[1] + vy * 145)
+        pygame.draw.line(screen, muted, start, end, 2)
+        pygame.draw.polygon(screen, muted, [end,
+            (end[0] - vx * 12 - vy * 5, end[1] - vy * 12 + vx * 5),
+            (end[0] - vx * 12 + vy * 5, end[1] - vy * 12 - vx * 5)])
+        text = font.render("+" + label, True, white)
+        screen.blit(text, text.get_rect(center=(center[0] + vx * 170, center[1] + vy * 170)))
+    lines = ["Waiting for a pick", "Length: -- px"]
+    if correction is not None and correction.get("dx_px") is None:
+        lines = ["Camera calibration unavailable", "Length: -- px"]
+    elif correction is not None:
+        dx, dy = correction["dx_px"], correction["dy_px"]
+        length = math.hypot(dx, dy)
+        if length > 1e-6:
+            vx, vy = dial_vector(dx / length, -dy / length, rotation)
+            end = (center[0] + vx * 105, center[1] + vy * 105)
+            pygame.draw.line(screen, red, center, end, 4)
+            pygame.draw.polygon(screen, red, [end,
+                (end[0] - vx * 17 - vy * 8, end[1] - vy * 17 + vx * 8),
+                (end[0] - vx * 17 + vy * 8, end[1] - vy * 17 - vx * 8)])
+        else:
+            pygame.draw.circle(screen, red, center, 5)
+        status = "Picking now" if correction["active"] else "Last pick"
+        lines = [status + f" - cell {tuple(correction['cell'])}",
+                 f"Length: {length:.2f} px",
+                 f"X: {dx:+.2f} px   Y: {-dy:+.2f} px (up)",
+                 "Camera correction" if correction["visual"] else "Nominal pick (no correction)"]
+    for index, line in enumerate(lines):
+        text = font.render(line, True, white)
+        screen.blit(text, text.get_rect(center=(800, 445 + index * 26)))
+    text = font.render("Arrow shows direction; length shown above", True, muted)
+    screen.blit(text, text.get_rect(center=(800, 570)))
+
+
 def run_window():
     import queue
     import pygame
 
     pygame.init()
-    screen = pygame.display.set_mode((620, 740))
+    screen = pygame.display.set_mode((1000, 780))
     pygame.display.set_caption("Xiangqi Robot - Debug Dashboard")
     title_font = pygame.font.SysFont("Segoe UI", 24, bold=True)
     label_font = pygame.font.SysFont("Segoe UI", 14, bold=True)
     value_font = pygame.font.SysFont("Segoe UI", 16)
     inbox, fields = queue.Queue(maxsize=1), {}
+    rotation = 0
+    rotate_left = pygame.Rect(665, 610, 120, 42)
+    rotate_right = pygame.Rect(815, 610, 120, 42)
 
     def receive():
         for line in sys.stdin:
@@ -138,12 +219,25 @@ def run_window():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if rotate_left.collidepoint(event.pos):
+                    rotation = (rotation - 90) % 360
+                elif rotate_right.collidepoint(event.pos):
+                    rotation = (rotation + 90) % 360
         try:
             fields = inbox.get_nowait()
         except queue.Empty:
             pass
         screen.fill((24, 28, 35))
         screen.blit(title_font.render("System Monitor", True, (240, 244, 250)), (24, 20))
+        screen.blit(label_font.render("VISUAL PICK CORRECTION (CAMERA X/Y)", True, (148, 164, 182)), (640, 72))
+        draw_correction_dial(screen, pygame, value_font, fields.get("correction"), rotation)
+        for rect, label in ((rotate_left, "Rotate -90"), (rotate_right, "Rotate +90")):
+            pygame.draw.rect(screen, (55, 67, 84), rect, border_radius=6)
+            text = value_font.render(label, True, (228, 234, 242))
+            screen.blit(text, text.get_rect(center=rect.center))
+        text = value_font.render(f"Display rotation: {rotation} deg", True, (148, 164, 182))
+        screen.blit(text, text.get_rect(center=(800, 680)))
         y = 72
         for key, label in (("mode", "APP MODE"), ("activity", "APP STATUS"),
                            ("connection", "ROBOT CONNECTION"), ("motion", "ROBOT MOTION"),
