@@ -198,8 +198,9 @@ class PickGeometryTests(unittest.TestCase):
         for rms in (.1, 1.1):
             with patch('src.vision.pick_geometry.cv2.calibrateCamera',
                        return_value=(rms, self.geometry.k, self.geometry.dist, fake_poses, [])):
-                with self.assertRaisesRegex(ValueError, 'tilts'):
+                with self.assertRaisesRegex(ValueError, 'tilt spread=0.000') as rejected:
                     calibrate_intrinsics(views, (9, 6), 20, (1280, 960))
+                self.assertEqual('RMS=' in str(rejected.exception), rms > 1)
 
     def test_nine_board_pose_points_and_consistency_gates(self):
         cells = np.array([(x, y) for x in (0, 4, 8) for y in (0, 4, 9)], float)

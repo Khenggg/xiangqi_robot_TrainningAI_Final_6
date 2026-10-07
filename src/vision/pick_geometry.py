@@ -186,12 +186,23 @@ def calibrate_intrinsics(image_points, pattern, square_mm, frame_size):
             raise ValueError("Duplicate checkerboard captures")
     objects = np.zeros((cols * rows, 3), np.float32)
     objects[:, :2] = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2) * square_mm
-    rms, k, dist, rvecs, _ = cv2.calibrateCamera(
+    rms, k, dist, rvecs, tvecs = cv2.calibrateCamera(
         [objects.copy() for _ in views], [p.astype(np.float32) for p in views], tuple(frame_size), None, None)
     normals = np.array([cv2.Rodrigues(r)[0][:, 2] for r in rvecs])
-    if (not np.isfinite(rms) or rms > 1.0
-            or np.max(np.linalg.norm(normals - normals.mean(axis=0), axis=1)) < .15):
-        raise ValueError("Intrinsics failed: RMS >1px or insufficient pattern tilts")
+    tilt = float(np.max(np.linalg.norm(normals - normals.mean(axis=0), axis=1)))
+    reasons = []
+    if not np.isfinite(rms) or rms > 1.0:
+        reasons.append(f"RMS={rms:.3f}px >1.000px")
+    if not np.isfinite(tilt) or tilt < .15:
+        reasons.append(f"tilt spread={tilt:.3f} <0.150")
+    if reasons:
+        errors = []
+        for index, (points, rotation, translation) in enumerate(zip(views, rvecs, tvecs)):
+            projected = cv2.projectPoints(objects, rotation, translation, k, dist)[0].reshape(-1, 2)
+            errors.append((index+1, float(np.sqrt(np.mean(np.sum((projected-points)**2, axis=1))))))
+        worst = sorted(errors, key=lambda item: item[1], reverse=True)[:5]
+        raise ValueError("Intrinsics rejected: " + "; ".join(reasons)
+                         + f". Worst samples (number,RMSpx): {worst}")
     return rms, k, dist
 
 

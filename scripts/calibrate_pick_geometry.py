@@ -40,7 +40,7 @@ def cancel_key(key):
         raise KeyboardInterrupt
 
 
-def capture_pattern(cap, pattern, square_mm, frame_size):
+def capture_pattern(cap, pattern, square_mm, frame_size, diagnostic_path=None):
     samples = []
     message = "Move/tilt target: center, left/right, top/bottom. S=capture, C=fit (>=12)."
     while True:
@@ -52,6 +52,8 @@ def capture_pattern(cap, pattern, square_mm, frame_size):
         show(frame, [f"STEP 1: optical target {pattern[0]}x{pattern[1]} INNER corners; views={len(samples)}",
                      message, "ESC=abort; fixed camera/focus/zoom throughout ALL steps"])
         key = cv2.waitKey(30) & 255
+        if ord('A') <= key <= ord('Z'):
+            key += 32
         cancel_key(key)
         if key == ord('s') and found:
             points = corners.reshape(-1, 2)
@@ -62,10 +64,22 @@ def capture_pattern(cap, pattern, square_mm, frame_size):
                 message = "Captured. Move AND tilt target; S=next, C=fit (>=12)."
         elif key == ord('c'):
             try:
+                print(f"[CALIBRATION FIT] Computing {len(samples)} samples...", flush=True)
+                show(frame, [f"Computing {len(samples)} samples...", "Please wait; do not close the window.", ""])
+                cv2.waitKey(1)
+                if diagnostic_path is not None:
+                    path = Path(diagnostic_path)
+                    try:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        np.savez_compressed(path, image_points=np.asarray(samples), pattern=pattern,
+                                            square_mm=square_mm, frame_size=frame_size)
+                        print(f"[CALIBRATION SAMPLES] Saved: {path}", flush=True)
+                    except OSError as exc:
+                        print(f"[CALIBRATION SAMPLES] Save failed; samples retained in RAM: {exc}", flush=True)
                 rms, k, dist = calibrate_intrinsics(samples, pattern, square_mm, frame_size)
                 return rms, k, dist, len(samples)
             except (ValueError, cv2.error) as exc:
-                print(f"[CALIBRATION REJECTED] {exc}")
+                print(f"[CALIBRATION REJECTED] {exc}", flush=True)
                 message = str(exc)[:110] + "; collect more / R=restart views"
         elif key == ord('r'):
             samples.clear()
