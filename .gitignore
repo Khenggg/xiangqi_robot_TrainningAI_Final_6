@@ -6,6 +6,7 @@
 perspective.npy
 calibration/pick_geometry.json*
 calibration/camera_intrinsics.json*
+!calibration/camera_intrinsics.json
 
 # Python cache files
 __pycache__/

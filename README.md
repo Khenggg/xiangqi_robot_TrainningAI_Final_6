@@ -934,6 +934,8 @@ Thiết lập một lần (đóng RUN để giải phóng camera):
 1. In `assets/calibration/checkerboard-20mm.svg` ở Actual Size; đo cạnh ô in thực tế.
 2. Chạy `CALIBRATE_CAMERA_INTRINSICS.bat --square-mm 20` (thay `20` bằng số đo thực).
    Chọn camera bằng `--camera INDEX` nếu cần; phải cùng camera/resolution/focus/zoom với RUN.
+   Đóng cả Windows Camera/OBS/Teams. Windows thử DirectShow, MSMF rồi backend mặc định
+   trên cùng index; có thể chọn `--backend msmf`. Kiểm tra preview là đúng camera.
 3. Di chuyển/nghiêng bảng chuẩn qua giữa và rìa ảnh. `S` lưu mẫu, `C` tính khi đủ ít nhất
    12 ảnh đa dạng; `R` làm lại, `ESC` hủy. Công cụ chỉ calibrate ống kính,
    không yêu cầu click quân chuẩn, test arm hay profile sai số gắp.
@@ -941,16 +943,19 @@ Thiết lập một lần (đóng RUN để giải phóng camera):
    lưu K/D; camera đổi vị trí thì calibrate lại lưới. Đổi camera, độ phân giải,
    focus/zoom thì calibrate nội tại lại.
 
-Cấu hình: `VISUAL_HEIGHT_PICK_ENABLED = True`, `VISUAL_HEIGHT_PIECE_MM = 9.0`,
-`VISUAL_HEIGHT_BOARD_MM = (366.0, 410.0)` là kích thước giữa giao điểm ngoài cùng,
+Cấu hình: `VISUAL_HEIGHT_PICK_ENABLED = True`, `VISUAL_HEIGHT_PIECE_MM = 6.0`,
+`VISUAL_HEIGHT_BOARD_MM = (324.0, 368.0)` là kích thước lưới thực đo giữa các
+giao điểm ngoài cùng, không tính viền trang trí.
 `VISUAL_TOP_FACE_ENABLED = False`, `PICK_OUTWARD_COMPENSATION_ENABLED = False`.
-Không cộng bù cố định cùng bù độ cao. Kích thước lưới cần đúng số đo thực tế.
+Không cộng bù cố định cùng bù độ cao. R1–R4 cần trùng bốn góc lưới thực;
+không thay kích thước lưới đo thực bằng khoảng cách teaching points.
 
 Log `[HEIGHT PICK]` cho biết dùng bù độ cao hay fallback. Thiếu/sai K/D, sai
 resolution hoặc pose không hợp lệ: **chặn gắp** và báo lý do;
 không giả định thông số camera và không đưa foot-point qua mặt phẳng mặt quân.
-Mỗi lần cần gắp lấy tối đa **5 ảnh mới trong cửa sổ 2 giây** (từ lúc vào
-phiên quét). Inference chậm có thể khiến ít hơn 5 ảnh; kết quả trả về sau
+Mỗi lần cần gắp lấy liên tục **nhiều ảnh mới nhất có thể trong cửa sổ 3,6 giây** (từ lúc vào
+phiên quét), không giới hạn số ảnh và không chờ giữa các mẫu. Số mẫu phụ thuộc
+tốc độ đọc camera và inference; kết quả trả về sau
 deadline không được dùng. Một lệnh camera/model đang chạy có thể làm thời gian
 thực vượt cửa sổ; log `[HEIGHT PICK]` ghi thời gian, số lần và số mẫu hợp lệ.
 Cần ít nhất 2 mẫu: các tâm gần nhau thì lấy trung bình tất cả; nếu dao động,
@@ -986,3 +991,48 @@ quân hay profile geometry để cho phép gắp. Kiểm tra kết nối robot, 
 trống và xác minh sau chuyển động vẫn áp dụng.
 
 **🎉 Chúc bạn thành công với dự án Xiangqi Robot!**
+
+
+### Chẩn đoán visual correction: ảnh đo và hover
+
+Mở RUN, auto-calibrate, nhấn **T** vào test; chọn một quân trên client rồi nhấn
+**H** trong cửa sổ client. Arm đo bằng nhánh height pick hiện tại và đến XY đó
+ở `SAFE_Z`, dừng tại chỗ, không hạ xuống gắp, không điều khiển kẹp, không đổi
+bàn test/FEN. Thiếu tâm hoặc geometry không hợp lệ thì không chạy arm.
+
+Cửa sổ camera giữ đúng ảnh mẫu hợp lệ cuối của lần quét: xanh lá là tâm bbox,
+cyan là giao điểm ô logic trên mặt bàn, magenta là XY sau bù chiều cao chiếu về
+mặt bàn, vòng cam là XY đồng thuận dùng cho lệnh arm chiếu về mặt bàn.
+Các dấu chiếu lên mặt bàn không phải vị trí ngón kẹp trong ảnh. Nhấn **D** trong
+client khi đang ở test để trở lại camera live. Đo lần tiếp theo thay ảnh cũ.
+Chọn ô đích trống vẫn chạy gắp/thả bằng chức năng T cũ; H chỉ hover.
+
+Kiểm tra các quân ở giữa bàn, gần rìa và bốn góc, đọc `[HOVER TEST]` để đối chiếu
+XY và độ dịch so với ô logic. Chế độ này hỗ trợ quan sát; `SAFE_Z` là độ cao
+đã cấu hình của project, không tự đo khoảng hở thực tế.
+
+
+### Clone và chạy trên Windows khác
+
+1. Cài Python 3.12 (64-bit), clone repo và checkout `feature/visual-correction-v2`.
+2. Chạy `SETUP_WINDOWS.bat` để tạo `.venv312` và cài các phiên bản trong
+   `requirements-lock-win-py312.txt`. RUN ưu tiên môi trường này.
+3. Kết nối camera/controller, kiểm tra IP robot và tên teaching points
+   R1–R4/HOMECHESS trên controller. Teaching points được đọc từ robot, không
+   nằm trong repo. Chạy RUN và xác nhận auto-calibrate lưới mỗi lần setup.
+
+Repo kèm `calibration/camera_intrinsics.json` đang dùng: camera index 0,
+640×480, RMS 0.819 px; mẫu checkerboard đo 27.3333333 mm và dữ liệu mẫu NPZ
+được giữ để truy vết. Profile chỉ dùng với cùng camera, focus/zoom và chế độ
+ảnh; camera khác cần calibrate nội tại riêng dù cùng index. `perspective.npy`
+được tạo lại khi auto-calibrate, không dùng bản của máy cũ.
+
+Cấu hình thử nghiệm hiện tại: lưới 324×368 mm, chiều cao bù 6 mm (quân thực
+đã đo 9 mm), SAFE_Z 182 mm, PICK_Z/PLACE_Z 180 mm. SAFE_Z chỉ cách độ cao gắp
+2 mm; đây là cấu hình thử tại workstation, chưa xác nhận khoảng hở trên máy
+khác. Không chạy arm tự động trong script setup.
+
+Model PT/ONNX có trong repo. Nếu không có Moonfish binary offline, launcher
+thông báo dùng đường engine có sẵn; chức năng online cần mạng. Clone giữ code,
+model và cấu hình, nhưng không đảm bảo hiệu năng máy/USB hay độ chính xác gắp
+vật lý giống nhau khi camera, TCP, teaching points hoặc setup thay đổi.
