@@ -79,8 +79,7 @@ class HeightGeometryTests(unittest.TestCase):
             VISUAL_HEIGHT_POSE_MAX_ERROR_PX=3., VISUAL_PICK_MIN_CONFIDENCE=.45,
             VISUAL_PICK_MAX_OFFSET_CELLS=.25, VISUAL_PICK_MIN_STABLE_SAMPLES=2,
             VISUAL_CENTER_PICK_MAX_JITTER_CELLS=.12)
-        manager.config.VISUAL_HEIGHT_SAMPLE_COUNT = 3
-        manager.config.VISUAL_HEIGHT_SAMPLE_WINDOW_SEC = .03
+        manager.config.VISUAL_HEIGHT_SAMPLE_WINDOW_SEC = .3
         manager.project_dir = self.root
         manager.perspective_path = self.root / 'perspective.npy'
         np.save(manager.perspective_path, self.perspective())
@@ -127,20 +126,20 @@ class HeightGeometryTests(unittest.TestCase):
         def snapshot(cell):
             u, v = geometry.project(geometry.grid_to_xy([cell]))[0]
             return frame, [(0, .9, (u-10, v-10, u+10, v+10))]
-        manager.cam_monitor.get_fresh_pick_snapshot.side_effect = [
-            FreshPickTransientError('temporary'), snapshot((6, 6)), snapshot((6, 6))]
+        import itertools
+        manager.cam_monitor.get_fresh_pick_snapshot.side_effect = itertools.chain(
+            [FreshPickTransientError('temporary')], itertools.repeat(snapshot((6, 6))))
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertIsNotNone(manager.get_robot_center_pick_targets({'moving': (6, 6)})['moving'])
-        manager.cam_monitor.get_fresh_pick_snapshot.side_effect = [
-            snapshot((5.8, 6)), snapshot((6.2, 6)), (frame, [])]
+        manager.cam_monitor.get_fresh_pick_snapshot.side_effect = itertools.chain(
+            [snapshot((5.8, 6)), snapshot((6.2, 6))], itertools.repeat((frame, [])))
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertIsNone(manager.get_robot_center_pick_targets({'moving': (6, 6)})['moving'])
 
-    def test_five_new_calls_are_spaced_and_late_results_excluded(self):
-        for inference_sec, expected_calls in ((.1, 5), (2.1, 1)):
+    def test_continuous_calls_use_full_window_and_exclude_late_results(self):
+        for inference_sec, expected_calls in ((.5, 8), (4., 1)):
             manager = self.manager()
-            manager.config.VISUAL_HEIGHT_SAMPLE_COUNT = 5
-            manager.config.VISUAL_HEIGHT_SAMPLE_WINDOW_SEC = 2.
+            manager.config.VISUAL_HEIGHT_SAMPLE_WINDOW_SEC = 3.6
             clock = [0.]
             call_times = []
             geometry = self.geometry()
@@ -157,8 +156,9 @@ class HeightGeometryTests(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()):
                 result = manager.get_robot_center_pick_targets({'moving': (6, 6)})['moving']
             self.assertEqual(len(call_times), expected_calls)
-            if expected_calls == 5:
-                np.testing.assert_allclose(call_times, [0, .4, .8, 1.2, 1.6])
+            if expected_calls == 8:
+                np.testing.assert_allclose(call_times, np.arange(8) * .5)
+                self.assertEqual(manager.last_height_pick_resolution["valid_samples"]["moving"], 7)
                 self.assertIsNotNone(result)
             else:
                 self.assertIsNone(result)

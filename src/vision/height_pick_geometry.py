@@ -97,3 +97,19 @@ class HeightPickEstimator(VisualPickEstimator):
         xy = self.geometry.pixels_to_top_xy([[(x1+x2)/2, (y1+y2)/2]])
         col, row = self.geometry.xy_to_grid(xy)[0]
         return float(col), float(row)
+
+    def estimate_pick_target(self, detections, expected_col, expected_row):
+        self.last_box = None
+        target = super().estimate_pick_target(detections, expected_col, expected_row)
+        if target is not None:
+            for _, confidence, box in detections or []:
+                if float(confidence) < self.min_confidence:
+                    continue
+                try:
+                    col, row = self._box_to_grid(box)
+                except (ValueError, TypeError, cv2.error):
+                    continue
+                if np.allclose([col, row], [target.col, target.row], atol=1e-8, rtol=0) and float(confidence) == target.confidence:
+                    self.last_box = tuple(map(float, box))
+                    break
+        return target

@@ -543,7 +543,8 @@ class CameraMonitor:
             detections = self._last_detections
 
         if frame is not None:
-            display = self._draw_overlay(frame, detections)
+            debug = getattr(self, "pick_debug_frame", None)
+            display = debug.copy() if debug is not None else self._draw_overlay(frame, detections)
             cv2.imshow(self.window_name, display)
 
         return cv2.waitKey(1)

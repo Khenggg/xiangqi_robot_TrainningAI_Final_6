@@ -11,6 +11,7 @@ from src.ai.moonfish_engine import MoonfishEngine
 from src.ai.cloud_engine import CloudEngine
 from src.ai.ai_controller import AIController
 from src.vision.camera_monitor import CameraMonitor
+from src.vision.camera_source import open_camera
 from src.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetector
 from src.vision.visual_pick_estimator import VisualPickEstimator, GridTarget
 from src.vision.pick_geometry import PickGeometry
@@ -215,21 +216,24 @@ class HardwareManager:
             
         cam_index = int(os.environ.get("VIDEO_INDEX", str(self.config.VIDEO_SOURCE)))
         for idx in [cam_index] + [i for i in [0, 1, 2] if i != cam_index]:
-            cap_try = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-            if cap_try.isOpened():
-                self.cap = cap_try
+            try:
+                self.cap = open_camera(idx, getattr(self.config, "VIDEO_BACKEND", "auto"))
                 self.actual_camera_index = idx
                 print(f"✅ Camera opened at index {idx}")
                 break
-            else:
-                cap_try.release()
+            except RuntimeError as exc:
+                print(f"[CAMERA] {exc}")
                 
         if self.cap is None:
             print("❌ Lỗi: Không mở được Camera!")
             sys.exit()
             
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        frame_width = getattr(self.config, "VIDEO_FRAME_WIDTH", 640)
+        frame_height = getattr(self.config, "VIDEO_FRAME_HEIGHT", 480)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
+        print(f"[CAMERA] RUN requested {frame_width}x{frame_height}; "
+              "actual snapshot resolution is checked against intrinsics before picking.")
 
         # Calibrate Vision (RTMPose ONNX thay cho YOLO-Pose cũ)
         print("\n" + "=" * 60)
@@ -498,13 +502,14 @@ class HardwareManager:
             self.last_pick_resolution["reason"] = "Camera unavailable"
             return targets
         samples = {name: [] for name in expected_cells}
+        diagnostics = {}
+        self.cam_monitor.pick_debug_frame = None
         estimator = None
         try:
             # Reload each pick cycle: moving camera/recalibrating board must not reuse old pose.
             matrix = np.load(self.perspective_path)
-            count = int(getattr(self.config, "VISUAL_HEIGHT_SAMPLE_COUNT", 5))
-            window = float(getattr(self.config, "VISUAL_HEIGHT_SAMPLE_WINDOW_SEC", 2.0))
-            if not 1 <= count <= 5 or not np.isfinite(window) or window <= 0:
+            window = float(getattr(self.config, "VISUAL_HEIGHT_SAMPLE_WINDOW_SEC", 3.6))
+            if not np.isfinite(window) or window <= 0:
                 raise ValueError("Invalid height scan limits")
             started = time.monotonic()
             deadline = started + window
@@ -514,14 +519,7 @@ class HardwareManager:
                 session_factory = getattr(self.cam_monitor, "pick_scan_session", None)
                 if callable(session_factory):
                     scan_session.enter_context(session_factory())
-                for index in range(count):
-                    # Spread captures across the window, leaving room for final inference.
-                    scheduled = started + index * window / count
-                    delay = scheduled-time.monotonic()
-                    if delay > 0:
-                        time.sleep(delay)
-                    if time.monotonic() >= deadline:
-                        break
+                while time.monotonic() < deadline:
                     attempts += 1
                     try:
                         frame, detections = self.cam_monitor.get_fresh_pick_snapshot()
@@ -544,13 +542,21 @@ class HardwareManager:
                     elif tuple(frame.shape[1::-1]) != estimator.geometry.frame_size:
                         raise ValueError("Camera resolution changed during pick sampling")
                     for name, cell in expected_cells.items():
-                        samples[name].append(estimator.estimate_pick_target(detections, *cell))
+                        observation = estimator.estimate_pick_target(detections, *cell)
+                        samples[name].append(observation)
+                        if observation is not None and estimator.last_box is not None:
+                            diagnostics[name] = (frame.copy(), estimator.last_box, observation)
             methods = {}
             for name, values in samples.items():
                 targets[name], methods[name] = aggregate_height_targets(
                     values, expected_cells[name],
                     getattr(self.config, "VISUAL_HEIGHT_MIN_SAMPLES", 2),
                     getattr(self.config, "VISUAL_HEIGHT_MAX_SPREAD_CELLS", .12))
+            if estimator is not None:
+                from src.vision.pick_debug import draw_pick_debug
+                for name, (frame, box, observation) in diagnostics.items():
+                    self.cam_monitor.pick_debug_frame = draw_pick_debug(
+                        frame, box, expected_cells[name], observation, targets[name], estimator.geometry)
             elapsed = time.monotonic()-started
             self.last_height_pick_resolution = {
                 "mode": "height" if all(t is not None for t in targets.values()) else "blocked",
@@ -570,6 +576,17 @@ class HardwareManager:
             self.last_pick_resolution = {"failure": "hard", "reason": str(exc)}
             print(f"[HEIGHT PICK] BLOCKED: {exc}; no foot/logical fallback.")
         return targets
+
+    def execute_hover_test(self, source):
+        """Measure production XY and approach SAFE_Z only; no gripper/FEN changes."""
+        if not self.robot or not self.robot.connected:
+            raise RuntimeError("Robot chưa kết nối")
+        if not getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False):
+            raise RuntimeError("Hover diagnostic requires height picking")
+        target = self.get_robot_center_pick_targets({"moving": source}).get("moving")
+        require_pick_target(self, {"moving": target}, "moving")
+        self.robot.hover_at(*source, visual_target=target)
+        return target
 
     def execute_pick_place_test(self, source, destination, validate_request=None):
         """Run the production geometry path without AI, rules or FEN commits."""

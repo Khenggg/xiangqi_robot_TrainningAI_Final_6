@@ -570,6 +570,20 @@ class FR5Robot:
         result[:2] = (np.asarray(result[:2]) + self._pick_outward_offset(col, row)).tolist()
         return result
 
+    def hover_at(self, col, row, visual_target):
+        """Use pick XY/rotation at SAFE_Z; never descend or operate gripper."""
+        if visual_target is None:
+            raise ValueError("Measured visual target required for hover")
+        rotation = getattr(config, "PICK_TOOL_ROTATION", config.ROTATION)
+        pose = self.board_to_pose_bilinear(visual_target.col, visual_target.row,
+                                           config.SAFE_Z, rotation=rotation)
+        pose = self._apply_pick_outward_offset(pose, col, row)
+        reference = self.board_to_pose_bilinear(col, row, config.SAFE_Z, rotation=rotation)
+        print(f"[HOVER TEST] cell=({col},{row}) XY=({pose[0]:.2f},{pose[1]:.2f}) "
+              f"Z={pose[2]:.2f}; delta=({pose[0]-reference[0]:+.2f},{pose[1]-reference[1]:+.2f})mm")
+        self.move_safe_pose(pose, col=col, row=row, label="Hover diagnostic")
+        return pose
+
     def pick_at(self, col, row, visual_target=None):
         """Gắp quân tại XY thực tế, với tool rotation đã dạy trong config.
 

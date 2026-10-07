@@ -100,7 +100,8 @@ class GuidedMeasurementTests(unittest.TestCase):
                 robot.robot.Mode.return_value = 1
             else:
                 robot.move_safe_pose.return_value = 112
-            with tempfile.TemporaryDirectory() as folder, patch.object(client, 'new_report', return_value=Path(folder)):
+            with tempfile.TemporaryDirectory() as folder, patch.object(client, 'new_report', return_value=Path(folder)), \
+                    patch.object(client.config, 'SAFE_Z', 210):
                 session = client.RobotMeasurement(robot)
                 with self.assertRaises(RuntimeError):
                     session.move([0, 0, client.config.SAFE_Z])

@@ -369,7 +369,7 @@ class InputHandler:
         board = self.state.pick_test_board
         if board[row][col] != ".":
             self.state.selected_pos = (col, row)
-            self.state.set_status(f"TEST: đã chọn ({col},{row}); chọn ô trống để chạy arm.", duration=20)
+            self.state.set_status(f"TEST: đã chọn ({col},{row}); H xem XY ở SAFE_Z / chọn ô trống để gắp.", duration=20)
             return
         source = self.state.selected_pos
         if source is None:
@@ -377,6 +377,17 @@ class InputHandler:
         destination = (col, row)
         self.state.selected_pos = None
         self._run_pick_test(source, destination)
+
+    def _run_hover_test(self, source):
+        if self._defer_motion(lambda: self._run_hover_test(source)):
+            return
+        try:
+            self.state.set_status("HOVER: đo tâm và đến SAFE_Z...", duration=30)
+            target = self.hw.execute_hover_test(source)
+            self.state.set_status(f"HOVER: ({target.col:.3f},{target.row:.3f}); dừng trên quân. Không gắp.", duration=30)
+        except Exception as exc:
+            print(f"[HOVER TEST] {exc}")
+            self.state.set_status(f"HOVER dừng: {exc}", duration=30)
 
     def _run_pick_test(self, source, destination, request=None):
         if self._defer_motion(lambda: self._run_pick_test(source, destination, request)):
@@ -515,6 +526,18 @@ class InputHandler:
                 self.state.set_status("Đang chờ đo tâm: R thử lại cùng nước đi / X hủy.", duration=30)
             return
 
+        if key == pygame.K_h and getattr(self.state, "pick_test_mode", False):
+            source = self.state.selected_pos
+            if source is None:
+                self.state.set_status("HOVER: chọn quân trước rồi nhấn H.", duration=15)
+            else:
+                self._run_hover_test(source)
+            return
+        if key == pygame.K_d and getattr(self.state, "pick_test_mode", False):
+            if self.hw.cam_monitor:
+                self.hw.cam_monitor.pick_debug_frame = None
+            self.state.set_status("Đã trở lại camera live.", duration=10)
+            return
         if key == pygame.K_t:
             self._toggle_pick_test()
             return

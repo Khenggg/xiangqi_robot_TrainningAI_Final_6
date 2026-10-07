@@ -39,9 +39,9 @@ CAPTURE_BIN_Y = 225.024
 CAPTURE_BIN_Z = 291.68  # [QUAN TRỌNG] Độ cao khi thả quân vào thùng
 
 # Độ cao an toàn (mm)
-SAFE_Z  = 210.0    # Độ cao an toàn khi di chuyển giữa các ô (tăng lên để tránh hất quân)
-PICK_Z  = 178.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
-PLACE_Z = 178.0   # Hạ xuống đặt
+SAFE_Z  = 220.0    # User-requested approach/hover height for testing (robot Z, mm).
+PICK_Z  = 180   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, hạ từ từ)
+PLACE_Z = 180   # Hạ xuống đặt
 
 # Cấu hình kẹp: motor 2 chiều dùng Tool DO trên đầu robot.
 # Verified wiring: DO1 chạy hướng MỞ, DO0 chạy hướng ĐÓNG. Không bao giờ bật cả hai cùng lúc.
@@ -60,8 +60,8 @@ GRIPPER_ACTIVE_STATUS = 1
 GRIPPER_DIRECTION_DEADTIME_SEC = 0.10
 # Open fully before a release or before establishing the safe travelling gap.
 # Tune this to the shortest pulse that reaches the physical open limit.
-GRIPPER_OPEN_MAX_PULSE_SEC = 0.3
-GRIPPER_CLOSE_PULSE_SEC = 0.8
+GRIPPER_OPEN_MAX_PULSE_SEC = 0.2
+GRIPPER_CLOSE_PULSE_SEC = 0.3
 # Starting from fully open, close only to the travelling/pre-pick safe gap.
 # Increase to narrow the gap; decrease to widen it. Do not drive into hard stop.
 GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC = 0.06
@@ -70,7 +70,7 @@ GRIPPER_CLOSE_SETTLE_SEC = 0.25
 MOVE_SPEED = 60 #Percentage based
 
 # Góc xoay của đầu Robot (Rx, Ry, Rz)
-ROTATION = [-179, -1.5, -11.3]
+ROTATION = [-179.4, -1.2, -73.2]
 
 # --- PHYSICAL PICK / PLACE MOTION PROFILE ---
 # Các pose Cartesian FR5 gồm [X, Y, Z, Rx, Ry, Rz]. XY được nội suy từ R1-R4;
@@ -89,7 +89,10 @@ DRY_RUN = False # Đổi thành True nếu muốn test code mà không cần b�
 
 # Camera index (0 = built-in webcam, 1 = USB cam, 2 = DroidCam, etc.)
 # main.py will auto-try configured index first, then others if it fails.
-VIDEO_SOURCE = 1
+VIDEO_SOURCE = 0  # Camera used for the accepted intrinsics calibration.
+VIDEO_BACKEND = "any"
+VIDEO_FRAME_WIDTH = 640
+VIDEO_FRAME_HEIGHT = 480
 
 # --- VISUAL PICK CORRECTION ---
 # Chỉ bù vị trí gắp khi snapshot mới từ camera xác nhận quân nằm gần ô logic.
@@ -105,11 +108,10 @@ VISUAL_CENTER_PICK_MAX_JITTER_CELLS = 0.12
 # BBox -> piece-height plane; pose refreshed from current auto/manual board calibration.
 VISUAL_HEIGHT_PICK_ENABLED = True
 VISUAL_CAMERA_INTRINSICS_PATH = "calibration/camera_intrinsics.json"
-VISUAL_HEIGHT_BOARD_MM = (366.0, 410.0)  # Outer PLAYING intersections, not decorative border.
-VISUAL_HEIGHT_PIECE_MM = 9.0  # User-measured board surface -> top face.
+VISUAL_HEIGHT_BOARD_MM = (324.0, 368.0)  # User-measured outer PLAYING intersections, mm.
+VISUAL_HEIGHT_PIECE_MM = 7.0  # Trial compensation height; physical piece height was measured as 9 mm.
 VISUAL_HEIGHT_POSE_MAX_ERROR_PX = 3.0
-VISUAL_HEIGHT_SAMPLE_COUNT = 5
-VISUAL_HEIGHT_SAMPLE_WINDOW_SEC = 2.0
+VISUAL_HEIGHT_SAMPLE_WINDOW_SEC = 3.6
 VISUAL_HEIGHT_MIN_SAMPLES = 2
 VISUAL_HEIGHT_MAX_SPREAD_CELLS = 0.12
 VISUAL_MOTION_ASYNC_ENABLED = True
