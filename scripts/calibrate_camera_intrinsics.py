@@ -13,26 +13,34 @@ from scripts.calibrate_pick_geometry import capture_pattern, read_frame, WINDOW
 from src.vision.height_pick_geometry import load_intrinsics
 
 
+from src.vision.camera_source import open_camera
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--camera", type=int, default=config.VIDEO_SOURCE)
+    parser.add_argument("--backend", choices=("auto", "dshow", "msmf", "any"), default=config.VIDEO_BACKEND)
     parser.add_argument("--square-mm", type=float, required=True,
                         help="Measured printed checkerboard square size")
     parser.add_argument("--cols", type=int, default=9)
     parser.add_argument("--rows", type=int, default=6)
     parser.add_argument("--output", type=Path, default=ROOT / config.VISUAL_CAMERA_INTRINSICS_PATH)
     args = parser.parse_args()
-    cap = cv2.VideoCapture(args.camera, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(args.camera)
+    cap = open_camera(args.camera, args.backend)
     try:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.VIDEO_FRAME_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.VIDEO_FRAME_HEIGHT)
         if not cap.isOpened():
             raise RuntimeError("Camera unavailable; close RUN first")
-        # Match the camera opening path in HardwareManager (no forced resolution).
+        # Use the same requested resolution as HardwareManager; record actual frame size.
         for _ in range(30):
             cap.read()
         frame = read_frame(cap)
         frame_size = frame.shape[1::-1]
         cv2.namedWindow(WINDOW)
-        rms, k, dist, views = capture_pattern(cap, (args.cols, args.rows), args.square_mm, frame_size)
+        rms, k, dist, views = capture_pattern(
+            cap, (args.cols, args.rows), args.square_mm, frame_size,
+            diagnostic_path=args.output.parent / f"intrinsic_samples_camera{args.camera}.npz")
         data = {"schema": 1, "camera_index": args.camera, "frame_size": list(frame_size),
                 "camera_matrix": k.tolist(), "distortion": dist.ravel().tolist(),
                 "intrinsic_rms_px": float(rms), "views": views,
