@@ -63,6 +63,20 @@ class HeightGeometryTests(unittest.TestCase):
         cells = np.array([[1.2, 7.8]])
         np.testing.assert_allclose(new.xy_to_grid(new.pixels_to_top_xy(new.project(new.grid_to_xy(cells)))), cells)
 
+    def test_height_pick_retains_measured_centers_outside_playing_grid(self):
+        geometry = self.geometry()
+        estimator = HeightPickEstimator(geometry)
+        for measured, expected in (((2, -.2), (2, 0)), ((2, 9.2), (2, 9)),
+                                   ((-.2, 4), (0, 4)), ((8.2, 4), (8, 4)),
+                                   ((-.14, -.14), (0, 0))):
+            # Independent camera projection: includes distortion and piece height.
+            world = np.array([[measured[0]*366/8, measured[1]*410/9, geometry.top_z]])
+            u, v = cv2.projectPoints(world, self.rvec, self.tvec, self.k, self.dist)[0].reshape(2)
+            with self.subTest(measured=measured):
+                target = estimator.estimate_pick_target([(0, .95, (u-12, v-12, u+12, v+12))], *expected)
+                self.assertIsNotNone(target)
+                np.testing.assert_allclose([target.col, target.row], measured, atol=1e-5)
+
     def test_rejects_missing_height_wrong_camera_resolution_and_singular_board(self):
         for kwargs in ({'piece_height_mm': None}, {'piece_height_mm': -1},
                        {'camera_index': 2}, {'frame_size': (640, 480)}):

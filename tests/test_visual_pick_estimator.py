@@ -61,6 +61,39 @@ class VisualPickEstimatorTests(unittest.TestCase):
         ]
         self.assertIsNone(self.estimator.estimate_pick_target(detections, 2.0, 2.0))
 
+    def test_accepts_outside_grid_margin_on_all_four_edges_without_clamping(self):
+        for mode in ("center", "foot"):
+            estimator = VisualPickEstimator(Path(self.temp_dir.name) / "perspective.npy", point_mode=mode)
+            for measured, expected in (((2, -.2), (2, 0)), ((2, 9.2), (2, 9)),
+                                       ((-.2, 4), (0, 4)), ((8.2, 4), (8, 4)),
+                                       ((-.14, -.14), (0, 0)), ((8.14, 9.14), (8, 9))):
+                col, row = measured
+                ymin = row-(.05 if mode == "center" else .085)
+                detection = [(0, .95, (col-.05, ymin, col+.05, ymin+.1))]
+                with self.subTest(mode=mode, measured=measured):
+                    target = estimator.estimate_pick_target(detection, *expected)
+                    self.assertIsNotNone(target)
+                    np.testing.assert_allclose([target.col, target.row], measured, atol=1e-6)
+
+    def test_rejects_points_beyond_outside_margin_even_when_offset_is_below_quarter_cell(self):
+        estimator = VisualPickEstimator(Path(self.temp_dir.name) / "perspective.npy", point_mode="center")
+        for measured, expected in (((2, -.2001), (2, 0)), ((2, 9.2001), (2, 9)),
+                                   ((-.2001, 4), (0, 4)), ((8.2001, 4), (8, 4))):
+            col, row = measured
+            with self.subTest(measured=measured):
+                self.assertIsNone(estimator.estimate_pick_target(
+                    [(0, .95, (col-.05, row-.05, col+.05, row+.05))], *expected))
+
+    def test_outside_margin_keeps_confidence_and_radial_offset_limits(self):
+        estimator = VisualPickEstimator(Path(self.temp_dir.name) / "perspective.npy", point_mode="center")
+        for measured, expected, confidence in (((2, -.2), (2, 0), .44),
+                                              ((-.18, -.18), (0, 0), .95),
+                                              ((2.24, .12), (2, 0), .95)):
+            col, row = measured
+            with self.subTest(measured=measured, confidence=confidence):
+                self.assertIsNone(estimator.estimate_pick_target(
+                    [(0, confidence, (col-.05, row-.05, col+.05, row+.05))], *expected))
+
     def test_aggregate_targets_uses_median_and_requires_stable_samples(self):
         first = self.estimator.estimate_pick_target([(0, 0.9, (1.9, 1.0, 2.1, 2.0))], 2.0, 1.85)
         second = self.estimator.estimate_pick_target([(0, 0.8, (2.0, 1.0, 2.2, 2.0))], 2.1, 1.85)

@@ -7,6 +7,11 @@ import cv2
 import numpy as np
 
 
+# Pieces can rest on the decorative margin outside the playing intersections.
+OUTSIDE_GRID_MARGIN_CELLS = 0.2
+GRID_BOUNDARY_EPSILON_CELLS = 1e-6
+
+
 @dataclass(frozen=True)
 class GridTarget:
     """Camera-derived pick point in continuous Xiangqi grid coordinates."""
@@ -61,7 +66,9 @@ class VisualPickEstimator:
             except (ValueError, TypeError, cv2.error) as exc:
                 print(f"[VISUAL PICK] Ignore invalid detection: {exc}")
                 continue
-            if not (0.0 <= col <= 8.0 and 0.0 <= row <= 9.0):
+            margin = OUTSIDE_GRID_MARGIN_CELLS + GRID_BOUNDARY_EPSILON_CELLS
+            if not (-margin <= col <= 8.0 + margin
+                    and -margin <= row <= 9.0 + margin):
                 continue
             offset = math.hypot(col - expected_col, row - expected_row)
             if offset <= self.max_offset_cells:
