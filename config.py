@@ -60,8 +60,8 @@ GRIPPER_ACTIVE_STATUS = 1
 GRIPPER_DIRECTION_DEADTIME_SEC = 0.10
 # Open fully before a release or before establishing the safe travelling gap.
 # Tune this to the shortest pulse that reaches the physical open limit.
-GRIPPER_OPEN_MAX_PULSE_SEC = 0.2
-GRIPPER_CLOSE_PULSE_SEC = 0.3
+GRIPPER_OPEN_MAX_PULSE_SEC = 0.25
+GRIPPER_CLOSE_PULSE_SEC = 0.2
 # Starting from fully open, close only to the travelling/pre-pick safe gap.
 # Increase to narrow the gap; decrease to widen it. Do not drive into hard stop.
 GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC = 0.06
@@ -70,7 +70,8 @@ GRIPPER_CLOSE_SETTLE_SEC = 0.25
 MOVE_SPEED = 50 #Percentage based
 
 # Góc xoay của đầu Robot (Rx, Ry, Rz)
-ROTATION = [-179.4, -1.2, -73.2]
+#ROTATION = [-179.4, -1.2, -73.2]
+ROTATION = [180, 0, -73.2]
 
 # --- PHYSICAL PICK / PLACE MOTION PROFILE ---
 # Các pose Cartesian FR5 gồm [X, Y, Z, Rx, Ry, Rz]. XY được nội suy từ R1-R4;
