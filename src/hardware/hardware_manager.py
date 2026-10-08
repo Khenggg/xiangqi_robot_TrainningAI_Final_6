@@ -17,6 +17,9 @@ from src.vision.visual_pick_estimator import VisualPickEstimator, GridTarget
 from src.vision.pick_geometry import PickGeometry
 from src.vision.height_pick_geometry import geometry_from_board, HeightPickEstimator, aggregate_height_targets
 from src.vision.top_face_pick_estimator import TopFacePickEstimator
+from src.vision.ring_pick_estimator import (
+    ring_pick_enabled, current_pick_enabled, exclusive_pick_required, resolve_ring_pick_targets,
+)
 from src.vision.pick_consensus import select_consensus, FreshPickTransientError, require_pick_target
 from src.vision.board_reconciler import BoardReconciler
 from src.vision.calibrate_camera import calibrate_perspective_camera
@@ -257,6 +260,7 @@ class HardwareManager:
             self.yolo_detector = YoloSnapshotDetector(self.perspective_path, self.class_id_to_name)
             print("[INIT] SnapshotDetector & CameraMonitor initialized (CChess ONNX enabled).")
             if (getattr(self.config, "VISUAL_PICK_ENABLED", False)
+                    or ring_pick_enabled(self.config)
                     or getattr(self.config, "VISUAL_BOARD_SYNC_REQUIRED", True)):
                 try:
                     self.pick_estimator = VisualPickEstimator(
@@ -340,6 +344,8 @@ class HardwareManager:
         return bool(getattr(getattr(self, "config", None), "VISUAL_TOP_FACE_ENABLED", False))
 
     def _occupancy_snapshot(self):
+        if ring_pick_enabled(getattr(self, "config", None)):
+            return self.cam_monitor.get_fresh_pick_snapshot()
         if self._top_face_enabled():
             return self.cam_monitor.get_fresh_pick_snapshot()
         return self.cam_monitor.get_fresh_snapshot()
@@ -448,6 +454,11 @@ class HardwareManager:
         Top mode fails closed. Only when that mode is disabled does the old
         box-center/foot fallback path below remain available.
         """
+        if ring_pick_enabled(getattr(self, "config", None)):
+            return resolve_ring_pick_targets(self, expected_cells)
+        if not current_pick_enabled(getattr(self, "config", None)):
+            self.last_pick_resolution = {"failure": "hard", "reason": "Both picking logic switches are disabled"}
+            return {name: None for name in expected_cells}
         if self._top_face_enabled():
             return self._get_top_face_targets(expected_cells)
         if getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False):
@@ -581,7 +592,7 @@ class HardwareManager:
         """Measure production XY and approach SAFE_Z only; no gripper/FEN changes."""
         if not self.robot or not self.robot.connected:
             raise RuntimeError("Robot chưa kết nối")
-        if not getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False):
+        if not (ring_pick_enabled(self.config) or getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False)):
             raise RuntimeError("Hover diagnostic requires height picking")
         target = self.get_robot_center_pick_targets({"moving": source}).get("moving")
         require_pick_target(self, {"moving": target}, "moving")
@@ -594,12 +605,12 @@ class HardwareManager:
             validate_request()
         if not self.robot or not self.robot.connected:
             raise RuntimeError("Robot chưa kết nối")
-        if not self.center_pick_estimator or not self.cam_monitor:
+        if (not self.center_pick_estimator and not ring_pick_enabled(getattr(self, "config", None))) or not self.cam_monitor:
             raise RuntimeError("Camera/visual correction chưa sẵn sàng")
         if not self.is_cell_visually_clear(destination):
             raise RuntimeError("Ô đích chưa trống hoặc camera không xác nhận được")
         target = self.get_robot_center_pick_targets({"moving": source}).get("moving")
-        required = self._top_face_enabled() or bool(getattr(getattr(self, "config", None),
+        required = exclusive_pick_required(getattr(self, "config", None)) or self._top_face_enabled() or bool(getattr(getattr(self, "config", None),
                                                           "VISUAL_HEIGHT_PICK_ENABLED", False))
         if target is None and required:
             require_pick_target(self, {"moving": None}, "moving")

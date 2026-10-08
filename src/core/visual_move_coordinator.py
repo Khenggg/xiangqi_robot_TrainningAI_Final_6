@@ -1,6 +1,7 @@
 """Execute one pending AI motion; only the caller may commit verified FEN."""
 from src.vision.pick_consensus import require_pick_target
 from src.core.game_state import pending_move_signature
+from src.vision.ring_pick_estimator import exclusive_pick_required
 
 
 def execute_pending_ai_motion(state, hw, config, stage="pre_pick"):
@@ -42,8 +43,9 @@ def execute_pending_ai_motion(state, hw, config, stage="pre_pick"):
         raise RuntimeError("Capture already removed; full capture replay forbidden")
 
     height = bool(getattr(config, "VISUAL_HEIGHT_PICK_ENABLED", False))
-    visual = bool(getattr(config, "VISUAL_PICK_ENABLED", False)) or height
-    required = height or (visual and bool(getattr(config, "VISUAL_TOP_FACE_ENABLED", False)))
+    exclusive = exclusive_pick_required(config)
+    visual = bool(getattr(config, "VISUAL_PICK_ENABLED", False)) or height or exclusive
+    required = exclusive or height or (visual and bool(getattr(config, "VISUAL_TOP_FACE_ENABLED", False)))
     physical_capture = capture and stage != "capture_removed"
     name = "captured" if physical_capture else "moving"
     cell = destination if physical_capture else source
