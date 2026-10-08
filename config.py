@@ -98,6 +98,8 @@ VIDEO_FRAME_HEIGHT = 480
 # Chỉ bù vị trí gắp khi snapshot mới từ camera xác nhận quân nằm gần ô logic.
 # Tắt cờ này để trở lại hoàn toàn hành vi gắp tại tâm ô như trước đây.
 VISUAL_PICK_ENABLED = True
+VISUAL_RING_PICK_ENABLED = False  # New: colored top ring -> height plane -> metric circle center (takes priority).
+VISUAL_CURRENT_PICK_ENABLED = True  # Preserve current picking logic; both switches False blocks picking.
 VISUAL_PICK_MIN_CONFIDENCE = 0.45
 VISUAL_PICK_MAX_OFFSET_CELLS = 0.25
 VISUAL_PICK_FOOT_RATIO = 0.85
