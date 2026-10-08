@@ -631,6 +631,10 @@ class FR5Robot:
         print(f"[ROBOT] 🤏 Gắp tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
 
         try:
+            # Re-establish the calibrated empty-gripper gap for every pickup.
+            # Do this before arm motion, while no piece is between the jaws.
+            self.gripper_ctrl(config.GRIPPER_ACTION_OPEN_MAX)
+            self.gripper_ctrl(config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
             self.move_safe_pose(pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
             self.movel_pose(pose_pick)                # Hạ xuống
             self.gripper_ctrl(config.GRIPPER_ACTION_CLOSE)

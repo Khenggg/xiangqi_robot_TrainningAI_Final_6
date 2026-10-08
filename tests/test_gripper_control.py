@@ -157,7 +157,7 @@ class GripperControlTests(unittest.TestCase):
             config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP, "teaching",
         ])
 
-    def test_pick_keeps_safe_gap_until_the_arm_reaches_pick_height(self):
+    def test_pick_reestablishes_safe_gap_before_approaching_piece(self):
         robot = FR5Robot()
         events = []
         with patch.object(robot, "board_to_pose", return_value=[0, 0, 0, 0, 0, 0]), \
@@ -169,6 +169,7 @@ class GripperControlTests(unittest.TestCase):
             robot.pick_at(2, 3)
 
         self.assertEqual(events, [
+            config.GRIPPER_ACTION_OPEN_MAX, config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP,
             "approach", "descend_or_lift", config.GRIPPER_ACTION_CLOSE, "descend_or_lift",
         ])
 
