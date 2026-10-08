@@ -26,12 +26,14 @@ class VisualPickEstimator:
     """Maps fresh YOLO boxes to conservative, expected board-cell pick targets."""
 
     def __init__(self, perspective_path, min_confidence=0.45,
-                 max_offset_cells=0.25, foot_ratio=0.85, point_mode="foot"):
+                 max_offset_cells=0.25, foot_ratio=0.85, point_mode="foot",
+                 board_mm=None, outside_margin_mm=None):
         self.perspective_path = Path(perspective_path)
         self.min_confidence = float(min_confidence)
         self.max_offset_cells = float(max_offset_cells)
         self.foot_ratio = float(foot_ratio)
         self.point_mode = str(point_mode)
+        self._configure_outside_margin(board_mm, outside_margin_mm)
         self._matrix = np.load(self.perspective_path).astype(np.float32)
         if self._matrix.shape != (3, 3):
             raise ValueError("perspective.npy must contain a 3x3 camera-to-grid matrix")
@@ -40,6 +42,19 @@ class VisualPickEstimator:
         if self.point_mode not in {"center", "foot"}:
             raise ValueError("point_mode must be 'center' or 'foot'")
         print(f"[VISUAL PICK] Perspective loaded: {self.perspective_path}")
+
+    def _configure_outside_margin(self, board_mm, outside_margin_mm):
+        self.metric_outside_margin = outside_margin_mm is not None
+        self.outside_col_margin = self.outside_row_margin = OUTSIDE_GRID_MARGIN_CELLS
+        if not self.metric_outside_margin:
+            return
+        dimensions = np.asarray(board_mm, dtype=float)
+        margin = float(outside_margin_mm)
+        if (dimensions.shape != (2,) or not np.isfinite(dimensions).all()
+                or np.any(dimensions <= 0) or not math.isfinite(margin) or margin < 0):
+            raise ValueError("Invalid board dimensions or outside pick margin")
+        self.outside_col_margin = margin * 8 / dimensions[0]
+        self.outside_row_margin = margin * 9 / dimensions[1]
 
     def _box_to_grid(self, box):
         x1, y1, x2, y2 = map(float, box)
@@ -66,12 +81,21 @@ class VisualPickEstimator:
             except (ValueError, TypeError, cv2.error) as exc:
                 print(f"[VISUAL PICK] Ignore invalid detection: {exc}")
                 continue
-            margin = OUTSIDE_GRID_MARGIN_CELLS + GRID_BOUNDARY_EPSILON_CELLS
-            if not (-margin <= col <= 8.0 + margin
-                    and -margin <= row <= 9.0 + margin):
+            col_margin = self.outside_col_margin + GRID_BOUNDARY_EPSILON_CELLS
+            row_margin = self.outside_row_margin + GRID_BOUNDARY_EPSILON_CELLS
+            if not (-col_margin <= col <= 8.0 + col_margin
+                    and -row_margin <= row <= 9.0 + row_margin):
                 continue
             offset = math.hypot(col - expected_col, row - expected_row)
-            if offset <= self.max_offset_cells:
+            association_offset = offset
+            if self.metric_outside_margin and (col < 0 or col > 8 or row < 0 or row > 9):
+                # Only the outward component gets extra reach. Keep the normal
+                # association limit along/inside the grid, preserving true XY.
+                association_offset = math.hypot(
+                    min(8.0, max(0.0, col)) - expected_col,
+                    min(9.0, max(0.0, row)) - expected_row,
+                )
+            if association_offset <= self.max_offset_cells:
                 candidates.append((offset, -confidence, col, row, confidence))
 
         if not candidates:

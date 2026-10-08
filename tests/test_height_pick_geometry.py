@@ -77,6 +77,53 @@ class HeightGeometryTests(unittest.TestCase):
                 self.assertIsNotNone(target)
                 np.testing.assert_allclose([target.col, target.row], measured, atol=1e-5)
 
+    def test_metric_margin_accepts_ten_mm_on_edges_and_corners_without_clamping(self):
+        geometry = self.geometry()
+        estimator = HeightPickEstimator(geometry, outside_margin_mm=10.)
+        dx, dy = 10 * 8 / geometry.width, 10 * 9 / geometry.height
+        positions = [((-dx, 4), (0, 4)), ((8+dx, 4), (8, 4)),
+                     ((4, -dy), (4, 0)), ((4, 9+dy), (4, 9)),
+                     ((-dx, -dy), (0, 0)), ((8+dx, -dy), (8, 0)),
+                     ((-dx, 9+dy), (0, 9)), ((8+dx, 9+dy), (8, 9))]
+        for measured, expected in positions:
+            with self.subTest(measured=measured):
+                u, v = geometry.project(geometry.grid_to_xy([measured]))[0]
+                target = estimator.estimate_pick_target([(0, .95, (u-10, v-10, u+10, v+10))], *expected)
+                self.assertIsNotNone(target)
+                np.testing.assert_allclose([target.col, target.row], measured, atol=1e-5)
+
+    def test_metric_margin_rejects_beyond_ten_mm_and_keeps_association_limits(self):
+        geometry = self.geometry()
+        estimator = HeightPickEstimator(geometry, outside_margin_mm=10.)
+        dx, dy = 10.1 * 8 / geometry.width, 10.1 * 9 / geometry.height
+        positions = [((-dx, 4), (0, 4), .95), ((8+dx, 4), (8, 4), .95),
+                     ((4, -dy), (4, 0), .95), ((4, 9+dy), (4, 9), .95),
+                     ((-.1, 4), (1, 4), .95), ((-.1, 4.3), (0, 4), .95),
+                     ((4.3, 4), (4, 4), .95), ((-.1, 4), (0, 4), .44)]
+        for measured, expected, confidence in positions:
+            with self.subTest(measured=measured, expected=expected):
+                u, v = geometry.project(geometry.grid_to_xy([measured]))[0]
+                self.assertIsNone(estimator.estimate_pick_target(
+                    [(0, confidence, (u-10, v-10, u+10, v+10))], *expected))
+
+    def test_manager_passes_metric_margin_to_height_scan(self):
+        manager = self.manager()
+        manager.config.VISUAL_PICK_OUTSIDE_MARGIN_MM = 10.
+        geometry = self.geometry()
+        measured = [-10 * 8 / geometry.width, 4.]
+        u, v = geometry.project(geometry.grid_to_xy([measured]))[0]
+        manager.cam_monitor.get_fresh_pick_snapshot.return_value = (
+            np.zeros((960, 1280, 3), np.uint8), [(0, .95, (u-10, v-10, u+10, v+10))])
+        with contextlib.redirect_stdout(io.StringIO()):
+            target = manager.get_robot_center_pick_targets({'moving': (0, 4)})['moving']
+        self.assertIsNotNone(target)
+        np.testing.assert_allclose([target.col, target.row], measured, atol=1e-5)
+
+    def test_rejects_invalid_metric_margin(self):
+        for margin in (-1., float('nan'), float('inf')):
+            with self.subTest(margin=margin), self.assertRaises(ValueError):
+                HeightPickEstimator(self.geometry(), outside_margin_mm=margin)
+
     def test_rejects_missing_height_wrong_camera_resolution_and_singular_board(self):
         for kwargs in ({'piece_height_mm': None}, {'piece_height_mm': -1},
                        {'camera_index': 2}, {'frame_size': (640, 480)}):

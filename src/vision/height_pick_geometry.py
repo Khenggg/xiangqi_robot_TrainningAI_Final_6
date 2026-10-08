@@ -85,10 +85,12 @@ def geometry_from_board(intrinsics_path, perspective, camera_index, frame_size,
 
 class HeightPickEstimator(VisualPickEstimator):
     """Same selection/temporal checks as bbox picks, with a height-aware mapping."""
-    def __init__(self, geometry, min_confidence=.45, max_offset_cells=.25):
+    def __init__(self, geometry, min_confidence=.45, max_offset_cells=.25,
+                 outside_margin_mm=None):
         self.geometry = geometry
         self.min_confidence = float(min_confidence)
         self.max_offset_cells = float(max_offset_cells)
+        self._configure_outside_margin((geometry.width, geometry.height), outside_margin_mm)
 
     def _box_to_grid(self, box):
         x1, y1, x2, y2 = finite_array(box, (4,))

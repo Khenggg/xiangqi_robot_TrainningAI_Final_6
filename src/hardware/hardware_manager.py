@@ -268,6 +268,8 @@ class HardwareManager:
                         min_confidence=self.config.VISUAL_PICK_MIN_CONFIDENCE,
                         max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
                         foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
+                        board_mm=getattr(self.config, "VISUAL_HEIGHT_BOARD_MM", None),
+                        outside_margin_mm=getattr(self.config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", None),
                     )
                     # Box center remains occupancy evidence and the explicitly
                     # selected legacy path, never a top-face fallback.
@@ -277,6 +279,8 @@ class HardwareManager:
                         max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
                         foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
                         point_mode="center",
+                        board_mm=getattr(self.config, "VISUAL_HEIGHT_BOARD_MM", None),
+                        outside_margin_mm=getattr(self.config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", None),
                     )
                     self.board_reconciler = BoardReconciler(self.pick_estimator)
                     print("[INIT] ✅ Visual pick / board reconciliation initialized.")
@@ -549,7 +553,9 @@ class HardwareManager:
                             self.config.VISUAL_HEIGHT_BOARD_MM, self.config.VISUAL_HEIGHT_PIECE_MM,
                             self.config.VISUAL_HEIGHT_POSE_MAX_ERROR_PX)
                         estimator = HeightPickEstimator(geometry, self.config.VISUAL_PICK_MIN_CONFIDENCE,
-                                                        self.config.VISUAL_PICK_MAX_OFFSET_CELLS)
+                                                        self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
+                                                        outside_margin_mm=getattr(
+                                                            self.config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", None))
                     elif tuple(frame.shape[1::-1]) != estimator.geometry.frame_size:
                         raise ValueError("Camera resolution changed during pick sampling")
                     for name, cell in expected_cells.items():

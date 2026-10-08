@@ -94,6 +94,29 @@ class VisualPickEstimatorTests(unittest.TestCase):
                 self.assertIsNone(estimator.estimate_pick_target(
                     [(0, confidence, (col-.05, row-.05, col+.05, row+.05))], *expected))
 
+    def test_metric_margin_in_center_and_foot_modes_accepts_boundary_and_rejects_beyond(self):
+        for mode in ("center", "foot"):
+            estimator = VisualPickEstimator(
+                Path(self.temp_dir.name) / "perspective.npy", point_mode=mode,
+                board_mm=(324., 368.), outside_margin_mm=10.)
+            for distance, accepted in ((10., True), (10.1, False)):
+                dx, dy = distance * 8 / 324., distance * 9 / 368.
+                positions = [((-dx, 4), (0, 4)), ((8+dx, 4), (8, 4)),
+                             ((4, -dy), (4, 0)), ((4, 9+dy), (4, 9)),
+                             ((-dx, -dy), (0, 0))]
+                for measured, expected in positions:
+                    with self.subTest(mode=mode, distance=distance, measured=measured):
+                        col, row = measured
+                        # Position the chosen bbox point at the measured coordinate.
+                        fraction = .5 if mode == "center" else estimator.foot_ratio
+                        box = (col-.05, row-.1*fraction, col+.05, row+.1*(1-fraction))
+                        target = estimator.estimate_pick_target([(0, .95, box)], *expected)
+                        if accepted:
+                            self.assertIsNotNone(target)
+                            np.testing.assert_allclose([target.col, target.row], measured, atol=1e-6)
+                        else:
+                            self.assertIsNone(target)
+
     def test_aggregate_targets_uses_median_and_requires_stable_samples(self):
         first = self.estimator.estimate_pick_target([(0, 0.9, (1.9, 1.0, 2.1, 2.0))], 2.0, 1.85)
         second = self.estimator.estimate_pick_target([(0, 0.8, (2.0, 1.0, 2.2, 2.0))], 2.1, 1.85)
