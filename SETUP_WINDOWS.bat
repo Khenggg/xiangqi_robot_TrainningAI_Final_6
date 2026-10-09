@@ -1,15 +1,10 @@
 @echo off
 setlocal
+chcp 65001 >nul
+title Xiangqi Robot - Windows Setup
 cd /d "%~dp0"
-py -3.12 --version
-if errorlevel 1 exit /b 1
-if not exist ".venv312\Scripts\python.exe" (
-    py -3.12 -m venv .venv312
-    if errorlevel 1 exit /b 1
-)
-".venv312\Scripts\python.exe" -m pip install -r requirements-lock-win-py312.txt
-if errorlevel 1 exit /b 1
-".venv312\Scripts\python.exe" -c "import cv2,pygame,numpy,requests,torch,ultralytics,onnxruntime; print('Dependencies OK')"
-if errorlevel 1 exit /b 1
-echo Setup complete. Connect camera and robot, then open RUN.bat.
-exit /b 0
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\windows_bootstrap.ps1" -Mode Setup
+set "RESULT=%ERRORLEVEL%"
+echo.
+if not "%XIANGQI_NO_PAUSE%"=="1" pause
+exit /b %RESULT%

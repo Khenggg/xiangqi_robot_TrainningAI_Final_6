@@ -25,10 +25,12 @@ from src.vision.board_reconciler import BoardReconciler
 from src.vision.calibrate_camera import calibrate_perspective_camera
 from src.vision.auto_calibrate import run_calibration_flow
 
+_YOLO_IMPORT_ERROR = None
 try:
     from ultralytics import YOLO
-except ImportError:
+except ImportError as exc:
     YOLO = None
+    _YOLO_IMPORT_ERROR = exc
 
 class HardwareManager:
     """Manages Robot, Camera (Vision), and AI Engine connections."""
@@ -213,7 +215,8 @@ class HardwareManager:
                 self.model = YOLO(model_path)
                 print(f"✅ Model loaded: {model_path}")
             else:
-                print("⚠️ Warning: Module 'ultralytics' chưa được cài đặt, bỏ qua load YOLO model.")
+                print(f"⚠️ Warning: Không import được YOLO: {_YOLO_IMPORT_ERROR}. "
+                      "Chạy lại SETUP_WINDOWS.bat và xem log setup.")
         except Exception as e:
             print(f"⚠️ Warning: Could not load YOLO model: {e}")
             

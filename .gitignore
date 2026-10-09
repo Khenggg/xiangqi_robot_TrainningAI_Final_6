@@ -23,9 +23,14 @@ hand_detection/
 # Local Python virtual environments (machine-specific dependencies)
 .venv/
 .venv312/
+.venv312-backup-*/
 venv/
 env/
 .env
 ENV/
 VENV/
+
+# Windows setup downloads and diagnostic logs (machine-specific)
+.setup-cache/
+logs/
 

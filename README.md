@@ -1,3 +1,5 @@
+> **Cài trên máy Windows mới:** double-click `SETUP_WINDOWS.bat`, chờ `Setup complete`, rồi double-click `RUN.bat`. SETUP tự chuẩn bị Python và thư viện; xem [hướng dẫn Windows](docs/WINDOWS_SETUP.md) để biết điều kiện và xử lý lỗi.
+
 # XIANGQI ROBOT CỜ TƯỚNG VIP — SPECIFICATION DOCUMENT
 
 > **Tài liệu kỹ thuật đầy đủ cho hệ thống Robot chơi Cờ Tướng tự động**  
