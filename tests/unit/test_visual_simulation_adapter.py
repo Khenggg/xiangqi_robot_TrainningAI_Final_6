@@ -56,7 +56,7 @@ def test_unknown_contact_offset_cannot_read_teaching_points():
     robot.robot.GetRobotTeachingPoint.assert_not_called()
 
 
-def test_verified_controller_frames_adopted_only_after_grid_parity():
+def test_visual_command_correction_is_diagnostic_not_a_motion_interlock():
     state = BoardPlacementState.compute(0.)
     points = {}
     for name, cell in zip(("R1", "R2", "R3", "R4"), ((0, 0), (0, 8), (9, 8), (9, 0))):
@@ -70,10 +70,10 @@ def test_verified_controller_frames_adopted_only_after_grid_parity():
     assert physical_board_provider(robot, cfg).is_calibrated
     assert (robot.tool_num, robot.user_num) == (2, 0)
     robot.tool_num, robot.user_num = 0, 1
-    robot.board_to_pose_bilinear = lambda col, row, z: [999., 999., z]
-    with pytest.raises(ValueError, match="disagree"):
-        physical_board_provider(robot, cfg)
-    assert (robot.tool_num, robot.user_num) == (0, 1)
+    robot.board_to_pose_bilinear = lambda col, row, z: list(state.cell_to_robot_xyz(row,col)[:2]*1000. + [5.,0.]) + [z]
+    provider = physical_board_provider(robot, cfg)
+    assert provider.visual_command_xy_difference_mm == pytest.approx(5., abs=.001)
+    assert (robot.tool_num, robot.user_num) == (2, 0)
 
 
 def test_virtual_failed_pick_never_places_or_reports_success():
@@ -103,6 +103,7 @@ def test_virtual_capture_without_configured_disposal_is_rejected_before_pick():
 
 def test_physical_typed_result_and_callbacks_are_preserved(tmp_path):
     h = manager(tmp_path)
+    h.physical_telemetry_ready = Mock(return_value=True)
     h.robot.physical_motion_authorized = True
     h.board_pose_provider = object()
     from src.hardware.simulation_adapter import SimulationMotionResult

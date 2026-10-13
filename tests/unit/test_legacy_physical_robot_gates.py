@@ -12,6 +12,7 @@ def ready_robot():
     arm.robot=MagicMock(); arm.robot.MoveCart.return_value=0
     arm.robot.MoveJ.return_value=0; arm.robot.SetToolDO.return_value=0
     arm.robot.Mode.return_value=0; arm.robot.RobotEnable.return_value=0
+    arm.robot.GetRobotTeachingPoint.return_value = (0, [0.0]*12 + [arm.tool_num, arm.user_num])
     arm.teaching_points={name:{"pose":[x,y,10,180,0,0],"joints":[0]*6}
         for name,x,y in [("R1",-200,500),("R2",-200,180),("R3",160,180),("R4",160,500)]}
     return arm

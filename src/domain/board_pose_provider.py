@@ -168,7 +168,7 @@ class BoardCalibrationTolerancePolicy:
     max_board_tilt_hard_fail_deg: float = 5.0
     min_normal_z: Optional[float] = None  # Deprecated alias; if set, acts as secondary constraint
     enforce_wobj_consistency: bool = True
-    allow_wobj_ids: Tuple[int, ...] = (0,)
+    allow_wobj_ids: Tuple[int, ...] = (0, 1)
 
     @classmethod
     def permissive_se3(cls) -> "BoardCalibrationTolerancePolicy":
@@ -855,7 +855,7 @@ class FixedBoardPoseProvider(BoardPoseProvider):
     def from_forward_shift(
         cls,
         forward_shift_mm: float = 0.0,
-        board_yaw_deg: float = 0.0,
+        board_yaw_deg: Optional[float] = None,
         safe_transit_height_mm: float = 40.0,
     ) -> "FixedBoardPoseProvider":
         state = BoardPlacementState.compute(

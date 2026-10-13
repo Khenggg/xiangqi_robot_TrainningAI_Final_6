@@ -70,6 +70,7 @@ setScenePlacement({
   boardCenterX: defaultCenter[0],
   boardSurfaceY: defaultCenter[1],
   boardCenterZ: defaultCenter[2],
+  board_yaw_deg: sceneJson.virtual_board_placement.board_yaw_deg,
   forward_shift_mm: 0.0,
   safe_transit_height_mm: 70.0,
   board_height_offset_mm: 0.0,
@@ -92,24 +93,20 @@ console.log("  [PASS] boardPointToXYZ(row, col) and boardPointToXYZ({ row, col }
 assert.throws(() => boardPointToXYZ(NaN, 0), /Invalid board coordinates/);
 assert.throws(() => boardPointToXYZ(0, undefined), /Invalid board coordinates/);
 
-// 2. Asymmetric cell (2, 7) vs (7, 2) to prevent transpose / swap regressions
-// Under current canonical 0°:
-// u = (col - 4.0) * 0.040
-// v = (row - 4.5) * 0.040
-// For (row=2, col=7): u = +0.120 m, v = -0.100 m
-// Robot: X_rob = -v = +0.100 m, Y_rob = 0.360 + u = +0.480 m.
-// Viewer: X = -0.480 m, Y = 0.0105 m, Z = -0.100 m.
+// Asymmetric cells are derived from the current canonical scene, never an old placement.
+function expectedWorld(row, col) {
+  const center = sceneJson.virtual_board_placement.board_center_in_robot_base_m;
+  const theta = sceneJson.virtual_board_placement.board_yaw_deg * Math.PI / 180;
+  const u = (col - (geometry.columns - 1)/2) * geometry.cellM;
+  const v = (row - (geometry.rows - 1)/2) * geometry.rowSpacingM;
+  return { x: -(center[1] + Math.cos(theta)*u - Math.sin(theta)*v),
+    y: center[2], z: -(center[0] - Math.sin(theta)*u - Math.cos(theta)*v) };
+}
 const p27 = boardPointToXYZ(2, 7, geometry);
-assert.ok(Math.abs(p27.x - (-0.480)) < 1e-6, `Expected X=-0.480, got ${p27.x}`);
-assert.ok(Math.abs(p27.y - 0.0105) < 1e-6, `Expected Y=0.0105, got ${p27.y}`);
-assert.ok(Math.abs(p27.z - (-0.100)) < 1e-6, `Expected Z=-0.100, got ${p27.z}`);
-
-// For transposed (row=7, col=2): u = -0.080 m, v = +0.100 m
-// Viewer: X = -0.280 m, Y = 0.0105 m, Z = +0.100 m.
 const p72 = boardPointToXYZ(7, 2, geometry);
-assert.ok(Math.abs(p72.x - (-0.280)) < 1e-6, `Expected X=-0.280, got ${p72.x}`);
-assert.ok(Math.abs(p72.z - 0.100) < 1e-6, `Expected Z=0.100, got ${p72.z}`);
-
+for (const [actual, expected] of [[p27, expectedWorld(2,7)], [p72, expectedWorld(7,2)]]) {
+  for (const axis of ['x','y','z']) assert.ok(Math.abs(actual[axis]-expected[axis]) < 1e-6);
+}
 assert.notEqual(p27.x, p72.x, "p27.x and p72.x must not be equal");
 assert.notEqual(p27.z, p72.z, "p27.z and p72.z must not be equal");
 console.log("  [PASS] Asymmetric cell (2, 7) verifies non-transposed row/col mapping.");
@@ -123,8 +120,8 @@ for (let r = 0; r < 10; r++) {
   for (let c = 0; c < 9; c++) {
     const ptWorld = boardPointToXYZ(r, c, geometry);
 
-    const u = (c - 4.0) * 0.040;
-    const v = (r - 4.5) * 0.040;
+    const u = (c - (geometry.columns-1)/2) * geometry.cellM;
+    const v = (r - (geometry.rows-1)/2) * geometry.rowSpacingM;
     const theta = sceneJson.virtual_board_placement.board_yaw_deg * Math.PI / 180;
     const center = sceneJson.virtual_board_placement.board_center_in_robot_base_m;
     const robX = center[0] - Math.sin(theta) * u - Math.cos(theta) * v;
@@ -204,8 +201,9 @@ console.log("  [PASS] movePieceTo supports both (row, col) and { row, col } cont
 // Apply forward shift d = +15 mm and vertical offset zOff = +30 mm
 setScenePlacement({
   boardCenterX: defaultCenter[0],
-  boardSurfaceY: 0.0105 + 0.030,
+  boardSurfaceY: defaultCenter[1] + 0.030,
   boardCenterZ: defaultCenter[2] + 0.015,
+  board_yaw_deg: sceneJson.virtual_board_placement.board_yaw_deg,
   forward_shift_mm: 15.0,
   safe_transit_height_mm: 50.0,
   board_height_offset_mm: 30.0,
@@ -214,7 +212,7 @@ setScenePlacement({
 
 const shiftedP27 = boardPointToXYZ(2, 7, geometry);
 assert.ok(Math.abs(shiftedP27.x - p27.x) < 1e-6, "Shift along Z must not alter X");
-assert.ok(Math.abs(shiftedP27.y - (0.0105 + 0.030)) < 1e-6, "Shift Y must reflect +30mm offset");
+assert.ok(Math.abs(shiftedP27.y - (defaultCenter[1] + 0.030)) < 1e-6, "Shift Y must reflect +30mm offset");
 assert.ok(Math.abs(shiftedP27.z - (p27.z + 0.015)) < 1e-6, "Shift Z must reflect +15mm forward shift");
 
 console.log("  [PASS] Dynamic board placement shift is translation-invariant across axes.");

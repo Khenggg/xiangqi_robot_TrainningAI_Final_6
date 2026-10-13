@@ -677,6 +677,13 @@ function initSpeedControlEvents() {
 function setLiveBadge(text, kind = "") {
   liveStateEl.textContent = text;
   liveStateEl.className = kind;
+  const warning = document.getElementById("launchCalibrationWarning");
+  if (warning && state.launchMirrorError) {
+    const armLive = state.liveSource === "PHYSICAL" && kind === "live physical";
+    warning.textContent = (armLive
+      ? "CÁNH TAY ĐANG LIVE — Đồng bộ quân cờ BẬT trên bàn mô phỏng mặc định (chưa hiệu chuẩn mặt bàn thật)."
+      : "CÁNH TAY CHƯA LIVE — Kiểm tra SDK/WebSocket. Đồng bộ quân cờ vẫn hoạt động trên bàn mô phỏng.");
+  }
 }
 
 function sendLivePayload(payload) {
@@ -696,8 +703,11 @@ function applyLiveState(payload) {
   const validation = validateLivePacket(payload, LIVE_JOINT_LIMITS_DEG, expectedModel);
   if (!validation.ok) {
     console.warn("Live packet rejected:", validation.reason);
-    return;
+    setLiveBadge("DỮ LIỆU CŨ/LỖI", "error");
+    if (sourceBadgeEl) sourceBadgeEl.textContent = validation.reason;
+    return false;
   }
+  state.lastValidLiveReceipt = performance.now();
   // Authoritative joints directly from backend telemetry
   state.liveSource = payload.source ?? null;
   state.jointsDeg = [...validation.joints];
@@ -741,6 +751,7 @@ function applyLiveState(payload) {
   if (payload.motion_state === "COLLISION_REJECTED" || payload.last_error) {
     handleBackendError(payload.last_error || "Chuyển động bị từ chối bởi Collision Guard");
   }
+  return true;
 }
 
 function connectLive() {
@@ -765,13 +776,26 @@ function connectLive() {
     return;
   }
   state.liveSocket = socket;
+  state.lastValidLiveReceipt = 0;
+  const connectionDeadline = setTimeout(() => {
+    if (socket.readyState === WebSocket.CONNECTING) socket.close();
+  }, 5000);
+  const freshnessWatchdog = setInterval(() => {
+    if (state.liveSocket === socket && socket.readyState === WebSocket.OPEN &&
+        (!state.lastValidLiveReceipt || performance.now() - state.lastValidLiveReceipt > 2000)) {
+      setLiveBadge("CHỜ DỮ LIỆU MỚI", "error");
+    }
+  }, 500);
   setLiveBadge("ĐANG KẾT NỐI…");
-  socket.onopen = () => setLiveBadge("LIVE", "live");
+  socket.onopen = () => {
+    if (state.liveSocket === socket) setLiveBadge("CHỜ TELEMETRY");
+  };
   socket.onmessage = (event) => {
+    if (state.liveSocket !== socket) return;
     try {
       const data = JSON.parse(event.data);
       if (data.type === "robot_state") {
-        applyLiveState(data);
+        if (!applyLiveState(data)) return;
         if (data.gripper !== undefined && state.currentArm?.gripper) {
           state.currentArm.gripper.setClosed(Boolean(data.gripper));
         }
@@ -780,9 +804,14 @@ function connectLive() {
           const verBadge = document.getElementById("placementVersionBadge");
           if (verBadge) verBadge.textContent = `VER: ${data.placement_version}`;
         }
+      } else if (data.type === "twin_status") {
+        if (data.error) {
+          setLiveBadge("DỮ LIỆU CŨ/LỖI", "error");
+          if (sourceBadgeEl) sourceBadgeEl.textContent = String(data.error);
+        }
       } else if (data.type === "world_state") {
         const val = validateWorldStatePacket(data);
-        if (val.ok && !(state.liveSource === "PHYSICAL" && state.livePlacementValid !== true)) {
+        if (val.ok && !(state.liveSource === "PHYSICAL" && state.livePlacementValid === false)) {
           if (piecesGroupRef && xiangqiPieces) {
             updatePiecesFromWorldState(piecesGroupRef, xiangqiPieces, val.pieces);
           }
@@ -805,6 +834,12 @@ function connectLive() {
         }
         const status = document.getElementById("teachingPointsStatus");
         if (status) status.textContent = `Đã nạp R1–R4 từ hình học mô phỏng, phiên bản ${data.placement_version}. Có thể sửa XYZ rồi áp dụng.`;
+      } else if (data.type === "board_profile_result") {
+        if (data.success && data.placement) state.teachingBaseVersion = Number(data.placement.placement_version);
+        const status = document.getElementById("teachingPointsStatus");
+        if (status) status.textContent = data.success
+          ? (data.status === "BOARD_PROFILE_SAVED" ? "Đã lưu vị trí bàn đang áp dụng." : "Đã khôi phục profile. Kiểm tra đường đi trước khi chơi.")
+          : `Profile bị từ chối: ${data.error || data.status}`;
       } else if (data.type === "board_teaching_result") {
         if (data.success) state.teachingBaseVersion = Number(data.placement?.placement_version);
         const status = document.getElementById("teachingPointsStatus");
@@ -879,6 +914,7 @@ function connectLive() {
     }
   };
   socket.onerror = () => {
+    if (state.liveSocket !== socket) return;
     setLiveBadge("LỖI", "error");
     if (sourceBadgeEl) {
       sourceBadgeEl.textContent = "";
@@ -886,6 +922,9 @@ function connectLive() {
     }
   };
   socket.onclose = () => {
+    clearTimeout(connectionDeadline);
+    clearInterval(freshnessWatchdog);
+    if (state.liveSocket !== socket) return;
     state.liveSocket = null;
     state.liveSource = null;
     state.livePlacementValid = null;
@@ -1236,10 +1275,13 @@ export function applyAuthoritativeBoardPlacement(packet) {
     zOffsetNum.placeholder = fourPointPose ? "R1–R4" : "";
   }
   if (verBadge) verBadge.textContent = `VER: ${ver}`;
-  for (const id of ["boardShiftSlider", "boardShiftNum", "boardZOffsetNum", "btnApplyPlacement"]) {
+  for (const id of ["boardShiftSlider", "boardShiftNum", "boardZOffsetNum", "safeTransitSlider", "safeTransitNum", "btnApplyPlacement"]) {
     const control = document.getElementById(id);
     if (control) control.disabled = fourPointPose;
   }
+  if (transitNum) transitNum.title = fourPointPose
+    ? "H giữ nguyên từ cấu hình đã áp dụng. Chế độ R1–R4 chưa hỗ trợ đổi H riêng."
+    : "";
 
   // Invalidate or reset stale validation badge when placement changes
   const valBadge = document.getElementById("valResultBadge");
@@ -1544,6 +1586,10 @@ function initServicePanelEvents() {
 function initPlacementPanelEvents() {
   const teachingStatus = document.getElementById("teachingPointsStatus");
   const sendTeachingCommand = (payload) => {
+    if (state.liveSource === "PHYSICAL") {
+      if (teachingStatus) teachingStatus.textContent = "Profile này chỉ dành cho mô phỏng; không thay calibration bàn thật.";
+      return false;
+    }
     if (!state.liveSocket || state.liveSocket.readyState !== WebSocket.OPEN) {
       if (teachingStatus) teachingStatus.textContent = "Cần Connect live với simulator để đổi vị trí bàn.";
       return false;
@@ -1553,6 +1599,13 @@ function initPlacementPanelEvents() {
   document.getElementById("btnLoadSimTeachingPoints")?.addEventListener("click", () => {
     sendTeachingCommand({ command: "GET_BOARD_TEACHING_POINTS" });
   });
+  for (const [id, command] of [["btnSaveBoardProfile", "SAVE_BOARD_PROFILE"], ["btnLoadBoardProfile", "LOAD_BOARD_PROFILE"]]) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      if (sendTeachingCommand({ command, expected_placement_version: state.teachingBaseVersion ?? state.placementVersion })) {
+        if (teachingStatus) teachingStatus.textContent = "Đang xử lý profile R1–R4…";
+      }
+    });
+  }
   document.getElementById("btnApplyTeachingPoints")?.addEventListener("click", () => {
     const points = {};
     for (const name of ["R1", "R2", "R3", "R4"]) {
@@ -1578,6 +1631,7 @@ function initPlacementPanelEvents() {
   const btnValidate = document.getElementById("btnValidatePlacement");
 
   const syncPrecheckFromInputs = () => {
+    if (state.placementSource === "R1_R4_SIMULATION" || state.placementSource === "R1_R4_PHYSICAL") return;
     const d = Number(shiftNum?.value ?? 0);
     const h = Number(transitNum?.value ?? 70);
     const zOff = Number(zOffsetNum?.value ?? 0);
@@ -2516,6 +2570,10 @@ function loop() {
 
 resizeRenderer();
 
+function reportViewerDiagnostic(error, source) {
+  window.reportProjectDiagnostic?.(error, source);
+}
+
 async function initApp() {
   try {
     const physicalGeometry = await fetchPhysicalGeometry();
@@ -2560,8 +2618,25 @@ async function initApp() {
     initJointControlPanelEvents();
     syncAllJointSliders();
     loop(performance.now());
+    const launchParams = new URLSearchParams(window.location.search);
+    const mirrorError = launchParams.get("mirror_error");
+    if (mirrorError) {
+      state.launchMirrorError = mirrorError;
+      const warning = document.createElement("div");
+      warning.id = "launchCalibrationWarning";
+      warning.setAttribute("role", "alert");
+      warning.style.cssText = "position:absolute;top:12px;left:12px;right:12px;z-index:20;background:#6b280d;color:white;padding:12px;border-radius:6px;pointer-events:none";
+      warning.textContent = "CÁNH TAY CHƯA LIVE — Kiểm tra SDK/WebSocket. Không cần hiệu chuẩn bàn để xem góc khớp.";
+      document.getElementById("canvasContainer").appendChild(warning);
+    }
+    const launchWs = launchParams.get("ws");
+    if (launchWs && /^ws:\/\/127\.0\.0\.1:\d+$/.test(launchWs)) {
+      document.getElementById("wsUrl").value = launchWs;
+      if (launchParams.get("autoconnect") === "1") connectLive();
+    }
   } catch (err) {
     console.error("[VIEWER] ❌ Failed to initialize 3D viewer:", err);
+    reportViewerDiagnostic(err, "viewer.init");
   }
 }
 

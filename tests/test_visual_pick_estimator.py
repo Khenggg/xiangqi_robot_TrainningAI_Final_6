@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -117,7 +118,10 @@ class PhysicalPoseTests(unittest.TestCase):
         robot.connected = True
         robot.physical_motion_authorized = True  # Isolated sequence test: every actuator below is mocked.
         robot.board_to_pose = lambda *args, **kwargs: [0., 0., 250., 180., 0., 0.]
-        robot.teaching_points = {"R_Trash": {"pose": [0., 0., 250., 180., 0., 0.], "joints": [0.] * 6}}
+        robot.teaching_points = {"R_Trash": {"pose": [0., 0., 250., 180., 0., 0.], "joints": [0.] * 6, "tool": 0, "user": 0}}
+        robot.robot = Mock()
+        robot.teaching_points['R_Trash'].update(tool=robot.tool_num, user=robot.user_num)
+        robot.robot.GetRobotTeachingPoint.return_value = (0, [0]*12 + [robot.tool_num, robot.user_num])
         events = []
         robot.pick_at = lambda col, row, visual_target=None: events.append(("pick", col, row, visual_target))
         robot.move_to_extra_safe = lambda col, row, visual_target=None: events.append(("safe", col, row, visual_target))
@@ -143,7 +147,10 @@ class PhysicalPoseTests(unittest.TestCase):
         robot.connected = True
         robot.physical_motion_authorized = True  # Isolated sequence test: every actuator below is mocked.
         robot.board_to_pose = lambda *args, **kwargs: [0., 0., 250., 180., 0., 0.]
-        robot.teaching_points = {"R_Trash": {"pose": [0., 0., 250., 180., 0., 0.], "joints": [0.] * 6}}
+        robot.teaching_points = {"R_Trash": {"pose": [0., 0., 250., 180., 0., 0.], "joints": [0.] * 6, "tool": 0, "user": 0}}
+        robot.robot = Mock()
+        robot.teaching_points['R_Trash'].update(tool=robot.tool_num, user=robot.user_num)
+        robot.robot.GetRobotTeachingPoint.return_value = (0, [0]*12 + [robot.tool_num, robot.user_num])
         events = []
         robot.pick_at = lambda *args, **kwargs: events.append("pick")
         robot.move_to_extra_safe = lambda *args, **kwargs: events.append("safe")

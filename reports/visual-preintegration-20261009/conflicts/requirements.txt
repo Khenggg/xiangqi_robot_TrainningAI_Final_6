@@ -1,0 +1,30 @@
+<<<<<<< D:\OJT\xiangqi_robot_TrainningAI_Final_6\reports\visual-preintegration-20261009\merge-inputs\ours
+pygame>=2.5.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+requests>=2.28.0
+ultralytics>=8.0.0
+torch>=2.0.0
+
+# Retained unified simulation and telemetry
+pybullet>=3.2.6
+websockets>=12,<16
+onnxruntime>=1.16
+Pillow>=9.0
+||||||| D:\OJT\xiangqi_robot_TrainningAI_Final_6\reports\visual-preintegration-20261009\merge-inputs\base
+pygame>=2.5.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+requests>=2.28.0
+ultralytics>=8.0.0
+torch>=2.0.0
+=======
+pygame>=2.5.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+requests>=2.28.0
+ultralytics>=8.0.0
+torch>=2.0.0
+
+onnxruntime>=1.17.0
+>>>>>>> D:\OJT\xiangqi_robot_TrainningAI_Final_6\reports\visual-preintegration-20261009\merge-inputs\visual

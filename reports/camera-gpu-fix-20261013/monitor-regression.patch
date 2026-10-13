@@ -1,0 +1,215 @@
+--- current
++++ previous_verified
+@@ -9,6 +9,8 @@
+ import time
+ import threading
+ import os
++import logging
++from src.core.project_logging import event
+ 
+ # Màu hiển thị
+ _PIECE_COLOR = (0, 255, 0)     # BGR - xanh lá (fallback YOLO)
+@@ -67,10 +69,16 @@
+         self._inference_error = None
+         self._max_result_age_s = 1.5
+         self._last_cchess_result = None  # Dict: {"success": True, "board": ..., "confidence": ...}
++        self._recognized_frame = None
++        self._last_inference_warning_at = 0.0
+         self._stop_event = threading.Event()  # Thread-safe shutdown signal
+         self._thread = None                 # Capture thread (30-60 FPS mượt mà)
+         self._detect_thread = None          # Detect thread (Async background)
+         self._lock = threading.Lock()       # Bảo vệ _last_frame/_last_detections
++        self._pick_scan_active = threading.Event()
++        self._pick_scan_lock = threading.Lock()
++        self._last_pick_diagnostic = None
++        self._pick_diagnostic_until = 0.0
+         self._cam_lock = threading.Lock()   # Bảo vệ truy cập camera (cap.read/grab)
+         self._board_polygon = None  # Cache polygon bàn cờ trong pixel space (4 điểm)
+ 
+@@ -193,6 +201,9 @@
+         """Luồng 1: Chuyên đọc frame liên tục từ camera ở tốc độ cao nhất (30-60 FPS).
+         Đảm bảo cửa sổ hiển thị mượt mà 100%, không bao giờ bị nghẽn bởi YOLO."""
+         while not self._stop_event.is_set():
++            if self._pick_scan_active.is_set():
++                self._stop_event.wait(.01)
++                continue
+             if self.cap is None or not self.cap.isOpened():
+                 time.sleep(0.1)
+                 continue
+@@ -218,6 +229,7 @@
+     def _record_inference_error(self, error):
+         with self._lock:
+             self._last_cchess_result = None
++            self._recognized_frame = None
+             self._last_detections = []
+             previous = self._inference_error
+             self._inference_error = str(error)
+@@ -258,6 +270,7 @@
+                     # Ultralytics numpy inputs are OpenCV BGR.
+                     results = self.model.predict(frame, conf=self.conf, iou=0.35,
+                                                  imgsz=640, device=self.device, verbose=False)
++                    self._limit_yolo_cpu_threads()
+                     for box in results[0].boxes:
+                         detections.append((int(box.cls[0]), float(box.conf[0]), tuple(map(int, box.xyxy[0]))))
+                     detections = self._filter_by_board(detections)
+@@ -273,6 +286,7 @@
+                 if sampled_at < self._last_inference_at:
+                     return None
+                 self._last_cchess_result = cchess_result
++                self._recognized_frame = frame
+                 self._last_detections = detections
+                 self._last_inference_at = sampled_at
+                 self._inference_error = None
+@@ -280,12 +294,21 @@
+ 
+     def _detect_loop(self):
+         while not self._stop_event.is_set():
++            if self._pick_scan_active.is_set():
++                self._stop_event.wait(.01)
++                continue
+             with self._lock:
+                 frame = self._last_frame.copy() if self._last_frame is not None else None
+                 sampled_at = self._last_frame_at
+                 fresh = time.monotonic() - sampled_at <= self._max_result_age_s
+             if frame is not None and fresh:
++                started = time.monotonic()
+                 self._infer_frame(frame, sampled_at)
++                elapsed = time.monotonic() - started
++                if elapsed > .5 and started - self._last_inference_warning_at >= 10:
++                    self._last_inference_warning_at = started
++                    event("camera.slow_inference", "Nhận diện camera chậm; giao diện tiếp tục dùng ảnh nền.",
++                          level=logging.WARNING, duration_ms=round(elapsed * 1000), device=str(self.device))
+             self._stop_event.wait(timeout=0.2)
+ 
+     def _draw_overlay(self, frame, detections):
+@@ -351,6 +374,7 @@
+         # --- 3. Fallback YOLO nếu chưa có CChess ---
+         if not has_cchess and detections:
+             for (cls_id, conf, (x1, y1, x2, y2)) in detections:
++                x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+                 cv2.rectangle(display, (x1, y1), (x2, y2), _PIECE_COLOR, 2)
+                 text = f"piece {conf:.0%}"
+                 (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+@@ -369,6 +393,27 @@
+             cv2.putText(display, str(message)[:100], (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+         return display
+ 
++    def get_fresh_pick_snapshot(self):
++        """Measured BGR boxes from one fresh frame; failure is never empty evidence."""
++        from src.vision.pick_consensus import FreshPickTransientError
++        if self.cap is None or not self.cap.isOpened() or self.model is None:
++            raise RuntimeError("Raw pick requires an available camera and best.pt")
++        with self._cam_lock:
++            if self._stop_event.is_set():
++                raise RuntimeError("Camera is stopping")
++            for _ in range(5):
++                self.cap.grab()
++            ok, frame = self.cap.read()
++        if not ok or frame is None or not frame.size:
++            raise FreshPickTransientError("Fresh pick frame unavailable")
++        try:
++            results = self._predict_yolo(frame)
++            detections = [(int(box.cls[0]), float(box.conf[0]),
++                           tuple(map(float, box.xyxy[0]))) for box in results[0].boxes]
++        except Exception as exc:
++            raise FreshPickTransientError("best.pt inference failed") from exc
++        return frame, detections
++
+     def get_fresh_snapshot(self):
+         """Chụp 1 snapshot MỚI: flush buffer + read.
+         Cập nhật đồng thời CChess layout recognition và detections.
+@@ -404,6 +449,24 @@
+             if self._inference_error or time.monotonic() - self._last_inference_at > self._max_result_age_s:
+                 return None
+             return self._last_cchess_result.copy() if self._last_cchess_result is not None else None
++
++    def get_latest_observation(self):
++        """Atomic, non-inferencing sample for GUI polling; timestamp is monotonic.
++
++        Frame, boxes and layout all originate from the same inference. Never
++        pair newer preview pixels with older boxes or count one result twice.
++        Fresh command/verification snapshots still use get_fresh_snapshot.
++        """
++        with self._lock:
++            if (self._inference_error or self._recognized_frame is None
++                    or time.monotonic() - self._last_inference_at > self._max_result_age_s):
++                return None
++            result = self._last_cchess_result
++            if result is not None:
++                result = result.copy()
++                result["board"] = [row[:] for row in result["board"]]
++            return (self._last_inference_at, self._recognized_frame.copy(),
++                    list(self._last_detections), result)
+ 
+ 
+     def start(self):
+@@ -429,6 +492,8 @@
+             self._thread.join(timeout=2)
+         if self._detect_thread is not None and self._detect_thread.is_alive():
+             self._detect_thread.join(timeout=2)
++        if any(t is not None and t.is_alive() for t in (self._thread, self._detect_thread)):
++            raise RuntimeError("Camera worker still running; device kept open until worker stops")
+         
+         # 3. Release camera SAU KHI thread đã dừng
+         if self.cap is not None:
+@@ -457,7 +522,19 @@
+             detections = self._last_detections
+ 
+         if frame is not None:
+-            display = self._draw_overlay(frame, detections)
++            with self._lock:
++                diagnostic = getattr(self, "pick_debug_frame", None)
++                if diagnostic is None:
++                    diagnostic = self._last_pick_diagnostic
++                if diagnostic is not None and not self._pick_diagnostic_until:
++                    self._pick_diagnostic_until = time.monotonic() + 8.0
++                if diagnostic is not None and time.monotonic() >= self._pick_diagnostic_until:
++                    self.pick_debug_frame = None
++                    self._last_pick_diagnostic = None
++                    self._pick_diagnostic_until = 0.0
++                    diagnostic = None
++                diagnostic = diagnostic.copy() if diagnostic is not None else None
++            display = diagnostic if diagnostic is not None else self._draw_overlay(frame, detections)
+             cv2.imshow(self.window_name, display)
+ 
+         return cv2.waitKey(1)
+@@ -476,3 +553,39 @@
+                 self._last_frame.copy() if self._last_frame is not None else None,
+                 list(self._last_detections)
+             )
++
++    def publish_pick_diagnostic(self, frame):
++        """Display the exact measured snapshot, not an overlay on a newer frame."""
++        with self._lock:
++            self._last_pick_diagnostic = frame.copy()
++            self._pick_diagnostic_until = 0.0
++
++    def _predict_yolo(self, image):
++        with self._inference_lock:
++            results = self.model.predict(image, conf=self.conf, iou=0.35,
++                                         imgsz=640, device=self.device, verbose=False)
++            self._limit_yolo_cpu_threads()
++            return results
++
++    def _limit_yolo_cpu_threads(self):
++        # Ultralytics select_device resets Torch's pool during lazy predictor
++        # setup. Apply the UI budget after that first setup, while serialized
++        # by _inference_lock. Subsequent predictions keep this pool size.
++        if self.device == "cpu":
++            import torch
++            if torch.get_num_threads() != 2:
++                torch.set_num_threads(2)
++
++    def pick_scan_session(self):
++        """Pause background inference; all actual camera reads retain _cam_lock."""
++        from contextlib import contextmanager
++
++        @contextmanager
++        def session():
++            with self._pick_scan_lock:
++                self._pick_scan_active.set()
++                try:
++                    yield
++                finally:
++                    self._pick_scan_active.clear()
++        return session()

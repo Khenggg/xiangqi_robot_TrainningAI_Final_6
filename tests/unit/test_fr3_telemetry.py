@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import unittest
+import time
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -78,6 +79,11 @@ class FR3TelemetryTests(unittest.TestCase):
         if not node_bin:
             self.skipTest("Node.js runtime not found; skipping JS live_state test")
 
+        self.publisher.update_from_snapshot(RobotStateSnapshot(
+            robot_model="FR3", connected=True, motion_state="IDLE",
+            joints_deg=[0]*6, flange_pose_mm_deg=[0]*6, tcp_pose_mm_deg=[0]*6,
+            gripper_closed=False, timestamp=time.time(), measurement_timestamp=time.time(),
+        ))
         raw_json = self.publisher._make_packet_json()
 
         js_code = f"""

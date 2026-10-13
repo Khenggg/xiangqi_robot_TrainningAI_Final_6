@@ -48,6 +48,7 @@ from src.simulation.physics.state import (
 from src.simulation.physics.world import VirtualPhysicalWorld
 from src.simulation.placement import BoardPlacementAnalyzer, BoardPlacementState, canonical_cell_to_robot_xyz_m
 from src.simulation.virtual_fr3_backend import VirtualFR3Backend
+from src.simulation.board_profile import SimulationBoardProfileStore
 from src.domain.geometry import get_physical_geometry
 from src.domain.board_pose_provider import BoardCalibrationProfile, calibrate_board_from_teaching_points
 from src.digital_twin.world_sync import sync_world_from_robot_snapshot
@@ -111,6 +112,8 @@ class VirtualXiangqiSimulation:
         # Project root resolution
         project_root = Path(__file__).resolve().parent.parent.parent
         self.scene_config_path = Path(selected_scene or self.world.scene_config_path)
+        self.board_profile_store = SimulationBoardProfileStore(
+            project_root / "data" / "simulation_board_profile.json", self.scene_config_path)
         self._load_scene_config()
 
         # Geometry
@@ -1396,6 +1399,40 @@ class VirtualXiangqiSimulation:
                             "source": "SIMULATION_ONLY"}
         except RuntimeOperationBusy as exc:
             return {"success": False, "status": "BOARD_RELOCATION_REJECTED_BUSY", "error": str(exc)}
+
+    def save_board_profile(self, expected_placement_version=None):
+        """Persist only the applied simulation pose, never unsent viewer inputs."""
+        try:
+            with self.acquire_operation_state(RuntimeOperationState.BOARD_ADJUSTMENT):
+                with self._command_lock:
+                    if self.placement_source != "R1_R4_SIMULATION":
+                        raise ValueError("Áp dụng R1–R4 thành công trước khi lưu profile")
+                    if expected_placement_version != self.placement_state.placement_version:
+                        raise ValueError("Phiên bản bàn đã đổi; nạp bốn điểm hiện tại trước khi lưu")
+                    record = self.board_profile_store.save(self.get_board_teaching_points(),
+                                                          self.placement_state.safe_transit_height_mm)
+                    return {"success": True, "status": "BOARD_PROFILE_SAVED",
+                            "calibration_version": record["calibration_version"]}
+        except (OSError, ValueError, RuntimeOperationBusy) as exc:
+            logger.warning("Không lưu được profile R1–R4: %s", exc)
+            return {"success": False, "status": "BOARD_PROFILE_SAVE_FAILED", "error": str(exc)}
+
+    def load_board_profile(self, expected_placement_version=None):
+        """Explicit supervised restore through the same relocation safety gates."""
+        try:
+            with self.acquire_operation_state(RuntimeOperationState.BOARD_ADJUSTMENT):
+                with self._command_lock:
+                    if expected_placement_version != self.placement_state.placement_version:
+                        raise ValueError("Phiên bản bàn đã đổi; nạp bốn điểm hiện tại trước khi khôi phục")
+                    record = self.board_profile_store.load(self.placement_state.safe_transit_height_mm)
+                    result = self.apply_board_teaching_points(record["points"], expected_placement_version)
+                    if result["success"]:
+                        result["status"] = "BOARD_PROFILE_LOADED"
+                        result["saved_calibration_version"] = record["calibration_version"]
+                    return result
+        except (OSError, ValueError, RuntimeOperationBusy) as exc:
+            logger.warning("Không nạp được profile R1–R4: %s", exc)
+            return {"success": False, "status": "BOARD_PROFILE_LOAD_FAILED", "error": str(exc)}
 
     def set_board_placement(
         self,
@@ -3156,6 +3193,13 @@ class VirtualXiangqiSimulation:
             res = self.apply_board_teaching_points(cmd.get("points", {}), cmd.get("expected_placement_version"))
             if self.telemetry is not None:
                 self.telemetry.broadcast_custom({"type": "board_teaching_result", **res})
+        elif action in ("SAVE_BOARD_PROFILE", "LOAD_BOARD_PROFILE"):
+            handler = self.save_board_profile if action == "SAVE_BOARD_PROFILE" else self.load_board_profile
+            res = handler(cmd.get("expected_placement_version"))
+            if self.telemetry is not None:
+                if res.get("success"):
+                    self.telemetry.broadcast_custom(self.get_board_teaching_points())
+                self.telemetry.broadcast_custom({"type": "board_profile_result", **res})
         elif action == "VALIDATE_BOARD_PLACEMENT":
             threading.Thread(target=self.validate_board_placement, daemon=True).start()
         elif action == "VALIDATE_FULL_BOARD_ROUTES":

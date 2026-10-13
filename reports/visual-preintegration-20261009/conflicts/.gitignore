@@ -1,0 +1,99 @@
+<<<<<<< D:\OJT\xiangqi_robot_TrainningAI_Final_6\reports\visual-preintegration-20261009\merge-inputs\ours
+# Thư mục chứa AI Engine (Quá lớn, tải thủ công)
+!moonfish/.keep
+!moonfish/README.md
+
+# Ma trận hiệu chỉnh Camera (mỗi người dùng máy khác nhau)
+perspective.npy
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Dữ liệu huấn luyện & Artifacts lớn (không commit vào Git)
+data/
+runs/
+outputs/
+graphify-out/
+*.zip
+hand_detection/
+
+# Local Python virtual environments (machine-specific dependencies)
+.venv/
+.venv312/
+venv/
+env/
+.env
+ENV/
+VENV/
+
+
+# Local verification dependencies and generated runtime files
+node_modules/
+.cad_tools/
+.playwright-cli/
+*.log
+logs/
+robot-3d-viewer/assets/fr3_v6/fairino3_v6_pybullet.urdf
+||||||| D:\OJT\xiangqi_robot_TrainningAI_Final_6\reports\visual-preintegration-20261009\merge-inputs\base
+# Thư mục chứa AI Engine (Quá lớn, tải thủ công)
+!moonfish/.keep
+!moonfish/README.md
+
+# Ma trận hiệu chỉnh Camera (mỗi người dùng máy khác nhau)
+perspective.npy
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Dữ liệu huấn luyện & Artifacts lớn (không commit vào Git)
+data/
+runs/
+outputs/
+graphify-out/
+*.zip
+hand_detection/
+
+# Local Python virtual environments (machine-specific dependencies)
+.venv/
+.venv312/
+venv/
+env/
+.env
+ENV/
+VENV/
+
+=======
+# Thư mục chứa AI Engine (Quá lớn, tải thủ công)
+!moonfish/.keep
+!moonfish/README.md
+
+# Ma trận hiệu chỉnh Camera (mỗi người dùng máy khác nhau)
+perspective.npy
+calibration/pick_geometry.json*
+calibration/camera_intrinsics.json*
+!calibration/camera_intrinsics.json
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Dữ liệu huấn luyện & Artifacts lớn (không commit vào Git)
+data/
+runs/
+outputs/
+graphify-out/
+*.zip
+hand_detection/
+
+# Local Python virtual environments (machine-specific dependencies)
+.venv/
+.venv312/
+venv/
+env/
+.env
+ENV/
+VENV/
+
+>>>>>>> D:\OJT\xiangqi_robot_TrainningAI_Final_6\reports\visual-preintegration-20261009\merge-inputs\visual

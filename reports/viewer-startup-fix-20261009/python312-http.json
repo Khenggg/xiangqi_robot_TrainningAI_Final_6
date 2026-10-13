@@ -1,0 +1,30 @@
+{
+  "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+  "fixture": "non-JavaScript OS MIME mapping",
+  "servers": {
+    "baseline": {
+      "robot-3d-viewer/main.mjs": {
+        "status": 200,
+        "content_type": "application/octet-stream",
+        "bytes": 107141
+      },
+      "vendor/three/build/three.module.js": {
+        "status": 200,
+        "content_type": "text/plain",
+        "bytes": 595384
+      }
+    },
+    "fixed": {
+      "robot-3d-viewer/main.mjs": {
+        "status": 200,
+        "content_type": "text/javascript",
+        "bytes": 107141
+      },
+      "vendor/three/build/three.module.js": {
+        "status": 200,
+        "content_type": "text/javascript",
+        "bytes": 595384
+      }
+    }
+  }
+}

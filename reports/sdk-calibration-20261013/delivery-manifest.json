@@ -1,0 +1,8 @@
+{
+  "src/hardware/robot_VIP.py": "1beffcbc4eddcd06ad8ee542011ea07ad9ee55968774db2d588375e920ae45cf",
+  "src/hardware/hardware_manager.py": "82b93a97c3627ba14412c83edb89a179a08088f4fd62b1b821a58f19ec82fa4c",
+  "tests/unit/test_connection_calibration_split.py": "3a4a0bc10ca776ccdbfaa7aa67069c8cab08e1f0cadab95a8090ff87096d3cfd",
+  "docs/SDK_CONNECTION_CALIBRATION_SPLIT_20261013.md": "ff96fb8f90617364547d1410bdbc810790ec0617a19ea23531a081ef5d1ac2d7",
+  "CURRENT_STATE.md": "065221f8b93d40f7ee199dc207f027982a4b0e41f57dc989c23c39937279c1ee",
+  "KNOWN_ISSUES.md": "690177a0e5d8cbfa458662f1cf97121c4dea4e539878520c211722565bd36c08"
+}

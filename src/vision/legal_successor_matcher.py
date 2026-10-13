@@ -1,4 +1,4 @@
-"""Match a fully recognized board against legal Red successors."""
+"""Match a fully recognized board against legal successors for one side."""
 from __future__ import annotations
 
 from typing import Dict, Iterable
@@ -17,10 +17,13 @@ def freeze_board(board: Iterable[Iterable[str]]) -> Board:
 class LegalSuccessorMatcher:
     """Exact full-board matcher; it deliberately never guesses from occupancy."""
 
-    def __init__(self, committed_board):
+    def __init__(self, committed_board, player_color="r"):
+        if player_color not in ("r", "b"):
+            raise ValueError("player_color must be r or b")
+        self.player_color = player_color
         self.committed_board = freeze_board(committed_board)
         self.successors: Dict[Move, Board] = {}
-        for move in xiangqi.find_all_valid_moves("r", [list(row) for row in self.committed_board]):
+        for move in xiangqi.find_all_valid_moves(player_color, [list(row) for row in self.committed_board]):
             successor, _ = xiangqi.make_temp_move([list(row) for row in self.committed_board], move)
             self.successors[move] = freeze_board(successor)
 
@@ -38,4 +41,5 @@ class LegalSuccessorMatcher:
             return MatchResult(MatchKind.UNIQUE, candidates[0])
         if len(candidates) > 1:
             return MatchResult(MatchKind.AMBIGUOUS, reason="multiple legal successors")
-        return MatchResult(MatchKind.INVALID, reason="layout is not a legal Red successor")
+        side = "Red" if self.player_color == "r" else "Black"
+        return MatchResult(MatchKind.INVALID, reason=f"layout is not a legal {side} successor")

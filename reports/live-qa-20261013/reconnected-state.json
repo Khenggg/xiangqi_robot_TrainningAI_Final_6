@@ -1,0 +1,96 @@
+{
+  "actuation": false,
+  "ports": [
+    {
+      "port": 20003,
+      "reachable": true
+    },
+    {
+      "port": 20004,
+      "reachable": true
+    }
+  ],
+  "samples": [
+    {
+      "connected": true,
+      "motion_state": "IDLE",
+      "joints_valid": true,
+      "tcp_valid": true,
+      "joints_deg": [
+        -89.46504211425781,
+        -128.6233673095703,
+        106.87696075439453,
+        -68.5107421875,
+        -89.49549865722656,
+        42.537105560302734
+      ],
+      "tcp_mm_deg": [
+        -104.28205108642578,
+        149.62501525878906,
+        348.1369323730469,
+        179.84840393066406,
+        0.5455830097198486,
+        -42.00173568725586
+      ],
+      "measurement_timestamp": 1791866586.1019864,
+      "telemetry_error": null,
+      "last_error": null
+    },
+    {
+      "connected": true,
+      "motion_state": "IDLE",
+      "joints_valid": true,
+      "tcp_valid": true,
+      "joints_deg": [
+        -89.46504211425781,
+        -128.62313842773438,
+        106.87696075439453,
+        -68.5109634399414,
+        -89.49571990966797,
+        42.537105560302734
+      ],
+      "tcp_mm_deg": [
+        -104.28167724609375,
+        149.62619018554688,
+        348.1367492675781,
+        179.84854125976562,
+        0.5454226732254028,
+        -42.00173568725586
+      ],
+      "measurement_timestamp": 1791866586.302615,
+      "telemetry_error": null,
+      "last_error": null
+    },
+    {
+      "connected": true,
+      "motion_state": "IDLE",
+      "joints_valid": true,
+      "tcp_valid": true,
+      "joints_deg": [
+        -89.46504211425781,
+        -128.62313842773438,
+        106.8771743774414,
+        -68.5109634399414,
+        -89.49549865722656,
+        42.537105560302734
+      ],
+      "tcp_mm_deg": [
+        -104.28205871582031,
+        149.6261444091797,
+        348.1355285644531,
+        179.84823608398438,
+        0.545435905456543,
+        -42.001739501953125
+      ],
+      "measurement_timestamp": 1791866586.5031464,
+      "telemetry_error": null,
+      "last_error": null
+    }
+  ],
+  "controller_ip": [
+    0,
+    "192.168.58.2"
+  ],
+  "backend_connected": true,
+  "receiver_alive_after_close": false
+}

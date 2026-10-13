@@ -1,0 +1,322 @@
+{
+  "audit_date": "2026-10-12",
+  "scope": "static source review only; no application, tests or physical commands executed",
+  "branch": "feature/unified-robot-vs-robot",
+  "head": "7d8c5deee9e03bb187ccf8e8c1999703202cfd7e",
+  "status_before_report": [
+    " M .gitignore",
+    " M CURRENT_STATE.md",
+    " M KNOWN_ISSUES.md",
+    " M README.md",
+    " M RUN.bat",
+    " M config.py",
+    " M docs/PHASE4_PHYSICAL_VALIDATION_RUNBOOK.md",
+    " M docs/R1_R4_BOARD_PLACEMENT_CURRENT.md",
+    " M main.py",
+    " M requirements.txt",
+    " M robot-3d-viewer/board_picker.mjs",
+    " M robot-3d-viewer/index.html",
+    " M robot-3d-viewer/main.mjs",
+    " M robot-3d-viewer/serve.mjs",
+    " M src/core/ai_execution.py",
+    " M src/core/game_state.py",
+    " M src/core/self_play_controller.py",
+    " M src/digital_twin/live_twin_bridge.py",
+    " M src/hardware/hardware_manager.py",
+    " M src/hardware/robot_VIP.py",
+    " M src/hardware/telemetry_publisher.py",
+    " M src/simulation/runtime.py",
+    " M src/ui/board_renderer.py",
+    " M src/ui/debug_dashboard.py",
+    " M src/ui/input_handler.py",
+    " M src/vision/auto_calibrate.py",
+    " M src/vision/calibrate_camera.py",
+    " M src/vision/camera_monitor.py",
+    " M src/vision/camera_startup.py",
+    " M src/vision/cchess_recognizer.py",
+    " M src/vision/visual_pick_estimator.py",
+    " M tests/test_board_stability_monitor.py",
+    " M tests/unit/test_phase3_final_g90_corrective.py",
+    " M tests/unit/test_viewer_coordinate_contract.mjs",
+    " M tests/unit/test_viewer_single_motion_authority.mjs",
+    "?? CALIBRATE_CAMERA_INTRINSICS.bat",
+    "?? CALIBRATE_PICK_GEOMETRY.bat",
+    "?? MEASURE_GEOMETRY.bat",
+    "?? SETUP_WINDOWS.bat",
+    "?? assets/calibration/",
+    "?? calibration/",
+    "?? docs/BOARD_PROFILE_AND_RECOVERY.md",
+    "?? docs/CROSS_FEATURE_AUDIT_20261005.md",
+    "?? docs/LOGGING.md",
+    "?? docs/R1_R4_SIMULATION_AUDIT_20261005.md",
+    "?? docs/START_PROJECT.md",
+    "?? docs/VISUAL_LATEST_REVIEW_20261005.md",
+    "?? docs/VISUAL_V2_INTEGRATION.md",
+    "?? docs/VISUAL_V2_INTEGRATION_CHOICES_20261009.md",
+    "?? docs/geometry-measurement.md",
+    "?? reports/branch-reviews/",
+    "?? reports/cross-feature-audit-20261005/",
+    "?? reports/physical-ui-latency-20261009/",
+    "?? reports/profile-recovery-20261005/",
+    "?? reports/r1r4-audit-20261005/",
+    "?? reports/startup-camera-recovery-20261009/",
+    "?? reports/telemetry-fix-20261006/",
+    "?? reports/three-mode-gui-20261005/",
+    "?? reports/viewer-startup-fix-20261009/",
+    "?? reports/visual-integration-20261005/",
+    "?? reports/visual-integration-20261009/",
+    "?? reports/visual-preintegration-20261009/",
+    "?? reports/visual-review-652af26/",
+    "?? scripts/calibrate_camera_intrinsics.py",
+    "?? scripts/calibrate_pick_geometry.py",
+    "?? scripts/measure_geometry.py",
+    "?? src/core/launch_options.py",
+    "?? src/core/motion_worker.py",
+    "?? src/core/project_logging.py",
+    "?? src/core/visual_move_coordinator.py",
+    "?? src/simulation/board_profile.py",
+    "?? src/ui/measurement_client.py",
+    "?? src/ui/recovery_status.py",
+    "?? src/vision/camera_source.py",
+    "?? src/vision/geometry_measurement.py",
+    "?? src/vision/height_pick_geometry.py",
+    "?? src/vision/pick_consensus.py",
+    "?? src/vision/pick_debug.py",
+    "?? src/vision/pick_geometry.py",
+    "?? src/vision/ring_pick_estimator.py",
+    "?? src/vision/top_face_pick_estimator.py",
+    "?? src/vision/visual_pick_modes.py",
+    "?? tests/test_auto_calibration_safety.py",
+    "?? tests/test_camera_intrinsics_open.py",
+    "?? tests/test_center_pick_no_fallback.py",
+    "?? tests/test_geometry_measurement.py",
+    "?? tests/test_height_pick_geometry.py",
+    "?? tests/test_measurement_client.py",
+    "?? tests/test_pick_consensus.py",
+    "?? tests/test_ring_pick_estimator.py",
+    "?? tests/test_top_face_geometry.py",
+    "?? tests/unit/test_board_profile_recovery.py",
+    "?? tests/unit/test_physical_ui_latency.py",
+    "?? tests/unit/test_project_logging.py",
+    "?? tests/unit/test_simple_launch_sync.py",
+    "?? tests/unit/test_startup_failure_recovery.py",
+    "?? tests/unit/test_telemetry_liveness.py",
+    "?? tests/unit/test_viewer_startup.py",
+    "?? tests/unit/test_visual_selective_integration.py",
+    "?? tests/unit/test_visual_v2_adapter.py",
+    "?? tests/unit/test_visual_v2_camera_boundary.py",
+    "?? tests/unit/test_visual_v2_simulation.py"
+  ],
+  "files": [
+    {
+      "path": "main.py",
+      "sha256": "5aee65096dfbe76ed8d234238a48beb64c6ba7206b1d2e9b8f40539a15c3f0ce",
+      "lines": 474
+    },
+    {
+      "path": "RUN.bat",
+      "sha256": "7911c48a9f152128974cef637ffe37ecd620284b0cff14e9c4afc08039a438be",
+      "lines": 91
+    },
+    {
+      "path": "SETUP_WINDOWS.bat",
+      "sha256": "36c54bf688873ae3b9f5a20cba9ad5b0250dd4b5814c4251b0a8d9e82bcd6e62",
+      "lines": 26
+    },
+    {
+      "path": "config.py",
+      "sha256": "00edddc90db404bcd974a850e79d2b5d03c1213733bd3196bd9386d61697165a",
+      "lines": 258
+    },
+    {
+      "path": "src/core/launch_options.py",
+      "sha256": "f13de8a90386a01e93e0d64ae8f553e061c1fcae3c1ae5d19dff7d6e734891f2",
+      "lines": 155
+    },
+    {
+      "path": "src/core/game_state.py",
+      "sha256": "54ff7e4112c944e99770feb33611ba661bb9cba0d38cc72701b50f1771586e5e",
+      "lines": 789
+    },
+    {
+      "path": "src/core/ai_execution.py",
+      "sha256": "72f7202c0399b9aec6e85220560bc93006863dc268e3c5fb4e0c51844db9821d",
+      "lines": 87
+    },
+    {
+      "path": "src/core/visual_move_coordinator.py",
+      "sha256": "abfd46f59e431015a0c169e0958d564558042c1758315c20bdd946f2a5a1c766",
+      "lines": 127
+    },
+    {
+      "path": "src/core/self_play_controller.py",
+      "sha256": "bafb7f5f0189ce4d72394a97a53f4b80ca71ede5375d0e30e6af38c34e50be6a",
+      "lines": 351
+    },
+    {
+      "path": "src/core/motion_worker.py",
+      "sha256": "eca9f4b10473dc6eb282c9c58f564c8c2345238c6d8a361ecb40c62132cecf02",
+      "lines": 55
+    },
+    {
+      "path": "src/core/project_logging.py",
+      "sha256": "bb7f77dd989ac4f27ed5d2920198a17474b0266384ade1c5dfc8dc86ad63cc3e",
+      "lines": 271
+    },
+    {
+      "path": "src/hardware/hardware_manager.py",
+      "sha256": "1280ca6d247fa38d471ff489a1604569f82f6accb0a6395da014177c1e1e6624",
+      "lines": 838
+    },
+    {
+      "path": "src/hardware/robot_VIP.py",
+      "sha256": "66f3a895f9a0810ea02b7b8b9d07c1cca34e4a7eefd41a85311ea09651f6751b",
+      "lines": 703
+    },
+    {
+      "path": "src/hardware/simulation_adapter.py",
+      "sha256": "b4fbabfe733e7452b04a5b94275da77db6d07fd7b0209e2118eb2a483c3f1b17",
+      "lines": 210
+    },
+    {
+      "path": "src/hardware/backends/physical_fr3.py",
+      "sha256": "0b25f3f63dda7fa0c707122cba5b35314ac8da356b8e4b1badd0296e64693186",
+      "lines": 771
+    },
+    {
+      "path": "src/hardware/robot_sdk_core.py",
+      "sha256": "4d357279787bb1b9d0103cf610d21a729e315d03840995aa9a2e989c7fbcd2ee",
+      "lines": 14141
+    },
+    {
+      "path": "src/domain/board_pose_provider.py",
+      "sha256": "d5fe5436ef088ad12571c2147bc93f4bfd50836d1adb460f458826b2dfeb110b",
+      "lines": 1014
+    },
+    {
+      "path": "src/motion/coordinator.py",
+      "sha256": "6e2e12f324e28b32d0932ae8955c249c369f2c75c2d8e756fce2f632a8bcba8b",
+      "lines": 273
+    },
+    {
+      "path": "src/motion/executor.py",
+      "sha256": "7466a4683da085700fa5dd37ec78cf1d673688f7d0ec8a159024b6b17c9592d9",
+      "lines": 426
+    },
+    {
+      "path": "src/ui/input_handler.py",
+      "sha256": "34fab06a5262d3c3605c5ab634ce3ac5b0c521b9157036a50b7238fce2e348e5",
+      "lines": 1060
+    },
+    {
+      "path": "src/vision/camera_monitor.py",
+      "sha256": "9bfdb0a2e766539301c304aa7014963f03388c1dced82c4990522e74e3224559",
+      "lines": 591
+    },
+    {
+      "path": "src/vision/snapshot_detector.py",
+      "sha256": "de58d0be6b0408d6530a842e86a4deefff72ea359803c420ac7544847278ee5b",
+      "lines": 637
+    },
+    {
+      "path": "src/vision/cchess_recognizer.py",
+      "sha256": "c05d9812c38565d300d4153676863b693984b40cd7db55d65a247aa4c5af0ddd",
+      "lines": 698
+    },
+    {
+      "path": "src/vision/move_observation.py",
+      "sha256": "de3ee1574aa3dfa45499e61c29aaa13854b28786eb7f0296389da3570348a2ab",
+      "lines": 210
+    },
+    {
+      "path": "src/digital_twin/live_twin_bridge.py",
+      "sha256": "623188da42e01ad022f51f088b49a4e622c34ca88981a00899008ebc462e17b8",
+      "lines": 378
+    },
+    {
+      "path": "src/digital_twin/world_sync.py",
+      "sha256": "ecddb45a0912d9eb8ae1bedf5cc17e0cfd80647926d7cdebbab9215a33bcc7f2",
+      "lines": 24
+    },
+    {
+      "path": "src/api/simulation_client.py",
+      "sha256": "bd4b148e150b9c829b4c55a31108dac52bb7194ea7b6545fa3217a854f96374f",
+      "lines": 109
+    },
+    {
+      "path": "src/ai/moonfish_engine.py",
+      "sha256": "ede5aec82b3e0d2d352d7d1ee8f28e95df102abaa0c47ba34c84fa702da7a4fe",
+      "lines": 321
+    },
+    {
+      "path": "src/ai/ai_controller.py",
+      "sha256": "894586b77d407838caa4190655b1354fcdac929d318d5a07be8a2a498cf45987",
+      "lines": 109
+    },
+    {
+      "path": "robot-3d-viewer/main.mjs",
+      "sha256": "08e31e84af4ab292dcd1a7c09e864c31e9a676c2b37950bcf8a5ef66ec621ef9",
+      "lines": 2608
+    },
+    {
+      "path": "robot-3d-viewer/live_state.mjs",
+      "sha256": "b6a569fb2b58923cb276108ac07f3d79c767b4fef7e89326d227bfc347aafa57",
+      "lines": 151
+    },
+    {
+      "path": "robot-3d-viewer/serve.mjs",
+      "sha256": "eb2849fc6c39a85412ff6c5a1dd86629207df22f9c85d5efea999e5a33f03525",
+      "lines": 78
+    },
+    {
+      "path": "tests/unit/test_live_twin_physical_mirror.py",
+      "sha256": "af89f9093a346770ca91456ec001a0dedb14d155e5efe849ce26278c9ff656f3",
+      "lines": 369
+    },
+    {
+      "path": "tests/unit/test_visual_v2_adapter.py",
+      "sha256": "41f3ee19bbd39fc16cd2352d8244ff49bb708f558574b68d0194ca72da63374d",
+      "lines": 230
+    },
+    {
+      "path": "tests/unit/test_visual_v2_camera_boundary.py",
+      "sha256": "61de7a293da286ede2c5e81fa1123768469e97982ea984266dfc92f93c05d91a",
+      "lines": 62
+    },
+    {
+      "path": "tests/unit/test_physical_ui_latency.py",
+      "sha256": "d57524311f4232058b0adb2b11ce85697c8a0194a72df0fc3e0c2e94825b746a",
+      "lines": 152
+    },
+    {
+      "path": "tests/unit/test_startup_failure_recovery.py",
+      "sha256": "043c3b24690d076614e37522e7388c8ef6568a9e8d30fbdae66a963c9734db5d",
+      "lines": 73
+    },
+    {
+      "path": "tests/unit/test_telemetry_liveness.py",
+      "sha256": "feb0765b178d65cf38b153ab3a2ab7f498aa2ce6b72bac5de7e9c1176878bed0",
+      "lines": 146
+    },
+    {
+      "path": "tests/unit/test_viewer_startup.py",
+      "sha256": "cb73244f02220a70783b67780b27a8b521c4f3528cc6ef02f6db58cf9c884179",
+      "lines": 59
+    },
+    {
+      "path": "tests/unit/test_simple_launch_sync.py",
+      "sha256": "9478edcaef04bfdb8b001e1f30fcd4ef6160321d93fde58b009d89abc9dff8f0",
+      "lines": 205
+    },
+    {
+      "path": "tests/unit/test_visual_unified_game_boundary.py",
+      "sha256": "0396d3c76d8a1cbc83b6b6cfffc3b9392d54053d04e96600e36e2e42453bacea",
+      "lines": 54
+    },
+    {
+      "path": "tests/unit/test_visual_selective_integration.py",
+      "sha256": "fb5f62ce5896a510d856306ee9f6781d0e0db9010aa448e41724a5fb269a57d4",
+      "lines": 208
+    }
+  ]
+}

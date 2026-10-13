@@ -1,4 +1,5 @@
 import xmlrpc.client
+from src.hardware.rpc_transport import BoundedRPCProxy, wait_for_reconnect
 import os
 import socket
 import hashlib
@@ -192,7 +193,7 @@ def calculate_file_md5(file_path):
 def xmlrpc_timeout(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if RPC.is_conect == False:
+        if self.is_conect == False:
             return -4
         else:
             result = func(self, *args, **kwargs)
@@ -245,10 +246,11 @@ class RPC():
 
 
     def __init__(self, ip="192.168.58.2"):
+        self.is_conect = True
         self.lock = threading.Lock()  # 增加锁
         self.ip_address = ip
         link = 'http://' + self.ip_address + ":20003"
-        self.robot = xmlrpc.client.ServerProxy(link)#xmlrpc连接机器人20003端口，用于发送机器人指令数据帧
+        self.robot = BoundedRPCProxy(link)#xmlrpc连接机器人20003端口，用于发送机器人指令数据帧
 
         self.sock_cli_state = None
         self.robot_realstate_exit = False
@@ -257,6 +259,7 @@ class RPC():
         self.stop_event = threading.Event()  # 停止事件
         self.connect_to_robot()
         thread= threading.Thread(target=self.robot_state_routine_thread)#创建线程循环接收机器人状态数据
+        self.thread = thread
         thread.daemon = True
         thread.start()
         time.sleep(1)
@@ -265,94 +268,69 @@ class RPC():
 
         try:
             # 调用 XML-RPC 方法
-            socket.setdefaulttimeout(1)
+            # Each RPC transport owns its timeout; do not alter global sockets.
             self.robot.GetControllerIP()
         except socket.timeout:
             print("XML-RPC connection timed out.")
-            RPC.is_conect = False
+            self.is_conect = False
 
         except socket.error as e:
             print("可能是网络故障，请检查网络连接。")
-            RPC.is_conect = False
+            self.is_conect = False
         except Exception as e:
             print("An error occurred during XML-RPC call:", e)
-            RPC.is_conect = False
+            self.is_conect = False
         finally:
             # 恢复默认超时时间
             self.robot = None
-            socket.setdefaulttimeout(None)
-            self.robot = xmlrpc.client.ServerProxy(link)
+            # No process-global socket timeout mutation.
+            self.robot = BoundedRPCProxy(link)
 
     def connect_to_robot(self):
-        """连接到机器人的实时端口"""
-        # print("SDK连接机器人")
-        self.sock_cli_state = socket.socket(socket.AF_INET, socket.SOCK_STREAM)#套接字连接机器人20004端口，用于实时更新机器人状态数据
-        self.sock_cli_state.settimeout(0.3)  # 设置超时时间为 0.05 秒
+        """Open only the read-only state socket, unless shutdown was requested."""
+        if self.closeRPC_state or self.stop_event.is_set():
+            return False
+        state_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        state_socket.settimeout(1.5)
+        self.sock_cli_state = state_socket
         try:
-            self.sock_cli_state.connect((self.ip_address, self.ROBOT_REALTIME_PORT))
+            state_socket.connect((self.ip_address, self.ROBOT_REALTIME_PORT))
+            if self.closeRPC_state or self.stop_event.is_set():
+                state_socket.close()
+                self.sock_cli_state_state = False
+                return False
             self.sock_cli_state_state = True
-        except socket.timeout:
-            # print("连接超时，请检查网络连接。")
+            return True
+        except Exception as exc:
+            state_socket.close()
             self.sock_cli_state_state = False
+            if not self.closeRPC_state and not self.stop_event.is_set():
+                self.log_warning(f"State socket 20004 unavailable: {exc}")
             return False
-        except Exception as ex:
-            self.sock_cli_state_state = False
-            print("SDK连接机器人实时端口失败", ex)
-            return False
-        return True
 
     def reconnect(self):
-        """自动重连"""
-        max_retries = 1000
-        retry_interval = 2  # 2秒
-        # with self.lock:  # 加锁
-        # RPC.is_conect = False
-        # print("断联")
+        """Retry state-socket connection; shutdown interrupts waits and attempts."""
         self.reconnect_flag = True
-        for attempt in range(max_retries):
-            # print(f"尝试重新连接，第 {attempt + 1} 次")
-            # print(f"尝试重新连接")
-            # 确保 self.sock_cli_state 是新的 socket 对象
-            if self.sock_cli_state:
-                self.sock_cli_state.close()  # 关闭旧的 socket
-                self.sock_cli_state = None  # 重置为 None
-            # 重新初始化 XML-RPC 连接
-            # self.robot = None
-            # link = 'http://' + self.ip_address + ":20003"
-            # self.robot = xmlrpc.client.ServerProxy(link)
-            # 尝试连接
-
-            if self.connect_to_robot():
-                # print("重新连接成功")
-                self.SDK_state = True
-                self.reconnect_flag = False
-                return True
-                # 验证 XML-RPC 连接
-                # try:
-                #     time.sleep(1)
-                #     self.Mode(0)  # 调用一个简单的 XML-RPC 方法
-                #     time.sleep(1)
-                #     self.Mode(1)  # 调用一个简单的 XML-RPC 方法
-                #     time.sleep(1)
-                #     # self.robot.Mode(0)  # 调用一个简单的 XML-RPC 方法
-                #     # time.sleep(1)
-                #     # self.robot.Mode(1)  # 调用一个简单的 XML-RPC 方法
-                #     # time.sleep(1)
-                #     # self.Mode(0)  # 调用一个简单的 XML-RPC 方法
-                #     print("XML-RPC 连接验证成功")
-                #     self.reconnect_flag = False
-                #     # RPC.is_conect = True
-                #     return True
-                # except Exception as ex:
-                #     print("XML-RPC 连接验证失败:", ex)
-                #     self.SDK_state = False
-            else:
-                # print(f"重新连接失败，等待 {retry_interval} 秒后重试...")
-                time.sleep(retry_interval)
-
-        print("已达到最大重连次数，连接失败")
         self.SDK_state = False
-        return False
+        try:
+            for _ in range(1000):
+                if self.closeRPC_state or self.stop_event.is_set():
+                    return False
+                state_socket = self.sock_cli_state
+                if state_socket is not None:
+                    state_socket.close()
+                    self.sock_cli_state = None
+                if self.connect_to_robot():
+                    if self.closeRPC_state or self.stop_event.is_set():
+                        return False
+                    self.SDK_state = True
+                    return True
+                if self.stop_event.wait(2):
+                    return False
+            self.log_error("State socket reconnect exhausted")
+            return False
+        finally:
+            self.reconnect_flag = False
         #
         # print("自动重连机制")
         # for i in range(1,6):
@@ -893,8 +871,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetControllerIP(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -918,8 +895,7 @@ class RPC():
     @xmlrpc_timeout
     def Mode(self, state):
         flag = True
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
 
         state = int(state)
         flag = True
@@ -941,8 +917,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def DragTeachSwitch(self, state):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         state = int(state)  # 强制转换为int型
         flag = True
         while flag:
@@ -963,8 +938,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def IsInDragTeach(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -987,8 +961,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def RobotEnable(self, state):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         state = int(state)  # 强制转换为int型
         flag = True
         while flag:
@@ -1017,8 +990,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def StartJOG(self, ref, nb, dir, max_dis, vel=20.0, acc=100.0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         ref = int(ref)  # 强制转换为int型
@@ -1045,8 +1017,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def StopJOG(self, ref):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ref = int(ref)  # 强制转换为int型
         flag = True
         while flag:
@@ -1066,8 +1037,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ImmStopJOG(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -1097,8 +1067,7 @@ class RPC():
     @xmlrpc_timeout
     def MoveJ(self, joint_pos, tool, user, desc_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=20.0, acc=0.0, ovl=100.0,
               exaxis_pos=[0.0, 0.0, 0.0, 0.0], blendT=-1.0, offset_flag=0, offset_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         joint_pos = list(map(float, joint_pos))
@@ -1157,8 +1126,7 @@ class RPC():
     def MoveL(self, desc_pos, tool, user, joint_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=20.0, acc=0.0, ovl=100.0,
               blendR=-1.0, blendMode = 0,exaxis_pos=[0.0, 0.0, 0.0, 0.0], search=0, offset_flag=0,
               offset_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],config=-1,velAccParamMode=0,overSpeedStrategy=0,speedPercent=10):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         desc_pos = list(map(float, desc_pos))
@@ -1268,8 +1236,7 @@ class RPC():
               vel_t=20.0, acc_t=100.0, exaxis_pos_t=[0.0, 0.0, 0.0, 0.0], offset_flag_t=0,
               offset_pos_t=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
               ovl=100.0, blendR=-1.0,config=-1,velAccParamMode=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         desc_pos_p = list(map(float, desc_pos_p))
@@ -1358,8 +1325,7 @@ class RPC():
                vel_p=20.0, acc_p=0.0, exaxis_pos_p=[0.0, 0.0, 0.0, 0.0], vel_t=20.0, acc_t=0.0,
                exaxis_pos_t=[0.0, 0.0, 0.0, 0.0],
                ovl=100.0, offset_flag=0, offset_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], oacc=100.0, blendR=-1,config=-1,velAccParamMode=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         desc_pos_p = list(map(float, desc_pos_p))
@@ -1500,8 +1466,7 @@ class RPC():
     def NewSpiral(self, desc_pos, tool, user, param, joint_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=20.0, acc=0.0,
                   exaxis_pos=[0.0, 0.0, 0.0, 0.0],
                   ovl=100.0, offset_flag=0, offset_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],config=-1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         desc_pos = list(map(float, desc_pos))
@@ -1554,8 +1519,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ServoMoveStart(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -1574,8 +1538,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ServoMoveEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -1601,8 +1564,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ServoJ(self, joint_pos,axisPos, acc=0.0, vel=0.0, cmdT=0.008, filterT=0.0, gain=0.0, id=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         joint_pos = list(map(float, joint_pos))
@@ -1639,8 +1601,7 @@ class RPC():
     @xmlrpc_timeout
     def ServoCart(self, mode, desc_pos, pos_gain=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0], acc=0.0, vel=0.0, cmdT=0.008,
                   filterT=0.0, gain=0.0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         mode = int(mode)
@@ -1669,8 +1630,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ServoJTStart(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -1691,8 +1651,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ServoJT(self, torque, interval):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         torque = list(map(float, torque))
@@ -1716,8 +1675,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ServoJTEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -1749,8 +1707,7 @@ class RPC():
         """
         HÀM MOVECART (8 THAM SỐ) - PHIÊN BẢN ĐÚNG
         """
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         
@@ -1784,8 +1741,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SplineStart(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -1811,8 +1767,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SplinePTP(self, joint_pos, tool, user, desc_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=20.0, acc=100.0, ovl=100.0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         joint_pos = list(map(float, joint_pos))
@@ -1849,8 +1804,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SplineEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -1871,8 +1825,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def NewSplineStart(self, type, averageTime=2000):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         type = int(type)
         averageTime = int(averageTime)
         flag = True
@@ -1904,8 +1857,7 @@ class RPC():
     @xmlrpc_timeout
     def NewSplinePoint(self, desc_pos, tool, user, lastFlag, joint_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=0.0,
                        acc=0.0, ovl=100.0, blendR=0.0, config=-1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         desc_pos = list(map(float, desc_pos))
@@ -1945,8 +1897,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def NewSplineEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -1966,8 +1917,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def StopMotion(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -2018,8 +1968,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def PointsOffsetEnable(self, flag, offset_pos):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         offset_pos = list(map(float, offset_pos))
         flag_tmp = True
@@ -2041,8 +1990,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def PointsOffsetDisable(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -2069,8 +2017,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetDO(self, id, status, smooth=0, block=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         status = int(status)
         smooth = int(smooth)
@@ -2097,8 +2044,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetToolDO(self, id, status, smooth=0, block=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         status = int(status)
         smooth = int(smooth)
@@ -2124,8 +2070,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAO(self, id, value, block=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         value = float(value)
         block = int(block)
@@ -2150,8 +2095,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetToolAO(self, id, value, block=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         value = float(value)
         block = int(block)
@@ -2236,8 +2180,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WaitDI(self, id, status, maxtime, opt):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         status = int(status)
         maxtime = int(maxtime)
@@ -2265,8 +2208,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WaitMultiDI(self, mode, id, status, maxtime, opt):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         mode = int(mode)
         id = int(id)
         status = int(status)
@@ -2294,8 +2236,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WaitToolDI(self, id, status, maxtime, opt):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         id = id+1 #控制器内部1对应di0,2对应di1
         status = int(status)
@@ -2440,8 +2381,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WaitAI(self, id, sign, value, maxtime, opt):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         sign = int(sign)
         value = float(value)
@@ -2470,8 +2410,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WaitToolAI(self, id, sign, value, maxtime, opt):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         sign = int(sign)
         value = float(value)
@@ -2500,8 +2439,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetSpeed(self, vel):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         vel = int(vel)
         flag = True
         while flag:
@@ -2523,8 +2461,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetSysVarValue(self, id, value):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         value = float(value)
         flag = True
@@ -2546,8 +2483,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetToolPoint(self, point_num):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         point_num = int(point_num)
         flag = True
         while flag:
@@ -2569,8 +2505,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ComputeTool(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -2594,8 +2529,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTcp4RefPoint(self, point_num):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         point_num = int(point_num)
         flag = True
         while flag:
@@ -2617,8 +2551,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ComputeTcp4(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -2647,8 +2580,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetToolCoord(self, id, t_coord, type, install, toolID, loadNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         t_coord = list(map(float, t_coord))
         type = int(type)
@@ -2678,8 +2610,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetToolList(self, id, t_coord, type, install , loadNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         t_coord = list(map(float, t_coord))
         type = int(type)
@@ -2704,8 +2635,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetExTCPPoint(self, point_num):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         point_num = int(point_num)
         flag = True
         while flag:
@@ -2727,8 +2657,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ComputeExTCF(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -2754,8 +2683,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetExToolCoord(self, id, etcp, etool):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         etcp = list(map(float, etcp))
         etool = list(map(float, etool))
@@ -2780,8 +2708,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetExToolList(self, id, etcp, etool):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         etcp = list(map(float, etcp))
         etool = list(map(float, etool))
@@ -2804,8 +2731,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetWObjCoordPoint(self, point_num):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         point_num = int(point_num)
         flag = True
         while flag:
@@ -2828,8 +2754,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ComputeWObjCoord(self, method, refFrame):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         method = int(method)
         refFrame = int(refFrame)
         flag = True
@@ -2857,8 +2782,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetWObjCoord(self, id, coord, refFrame):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         coord = list(map(float, coord))
         refFrame = int(refFrame)
@@ -2883,8 +2807,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetWObjList(self, id, coord, refFrame):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         coord = list(map(float, coord))
         refFrame = int(refFrame)
@@ -2908,8 +2831,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetLoadWeight(self, loadNum, weight):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         loadNum = int(loadNum)
         weight = float(weight)
         flag = True
@@ -2931,8 +2853,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetRobotInstallPos(self, method):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         method = int(method)
         flag = True
         while flag:
@@ -2954,8 +2875,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetRobotInstallAngle(self, yangle, zangle):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         yangle = float(yangle)
         zangle = float(zangle)
         flag = True
@@ -2980,8 +2900,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetLoadCoord(self, x, y, z, loadNum = 0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         x = float(x)
         y = float(y)
         z = float(z)
@@ -3005,8 +2924,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WaitMs(self, t_ms):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         t_ms = int(t_ms)
         flag = True
         while flag:
@@ -3033,8 +2951,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAnticollision(self, mode, level, config):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         mode = int(mode)
         level = list(map(float, level))
         config = int(config)
@@ -3061,8 +2978,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetCollisionStrategy(self, strategy,safeTime=1000,safeDistance=100,safeVel=250,safetyMargin=[10,10,10,10,10,10]):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         strategy = int(strategy)
         safeTime = int(safeTime)
         safeDistance = int(safeDistance)
@@ -3087,8 +3003,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetLimitPositive(self, p_limit):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         p_limit = list(map(float, p_limit))
         flag = True
         while flag:
@@ -3109,8 +3024,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetLimitNegative(self, n_limit):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         n_limit = list(map(float, n_limit))
         flag = True
         while flag:
@@ -3131,8 +3045,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ResetAllError(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -3152,8 +3065,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FrictionCompensationOnOff(self, state):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         state = int(state)
         flag = True
         while flag:
@@ -3174,8 +3086,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetFrictionValue_level(self, coeff):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         coeff = list(map(float, coeff))
         flag = True
         while flag:
@@ -3196,8 +3107,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetFrictionValue_wall(self, coeff):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         coeff = list(map(float, coeff))
         flag = True
         while flag:
@@ -3218,8 +3128,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetFrictionValue_ceiling(self, coeff):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         coeff = list(map(float, coeff))
         flag = True
         while flag:
@@ -3240,8 +3149,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetFrictionValue_freedom(self, coeff):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         coeff = list(map(float, coeff))
         flag = True
         while flag:
@@ -3267,8 +3175,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetRobotInstallAngle(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -3293,8 +3200,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetSysVarValue(self, id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         flag = True
         while flag:
@@ -3339,8 +3245,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetActualJointPosRadian(self, flag=1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         flag_tmp = True
         while flag_tmp:
@@ -3563,8 +3468,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetInverseKin(self, type, desc_pos, config=-1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         type = int(type)
         desc_pos = list(map(float, desc_pos))
         config = int(config)
@@ -3594,8 +3498,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetInverseKinRef(self, type, desc_pos, joint_pos_ref):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         type = int(type)
         desc_pos = list(map(float, desc_pos))
         joint_pos_ref = list(map(float, joint_pos_ref))
@@ -3625,8 +3528,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetInverseKinHasSolution(self, type, desc_pos, joint_pos_ref):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         type = int(type)
         desc_pos = list(map(float, desc_pos))
         joint_pos_ref = list(map(float, joint_pos_ref))
@@ -3654,8 +3556,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetForwardKin(self, joint_pos):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         joint_pos = list(map(float, joint_pos))
         flag = True
         while flag:
@@ -3701,8 +3602,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetTargetPayload(self, flag=1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         flag_tmp = True
         while flag_tmp:
@@ -3728,8 +3628,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetTargetPayloadCog(self, flag=1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         flag_tmp = True
         while flag_tmp:
@@ -3755,8 +3654,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetTCPOffset(self, flag=1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         flag_tmp = True
         while flag_tmp:
@@ -3782,8 +3680,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetWObjOffset(self, flag=1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         flag_tmp = True
         while flag_tmp:
@@ -3809,8 +3706,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetJointSoftLimitDeg(self, flag=1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         flag_tmp = True
         while flag_tmp:
@@ -3837,8 +3733,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetSystemClock(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -3863,8 +3758,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetRobotCurJointsConfig(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -3889,8 +3783,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetDefaultTransVel(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -3950,8 +3843,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetRobotTeachingPoint(self, name):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         name = str(name)
         flag = True
         while flag:
@@ -4070,8 +3962,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetSSHKeygen(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4099,8 +3990,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetSSHScpCmd(self, mode, sshname, sship, usr_file_url, robot_file_url):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         mode = int(mode)
         sshname = str(sshname)
         sship = str(sship)
@@ -4126,8 +4016,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ComputeFileMD5(self, file_path):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         file_path = str(file_path)
         flag = True
         while flag:
@@ -4155,8 +4044,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetSoftwareVersion(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4188,8 +4076,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetSlaveHardVersion(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4207,8 +4094,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetHardwareversion(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4240,8 +4126,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetSlaveFirmVersion(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4259,8 +4144,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetFirmwareVersion(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4285,8 +4169,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetDHCompensation(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4318,8 +4201,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTPDParam(self, name, period_ms, type=1, di_choose=0, do_choose=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         name = str(name)
         period_ms = int(period_ms)
         type = int(type)
@@ -4348,8 +4230,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTPDStart(self, name, period_ms, type=1, di_choose=0, do_choose=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         name = str(name)
         period_ms = int(period_ms)
         type = int(type)
@@ -4374,8 +4255,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetWebTPDStop(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4395,8 +4275,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTPDDelete(self, name):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         name = str(name)
         flag = True
         while flag:
@@ -4417,8 +4296,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LoadTPD(self, name):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         name = str(name)
         flag = True
         while flag:
@@ -4440,8 +4318,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetTPDStartPose(self, name):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         name = str(name)
         flag = True
         while flag:
@@ -4468,8 +4345,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MoveTPD(self, name, blend, ovl):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         name = str(name)
@@ -4496,8 +4372,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LoadTrajectoryJ(self, name, ovl, opt=1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         name = str(name)
         ovl = float(ovl)
         opt = int(opt)
@@ -4520,8 +4395,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MoveTrajectoryJ(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         flag = True
@@ -4544,8 +4418,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetTrajectoryStartPose(self, name):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         name = str(name)
         flag = True
         while flag:
@@ -4571,8 +4444,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetTrajectoryPointNum(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4596,8 +4468,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTrajectoryJSpeed(self, ovl):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ovl = float(ovl)
         flag = True
         while flag:
@@ -4618,8 +4489,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTrajectoryJForceTorque(self, ft):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ft = list(map(float, ft))
         flag = True
         while flag:
@@ -4640,8 +4510,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTrajectoryJForceFx(self, fx):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         fx = float(fx)
         flag = True
         while flag:
@@ -4662,8 +4531,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTrajectoryJForceFy(self, fy):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         fy = float(fy)
         flag = True
         while flag:
@@ -4684,8 +4552,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTrajectoryJForceFz(self, fz):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         fz = float(fz)
         flag = True
         while flag:
@@ -4706,8 +4573,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTrajectoryJTorqueTx(self, tx):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         tx = float(tx)
         flag = True
         while flag:
@@ -4728,8 +4594,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTrajectoryJTorqueTy(self, ty):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ty = float(ty)
         flag = True
         while flag:
@@ -4750,8 +4615,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTrajectoryJTorqueTz(self, tz):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         tz = float(tz)
         flag = True
         while flag:
@@ -4777,8 +4641,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LoadDefaultProgConfig(self, flag, program_name):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         program_name = str(program_name)
         flag_tmp = True
@@ -4800,8 +4663,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ProgramLoad(self, program_name):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         program_name = str(program_name)
         flag = True
         while flag:
@@ -4823,8 +4685,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetCurrentLine(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4848,8 +4709,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ProgramRun(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         flag = True
@@ -4871,8 +4731,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ProgramPause(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4892,8 +4751,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ProgramResume(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         flag = True
@@ -4915,8 +4773,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ProgramStop(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4955,8 +4812,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetLoadedProgram(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -4989,8 +4845,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetGripperConfig(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5015,8 +4870,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ActGripper(self, index, action):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         index = int(index)
         action = int(action)
         flag = True
@@ -5047,8 +4901,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MoveGripper(self, index, pos, vel, force, maxtime, block, type, rotNum, rotVel, rotTorque):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         index = int(index)
@@ -5081,8 +4934,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetGripperMotionDone(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5109,8 +4961,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetGripperConfig(self, company, device, softversion=0, bus=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         company = int(company)
         device = int(device)
         softversion = int(softversion)
@@ -5137,8 +4988,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ComputePrePick(self, desc_pos, zlength, zangle):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         desc_pos = list(map(float, desc_pos))
         zlength = float(zlength)
         zangle = float(zangle)
@@ -5168,8 +5018,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ComputePostPick(self, desc_pos, zlength, zangle):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         desc_pos = list(map(float, desc_pos))
         zlength = float(zlength)
         zangle = float(zangle)
@@ -5205,8 +5054,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_GetConfig(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5233,8 +5081,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_SetConfig(self, company, device, softversion=0, bus=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         company = int(company)
         device = int(device)
         softversion = int(softversion)
@@ -5258,8 +5105,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_Activate(self, state):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         state = int(state)
         flag = True
         while flag:
@@ -5280,8 +5126,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_SetZero(self, state):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         state = int(state)
         flag = True
         while flag:
@@ -5303,8 +5148,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_SetRCS(self, ref,coord=[0,0,0,0,0,0]):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ref = int(ref)
         coord = list(map(float, coord))
         flag = True
@@ -5327,8 +5171,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_PdIdenCompute(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5352,8 +5195,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_PdIdenRecord(self, tool_id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         tool_id = int(tool_id)
         flag = True
         while flag:
@@ -5375,8 +5217,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_PdCogIdenCompute(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5401,8 +5242,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_PdCogIdenRecord(self, tool_id, index):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         tool_id = int(tool_id)
         index = int(index)
         flag = True
@@ -5469,8 +5309,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_Guard(self, flag, sensor_num, select, force_torque, max_threshold, min_threshold):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         sensor_num = int(sensor_num)
         select = list(map(int, select))
@@ -5514,8 +5353,7 @@ class RPC():
             M = [0, 0]
         if B is None:
             B = [0, 0]
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         sensor_id = int(sensor_id)
         select = list(map(int, select))
@@ -5557,8 +5395,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_SpiralSearch(self, rcs, ft, dr=0.7, max_t_ms=60000, max_vel=5):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         rcs = int(rcs)
         ft = float(ft)
         dr = float(dr)
@@ -5589,8 +5426,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_RotInsertion(self, rcs, ft, orn, angVelRot=3, angleMax=45, angAccmax=0, rotorn=1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         rcs = int(rcs)
         ft = float(ft)
         orn = int(orn)
@@ -5622,8 +5458,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_LinInsertion(self, rcs, ft, disMax, linorn, lin_v=1.0, lin_a=1.0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         rcs = int(rcs)
         ft = float(ft)
         disMax = float(disMax)
@@ -5649,8 +5484,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_CalCenterStart(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5671,8 +5505,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_CalCenterEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5702,8 +5535,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_FindSurface(self, rcs, dir, axis, disMax, ft, lin_v=3.0, lin_a=0.0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         rcs = int(rcs)
         dir = int(dir)
         axis = int(axis)
@@ -5729,8 +5561,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_ComplianceStop(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5751,8 +5582,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FT_ComplianceStart(self, p, force):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         p = float(p)
         force = float(force)
         flag = True
@@ -5774,8 +5604,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LoadIdentifyDynFilterInit(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5795,8 +5624,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LoadIdentifyDynVarInit(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5818,8 +5646,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LoadIdentifyMain(self, joint_torque, joint_pos, t):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         joint_torque = list(map(float, joint_torque))
         joint_pos = list(map(float, joint_pos))
         t = float(t)
@@ -5844,8 +5671,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LoadIdentifyGetResult(self, gain):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         gain = list(map(float, gain))
         flag = True
         while flag:
@@ -5874,8 +5700,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorStartEnd(self, status):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         status = int(status)
@@ -5898,8 +5723,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorPointIORecord(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5919,8 +5743,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorPointARecord(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5940,8 +5763,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorRefPointRecord(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5961,8 +5783,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorPointBRecord(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -5982,8 +5803,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorIODetect(self, max_t):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         max_t = int(max_t)
         flag = True
         while flag:
@@ -6004,8 +5824,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorGetTrackData(self, mode):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         mode = int(mode)
         flag = True
         while flag:
@@ -6026,8 +5845,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorTrackStart(self, status):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         status = int(status)
         flag = True
         while flag:
@@ -6048,8 +5866,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorTrackEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -6074,8 +5891,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorSetParam(self, param, followType, startDis=0, endDis=100):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         param = list(map(float, param))
         followType = int(followType)
         startDis = int(startDis)
@@ -6099,8 +5915,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorCatchPointComp(self, cmp):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         cmp = list(map(float, cmp))
         flag = True
         while flag:
@@ -6127,8 +5942,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorTrackMoveL(self, name, tool, wobj, vel=20, acc=100, ovl=100, blendR=-1.0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         name = str(name)
@@ -6164,8 +5978,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ARCStart(self, ioType, arcNum, timeout):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ioType = int(ioType)
         arcNum = int(arcNum)
         timeout = int(timeout)
@@ -6190,8 +6003,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ARCEnd(self, ioType, arcNum, timeout):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ioType = int(ioType)
         arcNum = int(arcNum)
         timeout = int(timeout)
@@ -6218,8 +6030,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeldingSetCurrentRelation(self, currentMin, currentMax, outputVoltageMin, outputVoltageMax,AOIndex):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         currentMin = float(currentMin)
         currentMax = float(currentMax)
         outputVoltageMin = float(outputVoltageMin)
@@ -6248,8 +6059,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeldingSetVoltageRelation(self, weldVoltageMin, weldVoltageMax, outputVoltageMin, outputVoltageMax,AOIndex):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weldVoltageMin = float(weldVoltageMin)
         weldVoltageMax = float(weldVoltageMax)
         outputVoltageMin = float(outputVoltageMin)
@@ -6279,8 +6089,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeldingGetCurrentRelation(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
 
         try:
             flag = True
@@ -6311,8 +6120,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeldingGetVoltageRelation(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
 
         try:
             flag = True
@@ -6342,8 +6150,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeldingSetCurrent(self, ioType, current, AOIndex,blend):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ioType = int(ioType)
         current = float(current)
         AOIndex = int(AOIndex)
@@ -6370,8 +6177,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeldingSetVoltage(self, ioType, voltage, AOIndex,blend):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ioType = int(ioType)
         voltage = float(voltage)
         AOIndex = int(AOIndex)
@@ -6410,8 +6216,7 @@ class RPC():
     def WeaveSetPara(self, weaveNum, weaveType, weaveFrequency, weaveIncStayTime, weaveRange,
                      weaveLeftRange, weaveRightRange, additionalStayTime, weaveLeftStayTime,
                      weaveRightStayTime, weaveCircleRadio, weaveStationary,weaveYawAngle=0,weaveRotAngle=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weaveNum = int(weaveNum)
         weaveType = int(weaveType)
         weaveFrequency = float(weaveFrequency)
@@ -6456,8 +6261,7 @@ class RPC():
     @xmlrpc_timeout
     def WeaveOnlineSetPara(self, weaveNum, weaveType, weaveFrequency, weaveIncStayTime, weaveRange, weaveLeftStayTime,
                            weaveRightStayTime, weaveCircleRadio, weaveStationary):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weaveNum = int(weaveNum)
         weaveType = int(weaveType)
         weaveFrequency = float(weaveFrequency)
@@ -6491,8 +6295,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeaveStart(self, weaveNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weaveNum = int(weaveNum)
         try:
             flag = True
@@ -6516,8 +6319,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeaveEnd(self, weaveNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weaveNum = int(weaveNum)
         try:
             flag = True
@@ -6542,8 +6344,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetForwardWireFeed(self, ioType, wireFeed):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ioType = int(ioType)
         wireFeed = int(wireFeed)
         try:
@@ -6569,8 +6370,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetReverseWireFeed(self, ioType, wireFeed):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ioType = int(ioType)
         wireFeed = int(wireFeed)
         try:
@@ -6596,8 +6396,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAspirated(self, ioType, airControl):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ioType = int(ioType)
         airControl = int(airControl)
         try:
@@ -6629,8 +6428,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetSegmentWeldPoint(self, startPos, endPos, startDistance):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         startPos = list(map(float, startPos))
         endPos = list(map(float, endPos))
         startDistance = float(startDistance)
@@ -6898,8 +6696,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SegmentWeldEnd(self, ioType, arcNum, timeout):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ioType = int(ioType)
         arcNum = int(arcNum)
         timeout = int(timeout)
@@ -7344,8 +7141,7 @@ class RPC():
     @xmlrpc_timeout
     def AuxServoSetParam(self, servoId, servoCompany, servoModel, servoSoftVersion, servoResolution,
                          axisMechTransRatio):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         servoId = int(servoId)
         servoCompany = int(servoCompany)
         servoModel = int(servoModel)
@@ -7377,8 +7173,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoGetParam(self, servoId):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         servoId = int(servoId)
         flag = True
         while flag:
@@ -7404,8 +7199,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoEnable(self, servoId, status):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         servoId = int(servoId)
         status = int(status)
         flag = True
@@ -7428,8 +7222,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoSetControlMode(self, servoId, mode):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         servoId = int(servoId)
         mode = int(mode)
         flag = True
@@ -7454,8 +7247,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoSetTargetPos(self, servoId, pos, speed,acc=100):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         servoId = int(servoId)
         pos = float(pos)
         speed = float(speed)
@@ -7481,8 +7273,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoSetTargetSpeed(self, servoId, speed,acc):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         servoId = int(servoId)
         speed = float(speed)
         acc = float(acc)
@@ -7506,8 +7297,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoSetTargetTorque(self, servoId, torque):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         servoId = int(servoId)
         torque = float(torque)
         flag = True
@@ -7533,8 +7323,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoHoming(self, servoId, mode, searchVel, latchVel,acc=100):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         servoId = int(servoId)
         mode = int(mode)
         searchVel = float(searchVel)
@@ -7559,8 +7348,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoClearError(self, servoId):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         servoId = int(servoId)
         flag = True
         while flag:
@@ -7586,8 +7374,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoGetStatus(self, servoId):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         servoId = int(servoId)
         flag = True
         while flag:
@@ -7612,8 +7399,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServosetStatusID(self, servoId):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         servoId = int(servoId)
         flag = True
         while flag:
@@ -7634,8 +7420,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetExDevProtocol(self, protocol):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         protocol = int(protocol)
         flag = True
         while flag:
@@ -7656,8 +7441,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetExDevProtocol(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -7681,8 +7465,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetOaccScale(self, acc):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         acc = float(acc)
         flag = True
         while flag:
@@ -7706,8 +7489,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MoveAOStart(self, AONum, maxTCPSpeed=1000, maxAOPercent=100, zeroZoneCmp=20):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         AONum = int(AONum)
         maxTCPSpeed = int(maxTCPSpeed)
         maxAOPercent = int(maxAOPercent)
@@ -7730,8 +7512,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MoveAOStop(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -7754,8 +7535,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MoveToolAOStart(self, AONum, maxTCPSpeed=1000, maxAOPercent=100, zeroZoneCmp=20):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         AONum = int(AONum)
         maxTCPSpeed = int(maxTCPSpeed)
         maxAOPercent = int(maxAOPercent)
@@ -7778,8 +7558,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MoveToolAOStop(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -7809,8 +7588,7 @@ class RPC():
     @xmlrpc_timeout
     def ExtDevSetUDPComParam(self, ip, port, period, lossPkgTime, lossPkgNum, disconnectTime,
                              reconnectEnable, reconnectPeriod, reconnectNum,selfConnect):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ip = str(ip)
         port = int(port)
         period = int(period)
@@ -7851,8 +7629,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtDevGetUDPComParam(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -7875,8 +7652,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtDevLoadUDPDriver(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -7895,8 +7671,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtDevUnloadUDPDriver(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -7915,8 +7690,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtDevUDPClientComReset(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -7935,8 +7709,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtDevUDPClientComClose(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -7956,8 +7729,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetRobotPosToAxis(self, installType):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         installType = int(installType)
         flag = True
         while flag:
@@ -7987,8 +7759,7 @@ class RPC():
     @xmlrpc_timeout
     def SetAxisDHParaConfig(self, axisConfig, axisDHd1, axisDHd2, axisDHd3, axisDHd4, axisDHa1, axisDHa2, axisDHa3,
                             axisDHa4):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         axisConfig = int(axisConfig)
         axisDHd1 = float(axisDHd1)
         axisDHd2 = float(axisDHd2)
@@ -8031,8 +7802,7 @@ class RPC():
     @xmlrpc_timeout
     def ExtAxisParamConfig(self, axisId, axisType, axisDirection, axisMax, axisMin, axisVel, axisAcc, axisLead,
                            encResolution, axisOffect, axisCompany, axisModel, axisEncType):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         axisId = int(axisId)
         axisType = int(axisType)
         axisDirection = int(axisDirection)
@@ -8069,8 +7839,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetExAxisDriverConfig(self, axisId):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         axisId = int(axisId)
         flag = True
         while flag:
@@ -8094,8 +7863,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtAxisSetRefPoint(self, pointNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         pointNum = int(pointNum)
         flag = True
         while flag:
@@ -8116,8 +7884,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtAxisComputeECoordSys(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -8137,8 +7904,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetRefPointInExAxisEnd(self, pos):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         pos = list(map(float, pos))
         flag = True
         while flag:
@@ -8159,8 +7925,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def PositionorSetRefPoint(self, pointNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         pointNum = int(pointNum)
         flag = True
         while flag:
@@ -8181,8 +7946,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def PositionorComputeECoordSys(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -8209,8 +7973,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtAxisActiveECoordSys(self, axisCoordNum, toolNum, coord, calibFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         axisCoordNum = int(axisCoordNum)
         toolNum = int(toolNum)
         coord = list(map(float, coord))
@@ -8236,8 +7999,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtAxisServoOn(self, axisID, status):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         axisID = int(axisID)
         status = int(status)
         flag = True
@@ -8262,8 +8024,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtAxisSetHoming(self, axisID, mode, searchVel, latchVel):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         axisID = int(axisID)
         mode = int(mode)
         searchVel = float(searchVel)
@@ -8291,8 +8052,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtAxisStartJog(self, axisID, direction, vel, acc, maxDistance):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         axisID = int(axisID)
@@ -8336,8 +8096,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAuxDO(self, DONum, bOpen, smooth, block):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DONum = int(DONum)
         bOpen = bool(bOpen)
         smooth = bool(smooth)
@@ -8369,8 +8128,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAuxAO(self, AONum, value, block):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         AONum = int(AONum)
         value = float(value)
         block = bool(block)
@@ -8395,8 +8153,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAuxDIFilterTime(self, filterTime):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         filterTime = int(filterTime)
         flag = True
         while flag:
@@ -8418,8 +8175,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAuxAIFilterTime(self, AINum,filterTime):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         AINum = int(AINum)
         filterTime = int(filterTime)
         flag = True
@@ -8444,8 +8200,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WaitAuxDI(self, DINum, bOpen, time, errorAlarm):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DINum = int(DINum)
         bOpen = bool(bOpen)
         open_flag = 0 if bOpen else 1
@@ -8475,8 +8230,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WaitAuxAI(self, AINum, sign, value, time, errorAlarm):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         AINum = int(AINum)
         sign = int(sign)
         value = int(value)
@@ -8504,8 +8258,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetAuxDI(self, DINum, isNoBlock):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DINum = int(DINum)
         isNoBlock = bool(isNoBlock)
         isNoBlock_flag = 0 if isNoBlock else 1
@@ -8533,8 +8286,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetAuxAI(self, AINum, isNoBlock):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         AINum = int(AINum)
         isNoBlock = bool(isNoBlock)
         isNoBlock_flag = 0 if isNoBlock else 1
@@ -8562,8 +8314,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtAxisMove(self, pos, ovl, blend=-1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         pos = list(map(float, pos))
@@ -8599,8 +8350,7 @@ class RPC():
     @xmlrpc_timeout
     def ExtAxisSyncMoveJ(self, joint_pos, tool, user, exaxis_pos, desc_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=20.0, acc=0.0, ovl=100.0,
                          blendT=-1.0, offset_flag=0, offset_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         joint_pos = list(map(float, joint_pos))
@@ -8658,8 +8408,7 @@ class RPC():
     @xmlrpc_timeout
     def ExtAxisSyncMoveL(self, desc_pos, tool, user, exaxis_pos, joint_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=20.0, acc=0.0, ovl=100.0,
                          blendR=-1.0, search=0, offset_flag=0, offset_pos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],config=-1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         desc_pos = list(map(float, desc_pos))
@@ -8734,8 +8483,7 @@ class RPC():
                          vel_t=20.0, acc_t=100.0, offset_flag_t=0,
                          offset_pos_t=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                          ovl=100.0, blendR=-1.0,config=-1):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         desc_pos_p = list(map(float, desc_pos_p))
@@ -8809,8 +8557,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WireSearchStart(self, refPos,searchVel,searchDis,autoBackFlag,autoBackVel,autoBackDis,offectFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         refPos = int(refPos)
         searchVel = float(searchVel)
         searchDis = int(searchDis)
@@ -8842,8 +8589,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WireSearchEnd(self, refPos,searchVel,searchDis,autoBackFlag,autoBackVel,autoBackDis,offectFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         refPos = int(refPos)
         searchVel = float(searchVel)
         searchDis = int(searchDis)
@@ -8874,8 +8620,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetWireSearchOffset(self, seamType, method,varNameRef,varNameRes):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         seamType = int(seamType)
         method = int(method)
         if(len(varNameRes)!=6):
@@ -8908,8 +8653,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WireSearchWait(self,varname):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         varname=str(varname)
         flag = True
         while flag:
@@ -8930,8 +8674,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetPointToDatabase(self,varName,pos):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         varName = str(varName)
         pos = list(map(float,pos))
 
@@ -8972,8 +8715,7 @@ class RPC():
     @xmlrpc_timeout
     def ArcWeldTraceControl(self,flag,delaytime, isLeftRight, klr, tStartLr, stepMaxLr, sumMaxLr, isUpLow, kud, tStartUd, stepMaxUd,
                             sumMaxUd, axisSelect, referenceType, referSampleStartUd, referSampleCountUd, referenceCurrent, offsetType, offsetParameter):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         delaytime = float(delaytime)
         isLeftRight = int(isLeftRight)
@@ -9013,8 +8755,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ArcWeldTraceExtAIChannelConfig(self,channel):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         channel = int(channel)
         flag = True
         while flag:
@@ -9044,8 +8785,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def EndForceDragControl(self, status, asaptiveFlag, interfereDragFlag, ingularityConstraintsFlag, forceCollisionFlag, M, B, K, F, Fmax, Vmax):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         status = int(status)
         asaptiveFlag = int(asaptiveFlag)
         interfereDragFlag = int(interfereDragFlag)
@@ -9076,8 +8816,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetForceSensorDragAutoFlag(self, status):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         status = int(status)
         flag = True
         while flag:
@@ -9104,8 +8843,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ForceAndJointImpedanceStartStop(self,status, impedanceFlag, lamdeDain, KGain, BGain,dragMaxTcpVel,dragMaxTcpOriVel):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         status = int(status)
         impedanceFlag = int(impedanceFlag)
         if((len(lamdeDain)!=6)or(len(KGain)!=6)or(len(BGain)!=6)):
@@ -9136,8 +8874,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetForceAndTorqueDragState(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -9161,8 +8898,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetForceSensorPayload(self,weight):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weight = float(weight)
         flag = True
         while flag:
@@ -9185,8 +8921,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetForceSensorPayloadCog(self,x,y,z):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         x = float(x)
         y = float(y)
         z = float(z)
@@ -9209,8 +8944,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetForceSensorPayload(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -9237,8 +8971,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetForceSensorPayloadCog(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -9317,8 +9050,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ForceSensorSetSaveDataFlag(self,recordCount):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -9339,8 +9071,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ForceSensorComputeLoad(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -9367,8 +9098,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AxleSensorConfig(self,idCompany, idDevice, idSoftware, idBus):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         idCompany = int(idCompany)
         idDevice = int(idDevice)
         idSoftware = int(idSoftware)
@@ -9394,8 +9124,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AxleSensorConfigGet(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -9419,8 +9148,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AxleSensorActivate(self,actFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         actFlag = int(actFlag)
         flag = True
         while flag:
@@ -9447,8 +9175,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AxleSensorRegWrite(self,devAddr, regHAddr, regLAddr, regNum, data1, data2, isNoBlock):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         devAddr = int(devAddr)
         regHAddr = int(regHAddr)
         regLAddr = int(regLAddr)
@@ -9475,8 +9202,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetOutputResetCtlBoxDO(self,resetFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         resetFlag = int(resetFlag)
         flag = True
         while flag:
@@ -9497,8 +9223,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetOutputResetCtlBoxAO(self,resetFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         resetFlag = int(resetFlag)
         flag = True
         while flag:
@@ -9519,8 +9244,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetOutputResetAxleDO(self,resetFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         resetFlag = int(resetFlag)
         flag = True
         while flag:
@@ -9541,8 +9265,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetOutputResetAxleAO(self,resetFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         resetFlag = int(resetFlag)
         flag = True
         while flag:
@@ -9563,8 +9286,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetOutputResetExtDO(self,resetFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         resetFlag = int(resetFlag)
         flag = True
         while flag:
@@ -9585,8 +9307,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetOutputResetExtAO(self,resetFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         resetFlag = int(resetFlag)
         flag = True
         while flag:
@@ -9607,8 +9328,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetOutputResetSmartToolDO(self,resetFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         resetFlag = int(resetFlag)
         flag = True
         while flag:
@@ -9630,8 +9350,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeaveStartSim(self,weaveNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weaveNum = int(weaveNum)
         flag = True
         while flag:
@@ -9652,8 +9371,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeaveEndSim(self,weaveNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weaveNum = int(weaveNum)
         flag = True
         while flag:
@@ -9674,8 +9392,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeaveInspectStart(self,weaveNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weaveNum = int(weaveNum)
         flag = True
         while flag:
@@ -9696,8 +9413,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeaveInspectEnd(self,weaveNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weaveNum = int(weaveNum)
         flag = True
         while flag:
@@ -9729,8 +9445,7 @@ class RPC():
     @xmlrpc_timeout
     def WeldingSetProcessParam(self, id, startCurrent, startVoltage, startTime, weldCurrent, weldVoltage, endCurrent,
                                endVoltage, endTime):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         startCurrent = float(startCurrent)
         startVoltage = float(startVoltage)
@@ -9768,8 +9483,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeldingGetProcessParam(self, id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         flag = True
         while flag:
@@ -9794,8 +9508,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAirControlExtDoNum(self,DONum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DONum = int(DONum)
         flag = True
         while flag:
@@ -9816,8 +9529,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetArcStartExtDoNum(self,DONum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DONum = int(DONum)
         flag = True
         while flag:
@@ -9838,8 +9550,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetWireReverseFeedExtDoNum(self,DONum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DONum = int(DONum)
         flag = True
         while flag:
@@ -9860,8 +9571,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetWireForwardFeedExtDoNum(self,DONum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DONum = int(DONum)
         flag = True
         while flag:
@@ -9882,8 +9592,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetArcDoneExtDiNum(self,DINum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DINum = int(DINum)
         flag = True
         while flag:
@@ -9904,8 +9613,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetWeldReadyExtDiNum(self,DINum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DINum = int(DINum)
         flag = True
         while flag:
@@ -9927,8 +9635,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetExtDIWeldBreakOffRecover(self,reWeldDINum, abortWeldDINum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         reWeldDINum = int(reWeldDINum)
         abortWeldDINum = int(abortWeldDINum)
         flag = True
@@ -9953,8 +9660,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetCollisionDetectionMethod(self,method,thresholdMode):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         method = int(method)
         thresholdMode = int(thresholdMode)
         flag = True
@@ -9976,8 +9682,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetStaticCollisionOnOff(self,status):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         status = int(status)
         flag = True
         while flag:
@@ -9999,8 +9704,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetPowerLimit(self,status, power):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         status = int(status)
         power = float(power)
         flag = True
@@ -10022,8 +9726,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetRobotRealtimeStateSamplePeriod(self,period):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         period = int(period)
         flag = True
         while flag:
@@ -10045,8 +9748,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetRobotRealtimeStateSamplePeriod(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10098,8 +9800,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ArcWeldTraceReplayStart(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10120,8 +9821,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ArcWeldTraceReplayEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10147,8 +9847,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MultilayerOffsetTrsfToBase(self,pointo,pointX,pointZ,dx,dz,dry):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         pointo =list(map(float,pointo))
         pointX = list(map(float, pointX))
         pointZ = list(map(float, pointZ))
@@ -10179,8 +9878,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AngularSpeedStart(self, ratio):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ratio = int(ratio)
         flag = True
         while flag:
@@ -10200,8 +9898,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AngularSpeedEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10271,8 +9968,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoSetAcc(self,acc,dec):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         acc = float(acc)
         dec = float(dec)
         flag = True
@@ -10294,8 +9990,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoSetEmergencyStopAcc(self,acc,dec):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         acc = float(acc)
         dec = float(dec)
         flag = True
@@ -10318,8 +10013,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoGetEmergencyStopAcc(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10343,8 +10037,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AuxServoGetAcc(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10373,8 +10066,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetAxleCommunicationParam(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10402,8 +10094,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAxleCommunicationParam(self,baudRate,dataBit,stopBit,verify,timeout,timeoutTimes,period):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         baudRate = int (baudRate)
         dataBit = int (dataBit)
         stopBit = int (stopBit)
@@ -10429,8 +10120,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAxleFileType(self,type):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         type=int(type)
         flag = True
         while flag:
@@ -10450,8 +10140,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAxleLuaEnable(self,enable):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         enable=int(enable)
         flag = True
         while flag:
@@ -10471,8 +10160,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetRecoverAxleLuaErr(self,enable):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10491,8 +10179,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetAxleLuaEnableStatus(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10516,8 +10203,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAxleLuaEnableDeviceType(self,forceSensorEnable,gripperEnable,IOEnable):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         forceSensorEnable = int(forceSensorEnable)
         gripperEnable = int(gripperEnable)
         IOEnable = int(IOEnable)
@@ -10541,8 +10227,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetAxleLuaEnableDeviceType(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10566,8 +10251,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetAxleLuaEnableDevice(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10598,8 +10282,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetAxleLuaGripperFunc(self,id,func):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         func = list(map(int, func))
         flag = True
@@ -10622,8 +10305,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetAxleLuaGripperFunc(self,id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id=int(id)
         flag = True
         while flag:
@@ -10654,8 +10336,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetCtrlOpenLUAName(self,id,name):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         name = str(name)
         flag = True
@@ -10676,8 +10357,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetCtrlOpenLUAName(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10705,8 +10385,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LoadCtrlOpenLUA(self,id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         flag = True
         while flag:
@@ -10727,8 +10406,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def UnloadCtrlOpenLUA(self,id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         flag = True
         while flag:
@@ -10749,8 +10427,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetCtrlOpenLuaErrCode(self,id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         flag = True
         while flag:
@@ -10773,8 +10450,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SlaveFileWrite(self,type,slaveID,fileName):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         type = int(type)
         slaveID = int(slaveID)
         fileName =str(fileName)
@@ -10796,8 +10472,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetSysServoBootMode(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10849,8 +10524,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def TractorEnable(self, enable):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         enable = int(enable)
         flag = True
         while flag:
@@ -10870,8 +10544,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def TractorHoming(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10892,8 +10565,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def TractorMoveL(self,distance,vel):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         distance = float(distance)
@@ -10919,8 +10591,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def TractorMoveC(self,radio, angle, vel):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         radio = float(radio)
@@ -10945,8 +10616,7 @@ class RPC():
     @xmlrpc_timeout
 
     def TractorStop(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -10968,8 +10638,7 @@ class RPC():
     @xmlrpc_timeout
 
     def SetWireSearchExtDIONum(self,searchDoneDINum,searchStartDONum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         searchDoneDINum = int(searchDoneDINum)
         searchStartDONum = int(searchStartDONum)
         flag = True
@@ -10992,8 +10661,7 @@ class RPC():
     @xmlrpc_timeout
 
     def SetWeldMachineCtrlModeExtDoNum(self, DONum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DONum = int(DONum)
         flag = True
         while flag:
@@ -11015,8 +10683,7 @@ class RPC():
     @xmlrpc_timeout
 
     def SetWeldMachineCtrlMode(self, mode):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         mode = int(mode)
         flag = True
         while flag:
@@ -11034,32 +10701,33 @@ class RPC():
     """
 
     @log_call
-    @xmlrpc_timeout
-
     def CloseRPC(self):
-        # 设置停止事件以通知线程停止
+        """Stop local SDK threads/sockets even when XML-RPC startup failed."""
+        self.closeRPC_state = True
+        self.robot_realstate_exit = True
         self.stop_event.set()
-
-        # 如果线程仍在运行，则等待其结束
-        # if self.thread.is_alive():
-        #     self.thread.join()
-
-        # 清理 XML-RPC 代理
-        if self.robot is not None:
-            self.robot = None  # 将代理设置为 None，释放资源
-            self.sock_cli_state.close()
-            self.sock_cli_state = None
-            self.robot_state_pkg = None
-            self.closeRPC_state = True
-            # self.robot_realstate_exit = False
-
-        # 如果线程仍在运行，则等待其结束
-        if self.thread.is_alive():
-            self.thread.join()
-
-
+        self.SDK_state = False
+        self.is_conect = False
+        state_socket = self.sock_cli_state
+        if state_socket is not None:
+            try:
+                state_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            state_socket.close()
+        thread = self.thread
+        if thread.is_alive():
+            if thread is threading.current_thread():
+                raise RuntimeError("SDK receiver cannot join itself")
+            thread.join(timeout=2)
+            if thread.is_alive():
+                raise RuntimeError("SDK receiver has not stopped")
+        self.sock_cli_state = None
+        self.sock_cli_state_state = False
+        self.robot_state_pkg = None
+        self.robot = None
+        self.reconnect_flag = False
         print("RPC connection closed.")
-        return
 
     """   
     @brief 记录示教点
@@ -11090,8 +10758,7 @@ class RPC():
     @xmlrpc_timeout
 
     def SingularAvoidStart(self, protectMode, minShoulderPos=100,minElbowPos=50,minWristPos=10):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         protectMode = int(protectMode)
         minShoulderPos = float(minShoulderPos)
         minElbowPos = float(minElbowPos)
@@ -11115,8 +10782,7 @@ class RPC():
     @xmlrpc_timeout
 
     def SingularAvoidEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11177,8 +10843,7 @@ class RPC():
     @xmlrpc_timeout
 
     def PtpFIRPlanningStart(self, maxAcc,maxJek):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         maxAcc = float(maxAcc)
         maxJek = float(maxJek)
         flag = True
@@ -11200,8 +10865,7 @@ class RPC():
     @xmlrpc_timeout
 
     def PtpFIRPlanningEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11253,8 +10917,7 @@ class RPC():
     @xmlrpc_timeout
 
     def LinArcFIRPlanningStart(self, maxAccLin, maxAccDeg, maxJerkLin, maxJerkDeg):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         maxAccLin = float(maxAccLin)
         maxAccDeg = float(maxAccDeg)
         maxJerkLin = float(maxJerkLin)
@@ -11278,8 +10941,7 @@ class RPC():
     @xmlrpc_timeout
 
     def LinArcFIRPlanningEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11301,8 +10963,7 @@ class RPC():
     @xmlrpc_timeout
 
     def ToolTrsfStart(self, toolNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         toolNum = int(toolNum)
         flag = True
         while flag:
@@ -11323,8 +10984,7 @@ class RPC():
     @xmlrpc_timeout
 
     def ToolTrsfEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11349,8 +11009,7 @@ class RPC():
     @xmlrpc_timeout
 
     def ComputeToolCoordWithPoints(self, method, pos):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         method = int(method)
         param = {}
         param[0] = pos[0]
@@ -11390,8 +11049,7 @@ class RPC():
     @xmlrpc_timeout
 
     def ComputeWObjCoordWithPoints(self, method, pos, refFrame):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         method = int(method)
         param = {}
         param[0] = pos[0]
@@ -11422,8 +11080,7 @@ class RPC():
     @xmlrpc_timeout
 
     def WeldingSetCheckArcInterruptionParam(self, checkEnable, arcInterruptTimeLength):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         checkEnable = int(checkEnable)
         arcInterruptTimeLength = int(arcInterruptTimeLength)
         flag = True
@@ -11447,8 +11104,7 @@ class RPC():
     @xmlrpc_timeout
 
     def WeldingGetCheckArcInterruptionParam(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11475,8 +11131,7 @@ class RPC():
     @xmlrpc_timeout
 
     def WeldingSetReWeldAfterBreakOffParam(self, enable, length, velocity, moveType):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         enable = int(enable)
         length = float(length)
         velocity = float(velocity)
@@ -11504,8 +11159,7 @@ class RPC():
     @xmlrpc_timeout
 
     def WeldingGetReWeldAfterBreakOffParam(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11528,8 +11182,7 @@ class RPC():
     @xmlrpc_timeout
 
     def WeldingStartReWeldAfterBreakOff(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11549,8 +11202,7 @@ class RPC():
     @xmlrpc_timeout
 
     def WeldingAbortWeldAfterBreakOff(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11578,8 +11230,7 @@ class RPC():
     @xmlrpc_timeout
 
     def LaserSensorRecord(self, status, delayMode, delayTime, delayDisExAxisNum, delayDis, sensitivePara, speed):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         status = int(status)
         delayMode = int(delayMode)
         delayTime = int(delayTime)
@@ -11607,8 +11258,7 @@ class RPC():
     @xmlrpc_timeout
 
     def LaserTrackingLaserOn(self, weldId):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weldId = int(weldId)
         flag = True
         while flag:
@@ -11629,8 +11279,7 @@ class RPC():
     @xmlrpc_timeout
 
     def LaserTrackingLaserOff(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11651,8 +11300,7 @@ class RPC():
     @xmlrpc_timeout
 
     def LaserTrackingTrackOn(self, coordId):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         coordId = int(coordId)
         flag = True
         while flag:
@@ -11673,8 +11321,7 @@ class RPC():
     @xmlrpc_timeout
 
     def LaserTrackingTrackOff(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11700,8 +11347,7 @@ class RPC():
     @xmlrpc_timeout
 
     def LaserTrackingSearchStart(self, direction, directionPoint, vel, distance, timeout, posSensorNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         direction = int(direction)
         directionPoint = list(map(float, directionPoint))
         vel = int(vel)
@@ -11727,8 +11373,7 @@ class RPC():
     @xmlrpc_timeout
 
     def LaserTrackingSearchStop(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11754,8 +11399,7 @@ class RPC():
     @xmlrpc_timeout
 
     def WeaveChangeStart(self, weaveChangeFlag, weaveNum, velStart, velEnd):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         weaveChangeFlag = int(weaveChangeFlag)
         weaveNum = int(weaveNum)
         velStart = float(velStart)
@@ -11779,8 +11423,7 @@ class RPC():
     @xmlrpc_timeout
 
     def WeaveChangeEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -11811,8 +11454,7 @@ class RPC():
     @xmlrpc_timeout
 
     def LoadTrajectoryLA(self, name, mode, errorLim, type, precision, vamx, amax, jmax, flag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         name =str(name)
@@ -11844,8 +11486,7 @@ class RPC():
     @xmlrpc_timeout
 
     def MoveTrajectoryLA(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         flag = True
@@ -11871,8 +11512,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def CustomCollisionDetectionStart(self, flag, jointDetectionThreshould, tcpDetectionThreshould, block):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         flag = int(flag)
@@ -11898,8 +11538,7 @@ class RPC():
     @xmlrpc_timeout
 
     def CustomCollisionDetectionEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         flag = True
@@ -11947,8 +11586,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AccSmoothStart(self, saveFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         saveFlag = bool(saveFlag)
@@ -11973,8 +11611,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def AccSmoothEnd(self, saveFlag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         saveFlag = bool(saveFlag)
@@ -12073,8 +11710,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetRobotSN(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         flag = True
@@ -12098,8 +11734,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ShutDownRobotOS(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         flag = True
@@ -12121,8 +11756,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ConveyorComDetect(self, timeout):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         timeout = int(timeout)
@@ -12174,8 +11808,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ArcWeldTraceAIChannelCurrent(self, channel):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         channel = int(channel)
@@ -12197,8 +11830,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ArcWeldTraceAIChannelVoltage(self, channel):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         channel = int(channel)
@@ -12223,8 +11855,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ArcWeldTraceCurrentPara(self, AILow=0, AIHigh=10, currentLow=0, currentHigh=100):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         AILow = float(AILow)
@@ -12252,8 +11883,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ArcWeldTraceVoltagePara(self, AILow=0, AIHigh=10, voltageLow=0, voltageHigh=100):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         AILow = float(AILow)
@@ -12283,8 +11913,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeldingSetVoltageGradualChangeStart(self, IOType, voltageStart, voltageEnd, AOIndex, blend):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         IOType = int(IOType)
@@ -12309,8 +11938,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeldingSetVoltageGradualChangeEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         flag = True
@@ -12335,8 +11963,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeldingSetCurrentGradualChangeStart(self, IOType, currentStart, currentEnd, AOIndex, blend):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         IOType = int(IOType)
@@ -12361,8 +11988,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WeldingSetCurrentGradualChangeEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         flag = True
@@ -12396,8 +12022,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ExtAxisGetCoord(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         flag = True
@@ -12504,8 +12129,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetWideBoxTempFanMonitorParam(self, enable, period):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         if self.GetSafetyCode() != 0:
             return self.GetSafetyCode()
         enable = int(enable)
@@ -12529,8 +12153,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetWideBoxTempFanMonitorParam(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -12557,8 +12180,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetFocusCalibPoint(self, pointNum, point):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         pointNum = int(pointNum)
         point = list(map(float, point))
         flag = True
@@ -12581,8 +12203,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ComputeFocusCalib(self, pointNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         pointNum = int(pointNum)
         flag = True
         while flag:
@@ -12610,8 +12231,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FocusStart(self, kp=50.0, kpredic=19.0, aMax=1440, vMax=180, type=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         kp = float(kp)
         kpredic = float(kpredic)
         aMax = float(aMax)
@@ -12634,8 +12254,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FocusEnd(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -12654,8 +12273,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetFocusPosition(self, pos):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         pos = list(map(float, pos))
         flag = True
         while flag:
@@ -12676,8 +12294,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetEncoderUpgrade(self, path):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         path = str(path)
         flag = True
         while flag:
@@ -12777,8 +12394,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LaserRecordPoint(self, coordID):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         coordID = int(coordID)
         flag = True
         while flag:
@@ -12808,8 +12424,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetExAxisRobotPlan(self, strategy):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         strategy = int(strategy)
         flag = True
         while flag:
@@ -12832,8 +12447,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetFieldBusConfig(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -12858,8 +12472,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FieldBusSlaveWriteDO(self, DOIndex, wirteNum, status):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DOIndex = int(DOIndex)
         wirteNum = int(wirteNum)
         status = list(map(int, status))
@@ -12883,8 +12496,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FieldBusSlaveWriteAO(self, AOIndex, wirteNum, status):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         AOIndex = int(AOIndex)
         wirteNum = int(wirteNum)
         status = list(map(int, status))
@@ -12908,8 +12520,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FieldBusSlaveReadDI(self, DOIndex, readeNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DOIndex = int(DOIndex)
         readeNum = int(readeNum)
         flag = True
@@ -12936,8 +12547,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FieldBusSlaveReadAI(self, AOIndex, readeNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         AOIndex = int(AOIndex)
         readeNum = int(readeNum)
         flag = True
@@ -12964,8 +12574,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FieldBusSlaveWaitDI(self, DIIndex, status, waitMs):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         DIIndex = int(DIIndex)
         status = int(status)
         waitMs = int(waitMs)
@@ -12990,8 +12599,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def FieldBusSlaveWaitAI(self, AIIndex, waitType, value, waitMs):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         AIIndex = int(AIIndex)
         waitType = int(waitType)
         value = float(value)
@@ -13016,8 +12624,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetSuckerCtrl(self, slaveID, len, ctrlValue):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         slaveID = int(slaveID)
         len = int(len)
         ctrlValue = list(map(int, ctrlValue))
@@ -13042,8 +12649,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetSuckerState(self, slaveID):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         slaveID = int(slaveID)
         flag = True
         while flag:
@@ -13069,8 +12675,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def WaitSuckerState(self, slaveID, state, ms):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         slaveID = int(slaveID)
         state = int(state)
         ms = int(ms)
@@ -13115,8 +12720,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetTorqueDetectionSwitch(self, flag):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = int(flag)
         flag_tmp = True
         while flag_tmp:
@@ -13160,8 +12764,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LaserTrackingLaserOnOff(self, OnOff, weldId=0):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         OnOff = int(OnOff)
         weldId = int(weldId)
         flag = True
@@ -13183,8 +12786,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LaserTrackingTrackOnOff(self, OnOff, coordId):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         OnOff = int(OnOff)
         coordId = int(coordId)
         flag = True
@@ -13209,8 +12811,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LaserTrackingSearchStart_xyz(self, direction, vel, distance, timeout, posSensorNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         direction = int(direction)
         vel = int(vel)
         distance = int(distance)
@@ -13238,8 +12839,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LaserTrackingSearchStart_point(self, directionPoint, vel, distance, timeout, posSensorNum):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         directionPoint = list(map(float, directionPoint))
         vel = int(vel)
         distance = int(distance)
@@ -13264,8 +12864,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LaserTrackingSensorConfig(self, ip, port):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         ip =str (ip)
         port = int(port)
         flag = True
@@ -13286,8 +12885,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LaserTrackingSensorSamplePeriod(self, period):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         period = int(period)
         flag = True
         while flag:
@@ -13307,8 +12905,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LoadPosSensorDriver(self, type):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         type = int(type)
         flag = True
         while flag:
@@ -13327,8 +12924,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def UnLoadPosSensorDriver(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -13348,8 +12944,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LaserSensorRecord1(self, status, delayTime):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         status = int(status)
         delayTime = int(delayTime)
         flag = True
@@ -13371,8 +12966,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LaserSensorReplay(self, delayTime, speed):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         delayTime = int(delayTime)
         speed = float(speed)
         flag = True
@@ -13392,8 +12986,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MoveLTR(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -13417,8 +13010,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def LaserSensorRecordandReplay(self, delayMode, delayTime, delayDisExAxisNum, delayDis, sensitivePara, speed):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         delayMode = int(delayMode)
         delayTime = int(delayTime)
         delayDisExAxisNum = int(delayDisExAxisNum)
@@ -13444,8 +13036,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MoveToLaserRecordStart(self, moveType, ovl):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         moveType = int(moveType)
         ovl = float(ovl)
         flag = True
@@ -13467,8 +13058,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MoveToLaserRecordEnd(self, moveType, ovl):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         moveType = int(moveType)
         ovl = float(ovl)
         flag = True
@@ -13494,8 +13084,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MoveToLaserSeamPos(self, moveFlag, ovl, dataFlag, plateType, trackOffectType, offset):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         moveFlag = int(moveFlag)
         ovl = float(ovl)
         plateType = int(plateType)
@@ -13525,8 +13114,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetLaserSeamPos(self, trackOffectType, offset):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         trackOffectType = int(trackOffectType)
         offset = list(map(float, offset))
         flag = True
@@ -13569,8 +13157,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def ImpedanceControlStartStop(self, status, workSpace, forceThreshold, m, b, k, maxV, maxVA, maxW, maxWA):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         status = int(status)
         workSpace = int(workSpace)
         forceThreshold = list(map(float, forceThreshold))
@@ -13606,8 +13193,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetToolCoordWithID(self, id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         flag = True
         while flag:
@@ -13631,8 +13217,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetWObjCoordWithID(self, id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         flag = True
         while flag:
@@ -13656,8 +13241,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetExToolCoordWithID(self, id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         flag = True
         while flag:
@@ -13681,8 +13265,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetExAxisCoordWithID(self, id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         flag = True
         while flag:
@@ -13707,8 +13290,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetTargetPayloadWithID(self, id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         flag = True
         while flag:
@@ -13802,8 +13384,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def CustomWeaveSetPara(self, id, pointNum, point, stayTime, frequency, incStayType, stationary):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         pointNum = int(pointNum)
         point = list(map(float, point))
@@ -13840,8 +13421,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def CustomWeaveGetPara(self, id):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         id = int(id)
         flag = True
         while flag:
@@ -13912,8 +13492,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetKernelUpgradeResult(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -13937,8 +13516,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def JointSensitivityEnable(self, status):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         status = int(status)
         flag = True
         while flag:
@@ -13958,8 +13536,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def JointSensitivityCalibration(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -13980,8 +13557,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def JointSensitivityCollect(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -14000,8 +13576,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def MotionQueueClear(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -14027,8 +13602,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetSlavePortErrCounter(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -14064,8 +13638,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SlavePortErrCounterClear(self, slaveID):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         slaveID = int(slaveID)
         flag = True
         while flag:
@@ -14085,8 +13658,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def SetVelFeedForwardRatio(self, radio):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         radio = list(map(float,radio))
         flag = True
         while flag:
@@ -14106,8 +13678,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def GetVelFeedForwardRatio(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:
@@ -14128,8 +13699,7 @@ class RPC():
     @log_call
     @xmlrpc_timeout
     def RobotMCULogCollect(self):
-        while self.reconnect_flag:
-            time.sleep(0.1)
+        wait_for_reconnect(self)
         flag = True
         while flag:
             try:

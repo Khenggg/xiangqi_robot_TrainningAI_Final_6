@@ -1,0 +1,42 @@
+[
+  {
+    "file": "src/simulation/board_profile.py",
+    "sha256": "E18AD10ADD1AFC3755CAECA30C53809E135E9C14CF6E6178F0B618926DB57DE0",
+    "worktree_matches": true
+  },
+  {
+    "file": "src/simulation/runtime.py",
+    "sha256": "411A69BFF9773F400B5888233BB5F0FA7F336EFA185BD9CB92B11D145472A07D",
+    "worktree_matches": true
+  },
+  {
+    "file": "src/ui/recovery_status.py",
+    "sha256": "85B03E0FB8C2A6661CBABFB5443A67FDD94E49D5257E084BDF15FAF98969D6D6",
+    "worktree_matches": true
+  },
+  {
+    "file": "src/ui/board_renderer.py",
+    "sha256": "D17C6111C3CC64A7C86BFCE23F96FCCA1E63F9B285498859E14748EB5E5DFFC9",
+    "worktree_matches": true
+  },
+  {
+    "file": "src/core/game_state.py",
+    "sha256": "337985083AE6696F6069B7E3725A95A7D0C1682EA9AB38A3533C2F871762158B",
+    "worktree_matches": true
+  },
+  {
+    "file": "robot-3d-viewer/index.html",
+    "sha256": "C3A1803C87DB69A92EF9EA3BA516493B804F616D823B38EC4100533C77081B4C",
+    "worktree_matches": true
+  },
+  {
+    "file": "robot-3d-viewer/main.mjs",
+    "sha256": "34232AFD70B618A259EF0F7575A3DD1664242A05C0AAA59585F784064C9169B4",
+    "worktree_matches": true
+  },
+  {
+    "file": "tests/unit/test_board_profile_recovery.py",
+    "sha256": "7CF52BA9EB63534FC14B51366262E1C5D69D0B94E3D56DCD3030F47ACEB537E6",
+    "worktree_matches": true
+  }
+]

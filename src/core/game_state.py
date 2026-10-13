@@ -1,4 +1,5 @@
 import time
+from copy import deepcopy
 from collections import Counter, defaultdict
 from src.domain.game_move import MoveActor, MoveContext, initial_piece_identities, piece_symbol_for_identity
 from typing import Optional, Tuple, Dict, List, Any
@@ -46,6 +47,7 @@ class GameState:
         
         # AI Thread State
         self.ai_thread: Any = None
+        self._retired_ai_threads = []
         self.ai_result: Any = None
         self.ai_thinking: bool = False
         self.ai_think_start: float = 0.0
@@ -68,11 +70,21 @@ class GameState:
         self.snapshot_continue_required: bool = False
         self.snapshot_continue_can_commit_pending: bool = False
         self.emergency_mode: bool = False
+        self.pick_test_mode = False
+        self.pick_test_board = None
+        self.pick_test_piece_ids = None
+        self.pick_test_resume_required = False
+        self.pick_test_fault = None
         # A failed post-move camera check means the physical board may have
         # changed while FEN was intentionally left untouched.  Do not retry the
         # same robot command until an operator resolves the discrepancy.
         self.physical_sync_fault: bool = False
         self.pending_ai_move: Optional[Dict[str, Any]] = None
+        self.visual_pick_retry = None
+        self.visual_capture_checkpoint = None
+        self.test_pick_retry = None
+        self.is_robot_ready: bool = True
+        self.physical_enable_pending: bool = False
 
     def update_fen_from_board(self):
         """Cập nhật current_fen từ board array hiện tại."""
@@ -85,21 +97,46 @@ class GameState:
             "turn": self.turn,
             "allow_mouse": self.allow_mouse_move,
             "game_mode": config.GAME_MODE,
+            "robot_backend": config.ROBOT_BACKEND,
+            "is_robot_ready": getattr(self, "is_robot_ready", True),
+            "physical_enable_pending": getattr(self, "physical_enable_pending", False),
             "ai_thinking": self.ai_thinking,
             "ai_think_start": self.ai_think_start,
             "status_message": self.status_message,
             "status_color": self.status_color,
             "status_expiry": self.status_expiry,
             "move_sync_error": self.move_sync_error,
+            "physical_sync_fault": self.physical_sync_fault,
+            "move_execution_error": self.move_execution_error,
+            "move_execution_status": self.move_execution_status,
+            "pending_ai_move": self.pending_ai_move,
+            "visual_pick_retry": getattr(self, "visual_pick_retry", None),
+            "test_pick_retry": getattr(self, "test_pick_retry", None),
+            "pending_move": self.pending_move,
+            "turn_confirmation_required": self.turn_confirmation_required,
             "manual_override_active": self.manual_override_active,
             "snapshot_continue_required": self.snapshot_continue_required,
             "emergency_mode": self.emergency_mode,
+            "pick_test_mode": self.pick_test_mode,
+            "pick_test_fault": self.pick_test_fault,
+            "pick_test_resume_required": self.pick_test_resume_required,
             "recent_moves": self.move_log[-8:],
         }
 
+    @staticmethod
+    def _is_game_only(hw_manager):
+        cfg = getattr(hw_manager, "config", None)
+        return (getattr(cfg, "GAME_ONLY", False) is True
+                and getattr(cfg, "ROBOT_BACKEND", None) == "VIRTUAL"
+                and getattr(hw_manager, "dry_run", False) is True)
+
     def reset_game(self, hw_manager=None):
+        self.retire_ai_job()
+        self.visual_pick_retry = None
+        self.visual_capture_checkpoint = None
+        self.test_pick_retry = None
         # [API] Đóng room cũ trước khi tạo game mới
-        if self.api_client.room_id:
+        if self.api_client.room_id or getattr(self.api_client, 'pending', False):
             print("[GAME] 🔚 Đóng room cũ trước khi tạo game mới...")
             winner = "DRAW"
             reason = "OTHER"
@@ -149,15 +186,24 @@ class GameState:
         self.snapshot_continue_required = False
         self.snapshot_continue_can_commit_pending = False
         self.emergency_mode = False
+        self.pick_test_mode = False
+        self.pick_test_board = None
+        self.pick_test_piece_ids = None
+        self.pick_test_resume_required = False
+        self.pick_test_fault = None
         self.physical_sync_fault = False
         self.pending_ai_move = None
+        self.clear_visual_requests()
 
+        self._pre_space_state = None
         print("[GAME] 🔄 New game started!")
         print(f"[FEN] {self.current_fen}")
         
         if hw_manager:
-            hw_manager.capture_baseline_if_needed(force_delay=0.0)
-            if getattr(hw_manager, "simulation_runtime", None) is None:
+            if not self._is_game_only(hw_manager):
+                hw_manager.capture_baseline_if_needed(force_delay=0.0)
+            if getattr(hw_manager, "simulation_runtime", None) is None and not self._is_game_only(hw_manager):
+                self.sync_current_board()
                 self.physical_sync_fault = True
                 self.move_sync_error = "New game requires full physical board verification"
             else:
@@ -167,7 +213,8 @@ class GameState:
         
         # [API] Tạo room mới (nếu không ở chế độ DRY_RUN)
         if not config.DRY_RUN:
-            self.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
+            self.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI",
+                                         initial_fen=self.current_fen)
 
     def set_status(self, msg, color=(200, 0, 0), duration=2.5):
         self.status_message = msg
@@ -197,6 +244,10 @@ class GameState:
             "move_history": list(self.move_history),
             "move_log": list(self.move_log),
             "piece_ids": dict(self.piece_ids),
+            "history_snapshots": deepcopy(self.history_snapshots),
+            "game_over": self.game_over,
+            "winner": self.winner,
+            "game_over_reason": getattr(self, "game_over_reason", ""),
             "baseline_occ": baseline_occ,
             "baseline_time": baseline_time,
         }
@@ -210,6 +261,7 @@ class GameState:
             return
 
         print("[ROLLBACK] ↩️ Khôi phục trạng thái trước SPACE...")
+        self.retire_ai_job()
         self.game_epoch += 1
         self.ai_epoch += 1
         self.ai_job_token = None
@@ -223,6 +275,7 @@ class GameState:
         self.piece_ids = dict(s["piece_ids"])
         self.pending_move = None
         self.pending_ai_move = None
+        self.clear_visual_requests()
         self.turn = s["turn"]
         self.last_move = s["last_move"]
         self.current_fen = s["current_fen"]
@@ -231,8 +284,12 @@ class GameState:
         self.b_captured = list(s["b_captured"])
         self.move_history = list(s["move_history"])
         self.move_log = list(s.get("move_log", []))
+        self.history_snapshots = deepcopy(s.get("history_snapshots", []))
+        self.game_over = s.get("game_over", False)
+        self.winner = s.get("winner")
+        self.game_over_reason = s.get("game_over_reason", "")
 
-        if hw_manager:
+        if hw_manager and not self._is_game_only(hw_manager):
             hw_manager.restore_yolo_baseline(s.get("baseline_occ"), s.get("baseline_time"))
 
         print("[ROLLBACK] 📸 T1 baselines restored.")
@@ -245,7 +302,14 @@ class GameState:
         self.snapshot_continue_required = False
         self.snapshot_continue_can_commit_pending = False
         self.emergency_mode = False
-        if hw_manager is not None and getattr(hw_manager, "simulation_runtime", None) is None:
+        self.pick_test_mode = False
+        self.pick_test_board = None
+        self.pick_test_piece_ids = None
+        self.pick_test_resume_required = False
+        self.pick_test_fault = None
+        if (hw_manager is not None and getattr(hw_manager, "simulation_runtime", None) is None
+                and not self._is_game_only(hw_manager)):
+            self.sync_current_board()
             self.physical_sync_fault = True
             self.move_sync_error = "Rollback requires physical board verification"
         else:
@@ -253,14 +317,23 @@ class GameState:
 
     def set_pending_ai_move(self, move, expected_board, captured_piece):
         """Remember the only state transition a fault-recovery may commit."""
+        self.visual_pick_retry = None
+        self.visual_capture_checkpoint = None
         self.pending_ai_move = {
             "move": move,
             "expected_board": [row[:] for row in expected_board],
             "captured_piece": captured_piece,
         }
 
+    def clear_visual_requests(self):
+        """Drop acquisition requests whenever their pending game transition is replaced."""
+        self.visual_pick_retry = None
+        self.visual_capture_checkpoint = None
+        self.test_pick_retry = None
+
     def clear_pending_ai_move(self):
         self.pending_ai_move = None
+        self.clear_visual_requests()
         self.physical_sync_fault = False
 
     def prepare_ai_retry_after_physical_miss(self):
@@ -288,14 +361,26 @@ class GameState:
 
     def can_start_ai_turn(self):
         """Whether the main loop may create exactly one Black AI worker."""
+        self._retired_ai_threads = [worker for worker in self._retired_ai_threads if worker.is_alive()]
         return (
-            not self.ai_thinking
+            not self._retired_ai_threads
+            and
+            not self.pick_test_mode
+            and not self.pick_test_resume_required
+            and not self.ai_thinking
             and self.ai_thread is None
             and (
                 self.human_commit_generation > self.ai_started_for_human_commit_generation
                 or self.ai_retry_requested
             )
         )
+
+    def retire_ai_job(self):
+        worker = self.ai_thread
+        if worker is not None and worker.is_alive() is True:
+            self._retired_ai_threads.append(worker)
+        self.ai_thread = None
+        self.ai_thinking = False
 
     def mark_ai_turn_started(self):
         """Consume the normal-generation or one-shot retry start authority."""
@@ -347,8 +432,14 @@ class GameState:
         if context is not None:
             self.commit_piece_identity(context)
         self.pending_ai_move = None
+        self.clear_visual_requests()
         self.physical_sync_fault = False
-        return self.sync_current_board()
+        self.move_sync_error = None  # The verified commit supersedes the old command failure.
+        # A verified physical move is committed even if its spectator fails.
+        # Keep the sync fault latched; never misreport an uncommitted move or
+        # replay robot motion to repair a display.
+        self.sync_current_board()
+        return True
 
     @property
     def is_human_turn(self):
@@ -356,11 +447,17 @@ class GameState:
         return mode == "HUMAN_VS_HUMAN" or (mode == "HUMAN_VS_ROBOT" and self.turn == "r")
 
     def process_human_move(self, src, dst, p_name):
+        if self.game_over or self.turn_confirmation_required or self.pick_test_mode or self.pick_test_resume_required:
+            return False
+        from src.core.project_logging import event
+        if self.physical_sync_fault or self.move_sync_error or self.pending_move is not None:
+            return False
         if not self.is_human_turn or not xiangqi.is_valid_move(src, dst, self.board, self.turn):
             return False
         moving_color = self.turn
         print(f"[HUMAN] ✅ Moved: {p_name} {xiangqi.format_move(src, dst)}")
-        self.set_status("✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
+        self.set_status("✅ Đã nhận nước đi." if config.GAME_MODE == "HUMAN_VS_HUMAN"
+                        else "✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
         
         self._save_history_snapshot()
         context = self.create_move_context(src, dst, MoveActor.HUMAN)
@@ -374,19 +471,33 @@ class GameState:
         self.last_move = (src, dst)
         
         self.commit_piece_identity(context)
-        self._notify_human_commit(context)
-        self.sync_current_board()
         self.turn = "b" if moving_color == "r" else "r"  # Chuyển lượt
         self.human_commit_generation += 1
         self.move_number += 1
         self.update_fen_from_board()
+        event("game.human_move", "Đã nhận nước người đi", move_id=context.move_id,
+              src=src, dst=dst, cell_order="col,row", captured_piece_id=context.captured_piece_id,
+              piece_id=context.piece_id, fen=self.current_fen)
+        # Preserve the accepted camera move, but report a failed mirror update
+        # as a failure and retain the fault gate before another AI job starts.
+        if not self._notify_human_commit(context) or not self.sync_current_board():
+            self.physical_sync_fault = True
+            self.snapshot_continue_required = True
+            return False
         print(f"[FEN] {self.current_fen}")
         
         # [API] Đồng bộ nước đi lên máy chủ Simulation
         self.api_client.send_move_update_board(self.current_fen)
         
-        if xiangqi.get_king_pos(self.turn, self.board) is None:
-            self.handle_game_over(moving_color)
+        self._finish_human_committed_move(moving_color)
+        return True
+
+    def _finish_human_committed_move(self, moving_color):
+        """Publish termination only after the committed FEN has been queued."""
+        if (not self.game_over and (xiangqi.get_king_pos(self.turn, self.board) is None
+                                    or not xiangqi.find_all_valid_moves(self.turn, self.board))):
+            self.handle_game_over(moving_color, reason="CHECKMATE")
+            self.api_client.end_match(winner="RED" if moving_color == "r" else "BLACK", reason="CHECKMATE")
 
     def process_emergency_move(self, src, dst, p_name):
         """Commit one rule-checked client move for the side currently to move.
@@ -395,16 +506,21 @@ class GameState:
         exactly one AI/robot reply.  A Black move is an operator correction:
         it cancels any in-flight AI result and hands the turn back to Red.
         """
+        if (self.game_over or self.turn_confirmation_required or self.pick_test_mode or self.pick_test_resume_required
+                or not xiangqi.is_valid_move(src, dst, self.board, self.turn)):
+            return False
+        if self.turn == "r" and (self.physical_sync_fault or self.move_sync_error or not self.is_human_turn):
+            return False
         # An operator edit supersedes any unverified robot transition.  Never
         # let a later Continue overwrite the corrected client position.
         self.pending_ai_move = None
+        self.clear_visual_requests()
         self.pending_move = None
         self.snapshot_continue_required = True
         self.snapshot_continue_can_commit_pending = False
         color = self.turn
         if color == "r":
-            self.process_human_move(src, dst, p_name)
-            return
+            return self.process_human_move(src, dst, p_name)
 
         print(f"[EMERGENCY] ✅ Manual Black move: {p_name} {xiangqi.format_move(src, dst)}")
         captured_piece = self.board[dst[1]][dst[0]]
@@ -421,18 +537,19 @@ class GameState:
         # position; Python cannot safely kill that thread, but its result is
         # discarded by the main-loop token check.
         self.commit_piece_identity(context)
-        self.sync_current_board()
         self.ai_epoch += 1
         self.ai_job_token = None
-        self.ai_thinking = False
-        self.ai_thread = None
+        self.retire_ai_job()
         self.ai_results = {}
         self.ai_retry_requested = False
         self.update_fen_from_board()
+        if not self.sync_current_board():
+            self.snapshot_continue_required = True
+            return False
         self.api_client.send_move_update_board(self.current_fen)
         self.set_status("✅ Emergency Black move accepted — Red to move.", color=(0, 120, 0), duration=6.0)
-        if xiangqi.get_king_pos("r", self.board) is None:
-            self.handle_game_over("b")
+        self._finish_human_committed_move("b")
+        return True
 
     def set_move_observer(self, callback):
         """Observe committed human moves. The observer must not actuate the robot."""
@@ -579,11 +696,11 @@ class GameState:
             except Exception as exc:
                 self._require_scene_reconciliation(f"Board scan sync failed: {exc}")
                 return False
+        self.retire_ai_job()
         self.game_epoch += 1
         self.ai_epoch += 1
         self.ai_job_token = None
         self.ai_results.clear()
-        self.ai_thinking = False
         self.board = [list(row) for row in observed_board]
         self.piece_ids = new_ids
         self.turn = next_turn
@@ -594,6 +711,7 @@ class GameState:
         self.last_move = None
         self.last_committed_move = None
         self.pending_ai_move = None
+        self.clear_visual_requests()
         self.history_snapshots.clear()
         self.move_history.clear()
         missing = allowed - seen
@@ -636,6 +754,8 @@ class GameState:
 
     def set_pending_physical_move(self, move, expected_board, captured_piece, moving_color="b"):
         """Remember a verified physical move without committing it yet."""
+        self.visual_pick_retry = None
+        self.visual_capture_checkpoint = None
         self.pending_ai_move = {
             "move": move,
             "expected_board": [row[:] for row in expected_board],
@@ -644,12 +764,16 @@ class GameState:
         }
 
     def sync_current_board(self):
+        from src.core.project_logging import event
+        import logging
         if self._board_observer is None:
             return True
         try:
             if self._board_observer(dict(self.piece_ids)) is not True:
                 raise RuntimeError("Twin rejected board reconciliation")
         except Exception as exc:
+            event("board.sync_failed", str(exc), level=logging.ERROR, code="BOARD_SYNC_FAILED",
+                  exc_info=True, fen=self.current_fen, piece_count=len(self.piece_ids))
             self.move_sync_error = str(exc)
             self.physical_sync_fault = True
             self.set_status(f"Board synchronization stopped: {exc}", duration=30)
@@ -682,8 +806,10 @@ class GameState:
         self.ai_thinking = False
         self.pending_move = None
         self.pending_ai_move = None
+        self.clear_visual_requests()
         self.update_fen_from_board()
-        if hw_manager is not None and getattr(hw_manager, "simulation_runtime", None) is not None:
+        if hw_manager is not None and (getattr(hw_manager, "simulation_runtime", None) is not None
+                                       or self._is_game_only(hw_manager)):
             return self.sync_current_board()
         self.set_status("Đã hoàn tác; xác minh bàn trước khi tiếp tục.", duration=10)
         self._require_scene_reconciliation("Undo requires board reconciliation")

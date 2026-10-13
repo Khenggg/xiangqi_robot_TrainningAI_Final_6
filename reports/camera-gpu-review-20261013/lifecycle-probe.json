@@ -1,0 +1,20 @@
+{
+  "constructed_only": {
+    "read_calls": 0,
+    "capture_thread": null,
+    "detect_thread": null
+  },
+  "after_snapshot_ages": {
+    "health": {
+      "ready": false,
+      "error": null,
+      "result_age_s": 2.014999999999418
+    },
+    "cchess_visible": false
+  },
+  "explicit_start": {
+    "read_calls": 28,
+    "capture_thread_alive": true,
+    "detect_thread_alive": true
+  }
+}

@@ -27,7 +27,7 @@ class AutoCalibrator:
         CChess J0 (idx 2) → P3 (Đỏ Trái,   col=0, row=9)
     """
 
-    def __init__(self, cchess_recognizer=None, pose_model_path=None, min_kpt_conf=0.65):
+    def __init__(self, cchess_recognizer=None, pose_model_path=None, min_kpt_conf=0.05):
         """
         Args:
             cchess_recognizer: Instance CChessRecognizer đã khởi tạo (ưu tiên sử dụng)
@@ -52,7 +52,7 @@ class AutoCalibrator:
         P3: Đỏ Trái  (col=0, row=9)
         """
         # 1. Kiểm tra đủ 4 điểm
-        if len(kpts) != 4:
+        if np.asarray(kpts).shape != (4, 2) or not np.isfinite(kpts).all():
             return False, "Không đủ 4 keypoints"
 
         # 2. Kiểm tra nằm trong phạm vi ảnh (cho phép dung sai 2% ngoài biên nếu ảnh bị crop nhẹ)
@@ -111,8 +111,8 @@ class AutoCalibrator:
             # SimCC scores = max(softmax_x) * max(softmax_y), typically 0.08-0.35 for good predictions
             mean_conf = float(np.mean(kpts_conf))
             min_conf = float(np.min(kpts_conf))
-            if mean_conf < 0.08 or min_conf < 0.05:
-                print(f"[AUTO CALIBRATE] Confidence keypoint thap: mean={mean_conf:.4f}, min={min_conf:.4f} (yeu cau mean>=0.08, min>=0.05)")
+            if not np.isfinite(kpts_conf).all() or mean_conf < 0.08 or min_conf < self.min_kpt_conf:
+                print(f"[AUTO CALIBRATE] Confidence keypoint thap: mean={mean_conf:.4f}, min={min_conf:.4f}")
                 return None, 0.0
 
             # Geometric Sanity Check
@@ -128,12 +128,32 @@ class AutoCalibrator:
             return None, 0.0
 
 
+def stable_corner_consensus(samples, min_samples=6, max_jitter_px=3.0):
+    """Require a strict majority of consistent whole-board predictions.
+
+    Scores do not determine accuracy. Reject a frame if ANY corner disagrees
+    with the median; never combine independently selected corners from frames.
+    """
+    values = np.asarray(samples, dtype=np.float32)
+    if len(samples) < min_samples or values.shape[1:] != (4, 2) or not np.isfinite(values).all():
+        return None
+    median = np.median(values, axis=0)
+    errors = np.linalg.norm(values - median, axis=2).max(axis=1)
+    inliers = values[errors <= max_jitter_px]
+    if len(inliers) < max(min_samples, len(values) // 2 + 1):
+        return None
+    consensus = np.median(inliers, axis=0)
+    if np.linalg.norm(inliers - consensus, axis=2).max() > max_jitter_px:
+        return None
+    return consensus.astype(np.float32)
+
+
 def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_model_path=None, preview_sec=2.0):
     """Quy trình hiệu chỉnh Camera tích hợp:
     
     1. Warm-up camera một lần duy nhất (tránh race condition).
     2. Thử Auto-Calibration bằng RTMPose ONNX (pose_4_v6.onnx) nếu có CChessRecognizer.
-    3. Nếu Auto thành công: tính M, lưu .npy, hiển thị overlay lưới xác nhận rồi vào game.
+    3. Nếu góc ổn định: hiển thị lưới; chỉ lưu sau khi người dùng xác nhận.
     4. Nếu Auto thất bại hoặc chưa có model: Tự động fallback sang Click tay 4 góc (manual).
     
     Args:
@@ -141,7 +161,7 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
         perspective_path: đường dẫn lưu file .npy
         cchess_recognizer: Instance CChessRecognizer (ưu tiên sử dụng thay cho YOLO-Pose)
         pose_model_path: (Legacy/unused) Giữ lại cho tương thích API cũ
-        preview_sec: Thời gian hiển thị preview (giây)
+        preview_sec: Legacy compatibility; preview now waits for explicit acceptance.
     """
     if getattr(config, "DRY_RUN", False):
         print("[CALIBRATE] DRY_RUN: bo qua calibration.")
@@ -159,30 +179,37 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
     ret, warm_frame = cap.read()
     if not ret or warm_frame is None:
         print("[CALIBRATE] Khong lay duoc frame sau warm-up!")
-        return None
+        raise RuntimeError("Camera calibration failed: no fresh frame")
 
     # --- BƯỚC 2: THỬ AUTO-CALIBRATION (Multi-frame Sampling) ---
     if cchess_recognizer is not None:
         print("[CALIBRATE] Dang chay AI Auto-Calibration (RTMPose ONNX) phat hien 4 goc...")
         calibrator = AutoCalibrator(cchess_recognizer=cchess_recognizer)
 
-        best_corners = None
         best_score = 0.0
         best_frame = None
+        samples = []
 
-        # Lấy mẫu 5 frame liên tiếp để chọn frame có độ tin cậy cao nhất, tránh nhiễu/bóng/tay che
-        for attempt in range(5):
+        # Require a stable majority rather than trusting the highest model score.
+        for attempt in range(12):
             ret, frame = cap.read()
             if ret and frame is not None:
                 corners, score = calibrator.predict_corners(frame)
-                if corners is not None and score > best_score:
-                    best_corners = corners
+                if corners is not None:
+                    samples.append(corners)
+                if corners is not None:
                     best_score = score
                     best_frame = frame.copy()
             time.sleep(0.06)
 
+        best_corners = stable_corner_consensus(samples)
         if best_corners is not None:
-            print(f"[CALIBRATE] AI phat hien 4 goc ban co thanh cong! (Confidence: {best_score:.2%})")
+            valid, reason = calibrator.sanity_check_geometry(best_corners, warm_frame.shape[1], warm_frame.shape[0])
+            if not valid:
+                best_corners = None
+
+        if best_corners is not None:
+            print(f"[CALIBRATE] Stable corner candidate; waiting for grid approval (model score: {best_score:.2%})")
             for i, name in enumerate(["Den Trai", "Den Phai", "Do Phai", "Do Trai"]):
                 print(f"   P{i} ({name}): ({best_corners[i][0]:.1f}, {best_corners[i][1]:.1f})")
 
@@ -196,8 +223,6 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
             ], dtype=np.float32)
 
             M = cv2.getPerspectiveTransform(src, dst)
-            np.save(str(perspective_path), M)
-            print(f"[CALIBRATE] DA LUU MA TRAN AUTO-CALIBRATION: {perspective_path}")
 
             # Hiển thị Preview xác nhận trực quan (Grid Overlay)
             try:
@@ -222,24 +247,47 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
                     cv2.putText(preview, f"P{i}", (int(pt[0]) + 8, int(pt[1]) - 8),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-                cv2.putText(preview, f"AUTO-CALIBRATION OK ({best_score:.0%})", (30, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+                cv2.rectangle(preview, (0, 0), (preview.shape[1], 78), (0, 0, 0), -1)
+                cv2.putText(preview, "CHECK GRID: S=accept | M=manual corners | Q=cancel", (15, 28),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+                cv2.putText(preview, "Verify printed intersections at edges AND inside board. Score is not accuracy.", (15, 58),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
                 win_name = "CALIBRATION_PREVIEW"
                 cv2.namedWindow(win_name)
                 cv2.imshow(win_name, preview)
-                cv2.waitKey(int(preview_sec * 1000))
+                accepted = False
+                cancelled = False
+                while True:
+                    key = cv2.waitKey(50) & 0xFF
+                    if key in (ord('s'), ord('S')):
+                        accepted = True
+                        break
+                    if key in (ord('m'), ord('M')):
+                        break
+                    if key in (ord('q'), ord('Q'), 27) or cv2.getWindowProperty(win_name, cv2.WND_PROP_VISIBLE) < 1:
+                        cancelled = True
+                        break
                 cv2.destroyWindow(win_name)
+                if cancelled:
+                    raise RuntimeError("Camera calibration cancelled; previous matrix was not accepted")
+                if accepted:
+                    np.save(str(perspective_path), M)
+                    print(f"[CALIBRATE] Accepted and saved: {perspective_path}")
+                    return M
+            except RuntimeError:
+                raise
             except Exception as e:
                 print(f"[CALIBRATE] Preview error: {e}")
 
-            return M
-
-        print("[CALIBRATE] Auto-Calibration khong dat do tin cay. Chuyen sang Manual Fallback...")
+        print("[CALIBRATE] Automatic candidate not accepted; switching to manual calibration.")
 
     # --- BƯỚC 3: FALLBACK CLICK TAY NẾU CHƯA CÓ MODEL HOẶC AUTO THẤT BẠI ---
     print("[CALIBRATE] Mo giao dien Click 4 goc thu cong...")
-    return calibrate_perspective_camera(cap, str(perspective_path))
+    matrix = calibrate_perspective_camera(cap, str(perspective_path))
+    if matrix is None:
+        raise RuntimeError("Camera calibration cancelled or failed")
+    return matrix
 
 
 def check_drift(frame, current_M, calibrator, threshold_px=8.0):

@@ -1,0 +1,12 @@
+{
+  "rotation_deg": 90,
+  "pieces": 32,
+  "maximum_body_error_mm": 0.026239124128736007,
+  "version": 3,
+  "shared": true,
+  "target_R1_mm": [
+    146.2,
+    557.0,
+    10.5
+  ]
+}

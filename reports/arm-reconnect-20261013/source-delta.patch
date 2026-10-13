@@ -1,0 +1,95 @@
+--- robot-3d-viewer\main.mjs before
++++ robot-3d-viewer\main.mjs after
+@@ -681,8 +681,8 @@
+   if (warning && state.launchMirrorError) {
+     const armLive = state.liveSource === "PHYSICAL" && kind === "live physical";
+     warning.textContent = (armLive
+-      ? "CÁNH TAY ĐANG LIVE — bàn/quân chưa được hiệu chuẩn: "
+-      : "CHƯA ĐỒNG BỘ LIVE — bàn/quân chưa được hiệu chuẩn: ") + state.launchMirrorError;
++      ? "CÁNH TAY ĐANG LIVE — Bàn/quân chưa được hiệu chuẩn; không ảnh hưởng đồng bộ góc khớp."
++      : "CÁNH TAY CHƯA LIVE — Kiểm tra SDK/WebSocket. Không cần hiệu chuẩn bàn để xem góc khớp.");
+   }
+ }
+ 
+@@ -2626,7 +2626,7 @@
+       warning.id = "launchCalibrationWarning";
+       warning.setAttribute("role", "alert");
+       warning.style.cssText = "position:absolute;top:12px;left:12px;right:12px;z-index:20;background:#6b280d;color:white;padding:12px;border-radius:6px;pointer-events:none";
+-      warning.textContent = "CHƯA ĐỒNG BỘ LIVE — bàn/quân chưa được hiệu chuẩn: " + mirrorError;
++      warning.textContent = "CÁNH TAY CHƯA LIVE — Kiểm tra SDK/WebSocket. Không cần hiệu chuẩn bàn để xem góc khớp.";
+       document.getElementById("canvasContainer").appendChild(warning);
+     }
+     const launchWs = launchParams.get("ws");
+--- src\core\launch_options.py before
++++ src\core\launch_options.py after
+@@ -139,11 +139,11 @@
+         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+         self.url = f"http://127.0.0.1:{self.server.server_port}/robot-3d-viewer/"
+ 
+-    def start(self, telemetry_port, unavailable_reason=None):
++    def start(self, telemetry_port, unavailable_reason=None, *, telemetry_available=False):
+         self.thread.start()
+         query = {"ws": f"ws://127.0.0.1:{telemetry_port}", "autoconnect": "1"}
+         if unavailable_reason:
+-            query.update(autoconnect="0", mirror_error=str(unavailable_reason))
++            query.update(autoconnect="1" if telemetry_available else "0", mirror_error=str(unavailable_reason))
+         url = f"{self.url}?{urlencode(query)}"
+         print(f"[VIEWER] {url}")
+         webbrowser.open(url)
+--- src\core\session_startup.py before
++++ src\core\session_startup.py after
+@@ -40,7 +40,8 @@
+             try:
+                 launch_options.check_viewer_assets(root)
+                 viewer = launch_options.ViewerServer(root, options.viewer_port)
+-                viewer.start(config.TELEMETRY_PORT, unavailable_reason=reason)
++                viewer.start(config.TELEMETRY_PORT, unavailable_reason=reason,
++                             telemetry_available=bridge is not None)
+             except (OSError, FileNotFoundError) as exc:
+                 reason = f'Viewer unavailable: {exc}; check assets or --viewer-port'
+                 if viewer is not None:
+--- src\hardware\hardware_manager.py before
++++ src\hardware\hardware_manager.py after
+@@ -126,6 +126,12 @@
+             self._calibrate_robot()
+         except Exception as exc:
+             self.simulation_error = str(exc)
++            # The SDK receiver may recover after startup returned. Keep its
++            # read-only mirror reachable; do not reconnect/enable via the UI.
++            if self.robot.robot is not None:
++                from src.hardware.simulation_adapter import BorrowedPhysicalStateSource
++                self.backend = BorrowedPhysicalStateSource(self.robot)
++                self.robot.telemetry_readiness = self.physical_telemetry_ready
+             print(f"[ROBOT] Physical startup unavailable: {exc}")
+ 
+     def _calibrate_robot(self):
+--- src\hardware\simulation_adapter.py before
++++ src\hardware\simulation_adapter.py after
+@@ -24,16 +24,23 @@
+ 
+     def __init__(self, robot):
+         from src.hardware.backends.physical_fr3 import PhysicalFR3Backend
+-        if not robot.connected or robot.robot is None or robot.dry:
+-            raise ValueError("Physical telemetry requires an existing real connection")
++        if robot.robot is None or robot.dry:
++            raise ValueError("Physical telemetry requires an existing real SDK handle")
+         self.robot = robot
+         self.ip = robot.ip
+         self._reader = PhysicalFR3Backend(ip=robot.ip, dry_run=False)
+         self._reader._rpc = robot.robot
+-        self._reader._connected = True
++        self._reader._connected = bool(robot.connected)
+ 
+     def get_state_snapshot(self):
+-        self._reader._connected = bool(self.robot.connected)
++        sdk = self.robot.robot
++        self._reader._rpc = sdk
++        # Raw telemetry follows the retained SDK, independently of startup's
++        # command/calibration latch. A recovered socket still needs a fresh
++        # measured packet: the backend retains its freshness/validity checks.
++        sdk_connected = getattr(sdk, 'SDK_state', None)
++        self._reader._connected = sdk is not None and (
++            sdk_connected if isinstance(sdk_connected, bool) else bool(self.robot.connected))
+         self._reader._gripper_closed = bool(getattr(self.robot, 'gripper_closed_estimate', False))
+         return self._reader.get_state_snapshot()
+ 

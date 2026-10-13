@@ -1,0 +1,8 @@
+{
+  "sdk_state": false,
+  "xmlrpc_available": false,
+  "state_socket_connected": false,
+  "close_seconds": 0.0,
+  "receiver_alive": false,
+  "stop_requested": true
+}

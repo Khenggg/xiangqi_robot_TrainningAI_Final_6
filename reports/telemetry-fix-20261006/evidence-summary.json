@@ -1,0 +1,60 @@
+{
+  "session_id": "20261006_013940_4599664e",
+  "moves_total_plies": 10,
+  "captured_ids": [
+    "black_pawn_3",
+    "red_pawn_1"
+  ],
+  "expected_pieces": 30,
+  "actual_pieces": 30,
+  "all_piece_ids_and_cells_match": true,
+  "all_remaining_pieces_resting": true,
+  "packet_counts": {
+    "board_placement": 2,
+    "robot_state": 1288,
+    "world_state": 1285,
+    "operation_state": 20
+  },
+  "moving_robot_samples": 254,
+  "twin_fault_count": 0,
+  "error_event_count": 0,
+  "final_robot": {
+    "type": "robot_state",
+    "robot_model": "FR3",
+    "timestamp": 1791227131.7468174,
+    "published_at": 1791227131.7715492,
+    "measurement_timestamp": 1791227131.7468174,
+    "joints": [
+      0.0,
+      -70.0,
+      60.0,
+      -80.0,
+      -90.0,
+      0.0
+    ],
+    "tcp": [
+      -434.128,
+      -102.0,
+      176.491,
+      180.0,
+      -0.0,
+      90.0
+    ],
+    "gripper": false,
+    "motion_state": "IDLE",
+    "trajectory_stage": "COMPLETE",
+    "last_error": null,
+    "placement_version": 1,
+    "source": "VIRTUAL",
+    "controller_ip": null,
+    "connected": true,
+    "joints_valid": true,
+    "tcp_valid": true,
+    "telemetry_error": null
+  },
+  "final_operation": {
+    "type": "operation_state",
+    "state": "IDLE"
+  },
+  "max_final_cell_error_mm": 0.0
+}

@@ -25,6 +25,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pybullet as p
 import pytest
+from types import SimpleNamespace
 
 from src.core.game_state import GameState
 from src.digital_twin.live_twin_bridge import LiveTwinBridge
@@ -40,6 +41,58 @@ from src.hardware.backends.physical_fr3 import PhysicalFR3Backend
 from src.simulation.kinematics.fr3 import FR3Kinematics
 from src.simulation.physics.piece import PiecePhysicalState
 from src.simulation.physics.world import VirtualPhysicalWorld
+
+
+def test_physical_facade_commands_drive_estimated_payload_and_camera_reconciliation(bridge_setup, monkeypatch):
+    """Real facade/manager/PyBullet; only controller RPC and time delays mocked."""
+    from src.hardware.hardware_manager import HardwareManager
+    from src.hardware.robot_VIP import FR5Robot
+    from src.domain.game_move import initial_piece_identities
+    import config
+    bridge, backend, provider, world = bridge_setup
+    hw = HardwareManager(SimpleNamespace(ROBOT_BACKEND='PHYSICAL', DRY_RUN=False), '.')
+    arm = FR5Robot()
+    arm.dry = False
+    arm.connected = arm.physical_motion_authorized = True
+    arm.robot = MagicMock()
+    arm.robot.GetRobotTeachingPoint.return_value = (0, [0]*12 + [arm.tool_num,arm.user_num])
+    arm.robot.MoveCart.return_value = arm.robot.MoveJ.return_value = arm.robot.SetToolDO.return_value = 0
+    arm.teaching_points = {name:dict(pose=[x,y,10,180,0,0], joints=[0]*6)
+        for name,x,y in [('R1',-200,500),('R2',-200,180),('R3',160,180),('R4',160,500)]}
+    hw.robot, hw.backend, hw.twin_bridge = arm, backend, bridge
+    arm.motion_listener = bridge.animate_command_gripper
+    arm.telemetry_readiness = hw.physical_telemetry_ready
+    from dataclasses import replace
+    original_snapshot = backend.get_state_snapshot
+    monkeypatch.setattr(backend, 'get_state_snapshot', lambda:replace(
+        original_snapshot(), gripper_closed=arm.gripper_closed_estimate))
+    monkeypatch.setattr('src.hardware.robot_VIP.time.sleep', lambda *a:None)
+    seen = []
+    def command(**kw):
+        attached = world.get_attached_piece()
+        if attached is not None:
+            before = np.array(attached.get_pose_robot_base()[0])
+            backend._current_joints_deg[0] += 10
+            assert bridge.poll_once()
+            after = np.array(attached.get_pose_robot_base()[0])
+            assert np.linalg.norm(after-before) > .001
+            seen.append(attached.piece_id)
+        return 0
+    arm.robot.MoveCart.side_effect = command
+    context = MoveContext('red_pawn_0', (6,0), (5,0), MoveActor.ROBOT)
+    result = hw.execute_piece_move(0,6,0,5,False, move_context=context)
+    assert result.success, result.message
+    assert seen and set(seen) == {'red_pawn_0'}
+    assert world.get_attached_piece() is None and bridge.active_move is None
+    cells = initial_piece_identities()
+    del cells[(6,0)]
+    cells[(5,0)] = 'red_pawn_0'
+    assert hw.sync_committed_board(cells)
+    pos, _ = world.pieces['red_pawn_0'].get_pose_robot_base()
+    expected = provider.get_board_placement_state().cell_to_robot_xyz(5,0,z_rel_m=world.pieces['red_pawn_0'].height_m/2)
+    assert np.allclose(pos, expected, atol=.001)
+    # Default visual heights are used by physical commands, not mirror IK.
+    assert any(call.kwargs['desc_pos'][2] == config.PICK_Z for call in arm.robot.MoveCart.call_args_list)
 
 
 @pytest.fixture

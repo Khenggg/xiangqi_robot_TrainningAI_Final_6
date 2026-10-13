@@ -339,7 +339,8 @@ class EmergencyClientMoveTests(unittest.TestCase):
         state = GameState(allow_mouse_move=False)
         state.api_client.send_move_update_board = lambda fen: None
         state.turn = "b"
-        state.ai_thread = object()
+        import threading
+        state.ai_thread = threading.Thread()  # A completed/not-started worker with a real lifecycle API.
         state.ai_results = {"old": ((0, 0), (0, 1))}
         state.pending_ai_move = {"move": ((0, 3), (0, 4)), "expected_board": xiangqi.get_board(), "captured_piece": "."}
         state.physical_sync_fault = True

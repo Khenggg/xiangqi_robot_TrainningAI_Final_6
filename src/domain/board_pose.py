@@ -406,7 +406,7 @@ class BoardPlacementState:
         forward_shift_mm: float,
         safe_transit_height_mm: float = 40.0,
         board_height_offset_mm: float = 0.0,
-        board_yaw_deg: float = 0.0,
+        board_yaw_deg: Optional[float] = None,
         nominal_board_center_robot_m: Optional[Sequence[float]] = None,
         nominal_board_surface_z_m: Optional[float] = None,
         placement_version: int = 1,
@@ -415,9 +415,8 @@ class BoardPlacementState:
     ) -> "BoardPlacementState":
         d_m = float(forward_shift_mm) / 1000.0
         h_offset_m = float(board_height_offset_mm) / 1000.0
-        yaw_deg = float(board_yaw_deg)
-
-        nom_cfg = load_nominal_scene_placement() if (nominal_board_center_robot_m is None or nominal_board_surface_z_m is None) else {}
+        nom_cfg = load_nominal_scene_placement() if (nominal_board_center_robot_m is None or nominal_board_surface_z_m is None or board_yaw_deg is None) else {}
+        yaw_deg = float(nom_cfg.get("board_yaw_deg", 0.0) if board_yaw_deg is None else board_yaw_deg)
         if nominal_board_surface_z_m is None:
             nominal_board_surface_z_m = nom_cfg.get("board_surface_height_m", 0.0105)
         if nominal_grid_origin_m is not None:
@@ -487,11 +486,13 @@ def canonical_cell_to_robot_xyz_m(
     nominal_y0: Optional[float] = None,
     row_spacing_m: float = 0.040,
     col_spacing_m: float = 0.040,
-    board_yaw_deg: float = 0.0,
+    board_yaw_deg: Optional[float] = None,
 ) -> Tuple[float, float, float]:
     """
     Authoritative cell coordinate mapping using BoardPlacementState.
     """
+    if board_yaw_deg is None:
+        board_yaw_deg = float(load_nominal_scene_placement().get("board_yaw_deg", 0.0))
     if (nominal_x0 is None) != (nominal_y0 is None):
         raise ValueError("Both grid origin coordinates are required")
     if nominal_x0 is not None:
@@ -512,9 +513,11 @@ def find_nearest_cell(
     row_spacing_m: float = 0.040,
     col_spacing_m: float = 0.040,
     forward_shift_mm: float = 0.0,
-    board_yaw_deg: float = 0.0,
+    board_yaw_deg: Optional[float] = None,
 ) -> Tuple[int, int]:
     """Map a 3D position in robot_base to nearest board grid (row, col)."""
+    if board_yaw_deg is None:
+        board_yaw_deg = float(load_nominal_scene_placement().get("board_yaw_deg", 0.0))
     if row_spacing_m <= 0 or col_spacing_m <= 0:
         raise ValueError("Grid spacing must be positive")
     if grid_origin_robot_m is None:

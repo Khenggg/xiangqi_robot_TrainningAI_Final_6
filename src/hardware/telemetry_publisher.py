@@ -8,6 +8,9 @@ import json
 import math
 import threading
 import time
+import logging
+from collections import deque
+from src.core.project_logging import event
 from typing import List, Optional, Set
 import numpy as np
 
@@ -177,6 +180,13 @@ class TelemetryPublisher:
         self._stop_signal: Optional[asyncio.Event] = None
         self._server_ready = threading.Event()
         self._server_error: Optional[Exception] = None
+        self._outboxes = {}
+        self._dispatch_lock = threading.Lock()
+        self._pending_states = {}
+        self._pending_events = deque(maxlen=64)
+        self._dispatch_scheduled = False
+        self._event_overflow = False
+        self._latest_operation_state = None
 
     def register_command_handler(self, handler):
         """Register a callback to process incoming commands from WebSocket clients."""
@@ -192,6 +202,10 @@ class TelemetryPublisher:
             raise RuntimeError("websockets is required for telemetry")
         self._server_ready.clear()
         self._server_error = None
+        with self._dispatch_lock:
+            self._pending_states.clear()
+            self._pending_events.clear()
+            self._dispatch_scheduled = self._event_overflow = False
         self._running = True
         self._server_thread = threading.Thread(target=self._run_server, daemon=True, name="TelemetryServerThread")
         self._server_thread.start()
@@ -199,6 +213,9 @@ class TelemetryPublisher:
             self.stop()
             raise RuntimeError("Telemetry server did not become ready")
         if self._server_error is not None:
+            event("websocket.start_failed", str(self._server_error), level=logging.ERROR,
+                  code="PORT_BUSY" if isinstance(self._server_error, OSError) else "STARTUP_FAILED",
+                  host=self.host, port=self.port)
             self.stop()
             raise RuntimeError(f"Telemetry server startup failed: {self._server_error}")
 
@@ -206,6 +223,7 @@ class TelemetryPublisher:
         self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True, name="TelemetryHeartbeatThread")
         self._heartbeat_thread.start()
         print(f"[TELEMETRY] Virtual Robot Telemetry Server started at ws://{self.host}:{self.port}")
+        event("websocket.started", "Đã mở WebSocket telemetry", host=self.host, port=self.port)
 
     def stop(self):
         """Stop telemetry server and threads."""
@@ -224,11 +242,14 @@ class TelemetryPublisher:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._stop_signal = asyncio.Event()
+        command_lock = asyncio.Lock()
 
         async def handler(websocket):
             with self.clients_lock:
                 self.clients.add(websocket)
             print(f"[TELEMETRY] 3D Viewer Client connected ({len(self.clients)} active).")
+            event("websocket.client_connected", "Viewer đã kết nối", clients=len(self.clients))
+            sender = None
             try:
                 # Send immediate state on connect
                 await websocket.send(self._make_packet_json())
@@ -236,24 +257,35 @@ class TelemetryPublisher:
                     ws_data = self._latest_world_state
                     bp_data = self._latest_board_placement
                     pa_data = self._latest_placement_analysis
+                    op_data = self._latest_operation_state
                 if bp_data is not None:
                     await websocket.send(json.dumps(bp_data))
                 if pa_data is not None:
                     await websocket.send(json.dumps(pa_data))
                 if ws_data is not None:
                     await websocket.send(json.dumps(ws_data))
+                if op_data is not None:
+                    await websocket.send(json.dumps(op_data))
+                self._outboxes[websocket] = ({}, deque(), asyncio.Event())
+                sender = asyncio.create_task(self._send_client_packets(websocket))
                 # Listen for incoming client commands
                 async for raw_msg in websocket:
                     try:
                         cmd_dict = json.loads(raw_msg)
                         if isinstance(cmd_dict, dict):
+                            event("websocket.command_received", "Backend nhận yêu cầu viewer", level=logging.DEBUG,
+                                  command=cmd_dict.get("command", cmd_dict.get("type")))
                             with self._state_lock:
                                 handlers = list(self._command_handlers)
-                            for ch in handlers:
-                                try:
-                                    ch(cmd_dict)
-                                except Exception as cmd_err:
-                                    print(f"[TELEMETRY WARN] Command execution error: {cmd_err}")
+                            async with command_lock:
+                                for ch in handlers:
+                                    try:
+                                        # Runtime handlers may wait for physics locks or
+                                        # perform planning. Keep the network loop free.
+                                        # Serialize dispatch across all clients as before.
+                                        await asyncio.to_thread(ch, cmd_dict)
+                                    except Exception as cmd_err:
+                                        print(f"[TELEMETRY WARN] Command execution error: {cmd_err}")
                     except Exception as parse_err:
                         print(f"[TELEMETRY WARN] Failed to parse client message: {parse_err}")
             except websockets.exceptions.ConnectionClosed:
@@ -261,12 +293,18 @@ class TelemetryPublisher:
             except Exception as e:
                 print(f"[TELEMETRY WARN] Client socket error: {e}")
             finally:
+                self._outboxes.pop(websocket, None)
+                if sender is not None:
+                    sender.cancel()
+                    await asyncio.gather(sender, return_exceptions=True)
                 with self.clients_lock:
                     self.clients.discard(websocket)
                 print(f"[TELEMETRY] 3D Viewer Client disconnected ({len(self.clients)} active).")
+                event("websocket.client_disconnected", "Viewer đã ngắt kết nối", clients=len(self.clients))
 
         async def main():
-            async with websockets.serve(handler, self.host, self.port, close_timeout=1.0) as server:
+            async with websockets.serve(handler, self.host, self.port, close_timeout=1.0,
+                                        compression=None) as server:
                 if self.port == 0:
                     self.port = server.sockets[0].getsockname()[1]
                 self._server_ready.set()
@@ -318,6 +356,9 @@ class TelemetryPublisher:
     def update_from_snapshot(self, snapshot):
         """Update telemetry state from authoritative RobotStateSnapshot."""
         with self._state_lock:
+            if (self._snapshot_timestamp is not None
+                    and snapshot.timestamp < self._snapshot_timestamp):
+                return  # A delayed mirror read must not rewind newer execution state.
             self.robot_model = snapshot.robot_model
             self.joints_valid = bool(getattr(snapshot, "joints_valid", True))
             self.tcp_valid = bool(getattr(snapshot, "tcp_valid", True))
@@ -382,16 +423,7 @@ class TelemetryPublisher:
                 return
             msg = json.dumps(self._latest_world_state)
 
-        with self.clients_lock:
-            clients_copy = list(self.clients)
-
-        for client in clients_copy:
-            try:
-                asyncio.run_coroutine_threadsafe(client.send(msg), self._loop)
-            except websockets.exceptions.ConnectionClosed:
-                pass
-            except Exception as e:
-                print(f"[TELEMETRY WARN] Failed to send world_state packet to client: {e}")
+        self._queue_packet(msg, "world_state")
 
     def _broadcast_sync(self):
         """Broadcast latest packet to all connected clients."""
@@ -399,17 +431,7 @@ class TelemetryPublisher:
             return
         msg = self._make_packet_json()
 
-        with self.clients_lock:
-            clients_copy = list(self.clients)
-
-        for client in clients_copy:
-            try:
-                asyncio.run_coroutine_threadsafe(client.send(msg), self._loop)
-            except websockets.exceptions.ConnectionClosed:
-                pass
-            except Exception as e:
-                # Throttled/informative warning on failed send
-                print(f"[TELEMETRY WARN] Failed to send packet to client: {e}")
+        self._queue_packet(msg, "robot_state")
 
     def broadcast_custom(self, packet_dict: dict) -> None:
         """Broadcast an arbitrary event packet (e.g. trajectory_result) to all connected clients."""
@@ -422,18 +444,68 @@ class TelemetryPublisher:
             elif packet_dict.get("type") == "placement_analysis":
                 with self._state_lock:
                     self._latest_placement_analysis = dict(packet_dict)
+            elif packet_dict.get("type") == "operation_state":
+                with self._state_lock:
+                    self._latest_operation_state = dict(packet_dict)
         if not self._loop or not self.clients:
             return
         msg = json.dumps(packet_dict)
-        with self.clients_lock:
-            clients_copy = list(self.clients)
-        for client in clients_copy:
-            try:
-                asyncio.run_coroutine_threadsafe(client.send(msg), self._loop)
-            except websockets.exceptions.ConnectionClosed:
-                pass
-            except Exception:
-                pass
+        self._queue_packet(msg)
+
+    def _queue_packet(self, message, state_key=None):
+        """Coalesce snapshots before crossing threads; never queue one send per frame."""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        with self._dispatch_lock:
+            if state_key:
+                self._pending_states[state_key] = message
+            else:
+                if len(self._pending_events) == self._pending_events.maxlen:
+                    # Events aren't safely replaceable; disconnect consumers
+                    # rather than silently leave them on incomplete history.
+                    self._event_overflow = True
+                self._pending_events.append(message)
+            if self._dispatch_scheduled:
+                return
+            self._dispatch_scheduled = True
+        try:
+            loop.call_soon_threadsafe(self._dispatch_packets)
+        except RuntimeError:
+            with self._dispatch_lock:
+                self._dispatch_scheduled = False
+
+    def _dispatch_packets(self):
+        with self._dispatch_lock:
+            states, events = self._pending_states, self._pending_events
+            self._pending_states, self._pending_events = {}, deque(maxlen=64)
+            self._dispatch_scheduled = False
+            overflow, self._event_overflow = self._event_overflow, False
+        for client, (latest, queue, wake) in list(self._outboxes.items()):
+            latest.update(states)
+            if overflow or len(queue) + len(events) > 64:
+                asyncio.create_task(client.close(code=1013, reason="Viewer too slow; reconnect"))
+                self._outboxes.pop(client, None)
+                wake.set()
+                continue
+            queue.extend(events)
+            wake.set()
+
+    async def _send_client_packets(self, client):
+        """One bounded writer per client; a slow viewer cannot backlog other viewers."""
+        try:
+            while client in self._outboxes:
+                latest, queue, wake = self._outboxes[client]
+                await wake.wait()
+                wake.clear()
+                messages = list(queue) + list(latest.values())
+                queue.clear()
+                latest.clear()
+                for message in messages:
+                    await asyncio.wait_for(client.send(message), timeout=2.0)
+                await asyncio.sleep(0.04)  # Cap render snapshots at 25 Hz.
+        except (TimeoutError, websockets.exceptions.ConnectionClosed):
+            await client.close(code=1013, reason="Telemetry send stalled; reconnect")
 
     def _heartbeat_loop(self):
         """Broadcast current state at 25 Hz to ensure smooth UI mirror."""

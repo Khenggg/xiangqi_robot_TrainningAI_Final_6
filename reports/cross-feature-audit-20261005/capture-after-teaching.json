@@ -1,0 +1,153 @@
+{
+  "apply": {
+    "success": true,
+    "status": "BOARD_TEACHING_POINTS_APPLIED",
+    "placement": {
+      "type": "board_placement",
+      "forward_shift_mm": -346.2,
+      "safe_transit_height_mm": 70.0,
+      "board_height_offset_mm": 0.0,
+      "board_yaw_deg": 3.0,
+      "grid_origin_robot_m": [
+        0.17433,
+        0.22664,
+        0.0105
+      ],
+      "physical_board_center_robot_m": [
+        -0.0138,
+        0.377,
+        0.00525
+      ],
+      "physical_board_center_world_m": [
+        -0.377,
+        0.00525,
+        0.0138
+      ],
+      "board_surface_z_robot_m": 0.0105,
+      "board_surface_z_m": 0.0105,
+      "board_visual_root_world_m": [
+        -0.377,
+        0.0105,
+        0.0138
+      ],
+      "board_center_robot_m": [
+        -0.0138,
+        0.377,
+        0.00525
+      ],
+      "board_center_world_m": [
+        -0.377,
+        0.0105,
+        0.0138
+      ],
+      "quat_robot_from_board": [
+        0.0,
+        0.0,
+        0.72537,
+        0.68835
+      ],
+      "quat_world": [
+        0.01851,
+        0.70686,
+        0.70686,
+        -0.01851
+      ],
+      "R_robot_from_board": [
+        [
+          -0.052336,
+          -0.99863,
+          0.0
+        ],
+        [
+          0.99863,
+          -0.052336,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "T_robot_from_board": [
+        [
+          -0.05234,
+          -0.99863,
+          0.0,
+          -0.0138
+        ],
+        [
+          0.99863,
+          -0.05234,
+          0.0,
+          0.377
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0105
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "teaching_points": {
+        "R1": [
+          174.3270692546943,
+          226.63974656299808,
+          10.5
+        ],
+        "R2": [
+          157.57956325695227,
+          546.2011976844617,
+          10.5
+        ],
+        "R3": [
+          -201.92706925469432,
+          527.3602534370019,
+          10.5
+        ],
+        "R4": [
+          -185.1795632569523,
+          207.7988023155383,
+          10.5
+        ]
+      },
+      "placement_version": 2,
+      "timestamp": 1791188152.8736448,
+      "placement_source": "R1_R4_SIMULATION"
+    },
+    "residuals_mm": {
+      "R1": 6.206335383118183e-14,
+      "R2": 1.2412670766236365e-13,
+      "R3": 5.551115123125783e-14,
+      "R4": 6.206335383118183e-14,
+      "RMS": 8.092071311423672e-14,
+      "Max": 1.2412670766236365e-13
+    },
+    "source": "SIMULATION_ONLY"
+  },
+  "motion_success": true,
+  "motion_message": "Execution succeeded",
+  "victim_before_commit_m": [
+    -0.30938347160177754,
+    0.28138273529524355,
+    0.004704873981918009
+  ],
+  "victim_outside_board": true,
+  "moving_cell_before_commit": [
+    7,
+    7
+  ],
+  "destination_xy_error_mm": 0.1521522082381608,
+  "committed": true,
+  "fen": "rnbakab2/9/1c2c1n2/p1p1p1p1p/4P4/9/P1P3P1P/4C2r1/4A4/RNBAK1BNR w - - 0 9",
+  "fault": null,
+  "placement_version": 2,
+  "undo_restores_victim_and_cells": true,
+  "new_game_preserves_taught_pose_and_resets_32_pieces": true
+}

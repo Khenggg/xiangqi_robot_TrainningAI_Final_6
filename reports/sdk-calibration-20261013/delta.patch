@@ -1,0 +1,74 @@
+--- before/src/hardware/robot_VIP.py
++++ after/src/hardware/robot_VIP.py
+@@ -71,6 +71,7 @@
+         
+         # Cache teaching points để tránh Singularity
+         self.teaching_points = {}  # {name: {"pose": [x,y,z,rx,ry,rz], "joints": [j1..j6]}}
++        self.teaching_points_error = None
+         self.use_teaching_points = True  # Luôn dùng teaching points
+ 
+         # Kích thước ô cờ (mm), mặc định theo config, tự động cập nhật khi load teaching points
+@@ -112,21 +113,30 @@
+     def connect(self):
+         """Read-only connection: no servo, mode, motion or gripper command."""
+         self.physical_motion_authorized = False
++        self.teaching_points_error = None
+         if self.dry:
+             self.connected = True
+             return True
+         if robot_sdk_core is None:
+             raise RobotCommandError("Robot SDK unavailable")
++        self.teaching_points = {}
+         try:
+             self.robot = robot_sdk_core.RPC(self.ip)
+             self.connected = bool(self.robot.SDK_state)
+             if not self.connected:
+                 raise RobotCommandError("Robot SDK not connected")
+-            self._load_teaching_points()
+-            return True
+         except Exception:
+             self.connected = False
+             raise
++        # Board calibration does not decide whether the SDK is connected.
++        # Retain read-only arm telemetry, while rejecting unverified targets.
++        try:
++            self._load_teaching_points()
++        except Exception as exc:
++            self.teaching_points = {}
++            self.teaching_points_error = f"R1-R4 calibration unavailable: {exc}"
++            print(f"[ROBOT] Connected read-only; {self.teaching_points_error}")
++        return True
+ 
+     def activate_physical_control(self, *, commissioned=False):
+         """Explicit operator gate after calibration and commissioning review."""
+@@ -162,6 +172,8 @@
+     def _require_actuation(self):
+         if not self.dry and (not self.connected or not self.physical_motion_authorized):
+             raise RobotCommandError("Physical actuation is not authorized")
++        if not self.dry and self.teaching_points_error:
++            raise RobotCommandError(self.teaching_points_error)
+         if not self.dry and callable(self.telemetry_readiness) and not self.telemetry_readiness():
+             raise RobotCommandError("Robot telemetry stale/faulted; no new command dispatched")
+ 
+@@ -175,6 +187,8 @@
+         return values
+ 
+     def _validated_corners(self):
++        if self.teaching_points_error:
++            raise RobotCommandError(self.teaching_points_error)
+         corners = np.array([self._validate_pose(self.teaching_points[name]["pose"])[:3]
+                             for name in ("R1", "R2", "R3", "R4")])
+         edges = np.roll(corners, -1, axis=0) - corners
+--- before/src/hardware/hardware_manager.py
++++ after/src/hardware/hardware_manager.py
+@@ -133,6 +133,10 @@
+         self.board_pose_provider = None
+         self.backend = BorrowedPhysicalStateSource(self.robot)
+         self.robot.telemetry_readiness = self.physical_telemetry_ready
++        if self.robot.teaching_points_error:
++            self.simulation_error = self.robot.teaching_points_error
++            print(f"[TWIN] Board mirror unavailable; raw arm telemetry retained: {self.simulation_error}")
++            return
+         try:
+             self.board_pose_provider = physical_board_provider(self.robot, self.config)
+         except Exception as exc:

@@ -1,0 +1,42 @@
+{
+  "src/api/simulation_client.py": {
+    "create_match": [
+      86,
+      89
+    ],
+    "ensure_match": [
+      91,
+      101
+    ],
+    "_create_and_publish": [
+      103,
+      114
+    ],
+    "send_move_update_board": [
+      116,
+      120
+    ],
+    "end_match": [
+      122,
+      130
+    ]
+  },
+  "src/core/self_play_controller.py": {
+    "start": [
+      112,
+      163
+    ]
+  },
+  "src/core/game_state.py": {
+    "reset_game": [
+      128,
+      211
+    ]
+  },
+  "main.py": {
+    "_start_selected_game": [
+      127,
+      143
+    ]
+  }
+}

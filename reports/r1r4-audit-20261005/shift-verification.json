@@ -1,0 +1,11 @@
+{
+  "pieces": 32,
+  "max_piece_shift_error_mm": 0.008822744445621169,
+  "shared": true,
+  "placement_version": 2,
+  "resolved_R1_mm": [
+    166.2,
+    217.0,
+    10.5
+  ]
+}

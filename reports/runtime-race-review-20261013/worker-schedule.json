@@ -1,0 +1,145 @@
+{
+  "hardware": "mock executor; no camera, SDK, HTTP, sockets or physics",
+  "before": [
+    {
+      "phase": "thinking",
+      "restarted": true,
+      "transitions": [
+        {
+          "event": "worker finished, tick has not consumed result",
+          "status": "thinking",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+          "pending": false,
+          "motion_calls": 0,
+          "committed_moves": 0,
+          "worker_alive": false
+        },
+        {
+          "event": "F6 start requested",
+          "status": "ready",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+          "pending": false,
+          "motion_calls": 0,
+          "committed_moves": 0,
+          "worker_alive": false
+        },
+        {
+          "event": "tick consumed any remaining result",
+          "status": "ready",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+          "pending": false,
+          "motion_calls": 0,
+          "committed_moves": 0,
+          "worker_alive": false
+        }
+      ],
+      "retained_and_committed": false
+    },
+    {
+      "phase": "moving",
+      "restarted": true,
+      "transitions": [
+        {
+          "event": "worker finished, tick has not consumed result",
+          "status": "moving",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+          "pending": true,
+          "motion_calls": 1,
+          "committed_moves": 0,
+          "worker_alive": false
+        },
+        {
+          "event": "F6 start requested",
+          "status": "ready",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+          "pending": true,
+          "motion_calls": 1,
+          "committed_moves": 0,
+          "worker_alive": false
+        },
+        {
+          "event": "tick consumed any remaining result",
+          "status": "ready",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+          "pending": true,
+          "motion_calls": 1,
+          "committed_moves": 0,
+          "worker_alive": false
+        }
+      ],
+      "retained_and_committed": false
+    }
+  ],
+  "after": [
+    {
+      "phase": "thinking",
+      "restarted": false,
+      "transitions": [
+        {
+          "event": "worker finished, tick has not consumed result",
+          "status": "thinking",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+          "pending": false,
+          "motion_calls": 0,
+          "committed_moves": 0,
+          "worker_alive": false
+        },
+        {
+          "event": "F6 start requested",
+          "status": "thinking",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+          "pending": false,
+          "motion_calls": 0,
+          "committed_moves": 0,
+          "worker_alive": false
+        },
+        {
+          "event": "tick consumed any remaining result",
+          "status": "ready",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR b - - 0 2",
+          "pending": false,
+          "motion_calls": 1,
+          "committed_moves": 1,
+          "worker_alive": false
+        }
+      ],
+      "retained_and_committed": true
+    },
+    {
+      "phase": "moving",
+      "restarted": false,
+      "transitions": [
+        {
+          "event": "worker finished, tick has not consumed result",
+          "status": "moving",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+          "pending": true,
+          "motion_calls": 1,
+          "committed_moves": 0,
+          "worker_alive": false
+        },
+        {
+          "event": "F6 start requested",
+          "status": "moving",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+          "pending": true,
+          "motion_calls": 1,
+          "committed_moves": 0,
+          "worker_alive": false
+        },
+        {
+          "event": "tick consumed any remaining result",
+          "status": "ready",
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR b - - 0 2",
+          "pending": false,
+          "motion_calls": 1,
+          "committed_moves": 1,
+          "worker_alive": false
+        }
+      ],
+      "retained_and_committed": true
+    }
+  ],
+  "stress_runs": 100,
+  "stress_passed": 100
+}

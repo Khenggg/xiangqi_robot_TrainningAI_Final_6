@@ -1,0 +1,11 @@
+# Live vsrobot QA — SDK shutdown — 2026-10-13
+
+Live session logs/20261013_110612_33dea172/run.log selected VS ROBOT and EASY, but GetControllerIP timed out and SDK_state was unavailable; no port 8765 listener. Camera complete-board verification passed two samples, while YOLO occupancy baseline counted 30 and the visual estimator reported invalid dimensions/margin. Those camera/geometry concerns are not repaired by this SDK patch.
+
+After the operator closed game/camera, read-only SDK diagnosis reproduced TimeoutError in robot_state_routine_thread at recv_into (no packet acquired), XML-RPC timeout, SDK_state=False and is_conect=False. Calling CloseRPC returned through xmlrpc_timeout without executing cleanup: daemon receiver remained alive. Ping at the same point lost 2/2 packets, Ethernet 3 link Up, IPv4 192.168.58.3/24, neighbor 192.168.58.2 unresolved; current connectivity needs operator check, not inferred from older ping screenshot.
+
+Correction in src/hardware/robot_sdk_core.py: local CloseRPC no longer uses the connectivity decorator; always sets stop flags, shuts down the local socket to wake recv, joins with a 2-second bound, and clears handles only after thread exit. Reconnect checks cancellation and uses Event.wait instead of an uninterruptible delay. A state connection created during shutdown closes itself. No mode/enable/IO/robot motion or automatic actuation retry added.
+
+Evidence reports/sdk-shutdown-qa-20261013/: six failing regression cases before repair; final scoped gate 57 parallel + 1 serial = 58 passes, exit 0. New tests use actual local socketpair/receiver and real threads, never a physical controller. SDK state failure remains an error, not bypassed. Graph detect_changes includes 397 inherited files and no symbol impacts; direct caller review is used instead.
+
+QA pause: await fresh ping/network repair, then verify read-only SDK measurements and actual viewer live state before camera-confirmed moves. R1-R3 user=1 versus R4 user=0, missing measured board contact calibration and previously observed flange geometry discrepancy remain unresolved. No physical actuation was performed. Only this SDK source/test/doc patch is delivered; other pending recovery changes remain in the worktree.

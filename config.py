@@ -94,7 +94,7 @@ BOARD_CALIBRATION_PROVENANCE = ""
 
 # Camera index (0 = built-in webcam, 1 = USB cam, 2 = DroidCam, etc.)
 # VIDEO_INDEX overrides this explicitly; startup never substitutes another camera.
-VIDEO_SOURCE = 1
+VIDEO_SOURCE = 2
 
 # --- VISUAL PICK CORRECTION ---
 # Chỉ bù vị trí gắp khi snapshot mới từ camera xác nhận quân nằm gần ô logic.
@@ -102,6 +102,9 @@ VIDEO_SOURCE = 1
 VISUAL_PICK_ENABLED = True
 VISUAL_PICK_MIN_CONFIDENCE = 0.45
 VISUAL_PICK_MAX_OFFSET_CELLS = 0.25
+# Permit measured piece centres just beyond the outermost grid intersection.
+# Shared by the camera estimator and physical XY conversion; never clamp XY.
+VISUAL_PICK_OUTSIDE_MARGIN_MM = 6.0
 VISUAL_PICK_FOOT_RATIO = 0.85
 VISUAL_PICK_SAMPLE_COUNT = 3
 VISUAL_PICK_MIN_STABLE_SAMPLES = 2
@@ -216,6 +219,7 @@ IDLE_Y = 149.608
 IDLE_Z = 348.199
 # --- CCHESS RECOGNITION (ONNX) ---
 CCHESS_RECOGNITION_ENABLED = True  # Bật/tắt CChess ONNX recognition bổ sung
+VISION_DEVICE = _runtime_os.environ.get("VISION_DEVICE", "auto").lower()
 
 # Gameplay remains owned by the visual application.
 GAME_MODE = _os.environ.get("GAME_MODE", "HUMAN_VS_ROBOT").upper()

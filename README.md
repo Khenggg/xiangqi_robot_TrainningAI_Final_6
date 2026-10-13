@@ -1,4 +1,20 @@
+## Camera Monitor and Windows GPU (2026-10-13)
+
+Use SETUP_WINDOWS.bat for core dependencies and CPU ONNX on a new machine; SETUP_GPU.bat switches to the verified CUDA Torch/ORT stack. Core requirements intentionally omit ONNX: install exactly one runtime (onnxruntime for CPU, onnxruntime-gpu for GPU). Normal Windows setup preserves an installed GPU runtime. VISION_DEVICE defaults to auto; set VISION_DEVICE=cpu to opt out. See docs/CAMERA_MONITOR_GPU_FIX_20261013.md for commands and verification limits.
+
 # XIANGQI ROBOT CỜ TƯỚNG VIP — SPECIFICATION DOCUMENT
+
+Tích hợp mới và cách dùng camera/retry/hover (09/10/2026): [VISUAL_V2_INTEGRATION.md](docs/VISUAL_V2_INTEGRATION.md). Height/top-face/ring vẫn là tùy chọn; simulation và thông số robot hiện tại được giữ.
+
+## Lệnh khởi động hiện tại (2026-10-05)
+
+- `python main.py`: game + mô phỏng + viewer.
+- `python main.py --virtual`: **tắt mô phỏng**, chỉ chạy game (theo quy ước của chủ dự án).
+- `python main.py --physical`: camera + FR3 + viewer; F9 rồi F10 trong game để xác nhận bật quyền chuyển động.
+
+Chi tiết: [START_PROJECT.md](docs/START_PROJECT.md). Các mô tả lịch sử bên dưới không thay thế các lệnh này.
+
+Mỗi lần chạy tự lưu nhật ký vào `logs/<id-phien>/`. Khi có lỗi, đọc `errors.log` trước. Hướng dẫn và mã lỗi: [LOGGING.md](docs/LOGGING.md).
 
 > **Tài liệu kỹ thuật đầy đủ cho hệ thống Robot chơi Cờ Tướng tự động**  
 > Phiên bản: 2.2 | Cập nhật: 2026-03-14

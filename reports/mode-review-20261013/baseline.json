@@ -1,0 +1,11 @@
+{
+  "main.py": "fafbcfb3c8322adf037166c2216a3e3e3738ae1a4af46d12548da82678966e83",
+  "src/core/ai_execution.py": "72f7202c0399b9aec6e85220560bc93006863dc268e3c5fb4e0c51844db9821d",
+  "src/core/self_play_controller.py": "d484e006c39d3ded8ef77ba424f5c76cec704c4511236af5060d3de4183a4df8",
+  "src/ui/input_handler.py": "3e5a5899e4c9a8539f0831e6ab9eb2dd65cb60d49fa06a10495c8ca99474f483",
+  "src/vision/player_turn_arbiter.py": "36638b978770b50444e8fd19ab963e913473c484d9a4082301289deff22cfe09",
+  "CURRENT_STATE.md": "097289f52c1d0a15baeefcac302778daadd954b0ef26fe6c5446053701e3a2b3",
+  "KNOWN_ISSUES.md": "8ed525b7873f3a1a2aa6cf95846b46c8fb9b176b8247d4a97d31bd2276f4febd",
+  "tests/unit/test_game_modes_review.py": null,
+  "docs/GAME_MODE_REVIEW_20261013.md": null
+}

@@ -1,0 +1,232 @@
+[
+  {
+    "path": "config.py",
+    "before_sha256": "00edddc90db404bcd974a850e79d2b5d03c1213733bd3196bd9386d61697165a",
+    "after_sha256": "58e0439550e3081cbd6f8cb8f34ece52553baa78c169bf86d03750f821e5f79b",
+    "diff_lines": 29
+  },
+  {
+    "path": "main.py",
+    "before_sha256": "5aee65096dfbe76ed8d234238a48beb64c6ba7206b1d2e9b8f40539a15c3f0ce",
+    "after_sha256": "dacc271af5183755bf17692556b59565dab6fbc27cc9198504103ff2e261ce76",
+    "diff_lines": 306
+  },
+  {
+    "path": "robot-3d-viewer/live_state.mjs",
+    "before_sha256": "b6a569fb2b58923cb276108ac07f3d79c767b4fef7e89326d227bfc347aafa57",
+    "after_sha256": "a1dec7a349e355100579c27c79a7a5a1855e647d11a7895fa9bb6ed8b8ff1fc3",
+    "diff_lines": 19
+  },
+  {
+    "path": "robot-3d-viewer/main.mjs",
+    "before_sha256": "08e31e84af4ab292dcd1a7c09e864c31e9a676c2b37950bcf8a5ef66ec621ef9",
+    "after_sha256": "95abfa0f1383bd9fafddb66eac20a68c8d7ed94b0ac5ceec16b957d1b6867c6e",
+    "diff_lines": 83
+  },
+  {
+    "path": "src/ai/ai_controller.py",
+    "before_sha256": "894586b77d407838caa4190655b1354fcdac929d318d5a07be8a2a498cf45987",
+    "after_sha256": "8312e13cad2bbe610d81f1262f1bc450530d6f6151e15d444f524e4fac4f1567",
+    "diff_lines": 11
+  },
+  {
+    "path": "src/ai/moonfish_engine.py",
+    "before_sha256": "ede5aec82b3e0d2d352d7d1ee8f28e95df102abaa0c47ba34c84fa702da7a4fe",
+    "after_sha256": "e9c696e80ff6e168541f487a8e6b3a487b12351af93f1c4b5d9dc2c30662ec58",
+    "diff_lines": 161
+  },
+  {
+    "path": "src/api/simulation_client.py",
+    "before_sha256": "bd4b148e150b9c829b4c55a31108dac52bb7194ea7b6545fa3217a854f96374f",
+    "after_sha256": "16412778219b5d186623174952f3d394d9a05ac5eafd535ada644ce00a306834",
+    "diff_lines": 105
+  },
+  {
+    "path": "src/core/game_state.py",
+    "before_sha256": "54ff7e4112c944e99770feb33611ba661bb9cba0d38cc72701b50f1771586e5e",
+    "after_sha256": "93628831f41c732559fc2b82a92bc052b9f974c881c3e674e05b2bce97520aaf",
+    "diff_lines": 93
+  },
+  {
+    "path": "src/core/self_play_controller.py",
+    "before_sha256": "bafb7f5f0189ce4d72394a97a53f4b80ca71ede5375d0e30e6af38c34e50be6a",
+    "after_sha256": "124f3e0c3aa31521658456f66751d4ad19702a3b30714c2fead6868688054161",
+    "diff_lines": 64
+  },
+  {
+    "path": "src/digital_twin/live_twin_bridge.py",
+    "before_sha256": "623188da42e01ad022f51f088b49a4e622c34ca88981a00899008ebc462e17b8",
+    "after_sha256": "0cc65690b0f617801635e966f82a09b3c71fa46754d1c442e0c833daaffdf2a0",
+    "diff_lines": 67
+  },
+  {
+    "path": "src/hardware/hardware_manager.py",
+    "before_sha256": "1280ca6d247fa38d471ff489a1604569f82f6accb0a6395da014177c1e1e6624",
+    "after_sha256": "62ed946a59d7a68fbcb0e5e4099956e530012f6177cf9dd01317bc7e7a20bb39",
+    "diff_lines": 208
+  },
+  {
+    "path": "src/hardware/robot_VIP.py",
+    "before_sha256": "66f3a895f9a0810ea02b7b8b9d07c1cca34e4a7eefd41a85311ea09651f6751b",
+    "after_sha256": "015e9f8732f2a8e5b09bab510abf7380252a74960e5a0ad39be584035445a967",
+    "diff_lines": 129
+  },
+  {
+    "path": "src/hardware/robot_sdk_core.py",
+    "before_sha256": "4d357279787bb1b9d0103cf610d21a729e315d03840995aa9a2e989c7fbcd2ee",
+    "after_sha256": "e6163c236ade2001f77e024a8cd062e5216cef85ba2e53511772f242f9a686b0",
+    "diff_lines": 4178
+  },
+  {
+    "path": "src/hardware/simulation_adapter.py",
+    "before_sha256": "b4fbabfe733e7452b04a5b94275da77db6d07fd7b0209e2118eb2a483c3f1b17",
+    "after_sha256": "ea0e3c58e88ee57f38f91818fe287f5fd9a5d40566d970e4386a4e0483765035",
+    "diff_lines": 38
+  },
+  {
+    "path": "src/ui/input_handler.py",
+    "before_sha256": "34fab06a5262d3c3605c5ab634ce3ac5b0c521b9157036a50b7238fce2e348e5",
+    "after_sha256": "22d2e9b9e56bbaf81212d0c06bac8dd620f9877f684227afc72176c17790ed2f",
+    "diff_lines": 164
+  },
+  {
+    "path": "src/vision/snapshot_detector.py",
+    "before_sha256": "de58d0be6b0408d6530a842e86a4deefff72ea359803c420ac7544847278ee5b",
+    "after_sha256": "7139e32d53f4fe206d48d881bbe618c5aafff6b954ab50b05f3922468e5acd80",
+    "diff_lines": 24
+  },
+  {
+    "path": "tests/test_measurement_client.py",
+    "before_sha256": "3c995fc09e90d16ccb79abdd177bcb795bc0ae2ad48799e257ec99b7ac12e59d",
+    "after_sha256": "31de218e4659f0ab42d1818257e3303f1722326f03348f6e7919ea5f98c4908a",
+    "diff_lines": 19
+  },
+  {
+    "path": "tests/test_robot_motion_result.py",
+    "before_sha256": "2fe1796abdd8f19a9e0cf147ea92b1403d3b281eb1ac6a1816bd4bab358ede93",
+    "after_sha256": "1f66596cb79614974beeb9c778f2977a62538b905ee8f0bccdf8af36667aa80a",
+    "diff_lines": 13
+  },
+  {
+    "path": "tests/test_simulation_client.py",
+    "before_sha256": "f25765fb70d9a309314a0092d48d524b90a75f6300f0c1d29d6cbf32a53001fa",
+    "after_sha256": "a0e705ab963206656eedde2eeec358fa87b1ea0b1e2576b8b69e67b2e07495de",
+    "diff_lines": 22
+  },
+  {
+    "path": "tests/test_visual_pick_estimator.py",
+    "before_sha256": "a1eda91f2631f74549a6cb82ac02843d9bd4efe3b5115b5b30fe80552e5ad03f",
+    "after_sha256": "2f335f019effa1e9ad358ac43a91eabf4cb4a643348b19d8be7945d68c2b1430",
+    "diff_lines": 34
+  },
+  {
+    "path": "tests/test_emergency_client_move.py",
+    "before_sha256": "c5a03e9c577bb4914bda733f4527a8b1a0a308584d77463d7a8f9bd7139400e0",
+    "after_sha256": "f2f794ee906d4c6fafcca5099346625b8a01b0aab331231569c5136dc5887da1",
+    "diff_lines": 12
+  },
+  {
+    "path": "tests/unit/test_fr3_telemetry.py",
+    "before_sha256": "8afa9d97d7a5b1c2d812c3b47908cc5dd3e4f2316727886254319a3ed8455a25",
+    "after_sha256": "0d7bf266bbd9f21933dec83d75f7c58e5c6c4bc96a0ed4f4e748c57689b36d6d",
+    "diff_lines": 22
+  },
+  {
+    "path": "tests/unit/test_hardware_manager_integration.py",
+    "before_sha256": "908ca4d1f1803062b51f369368bd70ee51c3b30358946d65e3d08d2b54e8c429",
+    "after_sha256": "eead87615262ed6e0d1a25137d65a4f560a9d3fc13fb6e87e8dd752ac771f207",
+    "diff_lines": 23
+  },
+  {
+    "path": "tests/unit/test_legacy_physical_robot_gates.py",
+    "before_sha256": "78194b5b2dabfa9ad2b0f8fe5105cfca02f9a60f1b0c34c76f0ba991380825be",
+    "after_sha256": "9ac90aa8a0c84ec5423e84feef01b9011fafdafd30d707b3c56f67e468dc914e",
+    "diff_lines": 10
+  },
+  {
+    "path": "tests/unit/test_live_twin_physical_mirror.py",
+    "before_sha256": "af89f9093a346770ca91456ec001a0dedb14d155e5efe849ce26278c9ff656f3",
+    "after_sha256": "8519b061b6b156cb806a5f13a424c1cc99e034d5f1c6d891aad471c6781b6fa3",
+    "diff_lines": 69
+  },
+  {
+    "path": "tests/unit/test_physical_architecture_closure.py",
+    "before_sha256": "3ccf12b3bfa7d0d259e9eea742149ba2f0dd578e42107c171a5f93c715b9f20f",
+    "after_sha256": "b5754234af71eb4c17d703827763230c7ab89d495ecd03376f164b598ebbf96f",
+    "diff_lines": 18
+  },
+  {
+    "path": "tests/unit/test_visual_simulation_adapter.py",
+    "before_sha256": "130a210aa231eaafd03efafbb304b6b42ce6dd872462f4d6fcacc5fe3abc6752",
+    "after_sha256": "c359663df3c08b0b98cb5b8bc01715af3bb275c6673d4bcb4dde89a16f396693",
+    "diff_lines": 34
+  },
+  {
+    "path": "tests/unit/test_startup_failure_recovery.py",
+    "before_sha256": "043c3b24690d076614e37522e7388c8ef6568a9e8d30fbdae66a963c9734db5d",
+    "after_sha256": "6d6c167d2d79094a8c50dcec0e464fba60997777ba5c3f7c5460fc68b7f540c8",
+    "diff_lines": 118
+  },
+  {
+    "path": "tests/unit/test_visual_v2_adapter.py",
+    "before_sha256": "41f3ee19bbd39fc16cd2352d8244ff49bb708f558574b68d0194ca72da63374d",
+    "after_sha256": "99eda05b4788c3a8e89c867f8d07f8ee672bd694cc8776428485ac1806c9ffa6",
+    "diff_lines": 10
+  },
+  {
+    "path": "tests/unit/test_physical_ui_latency.py",
+    "before_sha256": "d57524311f4232058b0adb2b11ce85697c8a0194a72df0fc3e0c2e94825b746a",
+    "after_sha256": "2087c8356597875d7eb9e514ab0d93b23089a2c972967da6b419a3dddcd24486",
+    "diff_lines": 23
+  },
+  {
+    "path": "src/core/session_startup.py",
+    "before_sha256": null,
+    "after_sha256": "a7234ef25a3fd03e4d78eb507a636e3bbc40431df4981a7e1a2aa85e975a946d",
+    "diff_lines": 52
+  },
+  {
+    "path": "src/hardware/rpc_transport.py",
+    "before_sha256": null,
+    "after_sha256": "414d119925aa73a6edc1474dd3f8b0021636185166171132d33b225bcf253540",
+    "diff_lines": 58
+  },
+  {
+    "path": "src/digital_twin/physical_state_relay.py",
+    "before_sha256": null,
+    "after_sha256": "b0ccdc03cb3e33a51a21cab1bf34eae03c080ae8103e45f144e09ab67daf92d0",
+    "diff_lines": 49
+  },
+  {
+    "path": "tests/unit/test_reliability_audit_fixes.py",
+    "before_sha256": null,
+    "after_sha256": "1c2baf892564cce229eab894cb523f474a3296fa566f1cd22e82c9fec7048ab8",
+    "diff_lines": 240
+  },
+  {
+    "path": "tests/unit/test_viewer_freshness.mjs",
+    "before_sha256": null,
+    "after_sha256": "b30fdc5f5eb06f86d0708cdf1b1365f84bacfaef53af7a6daa75c86e4b4c4606",
+    "diff_lines": 16
+  },
+  {
+    "path": "CURRENT_STATE.md",
+    "before_sha256": "accc34d63780fe9749feda2e5a1fcd6d680a6e78e40d6eee71abe2c33734e0e3",
+    "after_sha256": "976b31f9528dd75576fa1e00a28bf8dec4ed4f4ed0ea121e5b12cf20e5344911"
+  },
+  {
+    "path": "KNOWN_ISSUES.md",
+    "before_sha256": "cef6e58e895f5f70534aea4356339ffd11521ffcf50f346c363130079ed1b96d",
+    "after_sha256": "fe2ea94f5d78766082941b6d46ba41351bc15f356926a8b3da8e439cd86308f2"
+  },
+  {
+    "path": "PROJECT_CONTEXT.md",
+    "before_sha256": "c8dfcc88f7be9c6a6757981420df486678dcbeffcbe7d42f4babf1ae58baadf4",
+    "after_sha256": "3409aacc4e08d3d430664626f6cb038a08b70bf92b10ea7f51924a0e5b731494"
+  },
+  {
+    "path": "docs/RELIABILITY_FIXES_20261012.md",
+    "before_sha256": null,
+    "after_sha256": "823cde141648c4b5a2e7fc5c4d6ce74eca4594db5df0dd9c894816e9e05967fc"
+  }
+]

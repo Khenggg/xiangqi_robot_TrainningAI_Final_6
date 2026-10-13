@@ -53,6 +53,8 @@ BTN_CONFIRM_MOVE_RECT = pygame.Rect(CLIENT_ACTION_X, 422, CLIENT_ACTION_WIDTH, 6
 BTN_EMERGENCY_RECT = pygame.Rect(CLIENT_ACTION_X, 502, CLIENT_ACTION_WIDTH, 64)
 BTN_ROLLBACK_RECT = pygame.Rect(CLIENT_ACTION_X, 582, CLIENT_ACTION_WIDTH, 64)
 BTN_CONTINUE_RECT = pygame.Rect(CLIENT_ACTION_X, 662, CLIENT_ACTION_WIDTH, 64)
+BTN_PICK_TEST_RECT = pygame.Rect(CLIENT_ACTION_X, 742, CLIENT_ACTION_WIDTH // 2 - 4, 64)
+BTN_HOVER_RECT = pygame.Rect(BTN_PICK_TEST_RECT.right + 8, 742, CLIENT_ACTION_WIDTH // 2 - 4, 64)
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 240, 650, 480, 104)
 HOME_SELF_PLAY_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 310, 810, 300, 58)
 HOME_HUMAN_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 10, 810, 300, 58)
@@ -224,7 +226,12 @@ class BoardRenderer:
         """
         self._draw_ink_wash_background()
 
-        self.draw_recent_moves(game_state.get("recent_moves", []))
+        from src.ui.recovery_status import describe_recovery
+        recovery = describe_recovery(game_state)
+        if recovery:
+            self.draw_recovery_status(recovery)
+        else:
+            self.draw_recent_moves(game_state.get("recent_moves", []))
         self._draw_ai_status(game_state)
         self._draw_board_backdrop()
 
@@ -254,11 +261,16 @@ class BoardRenderer:
 
         confirm_label = (("ĐI CHUỘT", "TỰ XÁC NHẬN") if game_state.get("allow_mouse")
                          else ("XÁC NHẬN", "NƯỚC ĐI"))
+        self_play_mode = game_state.get("game_mode") == "ROBOT_VS_ROBOT"
+        if self_play_mode:
+            confirm_label = ("NƯỚC TIẾP", "ROBOT VS ROBOT")
         actions = (
             (BTN_SCAN_FEN_RECT, "V", ("QUÉT / ĐỐI SOÁT FEN",), JADE_COLOR),
-            (BTN_CONFIRM_MOVE_RECT, "SPACE", confirm_label, JADE_DARK),
+            (BTN_CONFIRM_MOVE_RECT, "F7" if self_play_mode else "SPACE", confirm_label, JADE_DARK),
             (BTN_EMERGENCY_RECT, "M", ("EMERGENCY MODE",), VERMILION_COLOR),
             (BTN_ROLLBACK_RECT, "Z", ("ROLLBACK",), AMBER_COLOR),
+            (BTN_PICK_TEST_RECT, "T", ("GẮP", "THẢ"), JADE_COLOR),
+            (BTN_HOVER_RECT, "H", ("HOVER",), JADE_DARK),
         )
         emergency_active = game_state.get("emergency_mode", False)
         for rect, key, label_lines, color in actions:
@@ -275,11 +287,12 @@ class BoardRenderer:
                     label_surf = self.button_font.render(label, True, (255, 255, 255))
                     self.screen.blit(label_surf, (label_x, rect.y + 9 + line_index * 25))
 
-        can_continue = game_state.get("snapshot_continue_required", False)
+        pick_retry = bool(game_state.get("visual_pick_retry") or game_state.get("test_pick_retry"))
+        can_continue = pick_retry or game_state.get("snapshot_continue_required", False)
         continue_color = JADE_COLOR if can_continue else (121, 116, 100)
         pygame.draw.rect(self.screen, continue_color, BTN_CONTINUE_RECT, border_radius=12)
-        continue_key = self.ui_font.render("▶", True, (255, 255, 255))
-        continue_label = self.ui_font.render("CONTINUE", True, (255, 255, 255))
+        continue_key = self.ui_font.render("Y" if pick_retry else "▶", True, (255, 255, 255))
+        continue_label = self.ui_font.render("ĐO LẠI" if pick_retry else "CONTINUE", True, (255, 255, 255))
         self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 18, BTN_CONTINUE_RECT.y + 17))
         self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 66, BTN_CONTINUE_RECT.y + 17))
 
@@ -326,7 +339,10 @@ class BoardRenderer:
     def _draw_ai_status(self, game_state):
         """Render one live status, never a historical activity feed."""
         now = time.time()
-        if game_state.get("move_sync_error"):
+        if game_state.get("pick_test_fault"):
+            message = f"Test bị khóa: {game_state['pick_test_fault']}"
+            accent = VERMILION_COLOR
+        elif game_state.get("move_sync_error"):
             message = f"Move stopped: {game_state['move_sync_error']}"
             accent = VERMILION_COLOR
         elif game_state.get("ai_thinking"):
@@ -339,18 +355,33 @@ class BoardRenderer:
             accent = VERMILION_COLOR if raw_color[0] > raw_color[1] else JADE_COLOR
             if "CHECK" in message.upper():
                 accent = VERMILION_COLOR
+        elif game_state.get("pick_test_mode"):
+            message = "TEST GẮP / THẢ — game tạm dừng"
+            accent = AMBER_COLOR
+        elif game_state.get("pick_test_resume_required"):
+            message = "Khôi phục bàn rồi New Game để chơi tiếp"
+            accent = AMBER_COLOR
         else:
             mode = game_state.get("game_mode", "HUMAN_VS_ROBOT")
             if mode == "ROBOT_VS_ROBOT":
                 message = "Robot vs robot — F7: nước tiếp, F8: dừng"
+                accent = JADE_COLOR
             elif mode == "HUMAN_VS_ROBOT" and game_state.get("turn") == "b":
-                message = "Lượt robot — đang chờ thực hiện nước đi"
+                if game_state.get("robot_backend") == "PHYSICAL" and not game_state.get("is_robot_ready", True):
+                    if game_state.get("physical_enable_pending"):
+                        message = "Bấm F10 để bật robot (F9 để hủy)"
+                    else:
+                        message = "Robot READ-ONLY. Bấm F9 rồi F10 để bật robot!"
+                    accent = AMBER_COLOR
+                else:
+                    message = "Lượt robot — đang chờ thực hiện nước đi"
+                    accent = JADE_COLOR
             else:
                 side = "Đỏ" if game_state.get("turn", "r") == "r" else "Đen"
                 instruction = ("chọn quân và ô đến bằng chuột" if game_state.get("allow_mouse")
                                else "đi quân rồi xác nhận bằng SPACE")
                 message = f"Lượt {side} — {instruction}"
-            accent = JADE_COLOR
+                accent = JADE_COLOR
 
         self._draw_panel(AI_STATUS_RECT, fill=(249, 245, 232), border=accent, radius=12)
         pulse = 10 + int((now * 2) % 4)
@@ -382,6 +413,49 @@ class BoardRenderer:
         src = f"{chr(ord('a') + src_col)}{src_row}"
         dst = f"{chr(ord('a') + dst_col)}{dst_row}"
         return f"{piece} {src} -> {dst}"
+
+    def draw_recovery_status(self, recovery):
+        """Keep actionable fault details visible beside the board until reconciled."""
+        self._draw_panel(MOVE_LOG_RECT, fill=(249, 245, 232), border=VERMILION_COLOR, radius=14)
+        x, y = MOVE_LOG_RECT.x + 18, MOVE_LOG_RECT.y + 20
+        width = MOVE_LOG_RECT.width - 36
+        bottom = MOVE_LOG_RECT.bottom - 18
+        entries = [("GAME ĐANG KHÓA", VERMILION_COLOR),
+                   ("Cần làm: " + recovery["action"], JADE_DARK),
+                   ("Lý do: " + recovery["reason"], INK_COLOR),
+                   ("Nước chờ: " + recovery["pending"], INK_COLOR),
+                   ("Thực thi: " + recovery["execution"], INK_COLOR)]
+        for message, color in entries:
+            words = message.split()
+            lines, current = [], ""
+            for word in words:
+                # Split long backend identifiers too; keep text inside the panel.
+                chunks = []
+                while word and self.log_font.size(word)[0] > width:
+                    cut = len(word) - 1
+                    while cut > 1 and self.log_font.size(word[:cut])[0] > width:
+                        cut -= 1
+                    chunks.append(word[:cut])
+                    word = word[cut:]
+                chunks.append(word)
+                for chunk in chunks:
+                    candidate = (current + " " + chunk).strip()
+                    if current and self.log_font.size(candidate)[0] > width:
+                        lines.append(current)
+                        current = chunk
+                    else:
+                        current = candidate
+            if current:
+                lines.append(current)
+            limit = 6 if message.startswith(("Lý do:", "Cần làm:")) else 2
+            if len(lines) > limit:
+                lines = lines[:limit - 1] + ["… Chi tiết trong log phiên chơi."]
+            for line in lines:
+                if y + self.log_font.get_height() > bottom:
+                    return
+                self.screen.blit(self.log_font.render(line, True, color), (x, y))
+                y += self.log_font.get_linesize() + 3
+            y += 12
 
     def draw_recent_moves(self, moves):
         """Draw the latest eight moves in their moving side's color."""
@@ -438,7 +512,7 @@ class BoardRenderer:
             note = self.log_font.render(message, True, VERMILION_COLOR)
             self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 950)))
 
-    def draw_home_screen(self):
+    def draw_home_screen(self, message=""):
         """Draw the launcher shown before the player chooses a game mode."""
         self._draw_ink_wash_background()
 
@@ -468,6 +542,23 @@ class BoardRenderer:
             self.screen.blit(text, text.get_rect(center=rect.center))
         hint = self.log_font.render("Self-play: F7 next move / F8 stop. Camera full scan: F4", True, JADE_DARK)
         self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 914)))
+        if message:
+            # Wrap device errors below the controls, inside the logical canvas.
+            self._draw_panel(pygame.Rect(64, 940, SCREEN_WIDTH - 128, 128),
+                             fill=(249, 245, 232), border=VERMILION_COLOR, radius=12)
+            lines, line = [], ""
+            for word in str(message).split():
+                candidate = f"{line} {word}".strip()
+                if line and self.log_font.size(candidate)[0] > SCREEN_WIDTH - 160:
+                    lines.append(line)
+                    line = word
+                else:
+                    line = candidate
+            if line:
+                lines.append(line)
+            for index, text in enumerate(lines[:4]):
+                note = self.log_font.render(text, True, VERMILION_COLOR)
+                self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 966 + 25 * index)))
 
     @staticmethod
     def home_action_from_pixel(px, py):
@@ -552,7 +643,10 @@ class BoardRenderer:
 
     def draw_game_over(self, winner):
         """Vẽ thông báo kết thúc game."""
+        import config
         msg = "AI WINS (SAVED)" if winner == "b" else "YOU WIN (NOT SAVED)"
+        if config.GAME_MODE != "HUMAN_VS_ROBOT":
+            msg = "BLACK WINS" if winner == "b" else "RED WINS"
         color = (0, 255, 0) if winner == "b" else (255, 0, 0)
         txt = self.game_font.render(msg, True, color)
         self.screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)))

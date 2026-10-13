@@ -1,0 +1,127 @@
+--- before/main.py
++++ after/main.py
+@@ -394,7 +394,9 @@
+         # 2c. Camera Feed update
+         if hw is not None and hw.cam_monitor is not None:
+             key = hw.cam_monitor.update_display()
+-            if key == ord("q"): running = False
++            if key == ord("q"):
++                running = False
++                break
+ 
+         # Inspect the board itself rather than the object moving a piece.
+         # SPACE remains the safe manual fallback when camera confidence is poor.
+--- before/src/core/game_state.py
++++ after/src/core/game_state.py
+@@ -1,4 +1,5 @@
+ import time
++from copy import deepcopy
+ from collections import Counter, defaultdict
+ from src.domain.game_move import MoveActor, MoveContext, initial_piece_identities, piece_symbol_for_identity
+ from typing import Optional, Tuple, Dict, List, Any
+@@ -238,6 +239,10 @@
+             "move_history": list(self.move_history),
+             "move_log": list(self.move_log),
+             "piece_ids": dict(self.piece_ids),
++            "history_snapshots": deepcopy(self.history_snapshots),
++            "game_over": self.game_over,
++            "winner": self.winner,
++            "game_over_reason": getattr(self, "game_over_reason", ""),
+             "baseline_occ": baseline_occ,
+             "baseline_time": baseline_time,
+         }
+@@ -274,6 +279,10 @@
+         self.b_captured = list(s["b_captured"])
+         self.move_history = list(s["move_history"])
+         self.move_log = list(s.get("move_log", []))
++        self.history_snapshots = deepcopy(s.get("history_snapshots", []))
++        self.game_over = s.get("game_over", False)
++        self.winner = s.get("winner")
++        self.game_over_reason = s.get("game_over_reason", "")
+ 
+         if hw_manager and not self._is_game_only(hw_manager):
+             hw_manager.restore_yolo_baseline(s.get("baseline_occ"), s.get("baseline_time"))
+@@ -432,7 +441,7 @@
+         return mode == "HUMAN_VS_HUMAN" or (mode == "HUMAN_VS_ROBOT" and self.turn == "r")
+ 
+     def process_human_move(self, src, dst, p_name):
+-        if self.pick_test_mode or self.pick_test_resume_required:
++        if self.game_over or self.turn_confirmation_required or self.pick_test_mode or self.pick_test_resume_required:
+             return False
+         from src.core.project_logging import event
+         if self.physical_sync_fault or self.move_sync_error or self.pending_move is not None:
+@@ -474,9 +483,15 @@
+         # [API] Đồng bộ nước đi lên máy chủ Simulation
+         self.api_client.send_move_update_board(self.current_fen)
+         
+-        if xiangqi.get_king_pos(self.turn, self.board) is None:
+-            self.handle_game_over(moving_color)
++        self._finish_human_committed_move(moving_color)
+         return True
++
++    def _finish_human_committed_move(self, moving_color):
++        """Publish termination only after the committed FEN has been queued."""
++        if (not self.game_over and (xiangqi.get_king_pos(self.turn, self.board) is None
++                                    or not xiangqi.find_all_valid_moves(self.turn, self.board))):
++            self.handle_game_over(moving_color, reason="CHECKMATE")
++            self.api_client.end_match(winner="RED" if moving_color == "r" else "BLACK", reason="CHECKMATE")
+ 
+     def process_emergency_move(self, src, dst, p_name):
+         """Commit one rule-checked client move for the side currently to move.
+@@ -485,7 +500,10 @@
+         exactly one AI/robot reply.  A Black move is an operator correction:
+         it cancels any in-flight AI result and hands the turn back to Red.
+         """
+-        if self.pick_test_mode or self.pick_test_resume_required:
++        if (self.game_over or self.turn_confirmation_required or self.pick_test_mode or self.pick_test_resume_required
++                or not xiangqi.is_valid_move(src, dst, self.board, self.turn)):
++            return False
++        if self.turn == "r" and (self.physical_sync_fault or self.move_sync_error or not self.is_human_turn):
+             return False
+         # An operator edit supersedes any unverified robot transition.  Never
+         # let a later Continue overwrite the corrected client position.
+@@ -496,8 +514,7 @@
+         self.snapshot_continue_can_commit_pending = False
+         color = self.turn
+         if color == "r":
+-            self.process_human_move(src, dst, p_name)
+-            return
++            return self.process_human_move(src, dst, p_name)
+ 
+         print(f"[EMERGENCY] ✅ Manual Black move: {p_name} {xiangqi.format_move(src, dst)}")
+         captured_piece = self.board[dst[1]][dst[0]]
+@@ -514,17 +531,19 @@
+         # position; Python cannot safely kill that thread, but its result is
+         # discarded by the main-loop token check.
+         self.commit_piece_identity(context)
+-        self.sync_current_board()
+         self.ai_epoch += 1
+         self.ai_job_token = None
+         self.retire_ai_job()
+         self.ai_results = {}
+         self.ai_retry_requested = False
+         self.update_fen_from_board()
++        if not self.sync_current_board():
++            self.snapshot_continue_required = True
++            return False
+         self.api_client.send_move_update_board(self.current_fen)
+         self.set_status("✅ Emergency Black move accepted — Red to move.", color=(0, 120, 0), duration=6.0)
+-        if xiangqi.get_king_pos("r", self.board) is None:
+-            self.handle_game_over("b")
++        self._finish_human_committed_move("b")
++        return True
+ 
+     def set_move_observer(self, callback):
+         """Observe committed human moves. The observer must not actuate the robot."""
+--- before/src/ui/input_handler.py
++++ after/src/ui/input_handler.py
+@@ -320,8 +320,7 @@
+                             if getattr(self.state, "emergency_mode", False):
+                                 emergency_commit = getattr(self.state, "process_emergency_move", None)
+                                 if callable(emergency_commit):
+-                                    emergency_commit(src, dst, p_name)
+-                                    committed = True
++                                    committed = emergency_commit(src, dst, p_name) is True
+                                 else:
+                                     # Lightweight test/dry-run state objects only
+                                     # expose the legacy Red commit hook.

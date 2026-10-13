@@ -32,9 +32,19 @@ http
   .createServer((request, response) => {
     const urlPath = decodeURIComponent(request.url.split("?")[0]);
     let filePath;
-
-    // Controlled access: whitelist only exact canonical shared assets
-    if (sharedFilesWhitelist[urlPath]) {
+    if (urlPath.startsWith("/vendor/three/")) {
+      const threeRoot = path.resolve(repoRoot, "node_modules", "three");
+      filePath = path.resolve(threeRoot, urlPath.slice("/vendor/three/".length));
+      const allowedRoots = [path.join(threeRoot, "build"), path.join(threeRoot, "examples", "jsm")];
+      if (path.extname(filePath) !== ".js" || !allowedRoots.some((folder) => {
+        const rel = path.relative(folder, filePath);
+        return rel && !rel.startsWith("..") && !path.isAbsolute(rel);
+      })) {
+        response.writeHead(403);
+        response.end("Forbidden");
+        return;
+      }
+    } else if (sharedFilesWhitelist[urlPath]) {
       filePath = sharedFilesWhitelist[urlPath];
     } else {
       filePath = path.join(

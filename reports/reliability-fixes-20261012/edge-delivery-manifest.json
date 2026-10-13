@@ -1,0 +1,37 @@
+[
+  {
+    "path": "main.py",
+    "before_sha256": "4d957ae2ea0dd7d1821d56006ab4670ce111547d604bbfc9dd92af740e5dcaaa",
+    "after_sha256": "fafbcfb3c8322adf037166c2216a3e3e3738ae1a4af46d12548da82678966e83"
+  },
+  {
+    "path": "src/core/game_state.py",
+    "before_sha256": "d03810ea316ac2badc0f0563ccbe6af26ab0a0f2ee0e8d279feabcd38557cc91",
+    "after_sha256": "3529d3634a04aa039cfea1e2047df5573650dfd495383968501cc2eddd62781e"
+  },
+  {
+    "path": "src/ui/input_handler.py",
+    "before_sha256": "f41ea1d7a6b833bb3368e0574ffcb56b19802ee2be7f8de5689294f3eb655436",
+    "after_sha256": "3e5a5899e4c9a8539f0831e6ab9eb2dd65cb60d49fa06a10495c8ca99474f483"
+  },
+  {
+    "path": "CURRENT_STATE.md",
+    "before_sha256": "d7f815a008d8fb35acb9773d58a8f2ffde83d694854e0c7514ee741a28d115d8",
+    "after_sha256": "097289f52c1d0a15baeefcac302778daadd954b0ef26fe6c5446053701e3a2b3"
+  },
+  {
+    "path": "KNOWN_ISSUES.md",
+    "before_sha256": "f229cc22207df64640b2a2eb9463589340455dad506d9f0abb9cf3087d599a30",
+    "after_sha256": "8ed525b7873f3a1a2aa6cf95846b46c8fb9b176b8247d4a97d31bd2276f4febd"
+  },
+  {
+    "path": "tests/unit/test_review_lifecycle_edges.py",
+    "before_sha256": null,
+    "after_sha256": "f5be92a1fb916b027091cb687e966c87b772f0ad843c6408ea2e4537d2dbeb1b"
+  },
+  {
+    "path": "docs/LIFECYCLE_EDGE_REVIEW_20261012.md",
+    "before_sha256": null,
+    "after_sha256": "4293a1322130eb51bc6dd34eef3ba3766b49aeb81cc91f7264c44fcdd598ac56"
+  }
+]

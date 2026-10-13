@@ -1,0 +1,1 @@
+{"torch_threads": 7, "cv_threads": 1, "ort_threads": 0, "samples": [{"wall_ms": 4757.3, "cpu_ms": 7671.9}, {"wall_ms": 1898.8, "cpu_ms": 3578.1}, {"wall_ms": 918.9, "cpu_ms": 3187.5}, {"wall_ms": 1315.6, "cpu_ms": 3828.1}]}

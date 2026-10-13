@@ -3,7 +3,7 @@ Unit tests for BoardPoseProvider and FixedBoardPoseProvider.
 """
 
 import unittest
-from src.domain.board_pose import BoardPlacementState
+from src.domain.board_pose import BoardPlacementState, load_nominal_scene_placement
 from src.domain.board_pose_provider import BoardPoseProvider, FixedBoardPoseProvider
 
 
@@ -14,7 +14,7 @@ class BoardPoseProviderTests(unittest.TestCase):
         self.assertIsInstance(provider, BoardPoseProvider)
         state = provider.get_board_placement_state()
         self.assertIsInstance(state, BoardPlacementState)
-        self.assertEqual(state.board_yaw_deg, 0.0)
+        self.assertEqual(state.board_yaw_deg, load_nominal_scene_placement()['board_yaw_deg'])
 
     def test_from_teaching_points_calculation(self):
         # 4 corners in mm

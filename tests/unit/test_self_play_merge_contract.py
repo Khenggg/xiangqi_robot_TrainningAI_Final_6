@@ -8,6 +8,7 @@ from src.motion.stages import MotionStage
 
 def controller(result=None, physical=False):
     state=GameState()
+    state.api_client.ensure_match=Mock()
     state.api_client.send_move_update_board=Mock()
     state.api_client.end_match=Mock()
     state.sync_current_board=Mock(return_value=True)

@@ -1,0 +1,604 @@
+{
+  "head": "7d8c5deee9e03bb187ccf8e8c1999703202cfd7e",
+  "visual": "fe3faa8dcac121defa4c9ee000d4df0ac6c8fd09",
+  "merge_base": "e6bb6323a966727de1a17e57625711b3c2ead0c3",
+  "commit_divergence": "145\t26",
+  "committed_merge_exit": 1,
+  "working_tree_status": [
+    " M .gitignore",
+    " M CURRENT_STATE.md",
+    " M KNOWN_ISSUES.md",
+    " M README.md",
+    " M docs/PHASE4_PHYSICAL_VALIDATION_RUNBOOK.md",
+    " M docs/R1_R4_BOARD_PLACEMENT_CURRENT.md",
+    " M main.py",
+    " M requirements.txt",
+    " M robot-3d-viewer/board_picker.mjs",
+    " M robot-3d-viewer/index.html",
+    " M robot-3d-viewer/main.mjs",
+    " M robot-3d-viewer/serve.mjs",
+    " M src/core/ai_execution.py",
+    " M src/core/game_state.py",
+    " M src/core/self_play_controller.py",
+    " M src/digital_twin/live_twin_bridge.py",
+    " M src/hardware/hardware_manager.py",
+    " M src/hardware/robot_VIP.py",
+    " M src/hardware/telemetry_publisher.py",
+    " M src/simulation/runtime.py",
+    " M src/ui/board_renderer.py",
+    " M src/ui/debug_dashboard.py",
+    " M src/ui/input_handler.py",
+    " M src/vision/auto_calibrate.py",
+    " M src/vision/calibrate_camera.py",
+    " M tests/unit/test_phase3_final_g90_corrective.py",
+    " M tests/unit/test_viewer_coordinate_contract.mjs",
+    " M tests/unit/test_viewer_single_motion_authority.mjs",
+    "?? MEASURE_GEOMETRY.bat",
+    "?? docs/BOARD_PROFILE_AND_RECOVERY.md",
+    "?? docs/CROSS_FEATURE_AUDIT_20261005.md",
+    "?? docs/LOGGING.md",
+    "?? docs/R1_R4_SIMULATION_AUDIT_20261005.md",
+    "?? docs/START_PROJECT.md",
+    "?? docs/VISUAL_LATEST_REVIEW_20261005.md",
+    "?? docs/geometry-measurement.md",
+    "?? reports/cross-feature-audit-20261005/",
+    "?? reports/profile-recovery-20261005/",
+    "?? reports/r1r4-audit-20261005/",
+    "?? reports/telemetry-fix-20261006/",
+    "?? reports/three-mode-gui-20261005/",
+    "?? reports/visual-integration-20261005/",
+    "?? reports/visual-preintegration-20261009/",
+    "?? reports/visual-review-652af26/",
+    "?? scripts/measure_geometry.py",
+    "?? src/core/launch_options.py",
+    "?? src/core/project_logging.py",
+    "?? src/simulation/board_profile.py",
+    "?? src/ui/measurement_client.py",
+    "?? src/ui/recovery_status.py",
+    "?? src/vision/geometry_measurement.py",
+    "?? tests/test_auto_calibration_safety.py",
+    "?? tests/test_center_pick_no_fallback.py",
+    "?? tests/test_geometry_measurement.py",
+    "?? tests/test_measurement_client.py",
+    "?? tests/unit/test_board_profile_recovery.py",
+    "?? tests/unit/test_project_logging.py",
+    "?? tests/unit/test_simple_launch_sync.py",
+    "?? tests/unit/test_telemetry_liveness.py",
+    "?? tests/unit/test_visual_selective_integration.py"
+  ],
+  "donor_delta": [
+    "fe3faa8 feat(vision): support 10mm picking margin beyond board edges",
+    "a52c8e4 fix: changed rotation config",
+    "0e5f911 fix(vision): allow pick centers within outer grid margin",
+    "b98175d Merge branch 'feature/visual-correction-v2' of https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6 into feature/visual-correction-v2",
+    "fb857d5 fix: fixed gripper behavior",
+    "ab7afbb feat(vision): add opt-in colored-ring pick correction",
+    "af3d544 build(windows): package pinned setup and workstation camera calibration",
+    "12cd359 feat(vision): add continuous scan diagnostics and safe-height hover tests",
+    "7faa730 fix(camera): share camera opening policy with intrinsics calibration",
+    "bd1585b fix(calibration): report fit errors and preserve checkerboard samples",
+    "c8a3d79 feat(vision): add height-aware picking with bounded async sampling",
+    "367ac26 feat(vision): add homography-only top-rim correction",
+    "5846ffc Merge remote-tracking branch 'origin/feature/visual-correction-v2' into feature/visual-correction-v2",
+    "e8c0d40 docs(vision): document top-face calibration testing and retry recovery",
+    "f0a7a48 feat(robot): integrate guarded top-face picks and same-move retry controls",
+    "88eae34 feat(calibration): add camera-only pick geometry commissioning wizard",
+    "da8188e config(vision): define 10mm top-face and consensus settings",
+    "6ce81a7 feat(vision): add calibrated top-face geometry and metric consensus",
+    "2d097a1 fix(robot): restore visual pick fallback"
+  ],
+  "files": [
+    {
+      "path": ".codex/session-data/last-state.md",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 1
+    },
+    {
+      "path": ".codex/session-data/tool-count-01a0f62b-dd39-7551-bc79-a2f3cdbaa688.txt",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": ".gitattributes",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": ".gitignore",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "7291abc23de565f7c8931842d41ff32527aa45ee8776b7b2a10a613e36e39a87",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "CALIBRATE_CAMERA_INTRINSICS.bat",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "CALIBRATE_PICK_GEOMETRY.bat",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "MEASURE_GEOMETRY.bat",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "9cd1768ef0f4c631b28d888ca947bf1120f602ca53ab6f4fbfce7f0f47a8ceff",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "README.md",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "73b9beaf1e363d008de14d6513beacdd61e6bfbd1c9f5c5839802a4e5bcb54d1",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "RUN.bat",
+      "local_modified": false,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "631ed1745a44da50828780240169db24c86c0ef52183018ac8ba6c78a383b250",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "SETUP_WINDOWS.bat",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "assets/calibration/checkerboard-20mm.svg",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "calibration/README.md",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "calibration/camera_intrinsics.json",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "calibration/intrinsic_samples_camera0.npz",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "binary": true
+    },
+    {
+      "path": "config.py",
+      "local_modified": false,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "e4d42991b677b4b701f074de857745ab401bd7553fd36cfc96235156aaf1bd37",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "docs/colored-ring-picking.md",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "docs/geometry-measurement.md",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "df5cba3fa2d3213fe181af4788b7cc98ef7e2db78bfbe36135151b745c120e3c",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "docs/top-face-visual-pick.md",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "feature_list.json",
+      "local_modified": false,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "59563746b0bfc95f99cdde09305c4664d73defd71a31a0883d82b9a5db8228df",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "main.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "5f0432bc85f83b9c84ae9e79960ca18d5dbf3d45287fd628e9fddbb856dfc491",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "plans/2026-10-05-top-face-visual-correction/phase-01-top-face-targets.md",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "plans/2026-10-05-top-face-visual-correction/phase-02-consensus.md",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "plans/2026-10-05-top-face-visual-correction/plan.md",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "plans/2026-10-05-top-face-visual-correction/spec.md",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "requirements-lock-win-py312.txt",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "requirements.txt",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "730dbb0f020b00213d0f5961d171d7f6991fe0a60d29744169de919ab47052f7",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "scripts/calibrate_camera_intrinsics.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "scripts/calibrate_pick_geometry.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "scripts/measure_geometry.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "57e309d2ae5a08dbbc1e643c6cfec2c0020f5a9ae42890b37c2bd8c99ee9fe6e",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/core/game_state.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "a93639436681db02f4a2bc047737c15c07683bfaec35a3b929d17e16c3daec6a",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/core/visual_move_coordinator.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "src/hardware/hardware_manager.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "2dcf0626ec06470c4fae23e08bceb3baef60e725338e57c38ee5f91b1e82b00d",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/hardware/robot_VIP.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "a9809cd9625565f4607c0c3d1c8ca1fa4f6e614a8a867239fa8128ad1d16c2e7",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/ui/board_renderer.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "74ac36927cc8a28a4294bc38dbeeef9428a257679b680266eb8b43cb35d48062",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/ui/debug_dashboard.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "95a4cad4187af430fb2dd05b864423d223826faf77c8324e1cae03c2b411c079",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/ui/input_handler.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "36fbd9d64d67561aaf653fe35696678454b3307412a76792f8de853ff2e5effb",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/ui/measurement_client.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "9281227cd1a363f22b4cdb22f0263d00b274021bb69305ec97666b50e72dd24d",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/vision/auto_calibrate.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "e6ba1402cd1af0cc38566ce9c021c2c65641d7ef7a4f06d237d8bd013841a8a9",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/vision/calibrate_camera.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "8e30557dbbdc870ebe73f72803b6959e577f6725b2036932a755c96b567158ce",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/vision/camera_monitor.py",
+      "local_modified": false,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "bd766d441459deba1c3730f19734b25bdc26bfebef7f482c52c20c18becf87b1",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/vision/camera_source.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "src/vision/geometry_measurement.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "9b37ac7e774e4e5a8e4af22dc42df584f11a1234da18497ca5d835a40f19bdb2",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "src/vision/height_pick_geometry.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "src/vision/pick_consensus.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "src/vision/pick_debug.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "src/vision/pick_geometry.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "src/vision/ring_pick_estimator.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "src/vision/top_face_pick_estimator.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "src/vision/visual_pick_estimator.py",
+      "local_modified": false,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "77281ef7ed9b681b729be80015fd8053906a9a808de3d0864afda24907afa252",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "tests/test_auto_calibration_safety.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "735b75bdbd59403e5c96f8c681aecb5785329557d0147bf602dc93a3bd22b6e3",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "tests/test_camera_intrinsics_open.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "tests/test_center_pick_no_fallback.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "6f69a122fe4d899183e16587d12e92924093ca68527cd41465a987bcc3e630f2",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "tests/test_geometry_measurement.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "b34f50340f3d866afc4b3b571c0b98eed8ce9ea52f93f2f226a158fbca7d281f",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "tests/test_gripper_control.py",
+      "local_modified": false,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "b1b120556a61eb96f977d03005e27b83d9b0e00e80bf0a8ed2b155c8eb8a320e",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "tests/test_height_pick_geometry.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "tests/test_height_sampling.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "tests/test_hover_diagnostic.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "tests/test_measurement_client.py",
+      "local_modified": true,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "3c995fc09e90d16ccb79abdd177bcb795bc0ae2ad48799e257ec99b7ac12e59d",
+      "merge_file_exit": 1
+    },
+    {
+      "path": "tests/test_pick_consensus.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "tests/test_pick_outward_compensation.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "tests/test_pick_place_mode.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "tests/test_ring_pick_estimator.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "tests/test_top_face_geometry.py",
+      "local_modified": false,
+      "local_present": false,
+      "same_as_visual": false,
+      "local_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "merge_file_exit": 0
+    },
+    {
+      "path": "tests/test_visual_pick_estimator.py",
+      "local_modified": false,
+      "local_present": true,
+      "same_as_visual": false,
+      "local_sha256": "a1eda91f2631f74549a6cb82ac02843d9bd4efe3b5115b5b30fe80552e5ad03f",
+      "merge_file_exit": 1
+    }
+  ]
+}

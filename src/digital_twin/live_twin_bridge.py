@@ -13,6 +13,7 @@ import time
 import numpy as np
 
 from src.domain.game_move import MoveActor
+from src.core.project_logging import event
 from src.digital_twin.world_sync import sync_world_from_robot_snapshot
 from src.simulation.physics.world import VirtualPhysicalWorld
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class LiveTwinBridge:
+    board_sync_available = True
     def __init__(self, backend, board_pose_provider, telemetry=None, *, world=None,
                  poll_hz=25.0, max_snapshot_age_s=0.5, physical=True,
                  owns_world=True):
@@ -44,9 +46,14 @@ class LiveTwinBridge:
         self._last_measurement = -math.inf
         self.latest_snapshot = None
         self.last_error = None
+        self._fault_log_key = None
+        self._fault_log_at = -math.inf
+        self._fault_log_suppressed = 0
+        self._logged_robot_state = None
         self.recovery_required = False
         self.expected_payload_id = None
         self.active_move = None
+        self._command_animation = False
         self._payload_sequence = []
         self._released = []
         self._committed = set()
@@ -79,6 +86,17 @@ class LiveTwinBridge:
             self.placement = state
 
     def _fail(self, message, *, recovery=False):
+        now = time.monotonic()
+        if message != self._fault_log_key or now - self._fault_log_at >= 10.0:
+            event("twin.fault", str(message), level=logging.WARNING, code="TWIN_UNAVAILABLE",
+                  recovery_required=recovery or self.recovery_required,
+                  placement_version=self.placement.placement_version,
+                  move_id=getattr(self.active_move, "move_id", None),
+                  repeats_suppressed=self._fault_log_suppressed)
+            self._fault_log_key, self._fault_log_at = message, now
+            self._fault_log_suppressed = 0
+        else:
+            self._fault_log_suppressed += 1
         self.last_error = str(message)
         self.recovery_required |= recovery
         if self.telemetry is not None:
@@ -94,9 +112,20 @@ class LiveTwinBridge:
             self.telemetry.update_world_state(packet)
 
     def sync_robot_state(self, snapshot):
+        follows_runtime = not self.physical and not self.owns_world
+        # Distinguish an invalid read from a valid virtual read delayed while
+        # trajectory planning owns the shared world. The runtime already
+        # publishes execution samples; discard delayed reads without overwriting
+        # them or declaring a physical telemetry failure.
+        measured = getattr(snapshot, "measurement_timestamp", None)
+        measured = snapshot.timestamp if measured is None else measured
+        valid_at_entry = (snapshot.connected and getattr(snapshot, "joints_valid", True)
+                          and math.isfinite(measured)
+                          and 0 <= time.time() - measured <= self.max_snapshot_age_s)
         with self._lock, self.world._physics_lock:
-            measured = getattr(snapshot, "measurement_timestamp", None)
-            measured = snapshot.timestamp if measured is None else measured
+            if (follows_runtime and valid_at_entry
+                    and time.time() - measured > self.max_snapshot_age_s):
+                return False
             if (not snapshot.connected or not getattr(snapshot, "joints_valid", True)
                     or not math.isfinite(measured) or time.time() - measured > self.max_snapshot_age_s):
                 return self._fail("Actual joint telemetry unavailable or stale", recovery=self.active_move is not None)
@@ -108,11 +137,18 @@ class LiveTwinBridge:
             # A borrowed virtual world already follows authoritative runtime
             # callbacks. Polling must not rewind it with a snapshot read before
             # waiting for the physics lock, or step physics during planning.
-            follows_runtime = not self.physical and not self.owns_world
             if not follows_runtime:
                 sync_world_from_robot_snapshot(self.world, snapshot)
             self._last_measurement = measured
             self.latest_snapshot = snapshot
+            state_key = (snapshot.motion_state, getattr(snapshot, "trajectory_stage", None), snapshot.last_error)
+            if state_key != self._logged_robot_state:
+                event("robot.state_changed", "Robot đổi trạng thái", motion_state=snapshot.motion_state,
+                      stage=getattr(snapshot, "trajectory_stage", None), error=snapshot.last_error,
+                      joints_deg=list(snapshot.joints_deg), tcp_pose_mm_deg=list(snapshot.tcp_pose_mm_deg),
+                      measurement_timestamp=measured, placement_version=self.placement.placement_version,
+                      source="PHYSICAL" if self.physical else "VIRTUAL", physical_grasp_verified=False)
+                self._logged_robot_state = state_key
             tcp = np.asarray(snapshot.tcp_pose_mm_deg[:3], dtype=float)
             self.tcp_position_error_mm = (
                 float(np.linalg.norm(tcp - self.world.gripper.tcp_pos * 1000.0))
@@ -127,6 +163,11 @@ class LiveTwinBridge:
             if snapshot.motion_state in ("ERROR", "DISCONNECTED", "ESTOP", "STOPPED"):
                 return self._fail(snapshot.last_error or snapshot.motion_state, recovery=self.active_move is not None)
             elif not self.recovery_required:
+                if self.last_error is not None:
+                    event("twin.telemetry_recovered", "Telemetry hợp lệ trở lại; chưa chứng minh gắp thành công",
+                          repeats_suppressed=self._fault_log_suppressed)
+                    self._fault_log_key = None
+                    self._fault_log_suppressed = 0
                 self.last_error = None
             return True
 
@@ -233,6 +274,11 @@ class LiveTwinBridge:
         if not self._board_observation_ready():
             return False
         with self._lock, self.world._physics_lock:
+            if self._command_animation and self.active_move is None:
+                # Camera-confirmed reconciliation supersedes a command-only
+                # animation estimate, including an interrupted grasp.
+                self.world.release_attached_piece()
+                self._command_animation = False
             if (self.active_move is not None or self.world.get_attached_piece() is not None
                     ):
                 return self._fail("Cannot reconcile a board during robot motion or while holding a piece")
@@ -250,6 +296,36 @@ class LiveTwinBridge:
             self.recovery_required = False
             self._publish_world()
             return True
+
+    def begin_command_animation(self, context):
+        """Visual estimate only; never validates or commands the physical arm."""
+        with self._lock:
+            self.active_move = context
+            self._command_animation = True
+            self._released = []
+            self._payload_sequence = ([context.captured_piece_id] if context.captured_piece_id else []) + [context.piece_id]
+
+    def animate_command_gripper(self, event_name, closed):
+        if event_name != 'gripper' or not self._command_animation:
+            return
+        try:
+            if not self.poll_once():
+                return
+            with self._lock, self.world._physics_lock:
+                if closed and self.world.get_attached_piece() is None and len(self._released) < len(self._payload_sequence):
+                    piece = self.world.pieces[self._payload_sequence[len(self._released)]]
+                    self.world.gripper.attach_piece(piece)
+                elif not closed:
+                    piece = self.world.release_attached_piece()
+                    if piece is not None:
+                        self._released.append(piece.piece_id)
+                self._publish_world()
+        except Exception as exc:
+            event('twin.animation_failed', str(exc), level=logging.WARNING)
+
+    def finish_command_animation(self):
+        with self._lock:
+            self.active_move = None
 
     def begin_robot_move(self, context):
         if not self.poll_once():

@@ -1,0 +1,54 @@
+{
+  "providers": {
+    "pose": [
+      "CPUExecutionProvider"
+    ],
+    "layout": [
+      "CPUExecutionProvider"
+    ]
+  },
+  "runs": [
+    {
+      "duration_s": 2.4839999999967404,
+      "detections": 32,
+      "health": {
+        "ready": false,
+        "error": null,
+        "result_age_s": 2.4839999999967404
+      },
+      "cchess_raw_present": true,
+      "named_pieces": 32
+    },
+    {
+      "duration_s": 0.4850000000005821,
+      "detections": 32,
+      "health": {
+        "ready": true,
+        "error": null,
+        "result_age_s": 0.4850000000005821
+      },
+      "cchess_raw_present": true,
+      "named_pieces": 32
+    },
+    {
+      "duration_s": 0.4530000000013388,
+      "detections": 32,
+      "health": {
+        "ready": true,
+        "error": null,
+        "result_age_s": 0.4530000000013388
+      },
+      "cchess_raw_present": true,
+      "named_pieces": 32
+    }
+  ],
+  "after_no_background_refresh": {
+    "health": {
+      "ready": false,
+      "error": null,
+      "result_age_s": 2.186999999998079
+    },
+    "named_result_available": false,
+    "cached_detections": 32
+  }
+}

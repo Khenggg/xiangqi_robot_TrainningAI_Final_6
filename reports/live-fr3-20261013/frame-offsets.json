@@ -1,0 +1,29 @@
+{
+  "GetTCPOffset[1]": [
+    0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "GetWObjOffset[1]": [
+    0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "GetWObjCoordWithID[0]": {
+    "error": "<Fault -506: \"Method 'GetWObjCoordWithID' not defined\">"
+  },
+  "GetWObjCoordWithID[1]": {
+    "error": "<Fault -506: \"Method 'GetWObjCoordWithID' not defined\">"
+  },
+  "GetToolCoordWithID[0]": {
+    "error": "<Fault -506: \"Method 'GetToolCoordWithID' not defined\">"
+  }
+}

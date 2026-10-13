@@ -46,16 +46,18 @@ class HardwareManagerIntegrationTests(unittest.TestCase):
         self.assertIsNone(hw.setup_digital_twin(start=False))
         hw.cleanup()
 
-    def test_physical_dispatch_requires_commissioning_and_board_provider(self):
+    def test_physical_dispatch_requires_authorization_and_fresh_telemetry_not_mirror(self):
         self.config.ROBOT_BACKEND="PHYSICAL";self.config.DRY_RUN=False
         hw=HardwareManager(self.config,self.project_dir)
         hw.robot=MagicMock(connected=True,physical_motion_authorized=False)
         result=hw.execute_piece_move(0,0,0,1,False)
         self.assertFalse(result.success);hw.robot.move_piece.assert_not_called()
         hw.robot.physical_motion_authorized=True
+        hw.physical_telemetry_ready = MagicMock(return_value=False)
         result=hw.execute_piece_move(0,0,0,1,False)
         self.assertFalse(result.success);hw.robot.move_piece.assert_not_called()
-        hw.board_pose_provider=object()
+        self.assertIsNone(hw.board_pose_provider)
+        hw.physical_telemetry_ready.return_value = True
         hw.robot.move_piece.return_value=MotionResult.ok()
         context=object()
         result=hw.execute_piece_move(0,0,0,1,False,piece_id="red_rook_0",move_context=context)

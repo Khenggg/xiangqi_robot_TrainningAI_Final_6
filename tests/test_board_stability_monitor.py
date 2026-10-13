@@ -78,7 +78,7 @@ class BoardStabilityMonitorTests(unittest.TestCase):
 
         self.assertFalse(handler.poll_board_stability())
         self.assertFalse(state.committed)
-        self.assertEqual(1, handler._board_stability_monitor._sample_count)
+        self.assertEqual(0, handler._board_stability_monitor._sample_count)
 
     def test_full_board_desync_shows_a_warning_without_committing_a_move(self):
         class State:

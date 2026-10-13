@@ -54,6 +54,8 @@ class AIController:
         # Moonfish strength.
         if difficulty in ("easy", "medium", "hard", "impossible") and self.local_engine is not None:
             try:
+                if getattr(self.local_engine, '_ready', True) is False:
+                    self.local_engine.start(nnue_path=getattr(self.config, 'MOONFISH_NNUE', None))
                 if difficulty == "impossible":
                     return self.local_engine.pick_best_move(
                         board_snapshot, color, movetime_ms=self.config.MOONFISH_THINK_MS

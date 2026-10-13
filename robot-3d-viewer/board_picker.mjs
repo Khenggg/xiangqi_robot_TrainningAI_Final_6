@@ -19,14 +19,16 @@ export function nearestBoardIntersection(point, geometry, boardPointToXYZ, maxDi
   return closest;
 }
 
-export function settledPieceCell(piece) {
+export function settledPieceCell(piece, maxDistanceM = 0.020) {
   if (!piece) return null;
   // A carried, out-of-bounds, or grasped piece has no selectable board cell
-  if (piece.status === "OUT_OF_BOUNDS" || piece.status === "ATTACHED" || piece.is_grasped) return null;
+  if (piece.status === "OUT_OF_BOUNDS" || piece.status === "ATTACHED"
+      || piece.status === "ATTACHED_TO_GRIPPER" || piece.is_grasped) return null;
   const row = piece.nearest_row;
   const col = piece.nearest_col;
   const distance = piece.distance_to_nearest_intersection_m;
-  if (!Number.isInteger(row) || !Number.isInteger(col)) return null;
-  if (Number.isFinite(distance) && distance > 0.035) return null;
+  if (!Number.isInteger(row) || !Number.isInteger(col) || row < 0 || row >= 10 || col < 0 || col >= 9) return null;
+  // Half of the default 40 mm pitch: never select a neighbouring intersection.
+  if (!Number.isFinite(distance) || distance < 0 || distance >= maxDistanceM) return null;
   return { row, col };
 }

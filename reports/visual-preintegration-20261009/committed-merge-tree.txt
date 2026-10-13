@@ -1,0 +1,54 @@
+b13e0b7a6de3e2214181d929e563e2667f2def46
+100644 5608709ebf563900be3cb79dbb69bd408903e400 1	.codex/session-data/last-state.md
+100644 babd3b62f61ac3c432d9cda9701b16adfdfabc87 3	.codex/session-data/last-state.md
+100644 ac10f85fc38d6e4c7405f955acd9dec39ad46ddd 1	config.py
+100644 056ada41427925e7f4d02edfec0b9f9833f57fa2 2	config.py
+100644 6abc725ead01412b3c3e977438e2eab303a3ffa1 3	config.py
+100644 30da94fe6a44a06e58edc4daee9d556bfc1cee6e 1	main.py
+100644 16793aa981dec10a70b801fa724cc79194c21621 2	main.py
+100644 9a6c56b7c84872727b27dbd3784c2805e7e2b5f8 3	main.py
+100644 9d49ea59a8c442e24c693837af8dd63a90f6f59f 1	requirements.txt
+100644 f4c3b61018b79016066146e6f8fe4e573a909e90 2	requirements.txt
+100644 1aa365bff1b5166f77c7ff607c879d9344feb03c 3	requirements.txt
+100644 253499f4c1bbea29ef32ac9ab4abc93b69c2e598 1	src/core/game_state.py
+100644 50b74989a20a4e116ba6dbce5132fd253212aba9 2	src/core/game_state.py
+100644 af430d130a30ff30d867d5701b90831ea39491db 3	src/core/game_state.py
+100644 30365f7f74c5750ae99bc39d3a58746067831828 1	src/hardware/hardware_manager.py
+100644 327837eb666cb639723f3f0d20cef474795ebd0b 2	src/hardware/hardware_manager.py
+100644 f5784a7a6f5f237908dbbc16b9daec77ebfb575d 3	src/hardware/hardware_manager.py
+100644 f145bee578e6b6734a3016c57ba3b69b1ecad2d6 1	src/hardware/robot_VIP.py
+100644 e4fdb512f9317089f55cb4c3a757cb97ad15e6dd 2	src/hardware/robot_VIP.py
+100644 f5d73bdb3d89ee03982739b375f592a4a51a4d76 3	src/hardware/robot_VIP.py
+100644 0e4977aac731a11711e17c98068234f3dafdd9c4 1	src/ui/board_renderer.py
+100644 23f76880a9fba0ba075f12fce6390be8de5748e2 2	src/ui/board_renderer.py
+100644 3781d12bdb3b3526d59c094d3297089bec0ed9d0 3	src/ui/board_renderer.py
+100644 f17db39c90c852072e4e841d9f17226556e0c81d 1	src/ui/input_handler.py
+100644 6712fc00c3b2b305ec7e5b366bbc77193a12e5fa 2	src/ui/input_handler.py
+100644 72d3e204962d36599c09729cebabd26d5ee6f30f 3	src/ui/input_handler.py
+100644 62541686fd4097cf235cec5be2eee5668381cb74 1	src/vision/camera_monitor.py
+100644 3f8e432978e06bf0c398fa529ed539d238a5a26a 2	src/vision/camera_monitor.py
+100644 99a56f51e4117228b5fcb28fa3386432c26a3a05 3	src/vision/camera_monitor.py
+
+CONFLICT (modify/delete): .codex/session-data/last-state.md deleted in 7d8c5deee9e03bb187ccf8e8c1999703202cfd7e and modified in fe3faa8dcac121defa4c9ee000d4df0ac6c8fd09.  Version fe3faa8dcac121defa4c9ee000d4df0ac6c8fd09 of .codex/session-data/last-state.md left in tree.
+Auto-merging .gitignore
+Auto-merging config.py
+CONFLICT (content): Merge conflict in config.py
+Auto-merging main.py
+CONFLICT (content): Merge conflict in main.py
+Auto-merging requirements.txt
+CONFLICT (content): Merge conflict in requirements.txt
+Auto-merging src/core/game_state.py
+CONFLICT (content): Merge conflict in src/core/game_state.py
+Auto-merging src/hardware/hardware_manager.py
+CONFLICT (content): Merge conflict in src/hardware/hardware_manager.py
+Auto-merging src/hardware/robot_VIP.py
+CONFLICT (content): Merge conflict in src/hardware/robot_VIP.py
+Auto-merging src/ui/board_renderer.py
+CONFLICT (content): Merge conflict in src/ui/board_renderer.py
+Auto-merging src/ui/debug_dashboard.py
+Auto-merging src/ui/input_handler.py
+CONFLICT (content): Merge conflict in src/ui/input_handler.py
+Auto-merging src/vision/camera_monitor.py
+CONFLICT (content): Merge conflict in src/vision/camera_monitor.py
+Auto-merging tests/test_gripper_control.py
+Auto-merging tests/test_visual_pick_estimator.py

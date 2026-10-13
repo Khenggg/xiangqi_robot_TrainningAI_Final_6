@@ -29,20 +29,22 @@ class SnapshotDetector:
        Frame + detections được truyền vào từ CameraMonitor.
     """
 
-    def __init__(self, perspective_path, class_id_map, num_cols=9, num_rows=10, max_dist_threshold=0.32, min_absdiff_score=500.0, min_absdiff_margin=200.0):
+    def __init__(self, perspective_path, class_id_map, num_cols=9, num_rows=10, max_dist_threshold=0.38, min_absdiff_score=500.0, min_absdiff_margin=200.0, foot_ratio=0.85):
         """
         Args:
             perspective_path: đường dẫn file perspective.npy
             class_id_map:     dict {class_id: "r_P", "b_N", ...} (dùng để filter valid detections)
             num_cols:         số cột bàn cờ (9)
             num_rows:         số hàng bàn cờ (10)
-            max_dist_threshold: dung sai khoảng cách tối đa tới giao điểm ô cờ (default: 0.32)
+            max_dist_threshold: dung sai khoảng cách tối đa tới giao điểm ô cờ (default: 0.38)
+            foot_ratio:       tỉ lệ chiều cao tính tâm quân cờ (0.50 cho camera nhìn thẳng, 0.85 cho camera góc nghiêng)
         """
         self.perspective_path = str(perspective_path)
         self.class_id_map = class_id_map
         self.num_cols = num_cols
         self.num_rows = num_rows
         self.max_dist_threshold = max_dist_threshold
+        self.foot_ratio = float(foot_ratio)
 
         # T1 baseline
         self._baseline_occ = None    # occupancy grid: True/False
@@ -99,7 +101,8 @@ class SnapshotDetector:
         self.last_detection_ambiguous = False
         self.last_detection_error = None
         if cchess_result and cchess_result.get("success"):
-            return self._detect_move_from_cchess(board, cchess_result.get("board", []))
+            return self._detect_move_from_cchess(board, cchess_result.get("board", []),
+                                               cchess_result.get("confidence"))
 
         # === 2. FALLBACK: YOLO OCCUPANCY GRID COMPARISON ===
         if self._baseline_occ is None:
@@ -120,9 +123,9 @@ class SnapshotDetector:
         # So sánh T1 vs T2
         return self._compare_snapshots(self._baseline_occ, t2_occ, board, frame, cchess_result=cchess_result)
 
-    def _detect_move_from_cchess(self, current_board, rec_board):
+    def _detect_move_from_cchess(self, current_board, rec_board, confidence=None):
         from src.vision.move_observation import derive_move_observation
-        observation = derive_move_observation(current_board, rec_board, player_color="r")
+        observation = derive_move_observation(current_board, rec_board, player_color="r", confidence_grid=confidence)
         self.last_detection_ambiguous = observation.is_ambiguous
         self.last_detection_error = observation.error
         return observation.as_tuple() if observation.success else (None, None, None)
@@ -282,9 +285,9 @@ class SnapshotDetector:
             if aspect_ratio < 0.55 or aspect_ratio > 1.80:
                 continue
 
-            # Điểm chân quân cờ tiếp xúc mặt bàn (foot_point)
+            # Điểm tâm / chân quân cờ tiếp xúc mặt bàn
             cx = (x1 + x2) / 2
-            cy = y1 + h * 0.85
+            cy = y1 + h * self.foot_ratio
 
             try:
                 dst = cv2.perspectiveTransform(

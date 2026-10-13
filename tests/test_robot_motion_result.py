@@ -7,7 +7,9 @@ from src.motion.stages import MotionStage
 def make_robot():
     robot=FR5Robot();robot.connected=True;robot.dry=False
     robot.physical_motion_authorized=True
-    robot.teaching_points={name:{"pose":[x,y,10,180,0,0],"joints":[0]*6}
+    robot.robot = Mock()
+    robot.robot.GetRobotTeachingPoint.return_value = (0, [0]*12 + [robot.tool_num, robot.user_num])
+    robot.teaching_points={name:{"pose":[x,y,10,180,0,0],"joints":[0]*6,"tool":robot.tool_num,"user":robot.user_num}
         for name,x,y in [("R1",-200,500),("R2",-200,180),("R3",160,180),("R4",160,500),
                          ("R_Trash",-250,600)]}
     for method in ["pick_at","move_to_extra_safe","place_in_capture_bin","place_at","go_to_home_chess"]:

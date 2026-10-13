@@ -1,0 +1,21 @@
+{
+  "piece_id": "black_pawn_2",
+  "success": true,
+  "message": "Execution succeeded",
+  "placement_version": 2,
+  "target_robot_xyz_m": [
+    0.006200000000000001,
+    0.377,
+    0.0105
+  ],
+  "actual_robot_xyz_m": [
+    0.006221177289762921,
+    0.3771506555892059,
+    0.015204464040476205
+  ],
+  "actual_cell": [
+    4,
+    4
+  ],
+  "xy_error_mm": 0.15213672850656848
+}

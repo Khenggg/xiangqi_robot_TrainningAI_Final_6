@@ -1,3 +1,5 @@
+> **TẠM NGƯNG SỬ DỤNG — 2026-10-05:** Theo yêu cầu của chủ dự án, hiện tại không đọc, viện dẫn hoặc đề cập đến tài liệu này khi làm việc với dự án. Nội dung được lưu để tham khảo cho tương lai; chưa quyết định có triển khai hay không. Không dùng tài liệu này làm yêu cầu, kế hoạch thực hiện hoặc nguồn xác định trạng thái hiện tại. Cảnh báo này thay thế các tuyên bố “hiện hành” bên dưới, cho đến khi chủ dự án yêu cầu sử dụng lại.
+
 # R1–R4: vị trí bàn cờ trong mô phỏng và phép đo thật
 
 **Cập nhật 2026-09-29.** Đây là hướng dẫn hiện hành cho việc đổi vị trí bàn trên nhánh `feature/unified-robot-vs-robot`. Những số R1–R4 trong tài liệu cũ, mock backend và script legacy chỉ là ví dụ hoặc dữ liệu lịch sử. Không nạp chúng làm hiệu chuẩn FR3 thật.

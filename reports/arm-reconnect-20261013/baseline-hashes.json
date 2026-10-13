@@ -1,0 +1,7 @@
+{
+  "src/hardware/hardware_manager.py": "82b93a97c3627ba14412c83edb89a179a08088f4fd62b1b821a58f19ec82fa4c",
+  "src/hardware/simulation_adapter.py": "ea0e3c58e88ee57f38f91818fe287f5fd9a5d40566d970e4386a4e0483765035",
+  "src/core/session_startup.py": "f15c0eba1cb75e8644bccfbdefb3a9a522fbe7ad382d76cd586f7c508a3eca13",
+  "src/core/launch_options.py": "f13de8a90386a01e93e0d64ae8f553e061c1fcae3c1ae5d19dff7d6e734891f2",
+  "robot-3d-viewer/main.mjs": "ceafee90b47f674d6afa7ee4d0637b983ffdef93cb322e4fba32da813ecb27f0"
+}

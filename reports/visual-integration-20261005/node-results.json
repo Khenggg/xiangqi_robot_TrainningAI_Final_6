@@ -1,0 +1,38 @@
+[
+  {
+    "name": "test_board_picker",
+    "exit_code": 0
+  },
+  {
+    "name": "test_viewer_board_mesh_transform",
+    "exit_code": 0
+  },
+  {
+    "name": "test_viewer_camera_reconciliation",
+    "exit_code": 0
+  },
+  {
+    "name": "test_viewer_coordinate_contract",
+    "exit_code": 0
+  },
+  {
+    "name": "test_viewer_coordinate_ruler",
+    "exit_code": 0
+  },
+  {
+    "name": "test_viewer_gripper_and_telemetry",
+    "exit_code": 0
+  },
+  {
+    "name": "test_viewer_placement_integrity",
+    "exit_code": 0
+  },
+  {
+    "name": "test_viewer_profile_binding",
+    "exit_code": 0
+  },
+  {
+    "name": "test_viewer_single_motion_authority",
+    "exit_code": 0
+  }
+]

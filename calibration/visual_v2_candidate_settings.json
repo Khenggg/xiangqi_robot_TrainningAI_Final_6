@@ -1,0 +1,16 @@
+{
+  "source_commit": "fe3faa8dcac121defa4c9ee000d4df0ac6c8fd09",
+  "provenance": "DONOR_WORKSTATION_NOT_MEASURED_HERE",
+  "runtime_enabled": false,
+  "safe_z_mm": 220,
+  "move_speed_percent": 50,
+  "tool_rotation_deg": [180, 0, -73.2],
+  "gripper_open_pulse_sec": 0.25,
+  "gripper_close_pulse_sec": 0.20,
+  "camera_index": 0,
+  "frame_size": [640, 480],
+  "height_board_mm": [324, 368],
+  "height_piece_mm": 7,
+  "top_face_board_mm": [250, 281.25],
+  "top_face_piece_mm": 10
+}

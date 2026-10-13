@@ -1,0 +1,25 @@
+{
+  "physical_sdk_called": false,
+  "sdk": "Mock",
+  "camera": "Mock",
+  "motion_error_112_calls": 7,
+  "gripper_calls_total": 5,
+  "gripper_calls_after_first_motion_error": 3,
+  "call_trace": [
+    "gripper:open_max",
+    "gripper:close_to_safe_gap",
+    "MoveCart:112",
+    "MoveCart:112",
+    "gripper:close",
+    "MoveCart:112",
+    "MoveCart:112",
+    "MoveCart:112",
+    "gripper:open_max",
+    "MoveCart:112",
+    "gripper:close_to_safe_gap",
+    "MoveCart:112"
+  ],
+  "manual_test_returned_target": true,
+  "height_accepts_old_samples_with_latest_missing": true,
+  "height_aggregation_reason": "mean"
+}

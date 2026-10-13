@@ -1,0 +1,18 @@
+[
+  {
+    "path": "main.py",
+    "after_sha256": "e75dd6326cc0ce88484d6f7c13b60582c0d2dcacf13203573d97837565517400"
+  },
+  {
+    "path": "src/core/self_play_controller.py",
+    "after_sha256": "038cbd72202c4f09088fbf87da9b3dce57947a8dd62dc769eea2df9d0e52ac7f"
+  },
+  {
+    "path": "src/ui/input_handler.py",
+    "after_sha256": "57cbb69456d1bd57d5f8f379e984d23fbf16b335febc47527db544f6fecc118a"
+  },
+  {
+    "path": "tests/unit/test_runtime_race_review.py",
+    "after_sha256": "eebe3ebad3b8ddb9e443c8d6690d1d23538534d3760e80b64ff02cfe86a0e092"
+  }
+]

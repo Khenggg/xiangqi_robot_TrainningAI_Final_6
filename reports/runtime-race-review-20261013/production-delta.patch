@@ -1,0 +1,119 @@
+--- before/main.py
++++ after/main.py
+@@ -277,6 +277,7 @@
+                 continue
+             if event.type == pygame.QUIT:
+                 running = False
++                break
+             elif ((startup_worker.busy or (hw is not None and hw.motion_worker.busy))
+                   and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN)):
+                 continue
+--- before/src/core/self_play_controller.py
++++ after/src/core/self_play_controller.py
+@@ -51,6 +51,10 @@
+     def _is_physical(self):
+         return getattr(self.hw,"simulation_runtime",None) is None and not getattr(self.hw,"dry_run",False)
+ 
++    def _ui_worker_busy(self):
++        worker = getattr(self.hw, "motion_worker", None)
++        return worker is not None and worker.busy is True
++
+     @property
+     def active(self) -> bool:
+         return self.status in {
+@@ -90,7 +94,8 @@
+ 
+     def retry_visual_pick(self):
+         from src.core.visual_move_coordinator import retry_is_current, execute_pending_ai_motion
+-        if self.status is not SelfPlayStatus.PICK_PAUSED or not retry_is_current(self.state):
++        if (self._ui_worker_busy() or self.status is not SelfPlayStatus.PICK_PAUSED
++                or not retry_is_current(self.state)):
+             return False
+         request = self.state.visual_pick_retry
+         token = self._current_token()
+@@ -122,6 +127,15 @@
+             self.state.set_status("Wait for the previous self-play worker before restarting.",
+                                   color=(180, 100, 0), duration=8.0)
+             return False
++        # A finished thread still owns a result until tick consumes it. A
++        # paused capture also owns its checkpoint; F6 must not replace either.
++        if (self.status in {SelfPlayStatus.THINKING, SelfPlayStatus.MOVING,
++                            SelfPlayStatus.PICK_PAUSED, SelfPlayStatus.ENDING}
++                or getattr(self.state, "pending_ai_move", None) is not None
++                or getattr(self.state, "pending_move", None) is not None):
++            self.state.set_status("Nước đang chờ xử lý hoặc retry. Chờ hoàn tất, dùng Y đo lại hoặc F8 dừng.",
++                                  color=(180, 100, 0), duration=15.0)
++            return False
+         if getattr(self.state, "game_over", False):
+             self.status = SelfPlayStatus.FINISHED
+             self.state.set_status("Ván đã kết thúc. Chọn New Game trước khi bắt đầu self-play.",
+@@ -179,7 +193,7 @@
+         return True
+ 
+     def request_next_move(self) -> bool:
+-        if self.status is not SelfPlayStatus.READY:
++        if self._ui_worker_busy() or self.status is not SelfPlayStatus.READY:
+             return False
+         if getattr(self.state, "game_over", False):
+             self.status = SelfPlayStatus.FINISHED
+@@ -223,6 +237,10 @@
+ 
+     def tick(self):
+         """Poll the self-play lifecycle thread."""
++        # Startup/enable/reconciliation may run on the UI's separate worker.
++        # Defer new dispatch and preserve any unconsumed result until it ends.
++        if self._ui_worker_busy():
++            return
+         if self.status is SelfPlayStatus.READY and self.run_mode == "continuous":
+             self.request_next_move()
+ 
+--- before/src/ui/input_handler.py
++++ after/src/ui/input_handler.py
+@@ -244,17 +244,41 @@
+             return
+         from src.core.ai_execution import execute_ai_move
+         move = self.state.pending_ai_move["move"]
++        moving_color = self.state.pending_ai_move["moving_color"]
+         def retry():
+             if execute_ai_move(self.state, self.hw, move, self.hw.dry_run, True):
++                terminal = (xiangqi.get_king_pos(self.state.turn, self.state.board) is None
++                            or not xiangqi.find_all_valid_moves(self.state.turn, self.state.board))
++                if terminal:
++                    self.state.handle_game_over(moving_color, reason="CHECKMATE")
+                 try:
+                     self.state.api_client.send_move_update_board(self.state.current_fen)
+-                    if (xiangqi.get_king_pos(self.state.turn, self.state.board) is None
+-                            or not xiangqi.find_all_valid_moves(self.state.turn, self.state.board)):
+-                        self.state.handle_game_over("b")
+-                    else:
+-                        self.hw.capture_baseline_if_needed(force_delay=0)
++                    if terminal:
++                        self.state.api_client.end_match(winner="RED" if moving_color == "r" else "BLACK",
++                                                       reason="CHECKMATE")
+                 except Exception as exc:
+-                    self.state.set_status(f"Nước đã commit; cập nhật API/baseline lỗi: {exc}", duration=30)
++                    self.state.set_status(f"Nước đã commit; cập nhật API lỗi: {exc}", duration=30)
++                if terminal or self.state.physical_sync_fault or self.state.move_sync_error:
++                    return
++                baseline_error = None
++                try:
++                    captured = self.hw.capture_baseline_if_needed(force_delay=0)
++                except Exception as exc:
++                    captured = False
++                    baseline_error = str(exc)
++                if not self.hw.dry_run and not captured:
++                    from src.core.project_logging import event
++                    import logging
++                    event("camera.baseline_rejected", "Nước retry đã commit; tạm dừng quét vì baseline camera lỗi",
++                          level=logging.WARNING, code="CAMERA_VERIFY_FAILED", reason=baseline_error,
++                          fen=self.state.current_fen)
++                    self.state.manual_override_active = True
++                    self.state.snapshot_continue_required = True
++                    self.state.snapshot_continue_can_commit_pending = False
++                    self.state.set_status("Nước đã hoàn tất nhưng baseline camera lỗi. Bấm V để đối soát trước khi tiếp tục.",
++                                          duration=30)
++                elif baseline_error is not None:
++                    self.state.set_status(f"Nước đã commit; baseline camera lỗi: {baseline_error}", duration=30)
+         self._queue_or_run(retry)
+ 
+     def _run_hover_test(self):

@@ -17,6 +17,7 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(os.path.dirname(_THIS_DIR))
 sys.path.insert(0, _PROJECT_DIR)
 import config
+from src.core.project_logging import event
 from src.motion.result import MotionExecutionResult, MotionFailureCategory, PayloadState
 from src.motion.stages import MotionStage
 
@@ -46,6 +47,10 @@ class FR5Robot:
         self.ip          = ip or config.ROBOT_IP
         self.robot       = None
         self.physical_motion_authorized = False
+        self.gripper_closed_estimate = False
+        self.gripper_command_known = False
+        self.motion_listener = None
+        self.telemetry_readiness = None
         self.last_motion_result = None
         self._active_stage = MotionStage.PREPOSITION
         self._last_completed_stage = None
@@ -66,6 +71,7 @@ class FR5Robot:
         
         # Cache teaching points để tránh Singularity
         self.teaching_points = {}  # {name: {"pose": [x,y,z,rx,ry,rz], "joints": [j1..j6]}}
+        self.teaching_points_error = None
         self.use_teaching_points = True  # Luôn dùng teaching points
 
         # Kích thước ô cờ (mm), mặc định theo config, tự động cập nhật khi load teaching points
@@ -107,21 +113,30 @@ class FR5Robot:
     def connect(self):
         """Read-only connection: no servo, mode, motion or gripper command."""
         self.physical_motion_authorized = False
+        self.teaching_points_error = None
         if self.dry:
             self.connected = True
             return True
         if robot_sdk_core is None:
             raise RobotCommandError("Robot SDK unavailable")
+        self.teaching_points = {}
         try:
             self.robot = robot_sdk_core.RPC(self.ip)
             self.connected = bool(self.robot.SDK_state)
             if not self.connected:
                 raise RobotCommandError("Robot SDK not connected")
-            self._load_teaching_points()
-            return True
         except Exception:
             self.connected = False
             raise
+        # Board calibration does not decide whether the SDK is connected.
+        # Retain read-only arm telemetry, while rejecting unverified targets.
+        try:
+            self._load_teaching_points()
+        except Exception as exc:
+            self.teaching_points = {}
+            self.teaching_points_error = f"R1-R4 calibration unavailable: {exc}"
+            print(f"[ROBOT] Connected read-only; {self.teaching_points_error}")
+        return True
 
     def activate_physical_control(self, *, commissioned=False):
         """Explicit operator gate after calibration and commissioning review."""
@@ -141,9 +156,26 @@ class FR5Robot:
         self.physical_motion_authorized = True
         return True
 
+    def deactivate_physical_control(self):
+        """Revoke owned activation without gripper or HOME; leave read-only sessions alone."""
+        was_authorized = self.physical_motion_authorized
+        self.physical_motion_authorized = False
+        if not was_authorized or self.dry:
+            return True
+        if not self.connected or self.robot is None:
+            raise RobotCommandError("Cannot confirm controller disable: robot disconnected")
+        code = self.robot.RobotEnable(0)
+        if code != 0:
+            raise RobotCommandError(f"RobotEnable(0) failed: {code}; verify pendant", backend_code=code)
+        return True
+
     def _require_actuation(self):
         if not self.dry and (not self.connected or not self.physical_motion_authorized):
             raise RobotCommandError("Physical actuation is not authorized")
+        if not self.dry and self.teaching_points_error:
+            raise RobotCommandError(self.teaching_points_error)
+        if not self.dry and callable(self.telemetry_readiness) and not self.telemetry_readiness():
+            raise RobotCommandError("Robot telemetry stale/faulted; no new command dispatched")
 
     @staticmethod
     def _validate_pose(pose):
@@ -155,6 +187,8 @@ class FR5Robot:
         return values
 
     def _validated_corners(self):
+        if self.teaching_points_error:
+            raise RobotCommandError(self.teaching_points_error)
         corners = np.array([self._validate_pose(self.teaching_points[name]["pose"])[:3]
                             for name in ("R1", "R2", "R3", "R4")])
         edges = np.roll(corners, -1, axis=0) - corners
@@ -166,6 +200,8 @@ class FR5Robot:
 
     def _run_stage(self, stage, operation, *args, **kwargs):
         self._active_stage = stage
+        event("motion.stage_started", "Bắt đầu bước chuyển động", stage=stage.name,
+              operation=getattr(operation, "__name__", str(operation)))
         value = operation(*args, **kwargs)
         if isinstance(value, MotionExecutionResult):
             if not value.success:
@@ -174,6 +210,7 @@ class FR5Robot:
                                and not isinstance(value, bool) and value != 0):
             raise RobotCommandError(f"{stage.name} failed: {value}", value)
         self._last_completed_stage = stage
+        event("motion.stage_completed", "Hoàn tất bước chuyển động", stage=stage.name)
         return value
 
 
@@ -197,7 +234,9 @@ class FR5Robot:
                     
                     self.teaching_points[name] = {
                         "pose": pose_data,
-                        "joints": joint_data
+                        "joints": joint_data,
+                        "tool": int(float(data[12])) if len(data) >= 14 else None,
+                        "user": int(float(data[13])) if len(data) >= 14 else None,
                     }
                     print(f"[ROBOT]   ✅ Loaded {name}: X={pose_data[0]:.1f}, Y={pose_data[1]:.1f}, Z={pose_data[2]:.1f}")
                 else:
@@ -206,6 +245,19 @@ class FR5Robot:
                 print(f"[ROBOT]   ❌ Lỗi đọc {name}: {e}")
                 raise Exception(f"Thiếu teaching point {name} - Hệ thống không thể hoạt động")
         
+        frames = {(point['tool'], point['user']) for name, point in self.teaching_points.items()
+                  if name in point_names}
+        if len(frames) != 1 or any(value is None for value in next(iter(frames))):
+            tools = {point['tool'] for name, point in self.teaching_points.items() if name in point_names}
+            users = {point['user'] for name, point in self.teaching_points.items() if name in point_names}
+            if len(tools) == 1 and None not in tools and None not in users and users.issubset({0, 1}):
+                self.tool_num = self.teaching_points['R1']['tool']
+                self.user_num = self.teaching_points['R1']['user']
+                print(f"[ROBOT] ⚠️ Cảnh báo: R1-R4 có nhãn user frame {sorted(users)}; tự động dùng tool={self.tool_num}, user={self.user_num} của R1.")
+            else:
+                raise RobotCommandError('R1-R4 require consistent tool/user frame metadata')
+        else:
+            self.tool_num, self.user_num = next(iter(frames))
         # Tính CELL_SIZE tự động từ 4 góc
         self._calculate_cell_sizes_from_corners()
         
@@ -218,13 +270,15 @@ class FR5Robot:
                 
                 self.teaching_points["R_Trash"] = {
                     "pose": pose_data,
-                    "joints": joint_data
+                    "joints": joint_data,
+                    "tool": int(float(data[12])) if len(data) >= 14 else None,
+                    "user": int(float(data[13])) if len(data) >= 14 else None,
                 }
                 print(f"[ROBOT]   ✅ Loaded R_Trash: X={pose_data[0]:.1f}, Y={pose_data[1]:.1f}, Z={pose_data[2]:.1f}")
             else:
-                print(f"[ROBOT]   ⚠️ R_Trash không tồn tại, sẽ dùng tọa độ config backup")
+                print(f"[ROBOT]   ⚠️ R_Trash không tồn tại; nước ăn quân sẽ bị chặn.")
         except Exception as e:
-            print(f"[ROBOT]   ⚠️ Không load được R_Trash: {e} (sẽ dùng config backup)")
+            print(f"[ROBOT]   ⚠️ Không load được R_Trash: {e}; nước ăn quân sẽ bị chặn.")
         
         print(f"[ROBOT] ✅ Đã load {len(self.teaching_points)} teaching points")
         print(f"[ROBOT] 🎯 Sử dụng Bilinear Interpolation cho tất cả vị trí")
@@ -248,6 +302,15 @@ class FR5Robot:
         return None, None
 
     def board_to_pose(self, col, row, z_height, rotation=None):
+        # Physical coordinates follow visual-correction-v2: taught corners keep
+        # their measured XY; interior/visual floating targets use bilinear XY.
+        name, point = self._get_teaching_point_for_position(col, row)
+        if point is not None:
+            pose = list(point['pose'])
+            pose[2] = z_height
+            if rotation is not None:
+                pose[3:] = self._validated_rotation(rotation)
+            return self._validate_pose(pose)
         return self.board_to_pose_bilinear(col, row, z_height, rotation=rotation)
 
     @staticmethod
@@ -273,7 +336,16 @@ class FR5Robot:
     def board_to_pose_bilinear(self, col, row, z_height, rotation=None):
         if not all(math.isfinite(float(v)) for v in (col, row, z_height)):
             raise ValueError("Grid target must be finite")
-        if not (0 <= col <= 8 and 0 <= row <= 9):
+        margin = float(getattr(config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", 0.0))
+        if not math.isfinite(margin) or not 0 <= margin <= 10:
+            raise ValueError("Outside-grid margin must be within 0..10 mm")
+        corners = self._validated_corners()
+        width = min(np.linalg.norm(corners[1]-corners[0]), np.linalg.norm(corners[2]-corners[3]))
+        height = min(np.linalg.norm(corners[3]-corners[0]), np.linalg.norm(corners[2]-corners[1]))
+        if min(width, height) <= 0:
+            raise ValueError("Degenerate board dimensions")
+        if not (-8*margin/width <= col <= 8+8*margin/width
+                and -9*margin/height <= row <= 9+9*margin/height):
             raise ValueError("Grid target outside board")
         r1, r2, r3, r4 = self._validated_corners()
         u, v = col/8.0, row/9.0
@@ -374,10 +446,20 @@ class FR5Robot:
         err, data = self.robot.GetRobotTeachingPoint("HOMECHESS")
         if err != 0 or len(data) < 6:
             raise RobotCommandError("Validated HOMECHESS teaching point unavailable",err)
+        self._verify_waypoint_frame(data, 'HOMECHESS')
         pose = self._validate_pose(data[:6])
         if len(data) >= 12:
             return self.movej_joint([float(v) for v in data[6:12]],pose)
         return self.move_safe_pose(pose)
+
+    def _verify_waypoint_frame(self, data, name):
+        if len(data) < 14:
+            raise RobotCommandError(f'{name}: tool/user frame differs from R1-R4 or metadata is missing')
+        wp_tool, wp_user = int(float(data[12])), int(float(data[13]))
+        if (wp_tool, wp_user) != (self.tool_num, self.user_num):
+            if wp_tool == self.tool_num and {wp_user, self.user_num}.issubset({0, 1}):
+                return
+            raise RobotCommandError(f'{name}: tool/user frame differs from R1-R4 or metadata is missing')
 
 
     def _validate_gripper_config(self):
@@ -444,6 +526,14 @@ class FR5Robot:
         with self._gripper_lock:
             self._pulse_gripper_direction(target_id, pulse_seconds, label)
             time.sleep(settle_seconds)
+        self.gripper_closed_estimate = action == config.GRIPPER_ACTION_CLOSE
+        self.gripper_command_known = True
+        if callable(self.motion_listener):
+            try:
+                self.motion_listener('gripper', self.gripper_closed_estimate)
+            except Exception as exc:
+                import logging
+                event('twin.animation_failed', str(exc), level=logging.WARNING)
         return 0
 
     def _pulse_gripper_direction(self, target_id, pulse_seconds, label):
@@ -460,6 +550,16 @@ class FR5Robot:
     # -------------------------------------------------------------------------
     # QUY TRÌNH GẮP / ĐẶT / ĂN QUÂN
     # -------------------------------------------------------------------------
+
+    def hover_at(self, col, row, visual_target):
+        """Same calibrated pick XY at SAFE_Z, with no descent or gripper command."""
+        self._require_actuation()
+        if visual_target is None:
+            raise ValueError("Hover requires a measured target")
+        rotation = getattr(config, "PICK_TOOL_ROTATION", config.ROTATION)
+        pose = self.board_to_pose_bilinear(visual_target.col, visual_target.row, config.SAFE_Z, rotation)
+        self.move_safe_pose(pose, col=col, row=row, label="Hover diagnostic")
+        return pose
 
     def pick_at(self, col, row, visual_target=None):
         """Gắp quân tại XY thực tế, với tool rotation đã dạy trong config.
@@ -481,13 +581,20 @@ class FR5Robot:
         else:
             pose_safe = self.board_to_pose(col, row, config.SAFE_Z, rotation=pick_rotation)
             pose_pick = self.board_to_pose(col, row, config.PICK_Z, rotation=pick_rotation)
-        print(f"[ROBOT] 🤏 Gắp tại grid=({col},{row}) → X={pose_safe[0]:.1f}, Y={pose_safe[1]:.1f}, Z={pose_safe[2]:.1f}")
-
-        self._run_stage(MotionStage.APPROACH, self.move_safe_pose, pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
-        self._run_stage(MotionStage.LAND, self.movel_pose, pose_pick)                # Hạ xuống
-        self._run_stage(MotionStage.GRIP, self.gripper_ctrl, config.GRIPPER_ACTION_CLOSE)
-        self._payload_state = PayloadState.EXPECTED_ATTACHED
-        self._run_stage(MotionStage.LIFT, self.movel_pose, pose_safe)                # Nhấc lên
+        reference = self.board_to_pose_bilinear(col, row, config.PICK_Z, rotation=pick_rotation) if visual_target is not None else pose_pick
+        self.visual_pick_correction = dict(dx_mm=pose_pick[0]-reference[0], dy_mm=pose_pick[1]-reference[1],
+            cell=[col, row], target=[visual_target.col, visual_target.row] if visual_target else [col, row],
+            visual=visual_target is not None, active=True)
+        event("motion.visual_correction", "Bù tâm quân theo camera", correction=self.visual_pick_correction)
+        try:
+            self._run_stage(MotionStage.APPROACH, self.move_safe_pose, pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
+            self._run_stage(MotionStage.PREPOSITION, self.gripper_ctrl, config.GRIPPER_ACTION_OPEN_MAX)
+            self._run_stage(MotionStage.LAND, self.movel_pose, pose_pick)                # Hạ xuống
+            self._run_stage(MotionStage.GRIP, self.gripper_ctrl, config.GRIPPER_ACTION_CLOSE)
+            self._payload_state = PayloadState.EXPECTED_ATTACHED
+            self._run_stage(MotionStage.LIFT, self.movel_pose, pose_safe)                # Nhấc lên
+        finally:
+            self.visual_pick_correction["active"] = False
         print(f"[ROBOT] ✅ Gắp xong ({col},{row})")
 
     def place_at(self, col, row):
@@ -539,12 +646,21 @@ class FR5Robot:
             self._move_piece_sequence(*args, **kwargs)
             result = MotionResult.ok(payload_state=self._payload_state)
         except Exception as exc:
-            category = (MotionFailureCategory.GRIPPER_FAILED if isinstance(exc,GripperCommandError)
+            from src.vision.pick_consensus import PickTargetUnavailable
+            import logging
+            event("motion.stage_failed", str(exc), level=logging.ERROR, code="MOVE_REJECTED",
+                  exc_info=True, stage=self._active_stage.name,
+                  last_completed_stage=getattr(self._last_completed_stage, "name", None),
+                  payload_state=self._payload_state.name, backend_code=getattr(exc, "backend_code", None))
+            category = (MotionFailureCategory.PRECONDITION_FAILED if isinstance(exc,PickTargetUnavailable)
+                        else MotionFailureCategory.GRIPPER_FAILED if isinstance(exc,GripperCommandError)
                         else MotionFailureCategory.TARGET_INVALID if isinstance(exc,(ValueError,KeyError))
                         else MotionFailureCategory.MOTION_COMMAND_FAILED)
+            retry_stage = exc.stage if isinstance(exc, PickTargetUnavailable) else None
             result = MotionResult.fail(self._active_stage,category,str(exc),
                 last_completed_stage=self._last_completed_stage,payload_state=self._payload_state,
-                backend_code=getattr(exc,"backend_code",None))
+                backend_code=getattr(exc,"backend_code",None),
+                metadata={"visual_retry_stage": retry_stage} if retry_stage else {})
         self.last_motion_result = result
         return result
 
@@ -575,9 +691,18 @@ class FR5Robot:
             if "R_Trash" not in self.teaching_points:
                 raise RobotCommandError("Validated R_Trash teaching point unavailable")
             self._validate_pose(self.teaching_points["R_Trash"]["pose"])
+            trash = self.teaching_points['R_Trash']
+            if (trash.get('tool'), trash.get('user')) != (self.tool_num, self.user_num):
+                if not (trash.get('tool') == self.tool_num and {trash.get('user'), self.user_num}.issubset({0, 1})):
+                    raise RobotCommandError('R_Trash tool/user frame differs from R1-R4')
             joints = self.teaching_points["R_Trash"]["joints"]
             if len(joints) != 6 or not all(math.isfinite(float(v)) for v in joints):
                 raise ValueError("Capture-bin joint target is invalid")
+        if not self.dry:
+            code, home = self.robot.GetRobotTeachingPoint('HOMECHESS')
+            if code != 0:
+                raise RobotCommandError('HOMECHESS unavailable before motion', code)
+            self._verify_waypoint_frame(home, 'HOMECHESS')
 
         distance = abs(d_col - s_col) + abs(d_row - s_row)
         use_extra_safe = distance >= 4  # Nếu di chuyển >= 4 ô, dùng độ cao an toàn

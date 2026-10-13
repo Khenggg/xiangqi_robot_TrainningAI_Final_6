@@ -1,0 +1,11 @@
+{
+  "synthetic_setup": true,
+  "legal_in_current_rule_checker": true,
+  "expected_terminal_missing_black_king": true,
+  "recognition_board_matches_expected": true,
+  "confidence": 0.99,
+  "validation_ok": false,
+  "validation_reason": "Bàn cờ không hợp lệ: Yêu cầu đúng 1 Tướng Đen (b_K), phát hiện 0",
+  "physical_board_verified": false,
+  "hardware_used": false
+}

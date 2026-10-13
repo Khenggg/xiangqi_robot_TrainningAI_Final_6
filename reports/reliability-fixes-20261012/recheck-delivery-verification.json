@@ -1,0 +1,11 @@
+{
+  "delivered_files": 14,
+  "all_hashes_match": true,
+  "main": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6",
+  "source": "D:\\OJT\\_reliability_fix_20261012",
+  "final_targeted_passes": 110,
+  "full_pre_terminal_parallel": 978,
+  "full_pre_terminal_serial": 8,
+  "physical_hardware_used": false,
+  "committed": false
+}

@@ -1,3 +1,5 @@
+> **TẠM NGƯNG SỬ DỤNG — 2026-10-05:** Theo yêu cầu của chủ dự án, hiện tại không đọc, viện dẫn hoặc đề cập đến tài liệu này khi làm việc với dự án. Nội dung được lưu để tham khảo cho tương lai; chưa quyết định có triển khai hay không. Không dùng tài liệu này làm yêu cầu, kế hoạch thực hiện hoặc nguồn xác định trạng thái hiện tại. Cảnh báo này thay thế các tuyên bố “hiện hành” bên dưới, cho đến khi chủ dự án yêu cầu sử dụng lại.
+
 # Phase 4 — Physical Validation & Commissioning Runbook
 
 **Document ID:** `DOC-P4-RUNBOOK-001`<br>

@@ -1,0 +1,10 @@
+{
+  "src/hardware/hardware_manager.py": "bdc31dd3f2ee6e2478b858afa1c0a4a68c3fb07a7a3e79f62e062efb1efeac11",
+  "src/vision/camera_monitor.py": "bd766d441459deba1c3730f19734b25bdc26bfebef7f482c52c20c18becf87b1",
+  "src/vision/cchess_recognizer.py": "b8bff6a9114783178f066b60e7cf0ef51ba04fdead11ce6bd20adf9cd723a2dd",
+  "config.py": "0f47a4aefad5e6dbde0fcecdcd9bf8065d81bcbe86c0c57c670587626ddece98",
+  "SETUP_WINDOWS.bat": "36c54bf688873ae3b9f5a20cba9ad5b0250dd4b5814c4251b0a8d9e82bcd6e62",
+  "RUN.bat": "7911c48a9f152128974cef637ffe37ecd620284b0cff14e9c4afc08039a438be",
+  "requirements.txt": "730dbb0f020b00213d0f5961d171d7f6991fe0a60d29744169de919ab47052f7",
+  "src/ui/board_renderer.py": "fb497e1eb33cd8d9f6225c6e1a026fae3e14acdaeda5259748d2cb466388950a"
+}

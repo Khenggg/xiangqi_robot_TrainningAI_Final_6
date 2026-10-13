@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "source": "R1_R4_SIMULATION",
+  "frame": "robot_base",
+  "unit": "mm",
+  "calibration_version": 2,
+  "provenance": "SIMULATOR_BOARD_SURFACE_POINT",
+  "saved_at": "2026-10-05T11:02:20.367188+00:00",
+  "scene_sha256": "bfedc339b1bd6038272d5b51828c7dd2152dfad55d00cd505460bf86953c4d25",
+  "safe_transit_height_mm": 70.0,
+  "points": {
+    "R1": [
+      166.2,
+      217.0,
+      10.5
+    ],
+    "R2": [
+      166.2,
+      537.0,
+      10.5
+    ],
+    "R3": [
+      -193.8,
+      537.0,
+      10.5
+    ],
+    "R4": [
+      -193.8,
+      217.0,
+      10.5
+    ]
+  }
+}

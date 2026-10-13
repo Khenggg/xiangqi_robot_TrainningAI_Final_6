@@ -1,0 +1,124 @@
+{
+  "mode": "READ_ONLY",
+  "actuation_commands": 0,
+  "samples": [
+    {
+      "robot_model": "FR3",
+      "connected": true,
+      "motion_state": "IDLE",
+      "joints_deg": [
+        -89.46504211425781,
+        -128.6229248046875,
+        106.87696075439453,
+        -68.5109634399414,
+        -89.49571990966797,
+        42.537105560302734
+      ],
+      "flange_pose_mm_deg": [
+        -104.28168487548828,
+        149.62698364257812,
+        348.13616943359375,
+        179.848388671875,
+        0.5452762246131897,
+        -42.00151824951172
+      ],
+      "tcp_pose_mm_deg": [
+        -104.28168487548828,
+        149.62698364257812,
+        348.13616943359375,
+        179.848388671875,
+        0.5452756285667419,
+        -42.00173568725586
+      ],
+      "gripper_closed": false,
+      "timestamp": 1791860034.2631938,
+      "flange_pose_source": "CONTROLLER",
+      "last_error": null,
+      "trajectory_stage": "IDLE",
+      "placement_version": 1,
+      "joints_valid": true,
+      "tcp_valid": true,
+      "measurement_timestamp": 1791860034.2631938,
+      "telemetry_error": null
+    },
+    {
+      "robot_model": "FR3",
+      "connected": true,
+      "motion_state": "IDLE",
+      "joints_deg": [
+        -89.46525573730469,
+        -128.6229248046875,
+        106.87696075439453,
+        -68.5107421875,
+        -89.49549865722656,
+        42.537105560302734
+      ],
+      "flange_pose_mm_deg": [
+        -104.28150177001953,
+        149.6273651123047,
+        348.1361999511719,
+        179.84823608398438,
+        0.545435905456543,
+        -42.001956939697266
+      ],
+      "tcp_pose_mm_deg": [
+        -104.281494140625,
+        149.6269989013672,
+        348.13580322265625,
+        179.84808349609375,
+        0.5452888607978821,
+        -42.001956939697266
+      ],
+      "gripper_closed": false,
+      "timestamp": 1791860034.4141753,
+      "flange_pose_source": "CONTROLLER",
+      "last_error": null,
+      "trajectory_stage": "IDLE",
+      "placement_version": 1,
+      "joints_valid": true,
+      "tcp_valid": true,
+      "measurement_timestamp": 1791860034.4141753,
+      "telemetry_error": null
+    },
+    {
+      "robot_model": "FR3",
+      "connected": true,
+      "motion_state": "IDLE",
+      "joints_deg": [
+        -89.46504211425781,
+        -128.62313842773438,
+        106.87696075439453,
+        -68.5107421875,
+        -89.49571990966797,
+        42.537322998046875
+      ],
+      "flange_pose_mm_deg": [
+        -104.28168487548828,
+        149.62698364257812,
+        348.13616943359375,
+        179.848388671875,
+        0.5452750325202942,
+        -42.001953125
+      ],
+      "tcp_pose_mm_deg": [
+        -104.28167724609375,
+        149.6258087158203,
+        348.1363525390625,
+        179.848388671875,
+        0.5452750325202942,
+        -42.001953125
+      ],
+      "gripper_closed": false,
+      "timestamp": 1791860034.5648496,
+      "flange_pose_source": "CONTROLLER",
+      "last_error": null,
+      "trajectory_stage": "IDLE",
+      "placement_version": 1,
+      "joints_valid": true,
+      "tcp_valid": true,
+      "measurement_timestamp": 1791860034.5648496,
+      "telemetry_error": null
+    }
+  ],
+  "connect_ok": true
+}

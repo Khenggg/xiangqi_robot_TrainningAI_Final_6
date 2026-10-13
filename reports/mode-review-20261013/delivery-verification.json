@@ -1,0 +1,47 @@
+[
+  {
+    "path": "main.py",
+    "matches": true,
+    "sha256": "c20244c89d169d3f8a31e86b85340a1496a8d8136eaac03d3224b91dada6b3d5"
+  },
+  {
+    "path": "src/core/ai_execution.py",
+    "matches": true,
+    "sha256": "8cdce3be15f76f26803578522b0b6acc7d673cb3ec0480af97e0fa4cdf294ca6"
+  },
+  {
+    "path": "src/core/self_play_controller.py",
+    "matches": true,
+    "sha256": "99ca1d6b2cad5e7ef77a0c7d09141b176220dd1e59e5fb57996a2c07b5551095"
+  },
+  {
+    "path": "src/ui/input_handler.py",
+    "matches": true,
+    "sha256": "4b44a4a64da551d604c13c96deed0580741476875ccba164b712f95e9b5ce07e"
+  },
+  {
+    "path": "src/vision/player_turn_arbiter.py",
+    "matches": true,
+    "sha256": "be5e74bfe8f847969b9f5c4158d00ac6ea385766f25a6ff02b28f9b43d466919"
+  },
+  {
+    "path": "CURRENT_STATE.md",
+    "matches": true,
+    "sha256": "24c8c3aba07267292831ec1ba87fb969270f983218e0477a809a3f9d21597ce3"
+  },
+  {
+    "path": "KNOWN_ISSUES.md",
+    "matches": true,
+    "sha256": "0ea19a3d2a049cde5b0ca04539216180c980e29c5eef12fd90cffe2d006c2782"
+  },
+  {
+    "path": "tests/unit/test_game_modes_review.py",
+    "matches": true,
+    "sha256": "fbf960fa5d5902df31eb570e481a59b927c25eff051f811dca2efb9ec39d9c48"
+  },
+  {
+    "path": "docs/GAME_MODE_REVIEW_20261013.md",
+    "matches": true,
+    "sha256": "2f12866aa3d030ff7e833035c8c91325d1155b84bbaa18f640af74ccd7508001"
+  }
+]

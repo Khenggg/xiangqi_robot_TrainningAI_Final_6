@@ -84,14 +84,19 @@ PROJECT_TO_SHORT["."] = "."
 PROJECT_TO_SHORT["x"] = "x"
 
 
-def validate_board_sanity(board: List[List[str]]) -> Tuple[bool, Optional[str]]:
+def validate_board_sanity(board: List[List[str]], *, missing_king_color=None) -> Tuple[bool, Optional[str]]:
     """Kiểm tra tính hợp lệ cơ bản của bàn cờ tướng (Sanity check).
 
     Phát hiện các trạng thái bất thường / lỗi nhận diện như:
       - Thiếu hoặc thừa Tướng (Red King 'r_K', Black King 'b_K')
       - Tướng nằm ngoài Cung (Palace)
       - Số lượng quân vượt quá giới hạn luật cờ (tối đa 16 quân mỗi bên)
+
+    ``missing_king_color`` chỉ dùng khi đối soát nước ăn Tướng đã biết.
+    Mặc định vẫn bắt buộc đủ hai Tướng.
     """
+    if missing_king_color not in (None, "r", "b"):
+        return False, "Invalid terminal king color"
     if not board or len(board) != 10 or any(len(r) != 9 for r in board):
         return False, "Kích thước ma trận bàn cờ không hợp lệ (phải là 10 hàng x 9 cột)"
 
@@ -116,20 +121,24 @@ def validate_board_sanity(board: List[List[str]]) -> Tuple[bool, Optional[str]]:
             elif p.startswith("b"):
                 black_count += 1
 
-    if len(r_kings) != 1:
-        return False, f"Bàn cờ không hợp lệ: Yêu cầu đúng 1 Tướng Đỏ (r_K), phát hiện {len(r_kings)}"
-    if len(b_kings) != 1:
-        return False, f"Bàn cờ không hợp lệ: Yêu cầu đúng 1 Tướng Đen (b_K), phát hiện {len(b_kings)}"
+    red_required = 0 if missing_king_color == "r" else 1
+    black_required = 0 if missing_king_color == "b" else 1
+    if len(r_kings) != red_required:
+        return False, f"Bàn cờ không hợp lệ: Yêu cầu đúng {red_required} Tướng Đỏ (r_K), phát hiện {len(r_kings)}"
+    if len(b_kings) != black_required:
+        return False, f"Bàn cờ không hợp lệ: Yêu cầu đúng {black_required} Tướng Đen (b_K), phát hiện {len(b_kings)}"
 
     # Cung Tướng Đỏ: cột 3..5, hàng 7..9
-    rk_c, rk_r = r_kings[0]
-    if not (3 <= rk_c <= 5 and 7 <= rk_r <= 9):
-        return False, f"Tướng Đỏ ở vị trí ({rk_c}, {rk_r}) ngoài Cung (cột 3-5, hàng 7-9)"
+    if r_kings:
+        rk_c, rk_r = r_kings[0]
+        if not (3 <= rk_c <= 5 and 7 <= rk_r <= 9):
+            return False, f"Tướng Đỏ ở vị trí ({rk_c}, {rk_r}) ngoài Cung (cột 3-5, hàng 7-9)"
 
     # Cung Tướng Đen: cột 3..5, hàng 0..2
-    bk_c, bk_r = b_kings[0]
-    if not (3 <= bk_c <= 5 and 0 <= bk_r <= 2):
-        return False, f"Tướng Đen ở vị trí ({bk_c}, {bk_r}) ngoài Cung (cột 3-5, hàng 0-2)"
+    if b_kings:
+        bk_c, bk_r = b_kings[0]
+        if not (3 <= bk_c <= 5 and 0 <= bk_r <= 2):
+            return False, f"Tướng Đen ở vị trí ({bk_c}, {bk_r}) ngoài Cung (cột 3-5, hàng 0-2)"
 
     if red_count > 16:
         return False, f"Số lượng quân Đỏ vượt quá giới hạn ({red_count} > 16)"
@@ -389,6 +398,7 @@ class CChessRecognizer:
         pose_model_path: Union[str, Path],
         layout_model_path: Union[str, Path],
         use_gpu: bool = False,
+        cpu_threads: int = 2,
     ):
         """
         Args:
@@ -401,17 +411,34 @@ class CChessRecognizer:
 
         providers = ["CPUExecutionProvider"]
         if use_gpu and "CUDAExecutionProvider" in ort.get_available_providers():
-            providers.insert(0, "CUDAExecutionProvider")
+            # On Windows, importing CUDA-enabled Torch loads the CUDA/cuDNN
+            # DLLs shipped with its wheel. ORT uses matching CUDA12/cuDNN9.
+            import torch
+            providers.insert(0, ("CUDAExecutionProvider", {
+                "cudnn_conv_algo_search": "HEURISTIC",
+                "cudnn_conv_use_max_workspace": "0",
+            }))
 
+        # Leave CPU capacity for capture, SDL and telemetry; idle model pools
+        # must not spin while another model or the UI is working.
+        if isinstance(cpu_threads, bool) or not isinstance(cpu_threads, int) or cpu_threads < 1:
+            raise ValueError("cpu_threads must be a positive integer")
+        session_options = ort.SessionOptions()
+        session_options.intra_op_num_threads = cpu_threads
+        session_options.inter_op_num_threads = 1
+        session_options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+        session_options.add_session_config_entry("session.inter_op.allow_spinning", "0")
         # 1. Khởi tạo RTMPose Session
-        self.pose_session = ort.InferenceSession(self.pose_model_path, providers=providers)
+        self.pose_session = ort.InferenceSession(self.pose_model_path, sess_options=session_options, providers=providers)
         self.pose_input_name = self.pose_session.get_inputs()[0].name
         self.pose_input_size = (256, 256)  # (w, h)
         self.pose_padding = 1.25
 
         # 2. Khởi tạo Layout Classifier Session
-        self.layout_session = ort.InferenceSession(self.layout_model_path, providers=providers)
+        self.layout_session = ort.InferenceSession(self.layout_model_path, sess_options=session_options, providers=providers)
         self.layout_input_name = self.layout_session.get_inputs()[0].name
+        print(f"[CChess] Providers: pose={self.pose_session.get_providers()}, "
+              f"layout={self.layout_session.get_providers()}")
         self.layout_input_size = (280, 315)  # (w, h)
         self.layout_crop_size = (400, 450)  # (w, h)
         self.rectified_board_size = (450, 500)  # (w, h)

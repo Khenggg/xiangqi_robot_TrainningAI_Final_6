@@ -1,0 +1,8 @@
+{
+  "main.py": "c20244c89d169d3f8a31e86b85340a1496a8d8136eaac03d3224b91dada6b3d5",
+  "src/core/ai_execution.py": "8cdce3be15f76f26803578522b0b6acc7d673cb3ec0480af97e0fa4cdf294ca6",
+  "src/core/self_play_controller.py": "99ca1d6b2cad5e7ef77a0c7d09141b176220dd1e59e5fb57996a2c07b5551095",
+  "src/ui/input_handler.py": "4b44a4a64da551d604c13c96deed0580741476875ccba164b712f95e9b5ce07e",
+  "src/vision/player_turn_arbiter.py": "be5e74bfe8f847969b9f5c4158d00ac6ea385766f25a6ff02b28f9b43d466919",
+  "tests/unit/test_game_modes_review.py": "fbf960fa5d5902df31eb570e481a59b927c25eff051f811dca2efb9ec39d9c48"
+}

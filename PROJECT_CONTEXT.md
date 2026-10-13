@@ -1,3 +1,9 @@
+# Current reliability boundary (2026-10-12)
+
+Read `docs/RELIABILITY_FIXES_20261012.md` for the current physical execution/display split. User-directed physical coordinates and Z come from visual-correction-v2 (`fb0598d`); virtual motion retains its collision guard. Physical simulation is a read-only mirror and command animation, not a collision-planning gate. Missing board contact calibration does not block raw arm telemetry or donor-mapped physical commands, but prevents claiming board/piece alignment. Hardware is unverified in this change.
+
+---
+
 # Current integration authority (2026-10-04)
 
 Read `docs/VISUAL_UNIFIED_INTEGRATION_20261004.md` first for the current source ownership and runtime boundaries. Camera/game/AI/physical control now follow visual-correction-v2; simulation/viewer and shared geometry follow unified-robot-vs-robot. Default operation is VIRTUAL/DRY_RUN. Physical connect is read-only; measured physical parity remains a separate gate.

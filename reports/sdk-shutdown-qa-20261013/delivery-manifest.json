@@ -1,0 +1,7 @@
+{
+  "src/hardware/robot_sdk_core.py": "c8295c77e5491f63bd6c0ce3b95505a15a5ed0591e8e7bcb0fb635a757df61c1",
+  "tests/unit/test_sdk_shutdown_qa.py": "94b0a6163beb7153312a08b92d438dca21781f57e898d83e4c71fbd8bd93e806",
+  "docs/LIVE_QA_SDK_SHUTDOWN_20261013.md": "171024263a214791c02fdf380d19cf89c56961421306a539120bdfb9adc28d3c",
+  "CURRENT_STATE.md": "2124b7d1d31e80807266ee8e34a9814e48a594f1a8bd02200a66c34334576ca6",
+  "KNOWN_ISSUES.md": "82b7e49d7b6859b3715f9d92e93032b709ed3d8a492fe1eeacc6dd1b10279d9b"
+}

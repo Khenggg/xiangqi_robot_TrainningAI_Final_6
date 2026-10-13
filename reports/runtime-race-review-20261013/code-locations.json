@@ -1,0 +1,32 @@
+{
+  "main.py": [
+    {
+      "line": 278,
+      "text": "if event.type == pygame.QUIT:"
+    }
+  ],
+  "src/core/self_play_controller.py": [
+    {
+      "line": 54,
+      "text": "def _ui_worker_busy(self):"
+    },
+    {
+      "line": 124,
+      "text": "def start(self, red_difficulty: str = \"medium\", black_difficulty: str = \"medium\", run_mode: str = \"step\") -> bool:"
+    },
+    {
+      "line": 195,
+      "text": "def request_next_move(self) -> bool:"
+    },
+    {
+      "line": 238,
+      "text": "def tick(self):"
+    }
+  ],
+  "src/ui/input_handler.py": [
+    {
+      "line": 231,
+      "text": "def _retry_visual_pick(self):"
+    }
+  ]
+}

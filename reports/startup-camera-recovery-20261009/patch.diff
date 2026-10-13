@@ -1,0 +1,130 @@
+--- a/main.py
++++ b/main.py
+@@ -98,6 +98,7 @@
+ input_mgr = None
+ difficulty_menu_active = False
+ home_screen_active = True
++startup_message = ""
+ settings_menu_active = False
+ difficulty_menu_message = ""
+ debug_dashboard = None
+@@ -171,7 +172,7 @@
+         if settings_menu_active:
+             renderer.draw_settings_menu(getattr(config, "DEBUG_DASHBOARD", False))
+         elif home_screen_active:
+-            renderer.draw_home_screen()
++            renderer.draw_home_screen(startup_message)
+         else:
+             renderer.draw_ui(state.get_render_state())
+             renderer.draw_pieces(state.pick_test_board if state.pick_test_mode else state.board)
+@@ -201,7 +202,19 @@
+                     config.GAME_MODE = {"self_play": "ROBOT_VS_ROBOT", "human_vs_human": "HUMAN_VS_HUMAN"}.get(home_action, "HUMAN_VS_ROBOT")
+                     # Connecting to the robot and calibrating the camera can block, so defer
+                     # both until the player explicitly chooses to play against the robot.
+-                    hw = HardwareManager(config, _BASE_DIR).initialize_all()
++                    startup_message = ""
++                    try:
++                        hw = HardwareManager(config, _BASE_DIR).initialize_all()
++                    except Exception as exc:
++                        # initialize_all releases its partially initialized manager.
++                        # Keep the launcher available for an explicit operator retry.
++                        hw = None
++                        startup_message = (
++                            f"Không khởi tạo được: {exc}. "
++                            "Khắc phục thiết bị rồi chọn chế độ lại. Chi tiết trong logs/ (STARTUP_FAILED)."
++                        )
++                        log_event("startup.blocked", startup_message, level=logging.WARNING)
++                        continue
+                     telemetry = TelemetryPublisher(host=config.TELEMETRY_HOST, port=config.TELEMETRY_PORT, robot_model="FR3")
+                     bridge = hw.setup_digital_twin(telemetry)
+                     if bridge is not None:
+--- a/src/ui/board_renderer.py
++++ b/src/ui/board_renderer.py
+@@ -503,7 +503,7 @@
+             note = self.log_font.render(message, True, VERMILION_COLOR)
+             self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 950)))
+ 
+-    def draw_home_screen(self):
++    def draw_home_screen(self, message=""):
+         """Draw the launcher shown before the player chooses a game mode."""
+         self._draw_ink_wash_background()
+ 
+@@ -533,6 +533,23 @@
+             self.screen.blit(text, text.get_rect(center=rect.center))
+         hint = self.log_font.render("Self-play: F7 next move / F8 stop. Camera full scan: F4", True, JADE_DARK)
+         self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 914)))
++        if message:
++            # Wrap device errors below the controls, inside the logical canvas.
++            self._draw_panel(pygame.Rect(64, 940, SCREEN_WIDTH - 128, 128),
++                             fill=(249, 245, 232), border=VERMILION_COLOR, radius=12)
++            lines, line = [], ""
++            for word in str(message).split():
++                candidate = f"{line} {word}".strip()
++                if line and self.log_font.size(candidate)[0] > SCREEN_WIDTH - 160:
++                    lines.append(line)
++                    line = word
++                else:
++                    line = candidate
++            if line:
++                lines.append(line)
++            for index, text in enumerate(lines[:4]):
++                note = self.log_font.render(text, True, VERMILION_COLOR)
++                self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 966 + 25 * index)))
+ 
+     @staticmethod
+     def home_action_from_pixel(px, py):
+--- a/CURRENT_STATE.md
++++ b/CURRENT_STATE.md
+@@ -1,3 +1,9 @@
++## 2026-10-09 startup device failure recovery
++
++- main.py now catches initialization failures locally, retains the home screen and displays wrapped failure/retry guidance. initialize_all retains ownership of partial-startup cleanup; no implicit device substitution or calibration override.
++- 25 targeted startup/camera/window tests passed; Python3.12 real-entrypoint probe retained the GUI through two mocked camera failures, with no controller connection or APP_UNHANDLED. Scoped Luna review: no blocker.
++- Live log diagnosis: camera index1 supplied no frame while WindowsCamera process was present; physical mirror also refused an uncalibrated board contact offset. Camera readiness and physical calibration remain unresolved/untested. Evidence: reports/startup-camera-recovery-20261009/REPORT.md.
++
+ ## 2026-10-09 Windows viewer startup repair
+ 
+ - Windows setup now installs pinned local Three.js modules, including dev dependencies; startup checks required assets and reports missing installation with actionable guidance.
+--- a/KNOWN_ISSUES.md
++++ b/KNOWN_ISSUES.md
+@@ -1,3 +1,8 @@
++## 2026-10-09 physical startup blockers
++
++- Latest physical-session log (17:57:39) could not read camera index1; WindowsCamera was running when inspected. Device contention is plausible, not conclusively proven. Close competing camera apps and retry; the GUI now keeps the home screen with an error on startup failure.
++- That session also refused physical mirroring because BOARD_CALIBRATION_OFFSET_MM was unset. This patch does not invent a contact offset or bypass calibration; physical viewer/motion readiness is not proven.
++
+ ## 2026-10-09 Windows viewer startup scope
+ 
+ - Setup now includes the local Three.js dependency; missing modules produce an explicit setup error. Module MIME handling and RUN.bat argument forwarding/exit status were repaired and verified in isolation.
+--- a/docs/START_PROJECT.md
++++ b/docs/START_PROJECT.md
+@@ -2,10 +2,10 @@
+ 
+ Chạy lệnh tại thư mục repo bằng môi trường Python đã cài các dependencies.
+ 
+-Trên Windows: chạy `SETUP_WINDOWS.bat` một lần để cài Python dependencies và
+-Three.js theo `package-lock.json` (cần Node.js LTS/npm). Sau đó dùng `RUN.bat`;
+-tham số được chuyển nguyên vẹn vào `main.py`, ví dụ `RUN.bat --physical`,
+-`RUN.bat --virtual` hoặc `RUN.bat --viewer-port 8090 --telemetry-port 8770`.
++Trong PowerShell: chạy `.\SETUP_WINDOWS.bat` một lần để cài Python dependencies và
++Three.js theo `package-lock.json` (cần Node.js LTS/npm). Sau đó dùng `.\RUN.bat`;
++tham số được chuyển nguyên vẹn vào `main.py`, ví dụ `.\RUN.bat --physical`,
++`.\RUN.bat --virtual` hoặc `.\RUN.bat --viewer-port 8090 --telemetry-port 8770`.
+ Mặc định vẫn là mô phỏng; `--physical` kết nối ban đầu chỉ đọc.
+ 
+ Nếu viewer trống: xem lỗi `VIEWER_FAILED` trong phiên log. Thiếu module Three.js
+@@ -67,3 +67,14 @@
+ - Node kiểm tra cú pháp viewer và `test_viewer_camera_reconciliation.mjs` qua: vị trí, ẩn quân bị ăn và khôi phục snapshot.
+ - Full regression đầu tiên: 655 qua / 3 thất bại. Hai lỗi mới về mock cấu hình đã sửa và kiểm tra lại trong gate 108 ca. Ca `test_phase3_final_g90_corrective.py::Phase3FinalG90CorrectiveTests::test_shortened_tool_rejects_unreachable_near_center_critical_routes` cũng thất bại trên worktree baseline sạch `7d8c5de`: test kỳ vọng pose không tới được nhưng backend chấp nhận. Chưa sửa hoặc kết luận lại hợp đồng vùng với tới trong đợt này. Không tuyên bố full suite đã qua.
+ - Đường bật FR3 được kiểm bằng mock; calibration thực, chuyển động và đồng bộ camera/robot ngoài đời chưa được kiểm chứng.
++
++## Khi chọn chế độ nhưng khởi tạo thiết bị thất bại
++
++Game giữ màn hình đầu và hiện lỗi để bạn khắc phục rồi chọn lại chế độ.
++Nếu không đọc được camera: đóng Windows Camera/OBS/Teams và các phiên game khác
++đang dùng thiết bị, kiểm tra VIDEO_INDEX/VIDEO_SOURCE và quyền camera Windows.
++Không tự chuyển sang camera khác; camera đúng phải cung cấp frame hợp lệ.
++
++Nếu log báo Physical board surface contact offset has not been calibrated,
++viewer đồng bộ phần cứng chưa sẵn sàng. Cần calibration điểm chạm bàn có
++nguồn gốc phép đo; chiều dài CAD gripper không tự thay thế phép đo này.

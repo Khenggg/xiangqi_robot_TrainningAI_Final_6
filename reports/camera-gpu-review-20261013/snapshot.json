@@ -1,0 +1,8 @@
+{
+  "config.py": "0f47a4aefad5e6dbde0fcecdcd9bf8065d81bcbe86c0c57c670587626ddece98",
+  "src/vision/camera_monitor.py": "bd766d441459deba1c3730f19734b25bdc26bfebef7f482c52c20c18becf87b1",
+  "src/vision/cchess_recognizer.py": "b8bff6a9114783178f066b60e7cf0ef51ba04fdead11ce6bd20adf9cd723a2dd",
+  "src/vision/camera_startup.py": "abce26f68c2a6a4983116b8f02981b010bfec377860b49c1879edfe007c67e83",
+  "src/core/project_logging.py": "bb7f77dd989ac4f27ed5d2920198a17474b0266384ade1c5dfc8dc86ad63cc3e",
+  "src/vision/camera_source.py": "0dc2565a248b4bce22668795a93728b5d4b92fb0a9fe7bc3c2590253385b8efa"
+}

@@ -1,0 +1,175 @@
+--- before/src/hardware/robot_sdk_core.py
++++ after/src/hardware/robot_sdk_core.py
+@@ -287,75 +287,50 @@
+             self.robot = BoundedRPCProxy(link)
+ 
+     def connect_to_robot(self):
+-        """连接到机器人的实时端口"""
+-        # print("SDK连接机器人")
+-        self.sock_cli_state = socket.socket(socket.AF_INET, socket.SOCK_STREAM)#套接字连接机器人20004端口，用于实时更新机器人状态数据
+-        self.sock_cli_state.settimeout(0.3)  # 设置超时时间为 0.05 秒
++        """Open only the read-only state socket, unless shutdown was requested."""
++        if self.closeRPC_state or self.stop_event.is_set():
++            return False
++        state_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
++        state_socket.settimeout(0.3)
++        self.sock_cli_state = state_socket
+         try:
+-            self.sock_cli_state.connect((self.ip_address, self.ROBOT_REALTIME_PORT))
++            state_socket.connect((self.ip_address, self.ROBOT_REALTIME_PORT))
++            if self.closeRPC_state or self.stop_event.is_set():
++                state_socket.close()
++                self.sock_cli_state_state = False
++                return False
+             self.sock_cli_state_state = True
+-        except socket.timeout:
+-            # print("连接超时，请检查网络连接。")
++            return True
++        except Exception as exc:
++            state_socket.close()
+             self.sock_cli_state_state = False
++            if not self.closeRPC_state and not self.stop_event.is_set():
++                self.log_warning(f"State socket 20004 unavailable: {exc}")
+             return False
+-        except Exception as ex:
+-            self.sock_cli_state_state = False
+-            print("SDK连接机器人实时端口失败", ex)
++
++    def reconnect(self):
++        """Retry state-socket connection; shutdown interrupts waits and attempts."""
++        self.reconnect_flag = True
++        self.SDK_state = False
++        try:
++            for _ in range(1000):
++                if self.closeRPC_state or self.stop_event.is_set():
++                    return False
++                state_socket = self.sock_cli_state
++                if state_socket is not None:
++                    state_socket.close()
++                    self.sock_cli_state = None
++                if self.connect_to_robot():
++                    if self.closeRPC_state or self.stop_event.is_set():
++                        return False
++                    self.SDK_state = True
++                    return True
++                if self.stop_event.wait(2):
++                    return False
++            self.log_error("State socket reconnect exhausted")
+             return False
+-        return True
+-
+-    def reconnect(self):
+-        """自动重连"""
+-        max_retries = 1000
+-        retry_interval = 2  # 2秒
+-        # with self.lock:  # 加锁
+-        # RPC.is_conect = False
+-        # print("断联")
+-        self.reconnect_flag = True
+-        for attempt in range(max_retries):
+-            # print(f"尝试重新连接，第 {attempt + 1} 次")
+-            # print(f"尝试重新连接")
+-            # 确保 self.sock_cli_state 是新的 socket 对象
+-            if self.sock_cli_state:
+-                self.sock_cli_state.close()  # 关闭旧的 socket
+-                self.sock_cli_state = None  # 重置为 None
+-            # 重新初始化 XML-RPC 连接
+-            # self.robot = None
+-            # link = 'http://' + self.ip_address + ":20003"
+-            # self.robot = BoundedRPCProxy(link)
+-            # 尝试连接
+-
+-            if self.connect_to_robot():
+-                # print("重新连接成功")
+-                self.SDK_state = True
+-                self.reconnect_flag = False
+-                return True
+-                # 验证 XML-RPC 连接
+-                # try:
+-                #     time.sleep(1)
+-                #     self.Mode(0)  # 调用一个简单的 XML-RPC 方法
+-                #     time.sleep(1)
+-                #     self.Mode(1)  # 调用一个简单的 XML-RPC 方法
+-                #     time.sleep(1)
+-                #     # self.robot.Mode(0)  # 调用一个简单的 XML-RPC 方法
+-                #     # time.sleep(1)
+-                #     # self.robot.Mode(1)  # 调用一个简单的 XML-RPC 方法
+-                #     # time.sleep(1)
+-                #     # self.Mode(0)  # 调用一个简单的 XML-RPC 方法
+-                #     print("XML-RPC 连接验证成功")
+-                #     self.reconnect_flag = False
+-                #     # RPC.is_conect = True
+-                #     return True
+-                # except Exception as ex:
+-                #     print("XML-RPC 连接验证失败:", ex)
+-                #     self.SDK_state = False
+-            else:
+-                # print(f"重新连接失败，等待 {retry_interval} 秒后重试...")
+-                time.sleep(retry_interval)
+-
+-        print("已达到最大重连次数，连接失败")
+-        self.SDK_state = False
+-        return False
++        finally:
++            self.reconnect_flag = False
+         #
+         # print("自动重连机制")
+         # for i in range(1,6):
+@@ -10726,34 +10701,33 @@
+     """
+ 
+     @log_call
+-    @xmlrpc_timeout
+-
+     def CloseRPC(self):
+-        # 设置停止事件以通知线程停止
++        """Stop local SDK threads/sockets even when XML-RPC startup failed."""
++        self.closeRPC_state = True
++        self.robot_realstate_exit = True
+         self.stop_event.set()
+-
+-        # 如果线程仍在运行，则等待其结束
+-        # if self.thread.is_alive():
+-        #     self.thread.join()
+-
+-        # 清理 XML-RPC 代理
+-        if self.robot is not None:
+-            self.robot = None  # 将代理设置为 None，释放资源
+-            self.sock_cli_state.close()
+-            self.sock_cli_state = None
+-            self.robot_state_pkg = None
+-            self.closeRPC_state = True
+-            # self.robot_realstate_exit = False
+-
+-        # 如果线程仍在运行，则等待其结束
+-        if self.thread.is_alive():
+-            self.thread.join(timeout=2)
+-            if self.thread.is_alive():
++        self.SDK_state = False
++        self.is_conect = False
++        state_socket = self.sock_cli_state
++        if state_socket is not None:
++            try:
++                state_socket.shutdown(socket.SHUT_RDWR)
++            except OSError:
++                pass
++            state_socket.close()
++        thread = self.thread
++        if thread.is_alive():
++            if thread is threading.current_thread():
++                raise RuntimeError("SDK receiver cannot join itself")
++            thread.join(timeout=2)
++            if thread.is_alive():
+                 raise RuntimeError("SDK receiver has not stopped")
+-
+-
++        self.sock_cli_state = None
++        self.sock_cli_state_state = False
++        self.robot_state_pkg = None
++        self.robot = None
++        self.reconnect_flag = False
+         print("RPC connection closed.")
+-        return
+ 
+     """   
+     @brief 记录示教点

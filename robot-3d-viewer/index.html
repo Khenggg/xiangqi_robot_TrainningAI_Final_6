@@ -4,13 +4,25 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>FR3/FR5 · 3D Live Mirror</title>
+    <script>
+      window.reportProjectDiagnostic = (error, source) => {
+        if (new URLSearchParams(location.search).get("autoconnect") !== "1") return;
+        fetch("./diagnostics", {method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({message: String(error?.message || error).slice(0, 1000),
+            stack: String(error?.stack || "").slice(0, 4000), source}), keepalive: true}).catch(() => {});
+      };
+      window.addEventListener("error", (e) => window.reportProjectDiagnostic(
+        e.error || e.message || `Không tải được tài nguyên: ${e.target?.src || e.target?.href || "unknown"}`,
+        "window.error"), true);
+      window.addEventListener("unhandledrejection", (e) => window.reportProjectDiagnostic(e.reason, "promise.rejection"));
+    </script>
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/occt-import-js.min.js"></script>
     <script type="importmap">
       {
         "imports": {
-          "three": "https://cdn.jsdelivr.net/npm/three@0.176.0/build/three.module.js",
-          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.176.0/examples/jsm/"
+          "three": "/vendor/three/build/three.module.js",
+          "three/addons/": "/vendor/three/examples/jsm/"
         }
       }
     </script>
@@ -182,7 +194,7 @@
 
               <div class="diag-row">
                 <span>Công cụ (Tool Offset):</span>
-                <strong id="diagToolOffset" style="color: #58a6ff">150mm [MEASURED_APPROXIMATE]</strong>
+                <strong id="diagToolOffset" style="color: #58a6ff">Đang đọc tool profile…</strong>
               </div>
               <div class="diag-row">
                 <span>Visual Asset:</span>
@@ -223,8 +235,11 @@
               <div class="panel-actions" style="margin-top: 8px;">
                 <button id="btnLoadSimTeachingPoints" class="action-btn">Lấy 4 điểm từ bàn mô phỏng</button>
                 <button id="btnApplyTeachingPoints" class="action-btn primary-action">Áp dụng R1–R4</button>
+                <button id="btnSaveBoardProfile" class="action-btn">Lưu vị trí đã áp dụng</button>
+                <button id="btnLoadBoardProfile" class="action-btn">Khôi phục profile đã lưu</button>
               </div>
               <div id="teachingPointsStatus" role="status" style="font-size: 11px; margin-top: 6px; color: #aab7c8;">Kết nối live để nạp bốn điểm hiện tại.</div>
+              <small>Profile chỉ dùng cho mô phỏng. Sau khi khởi động lại: chuẩn bị SERVICE_SAFE rồi khôi phục. Chưa lưu các ô đang nhập.</small>
             </section>
             <div class="panel-section-header">
               <strong>📐 THIẾT LẬP VỊ TRÍ BÀN CỜ (DYNAMIC PLACEMENT)</strong>

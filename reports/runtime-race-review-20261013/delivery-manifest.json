@@ -1,0 +1,37 @@
+[
+  {
+    "path": "main.py",
+    "before_sha256": "c20244c89d169d3f8a31e86b85340a1496a8d8136eaac03d3224b91dada6b3d5",
+    "after_sha256": "e75dd6326cc0ce88484d6f7c13b60582c0d2dcacf13203573d97837565517400"
+  },
+  {
+    "path": "src/core/self_play_controller.py",
+    "before_sha256": "99ca1d6b2cad5e7ef77a0c7d09141b176220dd1e59e5fb57996a2c07b5551095",
+    "after_sha256": "038cbd72202c4f09088fbf87da9b3dce57947a8dd62dc769eea2df9d0e52ac7f"
+  },
+  {
+    "path": "src/ui/input_handler.py",
+    "before_sha256": "4b44a4a64da551d604c13c96deed0580741476875ccba164b712f95e9b5ce07e",
+    "after_sha256": "57cbb69456d1bd57d5f8f379e984d23fbf16b335febc47527db544f6fecc118a"
+  },
+  {
+    "path": "CURRENT_STATE.md",
+    "before_sha256": "24c8c3aba07267292831ec1ba87fb969270f983218e0477a809a3f9d21597ce3",
+    "after_sha256": "60ce5ed6f32c104581e4572f7fd271434e076d2e49e9fbcf8d419d8fd98ab519"
+  },
+  {
+    "path": "KNOWN_ISSUES.md",
+    "before_sha256": "0ea19a3d2a049cde5b0ca04539216180c980e29c5eef12fd90cffe2d006c2782",
+    "after_sha256": "e84bd143fa653f8ab4e206539495ea8492a5b47b0844db03c90ef33f1693432a"
+  },
+  {
+    "path": "tests/unit/test_runtime_race_review.py",
+    "before_sha256": null,
+    "after_sha256": "eebe3ebad3b8ddb9e443c8d6690d1d23538534d3760e80b64ff02cfe86a0e092"
+  },
+  {
+    "path": "docs/RUNTIME_RACE_REVIEW_20261013.md",
+    "before_sha256": null,
+    "after_sha256": "3854c7830e6aff039d6c9a2b4498a745780e379967623a50f1adcc53c989bf93"
+  }
+]

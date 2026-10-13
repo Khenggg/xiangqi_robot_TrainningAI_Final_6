@@ -1,0 +1,355 @@
+--- src/hardware/hardware_manager.py before
++++ src/hardware/hardware_manager.py after
+@@ -374,7 +374,9 @@
+                 pose_onnx = Path(self.project_dir) / "models" / "cchess" / "pose_4_v6.onnx"
+                 layout_onnx = Path(self.project_dir) / "models" / "cchess" / "layout_nano_v3.onnx"
+                 if pose_onnx.exists() and layout_onnx.exists():
+-                    self.cchess_recognizer = CChessRecognizer(pose_onnx, layout_onnx)
++                    self.cchess_recognizer = CChessRecognizer(
++                        pose_onnx, layout_onnx,
++                        use_gpu=getattr(self.config, "VISION_DEVICE", "auto") != "cpu")
+                     print("[INIT] [CChess] CChessRecognizer loaded successfully (pose + layout ONNX).")
+                 else:
+                     print("[INIT] [CChess] ONNX models not found in models/cchess/.")
+@@ -431,6 +433,7 @@
+                 model=self.model,
+                 perspective_path=self.perspective_path,
+                 cchess_recognizer=self.cchess_recognizer,
++                device_preference=getattr(self.config, "VISION_DEVICE", "auto"),
+             )
+             dist_thresh = getattr(self.config, "SNAPSHOT_MAX_DIST_THRESHOLD", 0.45)
+             foot_ratio = getattr(self.config, "SNAPSHOT_FOOT_RATIO", 0.50)
+@@ -499,6 +502,11 @@
+                     self.top_face_pick_estimator = None
+                     print(f"[TOP PICK] BLOCKED: {exc}. Run CALIBRATE_PICK_GEOMETRY.bat with RUN closed.")
+ 
++            # Start exactly once, after startup calibration/profile reads.
++            # The constructor only creates caches; without this there is no
++            # continuous capture/inference and snapshots immediately age out.
++            self.cam_monitor.start()
++
+     def cleanup(self):
+         failures = []
+         def close(name, operation):
+--- src/vision/camera_monitor.py before
++++ src/vision/camera_monitor.py after
+@@ -9,6 +9,8 @@
+ import time
+ import threading
+ import os
++import logging
++from src.core.project_logging import event
+ 
+ # Màu hiển thị
+ _PIECE_COLOR = (0, 255, 0)     # BGR - xanh lá (fallback YOLO)
+@@ -40,7 +42,7 @@
+     Các module khác (SnapshotDetector) nhận frame + detections từ đây.
+     """
+ 
+-    def __init__(self, cap, model=None, perspective_path=None, window_name="Camera Monitor", conf=0.25, cchess_recognizer=None):
++    def __init__(self, cap, model=None, perspective_path=None, window_name="Camera Monitor", conf=0.25, cchess_recognizer=None, *, device_preference="auto"):
+         """
+         Args:
+             cap: cv2.VideoCapture đã mở
+@@ -67,19 +69,28 @@
+         self._inference_error = None
+         self._max_result_age_s = 1.5
+         self._last_cchess_result = None  # Dict: {"success": True, "board": ..., "confidence": ...}
++        self._recognized_frame = None
++        self._last_inference_warning_at = 0.0
+         self._stop_event = threading.Event()  # Thread-safe shutdown signal
+         self._thread = None                 # Capture thread (30-60 FPS mượt mà)
+         self._detect_thread = None          # Detect thread (Async background)
+         self._lock = threading.Lock()       # Bảo vệ _last_frame/_last_detections
++        self._pick_scan_active = threading.Event()
++        self._pick_scan_lock = threading.Lock()
++        self._last_pick_diagnostic = None
++        self._pick_diagnostic_until = 0.0
+         self._cam_lock = threading.Lock()   # Bảo vệ truy cập camera (cap.read/grab)
+         self._board_polygon = None  # Cache polygon bàn cờ trong pixel space (4 điểm)
+ 
+-        # Tự động chọn GPU nếu có CUDA, ngược lại CPU
+-        try:
+-            import torch
+-            self.device = 0 if torch.cuda.is_available() else 'cpu'
+-        except Exception:
+-            self.device = 'cpu'
++        if device_preference not in ("auto", "cpu", "cuda", "gpu"):
++            raise ValueError("VISION_DEVICE must be auto, cpu or cuda")
++        self.device = 'cpu'
++        if device_preference != "cpu":
++            try:
++                import torch
++                self.device = 0 if torch.cuda.is_available() else 'cpu'
++            except Exception as exc:
++                print(f"[CAM MONITOR] CUDA unavailable; using CPU: {exc}")
+         if self.cchess_recognizer is not None:
+             print("[CAM MONITOR] CChessRecognizer layout enabled for live monitoring.")
+         if self.model is not None:
+@@ -193,6 +204,9 @@
+         """Luồng 1: Chuyên đọc frame liên tục từ camera ở tốc độ cao nhất (30-60 FPS).
+         Đảm bảo cửa sổ hiển thị mượt mà 100%, không bao giờ bị nghẽn bởi YOLO."""
+         while not self._stop_event.is_set():
++            if self._pick_scan_active.is_set():
++                self._stop_event.wait(.01)
++                continue
+             if self.cap is None or not self.cap.isOpened():
+                 time.sleep(0.1)
+                 continue
+@@ -218,6 +232,7 @@
+     def _record_inference_error(self, error):
+         with self._lock:
+             self._last_cchess_result = None
++            self._recognized_frame = None
+             self._last_detections = []
+             previous = self._inference_error
+             self._inference_error = str(error)
+@@ -258,6 +273,7 @@
+                     # Ultralytics numpy inputs are OpenCV BGR.
+                     results = self.model.predict(frame, conf=self.conf, iou=0.35,
+                                                  imgsz=640, device=self.device, verbose=False)
++                    self._limit_yolo_cpu_threads()
+                     for box in results[0].boxes:
+                         detections.append((int(box.cls[0]), float(box.conf[0]), tuple(map(int, box.xyxy[0]))))
+                     detections = self._filter_by_board(detections)
+@@ -273,6 +289,7 @@
+                 if sampled_at < self._last_inference_at:
+                     return None
+                 self._last_cchess_result = cchess_result
++                self._recognized_frame = frame
+                 self._last_detections = detections
+                 self._last_inference_at = sampled_at
+                 self._inference_error = None
+@@ -280,12 +297,21 @@
+ 
+     def _detect_loop(self):
+         while not self._stop_event.is_set():
++            if self._pick_scan_active.is_set():
++                self._stop_event.wait(.01)
++                continue
+             with self._lock:
+                 frame = self._last_frame.copy() if self._last_frame is not None else None
+                 sampled_at = self._last_frame_at
+                 fresh = time.monotonic() - sampled_at <= self._max_result_age_s
+             if frame is not None and fresh:
++                started = time.monotonic()
+                 self._infer_frame(frame, sampled_at)
++                elapsed = time.monotonic() - started
++                if elapsed > .5 and started - self._last_inference_warning_at >= 10:
++                    self._last_inference_warning_at = started
++                    event("camera.slow_inference", "Nhận diện camera chậm; giao diện tiếp tục dùng ảnh nền.",
++                          level=logging.WARNING, duration_ms=round(elapsed * 1000), device=str(self.device))
+             self._stop_event.wait(timeout=0.2)
+ 
+     def _draw_overlay(self, frame, detections):
+@@ -319,6 +345,8 @@
+         with self._lock:
+             cchess_res = (self._last_cchess_result.copy() if self._last_cchess_result
+                           and time.monotonic() - self._last_inference_at <= self._max_result_age_s else None)
++            if self._inference_error or time.monotonic() - self._last_inference_at > self._max_result_age_s:
++                detections = []  # Keep preview live; never draw old boxes as current detections.
+ 
+         if cchess_res and cchess_res.get("success") and self._inv_M is not None:
+             has_cchess = True
+@@ -351,6 +379,7 @@
+         # --- 3. Fallback YOLO nếu chưa có CChess ---
+         if not has_cchess and detections:
+             for (cls_id, conf, (x1, y1, x2, y2)) in detections:
++                x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+                 cv2.rectangle(display, (x1, y1), (x2, y2), _PIECE_COLOR, 2)
+                 text = f"piece {conf:.0%}"
+                 (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+@@ -369,6 +398,27 @@
+             cv2.putText(display, str(message)[:100], (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+         return display
+ 
++    def get_fresh_pick_snapshot(self):
++        """Measured BGR boxes from one fresh frame; failure is never empty evidence."""
++        from src.vision.pick_consensus import FreshPickTransientError
++        if self.cap is None or not self.cap.isOpened() or self.model is None:
++            raise RuntimeError("Raw pick requires an available camera and best.pt")
++        with self._cam_lock:
++            if self._stop_event.is_set():
++                raise RuntimeError("Camera is stopping")
++            for _ in range(5):
++                self.cap.grab()
++            ok, frame = self.cap.read()
++        if not ok or frame is None or not frame.size:
++            raise FreshPickTransientError("Fresh pick frame unavailable")
++        try:
++            results = self._predict_yolo(frame)
++            detections = [(int(box.cls[0]), float(box.conf[0]),
++                           tuple(map(float, box.xyxy[0]))) for box in results[0].boxes]
++        except Exception as exc:
++            raise FreshPickTransientError("best.pt inference failed") from exc
++        return frame, detections
++
+     def get_fresh_snapshot(self):
+         """Chụp 1 snapshot MỚI: flush buffer + read.
+         Cập nhật đồng thời CChess layout recognition và detections.
+@@ -404,6 +454,24 @@
+             if self._inference_error or time.monotonic() - self._last_inference_at > self._max_result_age_s:
+                 return None
+             return self._last_cchess_result.copy() if self._last_cchess_result is not None else None
++
++    def get_latest_observation(self):
++        """Atomic, non-inferencing sample for GUI polling; timestamp is monotonic.
++
++        Frame, boxes and layout all originate from the same inference. Never
++        pair newer preview pixels with older boxes or count one result twice.
++        Fresh command/verification snapshots still use get_fresh_snapshot.
++        """
++        with self._lock:
++            if (self._inference_error or self._recognized_frame is None
++                    or time.monotonic() - self._last_inference_at > self._max_result_age_s):
++                return None
++            result = self._last_cchess_result
++            if result is not None:
++                result = result.copy()
++                result["board"] = [row[:] for row in result["board"]]
++            return (self._last_inference_at, self._recognized_frame.copy(),
++                    list(self._last_detections), result)
+ 
+ 
+     def start(self):
+@@ -429,6 +497,8 @@
+             self._thread.join(timeout=2)
+         if self._detect_thread is not None and self._detect_thread.is_alive():
+             self._detect_thread.join(timeout=2)
++        if any(t is not None and t.is_alive() for t in (self._thread, self._detect_thread)):
++            raise RuntimeError("Camera worker still running; device kept open until worker stops")
+         
+         # 3. Release camera SAU KHI thread đã dừng
+         if self.cap is not None:
+@@ -457,7 +527,19 @@
+             detections = self._last_detections
+ 
+         if frame is not None:
+-            display = self._draw_overlay(frame, detections)
++            with self._lock:
++                diagnostic = getattr(self, "pick_debug_frame", None)
++                if diagnostic is None:
++                    diagnostic = self._last_pick_diagnostic
++                if diagnostic is not None and not self._pick_diagnostic_until:
++                    self._pick_diagnostic_until = time.monotonic() + 8.0
++                if diagnostic is not None and time.monotonic() >= self._pick_diagnostic_until:
++                    self.pick_debug_frame = None
++                    self._last_pick_diagnostic = None
++                    self._pick_diagnostic_until = 0.0
++                    diagnostic = None
++                diagnostic = diagnostic.copy() if diagnostic is not None else None
++            display = diagnostic if diagnostic is not None else self._draw_overlay(frame, detections)
+             cv2.imshow(self.window_name, display)
+ 
+         return cv2.waitKey(1)
+@@ -476,3 +558,39 @@
+                 self._last_frame.copy() if self._last_frame is not None else None,
+                 list(self._last_detections)
+             )
++
++    def publish_pick_diagnostic(self, frame):
++        """Display the exact measured snapshot, not an overlay on a newer frame."""
++        with self._lock:
++            self._last_pick_diagnostic = frame.copy()
++            self._pick_diagnostic_until = 0.0
++
++    def _predict_yolo(self, image):
++        with self._inference_lock:
++            results = self.model.predict(image, conf=self.conf, iou=0.35,
++                                         imgsz=640, device=self.device, verbose=False)
++            self._limit_yolo_cpu_threads()
++            return results
++
++    def _limit_yolo_cpu_threads(self):
++        # Ultralytics select_device resets Torch's pool during lazy predictor
++        # setup. Apply the UI budget after that first setup, while serialized
++        # by _inference_lock. Subsequent predictions keep this pool size.
++        if self.device == "cpu":
++            import torch
++            if torch.get_num_threads() != 2:
++                torch.set_num_threads(2)
++
++    def pick_scan_session(self):
++        """Pause background inference; all actual camera reads retain _cam_lock."""
++        from contextlib import contextmanager
++
++        @contextmanager
++        def session():
++            with self._pick_scan_lock:
++                self._pick_scan_active.set()
++                try:
++                    yield
++                finally:
++                    self._pick_scan_active.clear()
++        return session()
+--- src/vision/cchess_recognizer.py before
++++ src/vision/cchess_recognizer.py after
+@@ -411,7 +411,13 @@
+ 
+         providers = ["CPUExecutionProvider"]
+         if use_gpu and "CUDAExecutionProvider" in ort.get_available_providers():
+-            providers.insert(0, "CUDAExecutionProvider")
++            # On Windows, importing CUDA-enabled Torch loads the CUDA/cuDNN
++            # DLLs shipped with its wheel. ORT uses matching CUDA12/cuDNN9.
++            import torch
++            providers.insert(0, ("CUDAExecutionProvider", {
++                "cudnn_conv_algo_search": "HEURISTIC",
++                "cudnn_conv_use_max_workspace": "0",
++            }))
+ 
+         # Leave CPU capacity for capture, SDL and telemetry; idle model pools
+         # must not spin while another model or the UI is working.
+@@ -431,6 +437,8 @@
+         # 2. Khởi tạo Layout Classifier Session
+         self.layout_session = ort.InferenceSession(self.layout_model_path, sess_options=session_options, providers=providers)
+         self.layout_input_name = self.layout_session.get_inputs()[0].name
++        print(f"[CChess] Providers: pose={self.pose_session.get_providers()}, "
++              f"layout={self.layout_session.get_providers()}")
+         self.layout_input_size = (280, 315)  # (w, h)
+         self.layout_crop_size = (400, 450)  # (w, h)
+         self.rectified_board_size = (450, 500)  # (w, h)
+--- config.py before
++++ config.py after
+@@ -216,6 +216,7 @@
+ IDLE_Z = 348.199
+ # --- CCHESS RECOGNITION (ONNX) ---
+ CCHESS_RECOGNITION_ENABLED = True  # Bật/tắt CChess ONNX recognition bổ sung
++VISION_DEVICE = _runtime_os.environ.get("VISION_DEVICE", "auto").lower()
+ 
+ # Gameplay remains owned by the visual application.
+ GAME_MODE = _os.environ.get("GAME_MODE", "HUMAN_VS_ROBOT").upper()
+--- SETUP_WINDOWS.bat before
++++ SETUP_WINDOWS.bat after
+@@ -10,6 +10,12 @@
+ rem Combined project dependencies. Donor workstation pins are reference only.
+ ".venv312\Scripts\python.exe" -m pip install -r requirements.txt
+ if errorlevel 1 exit /b 1
++rem Preserve a verified GPU runtime; installing the CPU wheel over it breaks CUDA.
++".venv312\Scripts\python.exe" -m pip show onnxruntime-gpu >nul 2>&1
++if errorlevel 1 (
++    ".venv312\Scripts\python.exe" -m pip install "onnxruntime>=1.16"
++    if errorlevel 1 exit /b 1
++)
+ ".venv312\Scripts\python.exe" -c "import cv2,pygame,numpy,requests,torch,ultralytics,onnxruntime,pybullet,websockets; import src.hardware.hardware_manager,src.core.launch_options; print('Vision + simulation dependencies OK')"
+ if errorlevel 1 exit /b 1
+ rem Install the pinned local Three.js modules used by the web viewer.
+--- requirements.txt before
++++ requirements.txt after
+@@ -8,5 +8,6 @@
+ # Retained unified simulation and telemetry
+ pybullet>=3.2.6
+ websockets>=12,<16
+-onnxruntime>=1.16
++# Install exactly one ORT runtime via SETUP_WINDOWS.bat / SETUP_GPU.bat.
++# CPU and GPU wheels share the same Python package and must not coexist.
+ Pillow>=9.0
+--- src/ui/board_renderer.py before
++++ src/ui/board_renderer.py after
+@@ -365,6 +365,7 @@
+             mode = game_state.get("game_mode", "HUMAN_VS_ROBOT")
+             if mode == "ROBOT_VS_ROBOT":
+                 message = "Robot vs robot — F7: nước tiếp, F8: dừng"
++                accent = JADE_COLOR
+             elif mode == "HUMAN_VS_ROBOT" and game_state.get("turn") == "b":
+                 if game_state.get("robot_backend") == "PHYSICAL" and not game_state.get("is_robot_ready", True):
+                     if game_state.get("physical_enable_pending"):

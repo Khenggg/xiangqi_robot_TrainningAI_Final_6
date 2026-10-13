@@ -23,6 +23,8 @@ import threading
 import time
 import os
 import atexit
+import queue
+from collections import deque
 
 
 class MoonfishEngine:
@@ -55,6 +57,11 @@ class MoonfishEngine:
         self.process: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._ready = False
+        self.start_timeout_s = 10.0
+        self.request_timeout_s = 30.0
+        self._lines = queue.Queue(maxsize=1024)
+        self._stderr_tail = deque(maxlen=20)
+        self._readers = []
 
         if not os.path.isfile(engine_path):
             raise FileNotFoundError(
@@ -93,44 +100,61 @@ class MoonfishEngine:
 
         # Đăng ký atexit handler để đảm bảo subprocess bị kill khi thoát
         atexit.register(self._atexit_cleanup)
-
-        self._send('ucci')
-
-        # Wait for 'ucciok' (with 10-second timeout)
-        # Moonfish prints "Moonfish" first, then waits for commands
-        deadline = time.time() + 10
-        found_name = False
-        while time.time() < deadline:
-            line = self.process.stdout.readline().strip()
-            if not line:
-                # Check stderr for errors
-                if self.process.stderr:
-                    err_line = self.process.stderr.readline().strip()
-                    if err_line:
-                        print(f"[MOONFISH] stderr: {err_line}")
-                continue
-            
-            # Debug output (comment out for production)
-            # print(f"[MOONFISH] DEBUG: Received line: '{line}'")
-            
-            # Moonfish prints its name first
-            if line == 'Moonfish' or 'Moonfish' in line:
-                found_name = True
-                # print("[MOONFISH] Engine name received.")
-                continue
-            
-            if line == 'ucciok':
-                self._ready = True
-                print("[MOONFISH] Engine ready!")
-                return
-        
-        if found_name:
-            # Engine responded but didn't send ucciok - might be waiting for more input
+        self._start_readers()
+        try:
+            self._send('ucci')
+            deadline = time.monotonic() + self.start_timeout_s
+            while self._read_line(deadline) != 'ucciok':
+                pass
             self._ready = True
-            print("[MOONFISH] Engine ready (name received)!")
-            return
-            
-        raise RuntimeError("[MOONFISH] Engine did not respond with 'ucciok' in time.")
+            print("[MOONFISH] Engine ready!")
+        except Exception:
+            self.stop()
+            raise
+
+    def _start_readers(self):
+        process = self.process
+        lines = self._lines = queue.Queue(maxsize=1024)
+        self._stderr_tail.clear()
+        def drain(stream, stderr=False):
+            try:
+                for line in stream:
+                    if stderr:
+                        self._stderr_tail.append(line.rstrip()[:1000])
+                    else:
+                        try:
+                            lines.put_nowait(line.strip())
+                        except queue.Full:
+                            try:
+                                lines.get_nowait()
+                            except queue.Empty:
+                                pass
+                            try:
+                                lines.put_nowait(line.strip())
+                            except queue.Full:
+                                pass
+            finally:
+                if not stderr:
+                    try:
+                        lines.put_nowait(None)
+                    except queue.Full:
+                        pass
+        self._readers = [threading.Thread(target=drain, args=(process.stdout,), daemon=True),
+                         threading.Thread(target=drain, args=(process.stderr, True), daemon=True)]
+        for reader in self._readers:
+            reader.start()
+
+    def _read_line(self, deadline):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Moonfish response timed out; engine must restart")
+        try:
+            line = self._lines.get(timeout=remaining)
+        except queue.Empty as exc:
+            raise TimeoutError("Moonfish response timed out; engine must restart") from exc
+        if line is None:
+            raise RuntimeError("Moonfish exited: " + ' | '.join(self._stderr_tail))
+        return line
 
     def _atexit_cleanup(self):
         """Được gọi bởi atexit — force kill subprocess nếu vẫn còn chạy."""
@@ -156,6 +180,8 @@ class MoonfishEngine:
                     self.process.kill()
             self.process = None
             self._ready = False
+            for reader in self._readers:
+                reader.join(timeout=.2)
             print("[MOONFISH] Engine stopped.")
 
     def __del__(self):
@@ -213,17 +239,18 @@ class MoonfishEngine:
 
             # Read lines until we get 'bestmove ...'
             best_move_str = None
-            deadline = time.time() + 30  # Safety timeout
-            while time.time() < deadline:
-                line = self.process.stdout.readline().strip()
-                if not line:
-                    time.sleep(0.01)
-                    continue
-                if line.startswith('bestmove'):
-                    parts = line.split()
-                    best_move_str = parts[1] if len(parts) > 1 else None
-                    print(f"[MOONFISH] bestmove: {best_move_str}")
-                    break
+            deadline = time.monotonic() + self.request_timeout_s
+            try:
+                while True:
+                    line = self._read_line(deadline)
+                    if line.startswith('bestmove'):
+                        parts = line.split()
+                        best_move_str = parts[1] if len(parts) > 1 else None
+                        print(f"[MOONFISH] bestmove: {best_move_str}")
+                        break
+            except Exception:
+                self.stop()
+                raise
 
             if best_move_str and best_move_str != '(none)' and best_move_str != 'null':
                 return self._uci_to_move(best_move_str)

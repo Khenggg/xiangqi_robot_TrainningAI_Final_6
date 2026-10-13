@@ -1,0 +1,11 @@
+{
+  "src/api/simulation_client.py": "16412778219b5d186623174952f3d394d9a05ac5eafd535ada644ce00a306834",
+  "src/core/self_play_controller.py": "ee903149dbda15fea550112a244cd30a0c6bdb9c2eab42f8a2f08d3ada369860",
+  "main.py": "7eaf69ecad372f4f020b1d480bf473f539426ed94614a2968298709ea584ae2f",
+  "src/core/game_state.py": "990169f7c84c010c3aa9d7df53bad89fc5ca108f2e345e66a010b0105c36517e",
+  "CURRENT_STATE.md": "2024a52f1534b73e20c97c5e62a44e30ec6a25c9ae87db69a2e0ff835c62b473",
+  "KNOWN_ISSUES.md": "fdd3a05c27ef933f8551b749d8f47cfaf9daf171c5af7e3152cfd198cb84f8e1",
+  "tests/unit/test_spectator_lifecycle.py": null,
+  "docs/SPECTATOR_LIFECYCLE_FIX_20261012.md": null,
+  "tests/unit/test_self_play_merge_contract.py": "2cc8c078741725e9e1b9a8f0cbcd1a525258e686419bd89a41ead0f83dcfb92e"
+}

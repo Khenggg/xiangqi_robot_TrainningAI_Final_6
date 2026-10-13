@@ -1,0 +1,176 @@
+--- a/src/core/launch_options.py
++++ b/src/core/launch_options.py
+@@ -37,12 +37,39 @@
+     config.TELEMETRY_PORT = options.telemetry_port
+ 
+ 
++def check_viewer_assets(repo):
++    """Fail early with installation guidance for the local module graph."""
++    root = Path(repo).resolve()
++    required = (
++        "robot-3d-viewer/index.html", "robot-3d-viewer/main.mjs",
++        "node_modules/three/build/three.module.js",
++        "node_modules/three/build/three.core.js",
++        "node_modules/three/examples/jsm/controls/OrbitControls.js",
++        "node_modules/three/examples/jsm/loaders/STLLoader.js",
++    )
++    missing = [name for name in required if not (root / name).is_file()]
++    if missing:
++        raise FileNotFoundError(
++            "Viewer thiếu tài nguyên: " + ", ".join(missing)
++            + ". Chạy SETUP_WINDOWS.bat (hoặc npm ci tại thư mục repo); "
++              "nếu thiếu index.html/main.mjs, kiểm tra lại checkout."
++        )
++
++
+ class ViewerServer:
+     def __init__(self, repo, port):
+         root = Path(repo).resolve()
+         three_root = (root / "node_modules" / "three").resolve()
+ 
+         class Handler(SimpleHTTPRequestHandler):
++            # Windows registry MIME associations may differ between machines.
++            # ES modules require a JavaScript MIME type, including imported .js.
++            extensions_map = {
++                **SimpleHTTPRequestHandler.extensions_map,
++                ".mjs": "text/javascript; charset=utf-8",
++                ".js": "text/javascript; charset=utf-8",
++            }
++
+             def translate_path(self, path):
+                 decoded = unquote(urlsplit(path).path)
+                 if decoded.startswith("/vendor/three/"):
+--- a/main.py
++++ b/main.py
+@@ -3,7 +3,7 @@
+ # ===================================================================================
+ import sys
+ import os
+-from src.core.launch_options import parse_options, configure_runtime, ViewerServer
++from src.core.launch_options import parse_options, configure_runtime, ViewerServer, check_viewer_assets
+ 
+ # Parse before pygame or hardware imports so --help never opens a device.
+ launch_options = parse_options() if __name__ == "__main__" else parse_options([])
+@@ -210,8 +210,14 @@
+                         telemetry.start()
+                         if not launch_options.no_viewer and viewer_server is None:
+                             try:
++                                check_viewer_assets(_BASE_DIR)
+                                 viewer_server = ViewerServer(_BASE_DIR, launch_options.viewer_port)
+                                 viewer_server.start(config.TELEMETRY_PORT)
++                            except FileNotFoundError as exc:
++                                log_event("viewer.assets_missing", str(exc), level=logging.ERROR,
++                                          code="VIEWER_FAILED")
++                                state.set_status(str(exc), duration=30)
++                                print(f"[VIEWER] {exc}")
+                             except OSError as exc:
+                                 log_event("viewer.start_failed", str(exc), level=logging.ERROR,
+                                       code="PORT_BUSY", port=launch_options.viewer_port, exc_info=True)
+--- a/RUN.bat
++++ b/RUN.bat
+@@ -1,4 +1,5 @@
+ @echo off
++setlocal
+ chcp 65001 > nul
+ title Xiangqi Robot
+ color 0A
+@@ -60,11 +61,11 @@
+ echo  [OK] Đang sử dụng Python: %PYTHON%
+ "%PYTHON%" --version
+ 
+-REM Kiểm tra Moonfish Engine (Tùy chọn cho chế độ Offline)
+-if not exist "%~dp0moonfish\Windows\moonfish-avx2.exe" (
++REM Engine local hiện dùng Python Moonfish, theo config.MOONFISH_EXE.
++if not exist "%~dp0moonfish\moonfish_ucci.py" (
+     echo.
+-    echo  [THÔNG BÁO] Không tìm thấy moonfish-avx2.exe offline.
+-    echo  - Hệ thống sẽ tự động sử dụng Cloud Engine API ^(tuongkydaisu.com^).
++    echo  [THÔNG BÁO] Không tìm thấy moonfish\moonfish_ucci.py.
++    echo  - Kiểm tra config.MOONFISH_EXE; Cloud chỉ dùng khi ENGINE_TYPE cho phép.
+     echo.
+ )
+ 
+@@ -73,12 +74,13 @@
+ echo.
+ 
+ REM Chạy chương trình chính
+-"%PYTHON%" main.py
++"%PYTHON%" main.py %*
++set "RUN_EXIT_CODE=%ERRORLEVEL%"
+ 
+ REM Dừng màn hình lại để xem log lỗi (nếu có) trước khi thoát
+-if %ERRORLEVEL% NEQ 0 (
++if %RUN_EXIT_CODE% NEQ 0 (
+     echo.
+-    echo  [LỖI] Chương trình dừng lại với mã lỗi %ERRORLEVEL%! Hãy kiểm tra log ở trên.
++    echo  [LỖI] Chương trình dừng lại với mã lỗi %RUN_EXIT_CODE%! Hãy kiểm tra log ở trên.
+     pause
+ )
+ 
+@@ -86,3 +88,4 @@
+ echo.
+ echo  *** Chương trình đã kết thúc an toàn. ***
+ pause
++exit /b %RUN_EXIT_CODE%
+--- a/SETUP_WINDOWS.bat
++++ b/SETUP_WINDOWS.bat
+@@ -12,5 +12,15 @@
+ if errorlevel 1 exit /b 1
+ ".venv312\Scripts\python.exe" -c "import cv2,pygame,numpy,requests,torch,ultralytics,onnxruntime,pybullet,websockets; import src.hardware.hardware_manager,src.core.launch_options; print('Vision + simulation dependencies OK')"
+ if errorlevel 1 exit /b 1
++rem Install the pinned local Three.js modules used by the web viewer.
++where npm.cmd >nul 2>&1
++if errorlevel 1 (
++    echo [ERROR] Node.js/npm missing. Install Node.js LTS, reopen terminal and rerun setup.
++    exit /b 1
++)
++call npm.cmd ci --include=dev --no-audit --no-fund
++if errorlevel 1 exit /b 1
++".venv312\Scripts\python.exe" -c "from src.core.launch_options import check_viewer_assets; check_viewer_assets('.'); print('Local viewer assets OK')"
++if errorlevel 1 exit /b 1
+ echo Setup complete. RUN.bat starts the default virtual backend.
+ exit /b 0
+--- a/docs/START_PROJECT.md
++++ b/docs/START_PROJECT.md
+@@ -1,6 +1,17 @@
+ # Khởi động dự án
+ 
+ Chạy lệnh tại thư mục repo bằng môi trường Python đã cài các dependencies.
++
++Trên Windows: chạy `SETUP_WINDOWS.bat` một lần để cài Python dependencies và
++Three.js theo `package-lock.json` (cần Node.js LTS/npm). Sau đó dùng `RUN.bat`;
++tham số được chuyển nguyên vẹn vào `main.py`, ví dụ `RUN.bat --physical`,
++`RUN.bat --virtual` hoặc `RUN.bat --viewer-port 8090 --telemetry-port 8770`.
++Mặc định vẫn là mô phỏng; `--physical` kết nối ban đầu chỉ đọc.
++
++Nếu viewer trống: xem lỗi `VIEWER_FAILED` trong phiên log. Thiếu module Three.js
++thì chạy lại setup hoặc `npm ci --include=dev`. Server phục vụ `.mjs` và `.js`
++bằng MIME JavaScript cố định. Sau khi cập nhật code server, thoát phiên game cũ,
++chạy lại `RUN.bat` rồi tải lại trang bằng Ctrl+F5.
+ 
+ Mỗi phiên tự ghi log vào `logs/<id-phien>/`; đường dẫn xuất hiện trên terminal. Dùng `--log-level DEBUG` để xem chi tiết hơn hoặc `--log-dir <thu-muc>` để đổi nơi lưu. Xem [LOGGING.md](LOGGING.md) để đọc mã lỗi và truy vết nước đi.
+ 
+--- a/CURRENT_STATE.md
++++ b/CURRENT_STATE.md
+@@ -1,3 +1,10 @@
++## 2026-10-09 Windows viewer startup repair
++
++- Windows setup now installs pinned local Three.js modules, including dev dependencies; startup checks required assets and reports missing installation with actionable guidance.
++- HTTP JS/MJS MIME types are deterministic across Windows associations. RUN.bat forwards CLI options, preserves the Python exit code, and checks the actual Python Moonfish entrypoint.
++- Targeted launcher/HTTP/logging gate: 22 tests passed on Python3.11. Python3.12.10 actual HTTP probe verified incorrect OS MIME mappings before/after the patch; browser rendered the virtual robot/board and autoconnected to SIMULATION/IDLE.
++- The user's earlier one-off main.mjs error did not reproduce on the already-running server; its exact original cause remains unverified. No physical hardware used. Evidence: `reports/viewer-startup-fix-20261009/REPORT.md`.
++
+ ## 2026-10-09 selective visual v2 integration
+ 
+ - Selected source `fe3faa8` under all recommendations A; preserve current simulation/R1-R4/geometry/executor/identity/telemetry and defaults. New camera optics/calibration, strict target guard, same-move retry checkpoints, physical worker, and T/H/Y UI adapters. New camera modes off; measured dimensions unset; donor calibration not activated.
+--- a/KNOWN_ISSUES.md
++++ b/KNOWN_ISSUES.md
+@@ -1,3 +1,8 @@
++## 2026-10-09 Windows viewer startup scope
++
++- Setup now includes the local Three.js dependency; missing modules produce an explicit setup error. Module MIME handling and RUN.bat argument forwarding/exit status were repaired and verified in isolation.
++- The earlier browser main.mjs load failure was transient in the observed running session; exact historical cause is unconfirmed. Optional STEP loader still comes from CDN; an offline CAD-loader bundle is outside this patch. Camera/FR3 commissioning remains unverified.
++
+ ## 2026-10-09 visual v2 limits
+ 
+ - Height/top-face/ring are opt-in and require measured dimensions plus a matching current camera profile. No donor camera0 intrinsics, gripper pulses or tool rotation were applied. Hardware optics/commissioning remain unverified.

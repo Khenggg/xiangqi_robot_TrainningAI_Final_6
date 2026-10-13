@@ -1,0 +1,11 @@
+{
+  "copied_files": 42,
+  "all_main_worktree_hashes_match": true,
+  "branch_index_untouched": true,
+  "head": "7d8c5deee9e03bb187ccf8e8c1999703202cfd7e",
+  "system_probe_exit_code": 0,
+  "isolated_test_services_stopped": true,
+  "main_compile_and_cli_help_exit_code": 0,
+  "main_diff_check_exit_code": 0,
+  "index_has_no_staged_changes": true
+}

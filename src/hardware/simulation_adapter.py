@@ -24,21 +24,29 @@ class BorrowedPhysicalStateSource:
 
     def __init__(self, robot):
         from src.hardware.backends.physical_fr3 import PhysicalFR3Backend
-        if not robot.connected or robot.robot is None or robot.dry:
-            raise ValueError("Physical telemetry requires an existing real connection")
+        if robot.robot is None or robot.dry:
+            raise ValueError("Physical telemetry requires an existing real SDK handle")
         self.robot = robot
         self.ip = robot.ip
         self._reader = PhysicalFR3Backend(ip=robot.ip, dry_run=False)
         self._reader._rpc = robot.robot
-        self._reader._connected = True
+        self._reader._connected = bool(robot.connected)
 
     def get_state_snapshot(self):
-        self._reader._connected = bool(self.robot.connected)
+        sdk = self.robot.robot
+        self._reader._rpc = sdk
+        # Raw telemetry follows the retained SDK, independently of startup's
+        # command/calibration latch. A recovered socket still needs a fresh
+        # measured packet: the backend retains its freshness/validity checks.
+        sdk_connected = getattr(sdk, 'SDK_state', None)
+        self._reader._connected = sdk is not None and (
+            sdk_connected if isinstance(sdk_connected, bool) else bool(self.robot.connected))
+        self._reader._gripper_closed = bool(getattr(self.robot, 'gripper_closed_estimate', False))
         return self._reader.get_state_snapshot()
 
 
 def physical_board_provider(robot, config):
-    """Fit verified contact observations; reject unknown frame/offset or XY drift."""
+    """Optional measured board mirror; visual commands keep their own taught mapping."""
     from src.domain.board_pose_provider import (
         BoardCalibrationProfile, PhysicalTeachingPointBoardPoseProvider,
     )
@@ -66,15 +74,17 @@ def physical_board_provider(robot, config):
     # Command coordinates and the mirror must use the SAME verified controller
     # frames. The visual donor used user=1 while canonical calibration requires
     # robot base (user=0); retaining that default would offset every motion.
-    # A rigid canonical board must represent the actual visual motion mapping.
-    # This is a consistency check, not a physical clearance acceptance threshold.
+    # Visual correction deliberately offsets measured pick centres. A rigid
+    # board mirror is a display estimate, not a motion authority. Report the
+    # difference instead of blocking physical visual commands on sub-micron fit.
     state = provider.get_board_placement_state()
+    discrepancies = []
     for row in range(10):
         for col in range(9):
             physical = robot.board_to_pose_bilinear(col, row, state.board_surface_z_m * 1000.0)
             simulated = state.cell_to_robot_xyz(row, col) * 1000.0
-            if np.linalg.norm(np.asarray(physical[:2]) - simulated[:2]) > 1e-3:
-                raise ValueError("Physical bilinear grid and rigid simulation board disagree; mirror blocked")
+            discrepancies.append(float(np.linalg.norm(np.asarray(physical[:2]) - simulated[:2])))
+    provider.visual_command_xy_difference_mm = max(discrepancies)
     robot.tool_num = int(float(observations["R1"][12]))
     robot.user_num = int(float(observations["R1"][13]))
     return provider

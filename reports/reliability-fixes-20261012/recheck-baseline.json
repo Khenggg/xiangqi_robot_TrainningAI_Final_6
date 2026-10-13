@@ -1,0 +1,18 @@
+{
+  "main.py": "dacc271af5183755bf17692556b59565dab6fbc27cc9198504103ff2e261ce76",
+  "src/ui/input_handler.py": "22d2e9b9e56bbaf81212d0c06bac8dd620f9877f684227afc72176c17790ed2f",
+  "src/core/self_play_controller.py": "124f3e0c3aa31521658456f66751d4ad19702a3b30714c2fead6868688054161",
+  "src/core/session_startup.py": "a7234ef25a3fd03e4d78eb507a636e3bbc40431df4981a7e1a2aa85e975a946d",
+  "src/core/game_state.py": "93628831f41c732559fc2b82a92bc052b9f974c881c3e674e05b2bce97520aaf",
+  "src/hardware/hardware_manager.py": "62ed946a59d7a68fbcb0e5e4099956e530012f6177cf9dd01317bc7e7a20bb39",
+  "src/api/simulation_client.py": "16412778219b5d186623174952f3d394d9a05ac5eafd535ada644ce00a306834",
+  "tests/unit/test_startup_failure_recovery.py": "6d6c167d2d79094a8c50dcec0e464fba60997777ba5c3f7c5460fc68b7f540c8",
+  "tests/unit/test_reliability_audit_fixes.py": "1c2baf892564cce229eab894cb523f474a3296fa566f1cd22e82c9fec7048ab8",
+  "src/vision/legal_successor_matcher.py": "85afe684187d3cee905437ce6c3dab603908d607dca83fab7786ccec93b59edc",
+  "src/vision/cchess_recognizer.py": "c05d9812c38565d300d4153676863b693984b40cd7db55d65a247aa4c5af0ddd",
+  "src/core/visual_move_coordinator.py": "abfd46f59e431015a0c169e0958d564558042c1758315c20bdd946f2a5a1c766",
+  "CURRENT_STATE.md": "976b31f9528dd75576fa1e00a28bf8dec4ed4f4ed0ea121e5b12cf20e5344911",
+  "KNOWN_ISSUES.md": "fe2ea94f5d78766082941b6d46ba41351bc15f356926a8b3da8e439cd86308f2",
+  "docs/RELIABILITY_FIXES_20261012.md": "823cde141648c4b5a2e7fc5c4d6ce74eca4594db5df0dd9c894816e9e05967fc",
+  "docs/RELIABILITY_RECHECK_20261012.md": null
+}

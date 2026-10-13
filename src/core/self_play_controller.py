@@ -18,6 +18,7 @@ class SelfPlayStatus(str, Enum):
     THINKING = "thinking"
     MOVING = "moving"
     FAULTED = "faulted"
+    PICK_PAUSED = "pick_paused"
     ENDING = "ending"
     ENDED = "ended"
     FINISHED = "finished"
@@ -50,6 +51,10 @@ class SelfPlayController:
     def _is_physical(self):
         return getattr(self.hw,"simulation_runtime",None) is None and not getattr(self.hw,"dry_run",False)
 
+    def _ui_worker_busy(self):
+        worker = getattr(self.hw, "motion_worker", None)
+        return worker is not None and worker.busy is True
+
     @property
     def active(self) -> bool:
         return self.status in {
@@ -57,6 +62,7 @@ class SelfPlayController:
             SelfPlayStatus.THINKING,
             SelfPlayStatus.MOVING,
             SelfPlayStatus.ENDING,
+            SelfPlayStatus.PICK_PAUSED,
         }
 
     @property
@@ -64,8 +70,56 @@ class SelfPlayController:
         return self.status is SelfPlayStatus.READY and self.run_mode == "step"
 
     @property
+    def accepts_surrender(self) -> bool:
+        return (self.status is SelfPlayStatus.READY
+                and not getattr(self.state, "game_over", False)
+                and not getattr(self.state, "turn_confirmation_required", False)
+                and (self._thread is None or not self._thread.is_alive()))
+
+    @property
     def human_input_disabled(self) -> bool:
         return self.active or self.status in {SelfPlayStatus.FAULTED, SelfPlayStatus.ENDED}
+
+    @property
+    def recovery_input_allowed(self):
+        return (self.status in {SelfPlayStatus.FAULTED, SelfPlayStatus.ENDED, SelfPlayStatus.FINISHED}
+                and (self._thread is None or not self._thread.is_alive()))
+
+    def finish_recovery(self):
+        if (not self.recovery_input_allowed or self.state.physical_sync_fault
+                or self.state.move_sync_error or self.state.pending_ai_move is not None):
+            return False
+        self.status = SelfPlayStatus.IDLE
+        return True
+
+    def retry_visual_pick(self):
+        from src.core.visual_move_coordinator import retry_is_current, execute_pending_ai_motion
+        if (self._ui_worker_busy() or self.status is not SelfPlayStatus.PICK_PAUSED
+                or not retry_is_current(self.state)):
+            return False
+        request = self.state.visual_pick_retry
+        token = self._current_token()
+        if token != self._token:
+            self._fault("Retry belongs to a stale self-play epoch")
+            return False
+        expected = self.state.pending_ai_move["expected_board"]
+        color = self.state.turn
+        def run():
+            try:
+                result = execute_pending_ai_motion(self.state, self.hw, stage=request["stage"])
+                self._result = (token, expected, color, result, None)
+            except Exception as exc:
+                self._result = (token, expected, color, None, exc)
+        self.status = SelfPlayStatus.MOVING
+        self._thread = threading.Thread(target=run, name="self-play-retry", daemon=False)
+        self._thread.start()
+        return True
+
+    def close(self, timeout=5.0):
+        if self._thread is not None:
+            self._thread.join(timeout)
+            if self._thread.is_alive():
+                raise RuntimeError("Self-play motion still running; hardware must remain open")
 
     def start(self, red_difficulty: str = "medium", black_difficulty: str = "medium", run_mode: str = "step") -> bool:
         """Initialize and start an autonomous self-play match."""
@@ -73,6 +127,24 @@ class SelfPlayController:
             self.state.set_status("Wait for the previous self-play worker before restarting.",
                                   color=(180, 100, 0), duration=8.0)
             return False
+        # A finished thread still owns a result until tick consumes it. A
+        # paused capture also owns its checkpoint; F6 must not replace either.
+        if (self.status in {SelfPlayStatus.THINKING, SelfPlayStatus.MOVING,
+                            SelfPlayStatus.PICK_PAUSED, SelfPlayStatus.ENDING}
+                or getattr(self.state, "pending_ai_move", None) is not None
+                or getattr(self.state, "pending_move", None) is not None):
+            self.state.set_status("Nước đang chờ xử lý hoặc retry. Chờ hoàn tất, dùng Y đo lại hoặc F8 dừng.",
+                                  color=(180, 100, 0), duration=15.0)
+            return False
+        if getattr(self.state, "game_over", False):
+            self.status = SelfPlayStatus.FINISHED
+            self.state.set_status("Ván đã kết thúc. Chọn New Game trước khi bắt đầu self-play.",
+                                  color=(180, 100, 0), duration=15.0)
+            return False
+        if getattr(self.state, "turn_confirmation_required", False):
+            return self._start_fault("Xác nhận lượt Đỏ/Đen sau khi quét bàn trước khi self-play.")
+        if getattr(self.state, "pick_test_mode", False) or getattr(self.state, "pick_test_resume_required", False):
+            return self._start_fault("Khôi phục bàn và New Game sau test trước khi self-play.")
         # 1. Readiness check across Physical and Virtual backends
         backend_type = getattr(getattr(self.hw, "config", None), "ROBOT_BACKEND", "PHYSICAL").upper()
         dry_run = getattr(self.hw, "dry_run", False)
@@ -107,6 +179,9 @@ class SelfPlayController:
         self.run_mode = run_mode
         self.status = SelfPlayStatus.READY
         self._epoch += 1
+        if not getattr(self.hw, "dry_run", True):
+            self.state.api_client.ensure_match(red_name="Người chơi Thật", black_name="Robot AI",
+                                               initial_fen=self.state.current_fen)
         print(f"[SELF-PLAY] 🚀 Started! Red: {red_difficulty}, Black: {black_difficulty}, Mode: {run_mode}")
         return True
 
@@ -118,21 +193,20 @@ class SelfPlayController:
         return True
 
     def request_next_move(self) -> bool:
-        if self.status is not SelfPlayStatus.READY:
+        if self._ui_worker_busy() or self.status is not SelfPlayStatus.READY:
+            return False
+        if getattr(self.state, "game_over", False):
+            self.status = SelfPlayStatus.FINISHED
+            return False
+        if getattr(self.state, "turn_confirmation_required", False):
+            return self._start_fault("Xác nhận lượt Đỏ/Đen trước khi đi tiếp.")
+        if getattr(self.state, "pick_test_mode", False) or getattr(self.state, "pick_test_resume_required", False):
             return False
         if (not getattr(self.hw, "is_robot_ready", False)
                 or getattr(self.state, "move_sync_error", None)
                 or getattr(self.state, "physical_sync_fault", False)):
             self._fault("Self-play blocked by robot readiness or board synchronization fault.")
             return False
-        if self._is_physical():
-            try:
-                if not self.hw.verify_physical_board(self.state.board):
-                    self._fault("Pre-motion full-board camera verification failed.")
-                    return False
-            except Exception as exc:
-                self._fault(f"Pre-motion camera verification failed: {exc}")
-                return False
         snapshot = [row[:] for row in self.state.board]
         color = self.state.turn
         difficulty = self.red_difficulty if color == "r" else self.black_difficulty
@@ -142,6 +216,8 @@ class SelfPlayController:
 
         def think():
             try:
+                if self._is_physical() and not self.hw.verify_physical_board(snapshot):
+                    raise RuntimeError("Pre-motion full-board camera verification failed")
                 move = None
                 if hasattr(self.hw, "ai_ctrl") and self.hw.ai_ctrl is not None:
                     picker = self.hw.ai_ctrl.pick_move
@@ -161,6 +237,10 @@ class SelfPlayController:
 
     def tick(self):
         """Poll the self-play lifecycle thread."""
+        # Startup/enable/reconciliation may run on the UI's separate worker.
+        # Defer new dispatch and preserve any unconsumed result until it ends.
+        if self._ui_worker_busy():
+            return
         if self.status is SelfPlayStatus.READY and self.run_mode == "continuous":
             self.request_next_move()
 
@@ -177,6 +257,7 @@ class SelfPlayController:
                 if not xiangqi.find_all_valid_moves(color, snapshot):
                     winner = "b" if color == "r" else "r"
                     self.state.handle_game_over(winner, reason="CHIẾU BÍ")
+                    self.state.api_client.end_match(winner='RED' if winner == 'r' else 'BLACK', reason='CHECKMATE')
                     self.status = SelfPlayStatus.FINISHED
                 else:
                     self._fault(f"Engine failed to produce a legal move: {error}")
@@ -206,31 +287,24 @@ class SelfPlayController:
                     physical = self._is_physical()
                     if token != self._current_token() or self.state.board != snapshot:
                         raise RuntimeError("Game changed before robot motion")
-                    if physical and not self.hw.verify_physical_board(snapshot):
-                        raise RuntimeError("Pre-motion full-board camera verification failed")
-                    visual = bool(getattr(getattr(self.hw,"config",None),"VISUAL_PICK_ENABLED",False))
-                    if physical and visual and hasattr(self.hw, "get_robot_center_pick_targets"):
-                        targets = self.hw.get_robot_center_pick_targets(
-                            {"captured": move[1]} if is_capture else {"moving": move[0]}
-                        )
+                    if physical:
+                        from src.core.visual_move_coordinator import execute_pending_ai_motion
+                        exec_res = execute_pending_ai_motion(self.state, self.hw)
+                    else:
+                        exec_res = self.hw.execute_piece_move(
+                                s_col=move[0][0],
+                                s_row=move[0][1],
+                                d_col=move[1][0],
+                                d_row=move[1][1],
+                                is_capture=is_capture,
+                                moving_visual_target=None,
+                                captured_visual_target=None,
 
-                    if token != self._current_token() or self.state.board != snapshot:
-                        raise RuntimeError("Game changed during pre-motion camera verification")
-                    exec_res = self.hw.execute_piece_move(
-                            s_col=move[0][0],
-                            s_row=move[0][1],
-                            d_col=move[1][0],
-                            d_row=move[1][1],
-                            is_capture=is_capture,
-                            moving_visual_target=targets.get("moving"),
-                            captured_visual_target=targets.get("captured"),
-                            refresh_moving_visual_target=(lambda: self.hw.get_robot_center_pick_targets(
-                                {"moving":move[0]}).get("moving")) if physical and visual and is_capture else None,
-                            verify_capture_cleared=(lambda:self.hw.is_cell_visually_clear(move[1])) if physical and is_capture else None,
-                            piece_id=move_ctx.piece_id,
-                            captured_piece_id=move_ctx.captured_piece_id,
-                            move_context=move_ctx,
-                        )
+
+                                piece_id=move_ctx.piece_id,
+                                captured_piece_id=move_ctx.captured_piece_id,
+                                move_context=move_ctx,
+                            )
                     self._result = (token, expected_after, color, exec_res, None)
                 except Exception as exc:
                     self._result = (token, expected_after, color, None, exc)
@@ -243,13 +317,22 @@ class SelfPlayController:
             token, expected_after, color, result, error = self._result
             self._thread = None
 
-            if self.status is SelfPlayStatus.ENDING or token != self._token or token != self._current_token():
+            if self.status is SelfPlayStatus.ENDING:
                 self.state.mark_move_failed("Self-play ended during motion; camera reconciliation required")
                 self.state.move_sync_error = self.state.move_execution_error
                 self.state.set_status("Self-play ended after motion.", color=(180, 100, 0), duration=10.0)
                 self.status = SelfPlayStatus.ENDED
                 return
+            if token != self._token or token != self._current_token():
+                self._fault("Game epoch changed during motion or camera verification; reconcile board")
+                return
 
+            from src.vision.pick_consensus import PickTargetUnavailable
+            if isinstance(error, PickTargetUnavailable):
+                from src.core.visual_move_coordinator import pause_visual_pick
+                pause_visual_pick(self.state, error)
+                self.status = SelfPlayStatus.PICK_PAUSED
+                return
             if error or not isinstance(result, MotionExecutionResult) or not result.success:
                 self._fault(f"Robot motion failed: {error or getattr(result, 'message', 'Motion rejected')}")
                 return
@@ -258,22 +341,16 @@ class SelfPlayController:
                 self._fault("Game board changed during robot execution.")
                 return
 
-            # Camera verification on physical hardware
-            if self._is_physical():
-                try:
-                    verified = self.hw.verify_physical_board(expected_after)
-                except Exception as exc:
-                    self._fault(f"Post-motion camera verification failed: {exc}")
-                    return
-                if not verified:
-                    self._fault("Post-motion physical board verification failed.")
-                    return
             if token != self._current_token() or self.state.board != self._moving_before_board:
                 self._fault("Game changed during camera verification.")
                 return
 
             if not self.state.commit_pending_physical_move():
                 self._fault("State commit rejected.")
+                return
+            self.state.api_client.send_move_update_board(self.state.current_fen)
+            if self.state.move_sync_error or self.state.physical_sync_fault:
+                self._fault("Move committed; repair the board mirror before continuing")
                 return
 
             # Check game termination
@@ -283,22 +360,25 @@ class SelfPlayController:
                 winner = color
                 reason = "CHIẾU BÍ"
                 self.state.handle_game_over(winner)
+                self.state.api_client.end_match(winner='RED' if winner == 'r' else 'BLACK', reason='CHECKMATE')
                 self.status = SelfPlayStatus.FINISHED
                 print(f"[SELF-PLAY] 🏁 Game Over! Winner: {winner.upper()}")
             else:
                 self.status = SelfPlayStatus.READY
 
-    def end_match(self) -> bool:
+    def end_match(self, *, winner="DRAW", reason="OTHER") -> bool:
         """Stop scheduling moves; never issue an implicit hardware retreat."""
-        if self.status in {SelfPlayStatus.ENDED, SelfPlayStatus.FINISHED}:
+        if self.status in {SelfPlayStatus.IDLE, SelfPlayStatus.ENDING, SelfPlayStatus.ENDED, SelfPlayStatus.FINISHED}:
             return False
         self._epoch += 1
+        self.state.api_client.end_match(winner=winner, reason=reason)
         if self.status is SelfPlayStatus.MOVING and self._thread is not None and self._thread.is_alive():
             self.status = SelfPlayStatus.ENDING
             return True
-        if self.status is SelfPlayStatus.MOVING:
+        if self.status in {SelfPlayStatus.MOVING, SelfPlayStatus.PICK_PAUSED}:
             self.state.mark_move_failed("Self-play stopped before camera confirmation")
             self.state.move_sync_error = self.state.move_execution_error
+            self.state.visual_pick_retry = None
         self.status = SelfPlayStatus.ENDED
         self.state.set_status("Self-play match ended.", color=(180, 100, 0), duration=6.0)
         return True
@@ -310,6 +390,10 @@ class SelfPlayController:
         return False
 
     def _fault(self, message: str):
+        from src.core.project_logging import event
+        import logging
+        event("self_play.fault", message, level=logging.ERROR, code="MOVE_REJECTED",
+              fen=self.state.current_fen, move_id=getattr(getattr(self.state, "pending_move", None), "move_id", None))
         self.status = SelfPlayStatus.FAULTED
         self.state.physical_sync_fault = True
         self.state.snapshot_continue_required = True

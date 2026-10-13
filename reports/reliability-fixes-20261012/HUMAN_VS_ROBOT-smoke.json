@@ -1,0 +1,13 @@
+{
+  "http_status": 200,
+  "content_type": "text/javascript; charset=utf-8",
+  "websocket_messages": [
+    "robot_state",
+    "board_placement",
+    "world_state"
+  ],
+  "mode": "HUMAN_VS_ROBOT",
+  "backend": "VIRTUAL",
+  "pieces": 32,
+  "scene_synced": true
+}

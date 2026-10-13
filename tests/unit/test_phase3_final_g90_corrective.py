@@ -231,13 +231,13 @@ class Phase3FinalG90CorrectiveTests(unittest.TestCase):
 
         sim.stop()
 
-    def test_shortened_tool_rejects_unreachable_near_center_critical_routes(self):
-        """Former 150mm-tool positive fixture cannot authorize the active tool."""
+    def test_active_tool_rejects_below_board_near_center_targets(self):
+        """Reject real table penetration instead of assuming an old tool's reach limit."""
         sim = VirtualXiangqiSimulation(); sim.start()
         try:
             before = sim.backend.get_state_snapshot()
             for row in (4, 5):
-                target = sim.placement_state.cell_to_robot_xyz(row, 0, sim.geom.piece_height_mm / 2000.0)
+                target = sim.placement_state.cell_to_robot_xyz(row, 0, -0.020)
                 pose = [float(v)*1000.0 for v in target] + list(sim.target_tool_euler_deg)
                 assert not sim.backend.move_cartesian(pose)
                 after = sim.backend.get_state_snapshot()

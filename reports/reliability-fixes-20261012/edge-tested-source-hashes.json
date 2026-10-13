@@ -1,0 +1,6 @@
+{
+  "main.py": "fafbcfb3c8322adf037166c2216a3e3e3738ae1a4af46d12548da82678966e83",
+  "src/core/game_state.py": "3529d3634a04aa039cfea1e2047df5573650dfd495383968501cc2eddd62781e",
+  "src/ui/input_handler.py": "3e5a5899e4c9a8539f0831e6ab9eb2dd65cb60d49fa06a10495c8ca99474f483",
+  "tests/unit/test_review_lifecycle_edges.py": "f5be92a1fb916b027091cb687e966c87b772f0ad843c6408ea2e4537d2dbeb1b"
+}

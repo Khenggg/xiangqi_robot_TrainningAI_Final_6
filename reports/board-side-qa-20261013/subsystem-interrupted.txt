@@ -1,0 +1,1 @@
+Broad gate interrupted: expensive existing 90-cell/full-route sweeps not required for this orientation QA. No claim of full-suite or full-route acceptance.

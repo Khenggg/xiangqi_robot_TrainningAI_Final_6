@@ -1,0 +1,182 @@
+--- before/src/api/simulation_client.py
++++ after/src/api/simulation_client.py
+@@ -23,6 +23,10 @@
+         self._worker = None
+         self._job_lock = threading.Lock()
+         self._closing = threading.Event()
++        # Desired session state is separate from the asynchronously updated room_id.
++        # None also permits legacy callers that adopt an existing room directly.
++        self._match_requested = None
++        self._match_generation = 0
+         
+         self.headers_simulation = {
+             "Authorization": f"Bearer {self.token}",
+@@ -34,17 +38,20 @@
+         return self._jobs.unfinished_tasks > 0
+ 
+     def _submit(self, operation, *args):
++        with self._job_lock:
++            return self._enqueue_locked(operation, *args)
++
++    def _enqueue_locked(self, operation, *args):
+         if not self.token or self._closing.is_set():
+             return False
+-        with self._job_lock:
+-            try:
+-                self._jobs.put_nowait((operation, args))
+-            except queue.Full:
+-                event('api.queue_full', 'Hàng đợi cập nhật spectator đầy; game tiếp tục.', level=logging.ERROR)
+-                return False
+-            if self._worker is None:
+-                self._worker = threading.Thread(target=self._run, name='spectator-api', daemon=True)
+-                self._worker.start()
++        try:
++            self._jobs.put_nowait((operation, args))
++        except queue.Full:
++            event('api.queue_full', 'Hàng đợi cập nhật spectator đầy; game tiếp tục.', level=logging.ERROR)
++            return False
++        if self._worker is None:
++            self._worker = threading.Thread(target=self._run, name='spectator-api', daemon=True)
++            self._worker.start()
+         return True
+ 
+     def _run(self):
+@@ -61,24 +68,66 @@
+                 self._jobs.task_done()
+ 
+     def close(self, timeout=.2):
+-        self._closing.set()
++        with self._job_lock:
++            self._closing.set()
+         if self._worker is not None:
+             self._worker.join(timeout)
+             if self._worker.is_alive():
+                 event('api.shutdown_pending', 'Đang chờ cập nhật spectator; không giữ giao diện.', level=logging.WARNING)
+ 
+-    def create_match(self, red_name="Người chơi Đỏ", black_name="Robot AI"):
+-        return self._submit(self._create_match, red_name, black_name)
++    def _schedule_match_locked(self, red_name, black_name, initial_fen):
++        generation = self._match_generation + 1
++        if not self._enqueue_locked(self._create_and_publish, generation, red_name, black_name, initial_fen):
++            return False
++        self._match_generation = generation
++        self._match_requested = True
++        return True
++
++    def create_match(self, red_name="Người chơi Đỏ", black_name="Robot AI", *, initial_fen=None):
++        """Explicit New Game: enqueue a new room even if one is already open."""
++        with self._job_lock:
++            return self._schedule_match_locked(red_name, black_name, initial_fen)
++
++    def ensure_match(self, red_name="Người chơi Đỏ", black_name="Robot AI", *, initial_fen=None):
++        """Start/resume: reuse an open or queued room, reopen after an accepted end.
++
++        True means locally scheduled/reused, not a remote HTTP acknowledgement.
++        """
++        with self._job_lock:
++            if not self.token or self._closing.is_set():
++                return False
++            if self._match_requested or (self._match_requested is None and self.room_id):
++                return True
++            return self._schedule_match_locked(red_name, black_name, initial_fen)
++
++    def _create_and_publish(self, generation, red_name, black_name, initial_fen):
++        opened = False
++        try:
++            opened = self._create_match(red_name, black_name) is not None
++            if opened and initial_fen is not None:
++                self._send_move_update_board(str(initial_fen))
++        finally:
++            if not opened:
++                with self._job_lock:
++                    # An older failed request must not cancel a newer queued session.
++                    if self._match_generation == generation:
++                        self._match_requested = False
+ 
+     def send_move_update_board(self, fen, attempts=3):
+-        if not self.room_id and not self.pending:
+-            return False
+-        return self._submit(self._send_move_update_board, str(fen), attempts)
++        with self._job_lock:
++            if self._match_requested is False or (not self.room_id and not self.pending):
++                return False
++            return self._enqueue_locked(self._send_move_update_board, str(fen), attempts)
+ 
+     def end_match(self, winner="DRAW", reason="OTHER"):
+-        if not self.room_id and not self.pending:
+-            return False
+-        return self._submit(self._end_match, winner, reason)
++        with self._job_lock:
++            if self._match_requested is False or (not self.room_id and not self.pending):
++                return False
++            if not self._enqueue_locked(self._end_match, winner, reason):
++                return False
++            self._match_generation += 1
++            self._match_requested = False
++            return True
+ 
+     def _create_match(self, red_name="Người chơi Đỏ", black_name="Robot AI"):
+         """Tạo một trận đấu mới và lấy roomId."""
+--- before/src/core/self_play_controller.py
++++ after/src/core/self_play_controller.py
+@@ -115,6 +115,11 @@
+             self.state.set_status("Wait for the previous self-play worker before restarting.",
+                                   color=(180, 100, 0), duration=8.0)
+             return False
++        if getattr(self.state, "game_over", False):
++            self.status = SelfPlayStatus.FINISHED
++            self.state.set_status("Ván đã kết thúc. Chọn New Game trước khi bắt đầu self-play.",
++                                  color=(180, 100, 0), duration=15.0)
++            return False
+         if getattr(self.state, "pick_test_mode", False) or getattr(self.state, "pick_test_resume_required", False):
+             return self._start_fault("Khôi phục bàn và New Game sau test trước khi self-play.")
+         # 1. Readiness check across Physical and Virtual backends
+@@ -151,6 +156,9 @@
+         self.run_mode = run_mode
+         self.status = SelfPlayStatus.READY
+         self._epoch += 1
++        if not getattr(self.hw, "dry_run", True):
++            self.state.api_client.ensure_match(red_name="Người chơi Thật", black_name="Robot AI",
++                                               initial_fen=self.state.current_fen)
+         print(f"[SELF-PLAY] 🚀 Started! Red: {red_difficulty}, Black: {black_difficulty}, Mode: {run_mode}")
+         return True
+ 
+--- before/src/core/game_state.py
++++ after/src/core/game_state.py
+@@ -207,7 +207,8 @@
+         
+         # [API] Tạo room mới (nếu không ở chế độ DRY_RUN)
+         if not config.DRY_RUN:
+-            self.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
++            self.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI",
++                                         initial_fen=self.current_fen)
+ 
+     def set_status(self, msg, color=(200, 0, 0), duration=2.5):
+         self.status_message = msg
+--- before/main.py
++++ after/main.py
+@@ -136,10 +136,11 @@
+         state.set_status("FR3 chỉ đọc. Kiểm tra setup, bấm F9 rồi F10 để bật robot; F6 bắt đầu self-play.", duration=30)
+     if config.GAME_MODE == "ROBOT_VS_ROBOT" and self_play is not None and hw.is_robot_ready:
+         difficulty = getattr(config, "AI_DIFFICULTY", "medium")
+-        self_play.start(difficulty, difficulty, run_mode="step")
+-        state.set_status("Robot vs robot: F7 next move / F8 stop", duration=30)
++        if self_play.start(difficulty, difficulty, run_mode="step"):
++            state.set_status("Robot vs robot: F7 next move / F8 stop", duration=30)
+     if not config.DRY_RUN:
+-        state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
++        state.api_client.ensure_match(red_name="Người chơi Thật", black_name="Robot AI",
++                                      initial_fen=state.current_fen)
+ 
+ def _finish_startup(result, error):
+     global hw, telemetry, viewer_server, self_play, input_mgr, home_screen_active
+--- before/tests/unit/test_self_play_merge_contract.py
++++ after/tests/unit/test_self_play_merge_contract.py
+@@ -8,6 +8,7 @@
+ 
+ def controller(result=None, physical=False):
+     state=GameState()
++    state.api_client.ensure_match=Mock()
+     state.api_client.send_move_update_board=Mock()
+     state.api_client.end_match=Mock()
+     state.sync_current_board=Mock(return_value=True)

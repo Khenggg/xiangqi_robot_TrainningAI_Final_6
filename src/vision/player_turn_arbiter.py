@@ -36,9 +36,9 @@ class PlayerTurnArbiter:
     def turn_token(self):
         return self._token
 
-    def activate(self, board, capability=InteractionCapability.AVAILABLE):
+    def activate(self, board, capability=InteractionCapability.AVAILABLE, *, player_color="r"):
         self._token += 1
-        self._matcher = LegalSuccessorMatcher(board)
+        self._matcher = LegalSuccessorMatcher(board, player_color=player_color)
         self._interaction_seen = False
         self._reset_transient()
         self._emitted = False

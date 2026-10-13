@@ -1,0 +1,26 @@
+[
+  {
+    "Path": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\main.py",
+    "Hash": "B800D1C66D6DA11EE008D18C043C3A668AD7BD0F423800A3B884B456B47770E1"
+  },
+  {
+    "Path": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\vision\\camera_monitor.py",
+    "Hash": "F6FEBB68DE213C722AA0BEF7960892BA99D9785A9857012EBF093A231EBBB4BA"
+  },
+  {
+    "Path": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\ui\\input_handler.py",
+    "Hash": "2DB9B7ECE8B8125DB18C30D6135169B2C0692589304793188A09C4E8B5246088"
+  },
+  {
+    "Path": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\vision\\cchess_recognizer.py",
+    "Hash": "FC9EF3B97DAFCB2A304A51BB64A59978FF84E24D914BAC5F95BF1AC93CD58314"
+  },
+  {
+    "Path": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\launch_options.py",
+    "Hash": "3A382F5D9D8E1B86933D8FB9B888DA0452C80E07D3D8B37432D32FF073285924"
+  },
+  {
+    "Path": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\robot-3d-viewer\\main.mjs",
+    "Hash": "34232AFD70B618A259EF0F7575A3DD1664242A05C0AAA59585F784064C9169B4"
+  }
+]

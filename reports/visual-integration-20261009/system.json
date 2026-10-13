@@ -1,0 +1,602 @@
+{
+  "kind": "fixture opening replay via InputHandler/controller + actual PyBullet; not native mouse",
+  "modes": [
+    {
+      "mode": "HUMAN_VS_ROBOT",
+      "plies": [
+        {
+          "index": 1,
+          "move": "e6e5",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR b - - 0 2"
+        },
+        {
+          "index": 2,
+          "move": "h2e2",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c2c4/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR w - - 0 3"
+        },
+        {
+          "index": 3,
+          "move": "b9c7",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c2c4/p1p1p1p1p/9/4P4/P1P3P1P/1CN4C1/9/R1BAKABNR b - - 0 4"
+        },
+        {
+          "index": 4,
+          "move": "e3e4",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c2c4/p1p3p1p/4p4/4P4/P1P3P1P/1CN4C1/9/R1BAKABNR w - - 0 5"
+        },
+        {
+          "index": 5,
+          "move": "h9g7",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c2c4/p1p3p1p/4p4/4P4/P1P3P1P/1CN3NC1/9/R1BAKAB1R b - - 0 6"
+        },
+        {
+          "index": 6,
+          "move": "e4e5",
+          "capture": true,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c2c4/p1p3p1p/9/4p4/P1P3P1P/1CN3NC1/9/R1BAKAB1R w - - 0 7"
+        },
+        {
+          "index": 7,
+          "move": "g7e6",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c2c4/p1p3p1p/9/4p4/P1P1N1P1P/1CN4C1/9/R1BAKAB1R b - - 0 8"
+        },
+        {
+          "index": 8,
+          "move": "e5e6",
+          "capture": true,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c2c4/p1p3p1p/9/9/P1P1p1P1P/1CN4C1/9/R1BAKAB1R w - - 0 9"
+        },
+        {
+          "index": 9,
+          "move": "h7e7",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c2c4/p1p3p1p/9/9/P1P1p1P1P/1CN1C4/9/R1BAKAB1R b - - 0 10"
+        },
+        {
+          "index": 10,
+          "move": "e6e7",
+          "capture": true,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c2c4/p1p3p1p/9/9/P1P3P1P/1CN1p4/9/R1BAKAB1R w - - 0 11"
+        }
+      ],
+      "initial_joints": [
+        0.0,
+        -70.0,
+        60.0,
+        -80.0,
+        -90.0,
+        0.0
+      ],
+      "robot_settle_before_commit": [
+        {
+          "piece_id": "black_cannon_1",
+          "xy_error_mm_before_fen_commit": 0.10140040381235076,
+          "captured_piece_id": null
+        },
+        {
+          "piece_id": "black_pawn_2",
+          "xy_error_mm_before_fen_commit": 0.16305116475395956,
+          "captured_piece_id": null
+        },
+        {
+          "piece_id": "black_pawn_2",
+          "xy_error_mm_before_fen_commit": 0.15487212438801093,
+          "captured_piece_id": "red_pawn_2"
+        },
+        {
+          "piece_id": "black_pawn_2",
+          "xy_error_mm_before_fen_commit": 0.14348592976249858,
+          "captured_piece_id": "red_knight_1"
+        },
+        {
+          "piece_id": "black_pawn_2",
+          "xy_error_mm_before_fen_commit": 0.14981426324210081,
+          "captured_piece_id": "red_cannon_1"
+        }
+      ],
+      "surrendered": true,
+      "final_joints": [
+        0.0,
+        -70.0,
+        60.0,
+        -80.0,
+        -90.0,
+        0.0
+      ]
+    },
+    {
+      "mode": "HUMAN_VS_HUMAN",
+      "plies": [
+        {
+          "index": 1,
+          "move": "e6e5",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR b - - 0 2"
+        },
+        {
+          "index": 2,
+          "move": "e3e4",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c5c1/p1p3p1p/4p4/4P4/P1P3P1P/1C5C1/9/RNBAKABNR w - - 0 3"
+        },
+        {
+          "index": 3,
+          "move": "e5e4",
+          "capture": true,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c5c1/p1p3p1p/4P4/9/P1P3P1P/1C5C1/9/RNBAKABNR b - - 0 4"
+        },
+        {
+          "index": 4,
+          "move": "b0c2",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "r1bakabnr/9/1cn4c1/p1p3p1p/4P4/9/P1P3P1P/1C5C1/9/RNBAKABNR w - - 0 5"
+        },
+        {
+          "index": 5,
+          "move": "b9c7",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "r1bakabnr/9/1cn4c1/p1p3p1p/4P4/9/P1P3P1P/1CN4C1/9/R1BAKABNR b - - 0 6"
+        },
+        {
+          "index": 6,
+          "move": "h0g2",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "r1bakab1r/9/1cn3nc1/p1p3p1p/4P4/9/P1P3P1P/1CN4C1/9/R1BAKABNR w - - 0 7"
+        },
+        {
+          "index": 7,
+          "move": "h9g7",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "r1bakab1r/9/1cn3nc1/p1p3p1p/4P4/9/P1P3P1P/1CN3NC1/9/R1BAKAB1R b - - 0 8"
+        },
+        {
+          "index": 8,
+          "move": "i0h0",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "r1bakabr1/9/1cn3nc1/p1p3p1p/4P4/9/P1P3P1P/1CN3NC1/9/R1BAKAB1R w - - 0 9"
+        },
+        {
+          "index": 9,
+          "move": "i9h9",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "r1bakabr1/9/1cn3nc1/p1p3p1p/4P4/9/P1P3P1P/1CN3NC1/9/R1BAKABR1 b - - 0 10"
+        },
+        {
+          "index": 10,
+          "move": "c0e2",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "r2akabr1/9/1cn1b1nc1/p1p3p1p/4P4/9/P1P3P1P/1CN3NC1/9/R1BAKABR1 w - - 0 11"
+        }
+      ],
+      "initial_joints": [
+        0.0,
+        -70.0,
+        60.0,
+        -80.0,
+        -90.0,
+        0.0
+      ],
+      "robot_settle_before_commit": [],
+      "surrendered": true,
+      "final_joints": [
+        0.0,
+        -70.0,
+        60.0,
+        -80.0,
+        -90.0,
+        0.0
+      ]
+    },
+    {
+      "mode": "ROBOT_VS_ROBOT",
+      "plies": [
+        {
+          "index": 1,
+          "move": "b9c7",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1CN4C1/9/R1BAKABNR b - - 0 2"
+        },
+        {
+          "index": 2,
+          "move": "h0g2",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1CN4C1/9/R1BAKABNR w - - 0 3"
+        },
+        {
+          "index": 3,
+          "move": "h7g7",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1CN3C2/9/R1BAKABNR b - - 0 4"
+        },
+        {
+          "index": 4,
+          "move": "b2c2",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakab1r/9/2c3nc1/p1p1p1p1p/9/9/P1P1P1P1P/1CN3C2/9/R1BAKABNR w - - 0 5"
+        },
+        {
+          "index": 5,
+          "move": "g7g3",
+          "capture": true,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakab1r/9/2c3nc1/p1p1p1C1p/9/9/P1P1P1P1P/1CN6/9/R1BAKABNR b - - 0 6"
+        },
+        {
+          "index": 6,
+          "move": "c2c6",
+          "capture": true,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakab1r/9/6nc1/p1p1p1C1p/9/9/P1c1P1P1P/1CN6/9/R1BAKABNR w - - 0 7"
+        },
+        {
+          "index": 7,
+          "move": "h9g7",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "rnbakab1r/9/6nc1/p1p1p1C1p/9/9/P1c1P1P1P/1CN3N2/9/R1BAKAB1R b - - 0 8"
+        },
+        {
+          "index": 8,
+          "move": "b0c2",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "r1bakab1r/9/2n3nc1/p1p1p1C1p/9/9/P1c1P1P1P/1CN3N2/9/R1BAKAB1R w - - 0 9"
+        },
+        {
+          "index": 9,
+          "move": "i9h9",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "r1bakab1r/9/2n3nc1/p1p1p1C1p/9/9/P1c1P1P1P/1CN3N2/9/R1BAKABR1 b - - 0 10"
+        },
+        {
+          "index": 10,
+          "move": "a0b0",
+          "capture": false,
+          "max_active_piece_xy_error_mm": 0.0,
+          "joint_pose": [
+            0.0,
+            -70.0,
+            60.0,
+            -80.0,
+            -90.0,
+            0.0
+          ],
+          "fen": "1rbakab1r/9/2n3nc1/p1p1p1C1p/9/9/P1c1P1P1P/1CN3N2/9/R1BAKABR1 w - - 0 11"
+        }
+      ],
+      "initial_joints": [
+        0.0,
+        -70.0,
+        60.0,
+        -80.0,
+        -90.0,
+        0.0
+      ],
+      "robot_settle_before_commit": [
+        {
+          "piece_id": "red_knight_0",
+          "xy_error_mm_before_fen_commit": 0.1246149766890242,
+          "captured_piece_id": null
+        },
+        {
+          "piece_id": "black_knight_1",
+          "xy_error_mm_before_fen_commit": 0.08527770311333427,
+          "captured_piece_id": null
+        },
+        {
+          "piece_id": "red_cannon_1",
+          "xy_error_mm_before_fen_commit": 0.10439912082580348,
+          "captured_piece_id": null
+        },
+        {
+          "piece_id": "black_cannon_0",
+          "xy_error_mm_before_fen_commit": 0.06238962991931026,
+          "captured_piece_id": null
+        },
+        {
+          "piece_id": "red_cannon_1",
+          "xy_error_mm_before_fen_commit": 0.15487806359350142,
+          "captured_piece_id": "black_pawn_3"
+        },
+        {
+          "piece_id": "black_cannon_0",
+          "xy_error_mm_before_fen_commit": 0.17288444207366338,
+          "captured_piece_id": "red_pawn_1"
+        },
+        {
+          "piece_id": "red_knight_1",
+          "xy_error_mm_before_fen_commit": 0.08313364617353988,
+          "captured_piece_id": null
+        },
+        {
+          "piece_id": "black_knight_0",
+          "xy_error_mm_before_fen_commit": 0.09744548249112576,
+          "captured_piece_id": null
+        },
+        {
+          "piece_id": "red_rook_1",
+          "xy_error_mm_before_fen_commit": 0.046972809485007795,
+          "captured_piece_id": null
+        },
+        {
+          "piece_id": "black_rook_0",
+          "xy_error_mm_before_fen_commit": 0.10850319397903556,
+          "captured_piece_id": null
+        }
+      ],
+      "surrendered": true,
+      "final_joints": [
+        0.0,
+        -70.0,
+        60.0,
+        -80.0,
+        -90.0,
+        0.0
+      ]
+    }
+  ],
+  "complete": true
+}

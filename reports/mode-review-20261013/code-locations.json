@@ -1,0 +1,42 @@
+{
+  "src/ui/input_handler.py": {
+    "_maybe_activate_unified_turn": [
+      167,
+      195
+    ],
+    "_unified_observation_confidence": [
+      197,
+      216
+    ],
+    "poll_board_stability": [
+      993,
+      1123
+    ]
+  },
+  "src/vision/player_turn_arbiter.py": {
+    "activate": [
+      39,
+      48
+    ]
+  },
+  "src/core/ai_execution.py": {
+    "execute_ai_move": [
+      10,
+      89
+    ]
+  },
+  "src/core/self_play_controller.py": {
+    "accepts_surrender": [
+      69,
+      73
+    ],
+    "start": [
+      119,
+      172
+    ],
+    "request_next_move": [
+      181,
+      222
+    ]
+  }
+}

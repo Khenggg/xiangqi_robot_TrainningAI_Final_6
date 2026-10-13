@@ -1,0 +1,30 @@
+[
+  {
+    "path": "main.py",
+    "matches": true
+  },
+  {
+    "path": "src/core/self_play_controller.py",
+    "matches": true
+  },
+  {
+    "path": "src/ui/input_handler.py",
+    "matches": true
+  },
+  {
+    "path": "CURRENT_STATE.md",
+    "matches": true
+  },
+  {
+    "path": "KNOWN_ISSUES.md",
+    "matches": true
+  },
+  {
+    "path": "tests/unit/test_runtime_race_review.py",
+    "matches": true
+  },
+  {
+    "path": "docs/RUNTIME_RACE_REVIEW_20261013.md",
+    "matches": true
+  }
+]

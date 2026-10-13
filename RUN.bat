@@ -1,4 +1,5 @@
 @echo off
+setlocal
 chcp 65001 > nul
 title Xiangqi Robot
 color 0A
@@ -21,6 +22,12 @@ if not exist "%~dp0main.py" (
 
 REM Tìm phiên bản Python phù hợp (ưu tiên môi trường có cài sẵn thư viện cv2, pygame, ultralytics)
 set "PYTHON="
+
+REM Combined Windows setup environment (vision + simulation).
+if exist "%~dp0.venv312\Scripts\python.exe" (
+    set "PYTHON=%~dp0.venv312\Scripts\python.exe"
+    goto :FOUND_PYTHON
+)
 
 REM 1. Kiểm tra venv nội bộ trong project nếu có (.venv)
 if exist "%~dp0.venv\Scripts\python.exe" (
@@ -54,11 +61,11 @@ if %ERRORLEVEL% EQU 0 (
 echo  [OK] Đang sử dụng Python: %PYTHON%
 "%PYTHON%" --version
 
-REM Kiểm tra Moonfish Engine (Tùy chọn cho chế độ Offline)
-if not exist "%~dp0moonfish\Windows\moonfish-avx2.exe" (
+REM Engine local hiện dùng Python Moonfish, theo config.MOONFISH_EXE.
+if not exist "%~dp0moonfish\moonfish_ucci.py" (
     echo.
-    echo  [THÔNG BÁO] Không tìm thấy moonfish-avx2.exe offline.
-    echo  - Hệ thống sẽ tự động sử dụng Cloud Engine API ^(tuongkydaisu.com^).
+    echo  [THÔNG BÁO] Không tìm thấy moonfish\moonfish_ucci.py.
+    echo  - Kiểm tra config.MOONFISH_EXE; Cloud chỉ dùng khi ENGINE_TYPE cho phép.
     echo.
 )
 
@@ -67,12 +74,13 @@ echo  [OK] Để thoát: Đóng cửa sổ hoặc bấm phím Q trên cửa sổ
 echo.
 
 REM Chạy chương trình chính
-"%PYTHON%" main.py
+"%PYTHON%" main.py %*
+set "RUN_EXIT_CODE=%ERRORLEVEL%"
 
 REM Dừng màn hình lại để xem log lỗi (nếu có) trước khi thoát
-if %ERRORLEVEL% NEQ 0 (
+if %RUN_EXIT_CODE% NEQ 0 (
     echo.
-    echo  [LỖI] Chương trình dừng lại với mã lỗi %ERRORLEVEL%! Hãy kiểm tra log ở trên.
+    echo  [LỖI] Chương trình dừng lại với mã lỗi %RUN_EXIT_CODE%! Hãy kiểm tra log ở trên.
     pause
 )
 
@@ -80,3 +88,4 @@ REM Hiển thị khi thoát
 echo.
 echo  *** Chương trình đã kết thúc an toàn. ***
 pause
+exit /b %RUN_EXIT_CODE%

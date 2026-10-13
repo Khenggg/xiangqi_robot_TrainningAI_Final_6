@@ -20,7 +20,9 @@ class SimulationClientTests(unittest.TestCase):
         client.room_id = "room"
         capture_fen = "4k4/9/9/9/9/9/9/9/9/4K4 w - - 0 2"
 
-        result = client.send_move_update_board(capture_fen)
+        # Test the worker's HTTP retry contract; public enqueue is tested with
+        # delayed FIFO requests in test_reliability_audit_fixes.py.
+        result = client._send_move_update_board(capture_fen)
 
         self.assertEqual({"captured": "r_N"}, result)
         self.assertEqual(2, post.call_count)
@@ -35,7 +37,7 @@ class SimulationClientTests(unittest.TestCase):
         client = TuongKyDaiSuClient("https://example.test", "token")
         client.room_id = "room"
 
-        self.assertIsNone(client.send_move_update_board("bad-fen"))
+        self.assertIsNone(client._send_move_update_board("bad-fen"))
         post.assert_called_once()
 
 

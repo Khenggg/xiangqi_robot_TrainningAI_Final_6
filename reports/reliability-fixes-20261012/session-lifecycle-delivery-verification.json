@@ -1,0 +1,47 @@
+[
+  {
+    "path": "src/api/simulation_client.py",
+    "matches": true,
+    "sha256": "89332a976dffd0222f625cd97390a9ff7a5390a67a2129c9ff413b748f376030"
+  },
+  {
+    "path": "src/core/self_play_controller.py",
+    "matches": true,
+    "sha256": "d484e006c39d3ded8ef77ba424f5c76cec704c4511236af5060d3de4183a4df8"
+  },
+  {
+    "path": "main.py",
+    "matches": true,
+    "sha256": "4d957ae2ea0dd7d1821d56006ab4670ce111547d604bbfc9dd92af740e5dcaaa"
+  },
+  {
+    "path": "src/core/game_state.py",
+    "matches": true,
+    "sha256": "d03810ea316ac2badc0f0563ccbe6af26ab0a0f2ee0e8d279feabcd38557cc91"
+  },
+  {
+    "path": "CURRENT_STATE.md",
+    "matches": true,
+    "sha256": "d7f815a008d8fb35acb9773d58a8f2ffde83d694854e0c7514ee741a28d115d8"
+  },
+  {
+    "path": "KNOWN_ISSUES.md",
+    "matches": true,
+    "sha256": "f229cc22207df64640b2a2eb9463589340455dad506d9f0abb9cf3087d599a30"
+  },
+  {
+    "path": "tests/unit/test_spectator_lifecycle.py",
+    "matches": true,
+    "sha256": "930da632ea736fc51cdf26d79c0eea8e89ce05b3966ec4e3fe27c3c77b263263"
+  },
+  {
+    "path": "docs/SPECTATOR_LIFECYCLE_FIX_20261012.md",
+    "matches": true,
+    "sha256": "245f3e8577df94f56c4c9f93bffeeaf44719deadc8c0800581ffd5e36eabf538"
+  },
+  {
+    "path": "tests/unit/test_self_play_merge_contract.py",
+    "matches": true,
+    "sha256": "8e7b47b77d910b5cab75bd8d6793c3ffb0d5336d568c0d52400f712e18e75697"
+  }
+]

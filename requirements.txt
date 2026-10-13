@@ -8,4 +8,6 @@ torch>=2.0.0
 # Retained unified simulation and telemetry
 pybullet>=3.2.6
 websockets>=12,<16
-onnxruntime>=1.16
+# Install exactly one ORT runtime via SETUP_WINDOWS.bat / SETUP_GPU.bat.
+# CPU and GPU wheels share the same Python package and must not coexist.
+Pillow>=9.0

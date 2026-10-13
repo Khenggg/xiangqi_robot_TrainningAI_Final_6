@@ -1,0 +1,8 @@
+{
+  "main.py": "b800d1c66d6da11ee008d18c043c3a668ad7bd0f423800a3b884b456b47770e1",
+  "src/ui/board_renderer.py": "ff84f4a46fad49e62b71fa91f79d55bceee1a7a372a1f5964b94ae016e2a5411",
+  "CURRENT_STATE.md": "84a394045c9e7f3327891bb211b30dca88defb72d70eaeda43aa6056db33b2df",
+  "KNOWN_ISSUES.md": "687e82eec90e114fc27f80caa9613aed7ed021b11cae61b865c18a6741836bc2",
+  "docs/START_PROJECT.md": "a01383a216459953a034b8c37cc4aa4b23b554c053ee5b7088d18b180569cb9c",
+  "tests/unit/test_startup_failure_recovery.py": "043c3b24690d076614e37522e7388c8ef6568a9e8d30fbdae66a963c9734db5d"
+}

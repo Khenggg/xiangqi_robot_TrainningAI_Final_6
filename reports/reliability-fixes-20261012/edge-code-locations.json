@@ -1,0 +1,30 @@
+{
+  "src/core/game_state.py": {
+    "save_rollback_state": [
+      230,
+      249
+    ],
+    "handle_rollback": [
+      251,
+      310
+    ],
+    "process_human_move": [
+      443,
+      487
+    ],
+    "_finish_human_committed_move": [
+      489,
+      494
+    ],
+    "process_emergency_move": [
+      496,
+      546
+    ]
+  },
+  "src/ui/input_handler.py": {
+    "handle_mouse_down": [
+      246,
+      356
+    ]
+  }
+}

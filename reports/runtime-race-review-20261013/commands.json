@@ -1,0 +1,73 @@
+{
+  "environment": {
+    "python": "3.12.10",
+    "pytest": "8.4.2",
+    "xdist": "3.8.0",
+    "os": "Windows",
+    "cwd": "D:\\OJT\\_reliability_fix_20261012",
+    "numerical_threads": 1
+  },
+  "setup": [
+    "prepend .testvenv/Scripts to PATH",
+    "set PYTEST_ADDOPTS to --basetemp=<cwd>/<basetemp> --tb=short"
+  ],
+  "commands": [
+    {
+      "gate": "red",
+      "command": "./tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_runtime_race_review.py",
+      "basetemp": ".pytest_tmp/races-red",
+      "exit_code": 1
+    },
+    {
+      "gate": "focused",
+      "command": "./tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_runtime_race_review.py,tests/unit/test_self_play_merge_contract.py,tests/unit/test_visual_v2_adapter.py",
+      "basetemp": ".pytest_tmp/races-focused",
+      "exit_code": 0
+    },
+    {
+      "gate": "owner-red",
+      "command": "./tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_runtime_race_review.py::test_selfplay_defers_dispatch_while_ui_worker_owns_a_job",
+      "basetemp": ".pytest_tmp/races-owner-red",
+      "exit_code": 1
+    },
+    {
+      "gate": "worker-schedule",
+      "command": "./.venv312/Scripts/python.exe -X utf8 reports/runtime-race-review-20261013/probe_worker_schedule.py",
+      "exit_code": 0
+    },
+    {
+      "gate": "full",
+      "command": "./tools/test_fast.ps1 -Mode Balanced -Tests tests",
+      "basetemp": ".pytest_tmp/races-full",
+      "exit_code": 0
+    },
+    {
+      "gate": "subsystem",
+      "command": "./tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_runtime_race_review.py,tests/unit/test_game_modes_review.py,tests/unit/test_reliability_recheck.py,tests/unit/test_review_lifecycle_edges.py,tests/unit/test_reliability_audit_fixes.py,tests/unit/test_self_play_merge_contract.py,tests/unit/test_self_play_twin_contract.py,tests/unit/test_spectator_lifecycle.py,tests/unit/test_simple_launch_sync.py,tests/unit/test_visual_v2_adapter.py,tests/unit/test_physical_camera_commit_gate.py,tests/unit/test_camera_game_pipeline.py,tests/unit/test_physical_ui_latency.py,tests/test_human_move_confirmation.py,tests/test_human_commit_ai_handoff.py,tests/test_emergency_client_move.py,tests/test_capture_fen_sync.py,tests/test_simulation_client.py,tests/unit/test_startup_failure_recovery.py",
+      "basetemp": ".pytest_tmp/races-subsystem",
+      "exit_code": 0
+    },
+    {
+      "gate": "final-subsystem",
+      "command": "./tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_runtime_race_review.py,tests/unit/test_game_modes_review.py,tests/unit/test_reliability_recheck.py,tests/unit/test_review_lifecycle_edges.py,tests/unit/test_reliability_audit_fixes.py,tests/unit/test_self_play_merge_contract.py,tests/unit/test_self_play_twin_contract.py,tests/unit/test_spectator_lifecycle.py,tests/unit/test_simple_launch_sync.py,tests/unit/test_visual_v2_adapter.py,tests/unit/test_physical_camera_commit_gate.py,tests/unit/test_camera_game_pipeline.py,tests/unit/test_physical_ui_latency.py,tests/test_human_move_confirmation.py,tests/test_human_commit_ai_handoff.py,tests/test_emergency_client_move.py,tests/test_capture_fen_sync.py,tests/test_simulation_client.py,tests/unit/test_startup_failure_recovery.py",
+      "basetemp": ".pytest_tmp/races-final-subsystem",
+      "exit_code": 0
+    },
+    {
+      "gate": "primary-compile",
+      "command": [
+        "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\.venv312\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "compileall",
+        "-q",
+        "main.py",
+        "src/core/self_play_controller.py",
+        "src/ui/input_handler.py"
+      ],
+      "cwd": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6",
+      "exit_code": 0
+    }
+  ]
+}

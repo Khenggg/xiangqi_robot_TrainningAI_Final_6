@@ -1,0 +1,30 @@
+--- before/robot-3d-viewer/main.mjs
++++ after/robot-3d-viewer/main.mjs
+@@ -677,6 +677,13 @@
+ function setLiveBadge(text, kind = "") {
+   liveStateEl.textContent = text;
+   liveStateEl.className = kind;
++  const warning = document.getElementById("launchCalibrationWarning");
++  if (warning && state.launchMirrorError) {
++    const armLive = state.liveSource === "PHYSICAL" && kind === "live physical";
++    warning.textContent = (armLive
++      ? "CÁNH TAY ĐANG LIVE — bàn/quân chưa được hiệu chuẩn: "
++      : "CHƯA ĐỒNG BỘ LIVE — bàn/quân chưa được hiệu chuẩn: ") + state.launchMirrorError;
++  }
+ }
+ 
+ function sendLivePayload(payload) {
+@@ -2614,10 +2621,12 @@
+     const launchParams = new URLSearchParams(window.location.search);
+     const mirrorError = launchParams.get("mirror_error");
+     if (mirrorError) {
++      state.launchMirrorError = mirrorError;
+       const warning = document.createElement("div");
++      warning.id = "launchCalibrationWarning";
+       warning.setAttribute("role", "alert");
+       warning.style.cssText = "position:absolute;top:12px;left:12px;right:12px;z-index:20;background:#6b280d;color:white;padding:12px;border-radius:6px;pointer-events:none";
+-      warning.textContent = "PREVIEW OFFLINE — chưa đồng bộ robot/bàn thật: " + mirrorError;
++      warning.textContent = "CHƯA ĐỒNG BỘ LIVE — bàn/quân chưa được hiệu chuẩn: " + mirrorError;
+       document.getElementById("canvasContainer").appendChild(warning);
+     }
+     const launchWs = launchParams.get("ws");

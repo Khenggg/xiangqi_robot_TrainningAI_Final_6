@@ -1,0 +1,30 @@
+[
+  {
+    "path": "main.py",
+    "before_sha256": "c20244c89d169d3f8a31e86b85340a1496a8d8136eaac03d3224b91dada6b3d5"
+  },
+  {
+    "path": "src/core/self_play_controller.py",
+    "before_sha256": "99ca1d6b2cad5e7ef77a0c7d09141b176220dd1e59e5fb57996a2c07b5551095"
+  },
+  {
+    "path": "src/ui/input_handler.py",
+    "before_sha256": "4b44a4a64da551d604c13c96deed0580741476875ccba164b712f95e9b5ce07e"
+  },
+  {
+    "path": "CURRENT_STATE.md",
+    "before_sha256": "24c8c3aba07267292831ec1ba87fb969270f983218e0477a809a3f9d21597ce3"
+  },
+  {
+    "path": "KNOWN_ISSUES.md",
+    "before_sha256": "0ea19a3d2a049cde5b0ca04539216180c980e29c5eef12fd90cffe2d006c2782"
+  },
+  {
+    "path": "tests/unit/test_runtime_race_review.py",
+    "before_sha256": null
+  },
+  {
+    "path": "docs/RUNTIME_RACE_REVIEW_20261013.md",
+    "before_sha256": null
+  }
+]

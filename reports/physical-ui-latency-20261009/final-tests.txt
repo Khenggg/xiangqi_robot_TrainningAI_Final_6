@@ -1,0 +1,41 @@
+============================================================
+ Xiangqi Robot -- Fast Parallel Test Runner
+============================================================
+Mode        : Full (Workers: 2)
+Targets     : tests/unit/test_physical_ui_latency.py, tests/unit/test_camera_startup_and_health.py, tests/unit/test_visual_v2_camera_boundary.py, tests/unit/test_viewer_startup.py, tests/unit/test_startup_failure_recovery.py, tests/test_board_stability_monitor.py, tests/unit/test_camera_game_pipeline.py, tests/unit/test_physical_camera_commit_gate.py, tests/unit/test_camera_observation_integrity.py, tests/unit/test_simple_launch_sync.py
+Base Marker : not slow
+Dist Scheme : worksteal
+Thread Caps : OMP=1, MKL=1, OPENBLAS=1, NUMEXPR=1
+Repo Root   : D:\OJT\_viewer_fix_20261009
+
+>>> Part A: Running Parallel-Safe Tests (-n 2) ...
+============================= test session starts =============================
+platform win32 -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\_viewer_fix_20261009
+configfile: pytest.ini
+plugins: anyio-4.12.1, xdist-3.8.0
+created: 2/2 workers
+2 workers [72 items]
+
+........................................................................ [100%]
+============================== warnings summary ===============================
+C:\Users\Ken\AppData\Local\hermes\hermes-agent\venv\Lib\site-packages\pygame\pkgdata.py:25
+C:\Users\Ken\AppData\Local\hermes\hermes-agent\venv\Lib\site-packages\pygame\pkgdata.py:25
+  C:\Users\Ken\AppData\Local\hermes\hermes-agent\venv\Lib\site-packages\pygame\pkgdata.py:25: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
+    from pkg_resources import resource_stream, resource_exists
+
+src\hardware\telemetry_publisher.py:19
+src\hardware\telemetry_publisher.py:19
+  D:\OJT\_viewer_fix_20261009\src\hardware\telemetry_publisher.py:19: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+C:\Users\Ken\AppData\Local\hermes\hermes-agent\venv\Lib\site-packages\websockets\legacy\__init__.py:6
+C:\Users\Ken\AppData\Local\hermes\hermes-agent\venv\Lib\site-packages\websockets\legacy\__init__.py:6
+  C:\Users\Ken\AppData\Local\hermes\hermes-agent\venv\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 72 passed, 6 warnings in 23.06s =======================
+Part A PASSED.
+
+=== ALL TEST SUITES PASSED in 25.37s ===

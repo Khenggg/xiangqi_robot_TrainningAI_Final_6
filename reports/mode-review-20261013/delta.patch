@@ -1,0 +1,173 @@
+--- before/main.py
++++ after/main.py
+@@ -374,7 +374,7 @@
+                     elif BTN_SURRENDER_RECT.collidepoint(event.pos):
+                         # End only at a completed move boundary; do not invalidate
+                         # the board while a robot worker is moving a piece.
+-                        if self_play.accepts_next:
++                        if self_play.accepts_surrender:
+                             winner = 'b' if state.turn == 'r' else 'r'
+                             self_play.end_match(winner='BLACK' if winner == 'b' else 'RED', reason='RESIGN')
+                             state.handle_game_over(winner, reason='RESIGN')
+--- before/src/core/ai_execution.py
++++ after/src/core/ai_execution.py
+@@ -8,6 +8,8 @@
+ 
+ 
+ def execute_ai_move(state, hw, best_move, dry_run=False, visual_pick_enabled=False):
++    if getattr(state, "game_over", False) or getattr(state, "turn_confirmation_required", False):
++        return False
+     if getattr(state, "pick_test_mode", False) or getattr(state, "pick_test_resume_required", False):
+         return False
+     if not best_move or state.physical_sync_fault or state.move_sync_error:
+--- before/src/core/self_play_controller.py
++++ after/src/core/self_play_controller.py
+@@ -66,6 +66,13 @@
+         return self.status is SelfPlayStatus.READY and self.run_mode == "step"
+ 
+     @property
++    def accepts_surrender(self) -> bool:
++        return (self.status is SelfPlayStatus.READY
++                and not getattr(self.state, "game_over", False)
++                and not getattr(self.state, "turn_confirmation_required", False)
++                and (self._thread is None or not self._thread.is_alive()))
++
++    @property
+     def human_input_disabled(self) -> bool:
+         return self.active or self.status in {SelfPlayStatus.FAULTED, SelfPlayStatus.ENDED}
+ 
+@@ -120,6 +127,8 @@
+             self.state.set_status("Ván đã kết thúc. Chọn New Game trước khi bắt đầu self-play.",
+                                   color=(180, 100, 0), duration=15.0)
+             return False
++        if getattr(self.state, "turn_confirmation_required", False):
++            return self._start_fault("Xác nhận lượt Đỏ/Đen sau khi quét bàn trước khi self-play.")
+         if getattr(self.state, "pick_test_mode", False) or getattr(self.state, "pick_test_resume_required", False):
+             return self._start_fault("Khôi phục bàn và New Game sau test trước khi self-play.")
+         # 1. Readiness check across Physical and Virtual backends
+@@ -170,9 +179,14 @@
+         return True
+ 
+     def request_next_move(self) -> bool:
++        if self.status is not SelfPlayStatus.READY:
++            return False
++        if getattr(self.state, "game_over", False):
++            self.status = SelfPlayStatus.FINISHED
++            return False
++        if getattr(self.state, "turn_confirmation_required", False):
++            return self._start_fault("Xác nhận lượt Đỏ/Đen trước khi đi tiếp.")
+         if getattr(self.state, "pick_test_mode", False) or getattr(self.state, "pick_test_resume_required", False):
+-            return False
+-        if self.status is not SelfPlayStatus.READY:
+             return False
+         if (not getattr(self.hw, "is_robot_ready", False)
+                 or getattr(self.state, "move_sync_error", None)
+--- before/src/ui/input_handler.py
++++ after/src/ui/input_handler.py
+@@ -173,7 +173,12 @@
+         if self._player_turn_mode == PlayerTurnMode.LEGACY:
+             return False
+         capability = self._interaction_capability()
+-        if (self.state.turn != "r" or self.state.game_over
++        permission = getattr(self.state, "is_human_turn", self.state.turn == "r")
++        human_turn = permission() if callable(permission) else bool(permission)
++        if (not human_turn or self.state.game_over
++                or getattr(self.state, "physical_sync_fault", False)
++                or getattr(self.state, "move_sync_error", None)
++                or getattr(self.state, "turn_confirmation_required", False)
+                 or not self.hw.yolo_detector or not self.hw.yolo_detector.has_baseline()):
+             self._player_turn_arbiter.deactivate()
+             self._unified_active = False
+@@ -184,9 +189,31 @@
+             activation_capability = (InteractionCapability.AVAILABLE
+                                      if self._player_turn_mode == PlayerTurnMode.SHADOW
+                                      else capability)
+-            self._player_turn_arbiter.activate(self.state.board, activation_capability)
++            self._player_turn_arbiter.activate(self.state.board, activation_capability,
++                                               player_color=self.state.turn)
+             self._unified_active = self._player_turn_arbiter.state.name != "INACTIVE"
+         return self._unified_active
++
++    def _unified_observation_confidence(self, result):
++        """Validate cached recognition metadata without camera reads or inference."""
++        if not result or result.get("success") is not True or result.get("quality_ok") is False:
++            return None
++        confidence = result.get("confidence")
++        if confidence is None:
++            # The camera worker may provide its explicit quality decision instead.
++            return 1.0 if result.get("quality_ok") is True else None
++        try:
++            if len(confidence) != 10 or any(len(row) != 9 for row in confidence):
++                return None
++            values = [float(cell) for row in confidence for cell in row]
++            threshold = float(getattr(getattr(self.hw, "config", None), "CCHESS_MIN_CELL_CONFIDENCE", 0.5))
++            if (not math.isfinite(threshold) or not 0 <= threshold <= 1
++                    or any(not math.isfinite(v) or not 0 <= v <= 1 for v in values)
++                    or min(values) < threshold):
++                return None
++            return sum(values) / len(values)
++        except (TypeError, ValueError):
++            return None
+ 
+     def _motion_busy(self):
+         worker = getattr(self.hw, "motion_worker", None)
+@@ -971,6 +998,8 @@
+                 or getattr(self.state, "pick_test_mode", False) or getattr(self.state, "pick_test_resume_required", False)
+                 or getattr(self.state, "manual_override_active", False)):
+             self._board_stability_monitor.reset()
++            self._player_turn_arbiter.deactivate()
++            self._unified_active = False
+             return False
+         now = time.monotonic()
+         sample_interval = getattr(
+@@ -1002,6 +1031,8 @@
+             if self._board_stability_monitor.candidate is not None:
+                 print("[STABILITY] Candidate reset: camera returned no frame.")
+             self._board_stability_monitor.observe(None)
++            self._player_turn_arbiter.deactivate()
++            self._unified_active = False
+             return False
+         sampled_at, frame, detections, cchess_result = observation
+         if sampled_at <= max(self._last_stability_sample_at, self._stability_sample_after):
+@@ -1017,10 +1048,13 @@
+             layout = cchess_result.get("board") if cchess_result and cchess_result.get("success") else None
+             interaction = getattr(self.hw, "is_board_occluded", None)
+             interaction = bool(interaction()) if callable(interaction) else False
+-            visibility = Visibility.CLEAR if layout is not None and not interaction else Visibility.INSUFFICIENT
++            confidence = self._unified_observation_confidence(cchess_result)
++            visibility = (Visibility.CLEAR if layout is not None and confidence is not None and not interaction
++                          else Visibility.INSUFFICIENT)
+             request = self._player_turn_arbiter.ingest(BoardObservation(
+                 observed_at=sampled_at, layout=layout, visibility=visibility,
+                 hand_or_object_present=interaction,
++                aggregate_confidence=confidence if confidence is not None else 0.0,
+             )) if active else None
+             if request is not None and self._player_turn_mode == PlayerTurnMode.UNIFIED:
+                 src, dst = request.move
+@@ -1032,8 +1066,10 @@
+                     request.move,
+                 )
+                 committed = self._human_commit_coordinator.try_commit(scoped_request, piece) == "ACCEPTED"
+-                if committed:
+-                    self._player_turn_arbiter.deactivate()
++                # Reconciliation failure can follow a local commit. Start the
++                # next confirmation from current truth, never the old matcher.
++                self._player_turn_arbiter.deactivate()
++                self._unified_active = False
+                 return committed
+             # SHADOW deliberately leaves legacy authoritative while recording
+             # the same decisions in the arbiter state.
+--- before/src/vision/player_turn_arbiter.py
++++ after/src/vision/player_turn_arbiter.py
+@@ -36,9 +36,9 @@
+     def turn_token(self):
+         return self._token
+ 
+-    def activate(self, board, capability=InteractionCapability.AVAILABLE):
++    def activate(self, board, capability=InteractionCapability.AVAILABLE, *, player_color="r"):
+         self._token += 1
+-        self._matcher = LegalSuccessorMatcher(board)
++        self._matcher = LegalSuccessorMatcher(board, player_color=player_color)
+         self._interaction_seen = False
+         self._reset_transient()
+         self._emitted = False

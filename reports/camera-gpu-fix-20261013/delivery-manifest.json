@@ -1,0 +1,12 @@
+{
+  "src/hardware/hardware_manager.py": "2618526ef0833e3bb29e985d396a33549e0caca5eaa993ce38213e67abd4c859",
+  "src/vision/camera_monitor.py": "05c2b582408be586a71a7d11faf99603c03abac2a13b2fd03035c4bd6247fdca",
+  "src/vision/cchess_recognizer.py": "e75ce4be446df4d3ba091a70bff7180fd32a1d4374ed96a8a6993783da909005",
+  "config.py": "1f9c6a86294426efcc86b35b5e774a45120b69fdf1d885c3100170b22ecbd159",
+  "SETUP_WINDOWS.bat": "ce78680a1150d3f87e1743918fa3982d93ef02d79c3bb0c74848a8b30d9ab578",
+  "requirements.txt": "79ffb3ae1bff1fd0c1855a826e7c04cfa4ffd59f8935801c56e3a2a67be795a1",
+  "src/ui/board_renderer.py": "5c1cdb62b3ae73d85d57249e25089196f075add9b158c60420f4546ce2a4bcc7",
+  "SETUP_GPU.bat": "50e0508ff87600945a730d79e3e4d71b4efba040ddb5fbddfb864092cfa6757e",
+  "tests/unit/test_camera_gpu_lifecycle.py": "9c8844f000558c53b5689625334ea6fd019f6635c5eb3936c8e1fa73deeeb203",
+  "docs/CAMERA_MONITOR_GPU_FIX_20261013.md": "db3ece78618da53aa1d8a2ecb675825b32ade786f332abe6d15228098366faf7"
+}

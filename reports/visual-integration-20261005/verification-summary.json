@@ -1,0 +1,180 @@
+{
+  "date": "2026-10-05",
+  "branch": "feature/unified-robot-vs-robot",
+  "base_head": "7d8c5deee9e03bb187ccf8e8c1999703202cfd7e",
+  "visual_donor": "652af26912c66ef160f7c622a49fed3feaca0ea0",
+  "committed": false,
+  "physical_hardware_used": false,
+  "full_parallel_passed": 731,
+  "full_serial_passed": 8,
+  "follow_up_integration_passed": 97,
+  "system_cleanup_passed": 51,
+  "final_gui_passed": 30,
+  "node_contracts_passed": 9,
+  "startup_game_only_exit": 0,
+  "startup_simulation_exit": 0,
+  "actual_pybullet_before_sync_xy_error_mm": 0.1504,
+  "root_worktree_source_mismatches": 0,
+  "files": [
+    {
+      "path": "main.py",
+      "sha256": "6D3FD6DB12542E5CE740A9094F6E3074D06D8EC9CDB45C472772E36A95CF592B",
+      "worktree_match": true
+    },
+    {
+      "path": "requirements.txt",
+      "sha256": "730DBB0F020B00213D0F5961D171D7F6991FE0A60D29744169DE919AB47052F7",
+      "worktree_match": true
+    },
+    {
+      "path": "robot-3d-viewer/board_picker.mjs",
+      "sha256": "D8AFEA4FF780FD66A08504FFF8FA8A39D511CE5957082F646ADC1852A32F91E4",
+      "worktree_match": true
+    },
+    {
+      "path": "robot-3d-viewer/index.html",
+      "sha256": "8003E128F1F0EC9093804691DF99A149DDC3FF275C6C3E9CB12ACADCE511F7F0",
+      "worktree_match": true
+    },
+    {
+      "path": "robot-3d-viewer/main.mjs",
+      "sha256": "98B20420795FA72BC45D8457B4B6005F46FED5CD9144420F7D497E660A6D497A",
+      "worktree_match": true
+    },
+    {
+      "path": "src/core/ai_execution.py",
+      "sha256": "A116C599C0C5C6FAA7028D9C595D6ADD561E198592870508807331DED478DFF0",
+      "worktree_match": true
+    },
+    {
+      "path": "src/core/game_state.py",
+      "sha256": "2306A60E89C2969E1D44695F3DF1F760A0E0B12E13671EAA8B29C6451F2AEB0B",
+      "worktree_match": true
+    },
+    {
+      "path": "src/core/self_play_controller.py",
+      "sha256": "60F01ADD853A9DB7CE3128F8CCE16E44FA0CCC25EB28D5899AE44F47C27DE3FF",
+      "worktree_match": true
+    },
+    {
+      "path": "src/digital_twin/live_twin_bridge.py",
+      "sha256": "58791BE9E97B58CD8A929ACA1168771CB7C55A59013E2BD22DAA5A1A2991FCE2",
+      "worktree_match": true
+    },
+    {
+      "path": "src/hardware/hardware_manager.py",
+      "sha256": "2DCF0626EC06470C4FAE23E08BCEB3BAEF60E725338E57C38EE5F91B1E82B00D",
+      "worktree_match": true
+    },
+    {
+      "path": "src/hardware/robot_VIP.py",
+      "sha256": "A9809CD9625565F4607C0C3D1C8CA1FA4F6E614A8A867239FA8128AD1D16C2E7",
+      "worktree_match": true
+    },
+    {
+      "path": "src/hardware/telemetry_publisher.py",
+      "sha256": "0101F2E6CA376B2CDE51B7B5F9993523AA6C186E39888578E406E89E1FAB72F9",
+      "worktree_match": true
+    },
+    {
+      "path": "src/ui/board_renderer.py",
+      "sha256": "205BD703D762B468836BFFC420D299795E45257EEA3562357595790F0D6F1E37",
+      "worktree_match": true
+    },
+    {
+      "path": "src/ui/debug_dashboard.py",
+      "sha256": "95A4CAD4187AF430FB2DD05B864423D223826FAF77C8324E1CAE03C2B411C079",
+      "worktree_match": true
+    },
+    {
+      "path": "src/ui/input_handler.py",
+      "sha256": "FB804400BE46406A84B746817AC547A166D50E6B8880B0A81CE6155280B3A5DF",
+      "worktree_match": true
+    },
+    {
+      "path": "src/vision/auto_calibrate.py",
+      "sha256": "E6BA1402CD1AF0CC38566CE9C021C2C65641D7EF7A4F06D237D8BD013841A8A9",
+      "worktree_match": true
+    },
+    {
+      "path": "src/vision/calibrate_camera.py",
+      "sha256": "8E30557DBBDC870EBE73F72803B6959E577F6725B2036932A755C96B567158CE",
+      "worktree_match": true
+    },
+    {
+      "path": "tests/unit/test_phase3_final_g90_corrective.py",
+      "sha256": "D1490129FC4EB3F55560EDF7C4ABCE75A19778007434F608F785EF008F77B4E1",
+      "worktree_match": true
+    },
+    {
+      "path": "tests/unit/test_viewer_coordinate_contract.mjs",
+      "sha256": "2933C8E2E2E9DE2D4D3CDB92E3704EA7EDB41388CF05A3E538804B5DB61FC21C",
+      "worktree_match": true
+    },
+    {
+      "path": "tests/unit/test_viewer_single_motion_authority.mjs",
+      "sha256": "E5B64308A53D8BF7326B6DC9CF668DDF19DC01F0003F8FC637D5F6ADF2492C90",
+      "worktree_match": true
+    },
+    {
+      "path": "scripts/measure_geometry.py",
+      "sha256": "57E309D2AE5A08DBBC1E643C6CFEC2C0020F5A9AE42890B37C2BD8C99EE9FE6E",
+      "worktree_match": true
+    },
+    {
+      "path": "src/core/launch_options.py",
+      "sha256": "0FF7299FB8653DED355C6B0B1790F042449A4ADC213D5AD1905C7D88D0F5E1CF",
+      "worktree_match": true
+    },
+    {
+      "path": "src/core/project_logging.py",
+      "sha256": "BB7F77DD989AC4F27ED5D2920198A17474B0266384ADE1C5DFC8DC86AD63CC3E",
+      "worktree_match": true
+    },
+    {
+      "path": "src/ui/measurement_client.py",
+      "sha256": "9281227CD1A363F22B4CDB22F0263D00B274021BB69305EC97666B50E72DD24D",
+      "worktree_match": true
+    },
+    {
+      "path": "src/vision/geometry_measurement.py",
+      "sha256": "9B37AC7E774E4E5A8E4AF22DC42DF584F11A1234DA18497CA5D835A40F19BDB2",
+      "worktree_match": true
+    },
+    {
+      "path": "tests/test_auto_calibration_safety.py",
+      "sha256": "735B75BDBD59403E5C96F8C681AECB5785329557D0147BF602DC93A3BD22B6E3",
+      "worktree_match": true
+    },
+    {
+      "path": "tests/test_center_pick_no_fallback.py",
+      "sha256": "6F69A122FE4D899183E16587D12E92924093CA68527CD41465A987BCC3E630F2",
+      "worktree_match": true
+    },
+    {
+      "path": "tests/test_geometry_measurement.py",
+      "sha256": "B34F50340F3D866AFC4B3B571C0B98EED8CE9EA52F93F2F226A158FBCA7D281F",
+      "worktree_match": true
+    },
+    {
+      "path": "tests/test_measurement_client.py",
+      "sha256": "3C995FC09E90D16CCB79ABDD177BCB795BC0AE2AD48799E257EC99B7AC12E59D",
+      "worktree_match": true
+    },
+    {
+      "path": "tests/unit/test_project_logging.py",
+      "sha256": "FC48D41DA20A3FA5CC168A035F4E26A008FDBFDB8A76CB7E350448B3DA3021E9",
+      "worktree_match": true
+    },
+    {
+      "path": "tests/unit/test_simple_launch_sync.py",
+      "sha256": "B886127247A62EF8A82C0026F69B432B1EC64F6217E7897D49FD8C06CB590CB1",
+      "worktree_match": true
+    },
+    {
+      "path": "tests/unit/test_visual_selective_integration.py",
+      "sha256": "FB5F62CE5896A510D856306EE9F6781D0E0DB9010AA448E41724A5FB269A57D4",
+      "worktree_match": true
+    }
+  ]
+}

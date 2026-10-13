@@ -5,6 +5,16 @@ export function validateLivePacket(payload, jointLimits, expectedModel = "FR5") 
   if (payload.robot_model !== expectedModel) {
     return { ok: false, reason: `expected robot_model ${expectedModel}` };
   }
+  if (payload.connected === false || payload.joints_valid === false) {
+    return { ok: false, reason: payload.telemetry_error || "robot telemetry unavailable" };
+  }
+  if (payload.source === "PHYSICAL") {
+    const measured = Number(payload.measurement_timestamp);
+    const age = Date.now() / 1000 - measured;
+    if (!measured || !Number.isFinite(age) || age < -1 || age > 2) {
+      return { ok: false, reason: "physical robot measurement is stale" };
+    }
+  }
   if (!Array.isArray(payload.joints) || payload.joints.length < 6) {
     return { ok: false, reason: "six joint values are required" };
   }

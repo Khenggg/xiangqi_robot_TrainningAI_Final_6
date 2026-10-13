@@ -1,0 +1,54 @@
+{
+  "pose_providers": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "layout_providers": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "yolo_device": "cuda:0",
+  "monitor_device": 0,
+  "runs": [
+    {
+      "duration_s": 2.3439999999973224,
+      "health": {
+        "ready": false,
+        "error": null,
+        "result_age_s": 2.3439999999973224
+      },
+      "detections": 32,
+      "names": 32
+    },
+    {
+      "duration_s": 0.07800000000133878,
+      "health": {
+        "ready": true,
+        "error": null,
+        "result_age_s": 0.07800000000133878
+      },
+      "detections": 32,
+      "names": 32
+    },
+    {
+      "duration_s": 0.06300000000192085,
+      "health": {
+        "ready": true,
+        "error": null,
+        "result_age_s": 0.06300000000192085
+      },
+      "detections": 32,
+      "names": 32
+    },
+    {
+      "duration_s": 0.046999999998661224,
+      "health": {
+        "ready": true,
+        "error": null,
+        "result_age_s": 0.046999999998661224
+      },
+      "detections": 32,
+      "names": 32
+    }
+  ]
+}

@@ -127,7 +127,14 @@ class TestGripperRPCBindingAndInvariants(unittest.TestCase):
         from types import SimpleNamespace
         cfg=SimpleNamespace(ROBOT_BACKEND="PHYSICAL",DRY_RUN=False)
         hm=HardwareManager(cfg,".")
-        hm.robot=MagicMock(connected=True,physical_motion_authorized=True)
+        from src.hardware.robot_VIP import FR5Robot
+        hm.robot=FR5Robot()
+        hm.robot.connected=True
+        hm.robot.dry=False
+        hm.robot.physical_motion_authorized=True
+        hm.robot.robot=MagicMock()
+        hm.robot.robot.RobotEnable.return_value=0
+        hm.robot._set_gripper_safe_idle=MagicMock()
         hm.cleanup()
         hm.robot._set_gripper_safe_idle.assert_called_once()
         hm.robot.robot.RobotEnable.assert_called_once_with(0)

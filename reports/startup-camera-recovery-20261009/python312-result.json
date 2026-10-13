@@ -1,0 +1,7 @@
+{
+  "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+  "home_screen_active": true,
+  "failed_attempts": 2,
+  "physical_connect_calls": 0,
+  "message": "Không khởi tạo được: Camera startup blocked: Cannot read camera index 1. Close Windows Camera, OBS/Teams; check index and camera permissions.. Khắc phục thiết bị rồi chọn chế độ lại. Chi tiết trong logs/ (STARTUP_FAILED)."
+}

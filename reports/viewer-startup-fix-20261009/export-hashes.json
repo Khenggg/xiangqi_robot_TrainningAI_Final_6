@@ -1,0 +1,10 @@
+{
+  "src/core/launch_options.py": "3a382f5d9d8e1b86933d8fb9b888da0452c80e07d3d8b37432d32ff073285924",
+  "main.py": "c7a2ad5c5adc503c63f1495674edb4ee41922ef2ec3f44d025bcf84089955f82",
+  "RUN.bat": "7911c48a9f152128974cef637ffe37ecd620284b0cff14e9c4afc08039a438be",
+  "SETUP_WINDOWS.bat": "36c54bf688873ae3b9f5a20cba9ad5b0250dd4b5814c4251b0a8d9e82bcd6e62",
+  "docs/START_PROJECT.md": "cee4fa41098298a875bf759637f21e743af4b9dd979025070af2c32ea401ead0",
+  "CURRENT_STATE.md": "beae740b3b04884073c84f9f34d122bf148ce4c18dcfde4a8b0906f149f49cff",
+  "KNOWN_ISSUES.md": "13aab2dc6acdcab5cf3267aeb5105e807c440b0a91c35b9d80330419b2fc13a9",
+  "tests/unit/test_viewer_startup.py": "4c2a44e1496bc054463056be9913b219236404db55cc8d2b500dea6029124840"
+}

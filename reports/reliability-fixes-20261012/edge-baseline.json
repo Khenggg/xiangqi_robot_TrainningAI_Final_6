@@ -1,0 +1,9 @@
+{
+  "main.py": "4d957ae2ea0dd7d1821d56006ab4670ce111547d604bbfc9dd92af740e5dcaaa",
+  "src/core/game_state.py": "d03810ea316ac2badc0f0563ccbe6af26ab0a0f2ee0e8d279feabcd38557cc91",
+  "src/ui/input_handler.py": "f41ea1d7a6b833bb3368e0574ffcb56b19802ee2be7f8de5689294f3eb655436",
+  "CURRENT_STATE.md": "d7f815a008d8fb35acb9773d58a8f2ffde83d694854e0c7514ee741a28d115d8",
+  "KNOWN_ISSUES.md": "f229cc22207df64640b2a2eb9463589340455dad506d9f0abb9cf3087d599a30",
+  "tests/unit/test_review_lifecycle_edges.py": null,
+  "docs/LIFECYCLE_EDGE_REVIEW_20261012.md": null
+}

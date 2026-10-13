@@ -1,0 +1,175 @@
+{
+  "base_snapshot": "da703237561c5264d96886514852bd958e613409",
+  "source_commit": "fe3faa8dcac121defa4c9ee000d4df0ac6c8fd09",
+  "files": [
+    {
+      "path": "CALIBRATE_CAMERA_INTRINSICS.bat",
+      "sha256": "61b2f08b0e88676efd327f2a4aa73902aa80f3af12f25edc2d4c1533a1d752c2"
+    },
+    {
+      "path": "CALIBRATE_PICK_GEOMETRY.bat",
+      "sha256": "a9bb853921b274764f28eeca5d7200682761f578ab0b395573450bb27fe7d9cb"
+    },
+    {
+      "path": "CURRENT_STATE.md",
+      "sha256": "13a6cc2338faafcd093cd5edb61180fe7499bf79b74652ccb80b19dc9b0591fb"
+    },
+    {
+      "path": "KNOWN_ISSUES.md",
+      "sha256": "d570052c28b1774e572c04aed7ec76daf39bc3c9278a99077b083ec59ba1c715"
+    },
+    {
+      "path": "README.md",
+      "sha256": "f793763f7672b81fb506c3587bf47f419751aa011babdc85775e85ce4c2e5207"
+    },
+    {
+      "path": "RUN.bat",
+      "sha256": "b977c3963f9efda4098d5c97f30a3134c4af46b6760f0f3527d86729081183a4"
+    },
+    {
+      "path": "SETUP_WINDOWS.bat",
+      "sha256": "30517f1659b5a742f8043dae8bf4384d34f42e570c70c638adf4cbb004a66363"
+    },
+    {
+      "path": "assets/calibration/checkerboard-20mm.svg",
+      "sha256": "2ae3a22a5e26f63a14bfa9d6b19753607a9d2a20be61381a77e0c76f36afed4c"
+    },
+    {
+      "path": "calibration/visual_v2_candidate_settings.json",
+      "sha256": "0aea52a3b01aaedc185aa0d87a382cfa7b9f919aa118636807f624dde6264fc7"
+    },
+    {
+      "path": "config.py",
+      "sha256": "f3dd9870a68a75e94c1c058bdc1494e8e9bdbba0a8e0bff3f99afeed84fc058e"
+    },
+    {
+      "path": "docs/VISUAL_V2_INTEGRATION.md",
+      "sha256": "5fcddb8ec20d4e689ad0237b05422c7fb9c6a0506262875ef57fb4d65b786cff"
+    },
+    {
+      "path": "main.py",
+      "sha256": "62c4c0a5be4dfae793208276ace3bbdf09e7e82c600fbdb7d7f29820890a18d7"
+    },
+    {
+      "path": "scripts/calibrate_camera_intrinsics.py",
+      "sha256": "63149b1b8f58bdb06459b03599f2aaf2c8b79e8401c85520b54dbf979a4a14d4"
+    },
+    {
+      "path": "scripts/calibrate_pick_geometry.py",
+      "sha256": "317f7994b12ce652e2569a4e74f0ede687372039e46379a37f089385ab9df30f"
+    },
+    {
+      "path": "src/core/ai_execution.py",
+      "sha256": "72f7202c0399b9aec6e85220560bc93006863dc268e3c5fb4e0c51844db9821d"
+    },
+    {
+      "path": "src/core/game_state.py",
+      "sha256": "54ff7e4112c944e99770feb33611ba661bb9cba0d38cc72701b50f1771586e5e"
+    },
+    {
+      "path": "src/core/motion_worker.py",
+      "sha256": "eca9f4b10473dc6eb282c9c58f564c8c2345238c6d8a361ecb40c62132cecf02"
+    },
+    {
+      "path": "src/core/self_play_controller.py",
+      "sha256": "bafb7f5f0189ce4d72394a97a53f4b80ca71ede5375d0e30e6af38c34e50be6a"
+    },
+    {
+      "path": "src/core/visual_move_coordinator.py",
+      "sha256": "abfd46f59e431015a0c169e0958d564558042c1758315c20bdd946f2a5a1c766"
+    },
+    {
+      "path": "src/hardware/hardware_manager.py",
+      "sha256": "1280ca6d247fa38d471ff489a1604569f82f6accb0a6395da014177c1e1e6624"
+    },
+    {
+      "path": "src/hardware/robot_VIP.py",
+      "sha256": "66f3a895f9a0810ea02b7b8b9d07c1cca34e4a7eefd41a85311ea09651f6751b"
+    },
+    {
+      "path": "src/ui/board_renderer.py",
+      "sha256": "78a7689e8ad0a3c4b987b5e956688c70a4961bda9c6c6bf831caa61ee9c0c352"
+    },
+    {
+      "path": "src/ui/input_handler.py",
+      "sha256": "2db9b7ece8b8125db18c30d6135169b2c0692589304793188a09c4e8b5246088"
+    },
+    {
+      "path": "src/vision/camera_monitor.py",
+      "sha256": "f6febb68de213c722aa0bef7960892ba99d9785a9857012ebf093a231ebbb4ba"
+    },
+    {
+      "path": "src/vision/camera_source.py",
+      "sha256": "0dc2565a248b4bce22668795a93728b5d4b92fb0a9fe7bc3c2590253385b8efa"
+    },
+    {
+      "path": "src/vision/camera_startup.py",
+      "sha256": "abce26f68c2a6a4983116b8f02981b010bfec377860b49c1879edfe007c67e83"
+    },
+    {
+      "path": "src/vision/height_pick_geometry.py",
+      "sha256": "738e07758ad42eb8eef0d4af652753e82410d0f9e31fadcfcdbd7df1f18764a0"
+    },
+    {
+      "path": "src/vision/pick_consensus.py",
+      "sha256": "cb281fbf06f235216e3ee7bd407b07683adb139d0b98d1cf4c39eda8b0f5b4ce"
+    },
+    {
+      "path": "src/vision/pick_debug.py",
+      "sha256": "03c179016bfacd7bb6e8a12bfc9b7cfa704d1dfe1e6fceb7173806a304e83599"
+    },
+    {
+      "path": "src/vision/pick_geometry.py",
+      "sha256": "0b2e4e05b76681b0e23c586c51d854042098e5f215abd6fcbfa099970b188217"
+    },
+    {
+      "path": "src/vision/ring_pick_estimator.py",
+      "sha256": "22ece262b4f79ca7d006536cc389e0adea7af81afb05ab5f83e56fd77250a544"
+    },
+    {
+      "path": "src/vision/top_face_pick_estimator.py",
+      "sha256": "90321c43ed55b42a6abe75386cbf5955a2ca7d630c6052a8e104ad7bb71c78f6"
+    },
+    {
+      "path": "src/vision/visual_pick_estimator.py",
+      "sha256": "814bbd53f52b1e13ce44df6fc13d1fa5db18beb5e67e276933985f50a9fed931"
+    },
+    {
+      "path": "src/vision/visual_pick_modes.py",
+      "sha256": "3716ba49e9119d76487dea58e6dc78ef74a285de5ec4dad7bdac532be8f63808"
+    },
+    {
+      "path": "tests/test_camera_intrinsics_open.py",
+      "sha256": "9b04f6d66049265be4bdcfd4db72ab3ac641efa6feafb1c7727c5cb29e7b2270"
+    },
+    {
+      "path": "tests/test_height_pick_geometry.py",
+      "sha256": "c460113d5f05179b7ed2a8e1c94159a23ca1a67d8c7689c984d57bac6dbe923c"
+    },
+    {
+      "path": "tests/test_pick_consensus.py",
+      "sha256": "2b21200c5fc0039af064e7da3b7bee8fafa577f161bf31b6934a6ff38b3ca8f4"
+    },
+    {
+      "path": "tests/test_ring_pick_estimator.py",
+      "sha256": "81cdd334a8324137ea4b225d05b7d66a70047ed7a52d48dbe2fb72a66c9dace4"
+    },
+    {
+      "path": "tests/test_top_face_geometry.py",
+      "sha256": "2a7e3de3386ec35b2a076cce9871709c998732243de615651e7707784be3a9f8"
+    },
+    {
+      "path": "tests/unit/test_visual_v2_adapter.py",
+      "sha256": "41f3ee19bbd39fc16cd2352d8244ff49bb708f558574b68d0194ca72da63374d"
+    },
+    {
+      "path": "tests/unit/test_visual_v2_camera_boundary.py",
+      "sha256": "61de7a293da286ede2c5e81fa1123768469e97982ea984266dfc92f93c05d91a"
+    },
+    {
+      "path": "tests/unit/test_visual_v2_simulation.py",
+      "sha256": "4abb03168f32f2f2c5f81ea73b202c4de017a2aed1a5a3de5022d030212c4f77"
+    }
+  ],
+  "conflicts_with_current_main": []
+}
