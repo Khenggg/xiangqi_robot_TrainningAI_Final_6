@@ -17,6 +17,13 @@ graphify-out/
 *.zip
 hand_detection/
 
+# Trọng số mô hình AI & Computer Vision (quá lớn, tải/quản lý riêng)
+models/*.pt
+models/**/*.onnx
+*.pt
+*.onnx
+!models/cchess/README.md
+
 # Local Python virtual environments (machine-specific dependencies)
 .venv/
 .venv312/
