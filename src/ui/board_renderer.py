@@ -56,7 +56,8 @@ BTN_CONTINUE_RECT = pygame.Rect(CLIENT_ACTION_X, 662, CLIENT_ACTION_WIDTH, 64)
 BTN_PICK_RETRY_RECT = pygame.Rect(CLIENT_ACTION_X, 662, 148, 64)
 BTN_PICK_CANCEL_RECT = pygame.Rect(CLIENT_ACTION_X + 156, 662, 148, 64)
 BTN_PICK_TEST_RECT = pygame.Rect(CLIENT_ACTION_X, 742, CLIENT_ACTION_WIDTH, 64)
-HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 240, 650, 480, 104)
+HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 460, 650, 420, 104)
+HOME_VS_HUMAN_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 40, 650, 420, 104)
 HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 230, 42, 180, 58)
 SETTINGS_BACK_RECT = pygame.Rect(48, 42, 168, 58)
 DEBUG_STATUS_RECT = pygame.Rect(886, 330, 320, 70)
@@ -449,26 +450,32 @@ class BoardRenderer:
         settings = self.log_font.render("SETTINGS", True, (255, 255, 255))
         self.screen.blit(settings, settings.get_rect(center=HOME_SETTINGS_RECT.center))
 
-        card = HOME_VS_ROBOT_RECT.inflate(48, 68)
-        self._draw_panel(card, fill=(249, 245, 232), border=GOLD_COLOR, radius=20)
-        pygame.draw.circle(self.screen, JADE_DARK, (SCREEN_WIDTH // 2, card.y + 52), 30)
-        robot_mark = self.log_font.render("AI", True, (255, 255, 255))
-        self.screen.blit(robot_mark, robot_mark.get_rect(center=(SCREEN_WIDTH // 2, card.y + 52)))
-        pygame.draw.rect(self.screen, JADE_COLOR, HOME_VS_ROBOT_RECT, border_radius=18)
-        button = self.game_font.render("VS ROBOT", True, (255, 255, 255))
-        self.screen.blit(button, button.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery - 12)))
-        detail = self.log_font.render("Choose the robot difficulty next", True, (227, 245, 237))
-        self.screen.blit(detail, detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery + 32)))
+        self._draw_home_mode_button(HOME_VS_ROBOT_RECT, "VS ROBOT", "Choose the robot difficulty next", "AI")
+        self._draw_home_mode_button(HOME_VS_HUMAN_RECT, "VS NGƯỜI", "Create or join a room", "2P")
 
-        hint_rect = pygame.Rect(SCREEN_WIDTH // 2 - 190, 810, 380, 46)
+        hint_rect = pygame.Rect(SCREEN_WIDTH // 2 - 230, 810, 460, 46)
         self._draw_panel(hint_rect, fill=(249, 245, 232), border=GOLD_COLOR, radius=18)
-        hint = self.log_font.render("Click VS ROBOT or press Enter", True, MENU_MUTED_TEXT_COLOR)
+        hint = self.log_font.render("Choose VS ROBOT or VS NGƯỜI", True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(hint, hint.get_rect(center=hint_rect.center))
+
+    def _draw_home_mode_button(self, rect, label, detail, badge):
+        card = rect.inflate(36, 54)
+        self._draw_panel(card, fill=(249, 245, 232), border=GOLD_COLOR, radius=20)
+        pygame.draw.circle(self.screen, JADE_DARK, (rect.centerx, card.y + 42), 25)
+        mark = self.log_font.render(badge, True, (255, 255, 255))
+        self.screen.blit(mark, mark.get_rect(center=(rect.centerx, card.y + 42)))
+        pygame.draw.rect(self.screen, JADE_COLOR, rect, border_radius=18)
+        button = self.game_font.render(label, True, (255, 255, 255))
+        self.screen.blit(button, button.get_rect(center=(rect.centerx, rect.centery - 12)))
+        detail_surface = self.log_font.render(detail, True, (227, 245, 237))
+        self.screen.blit(detail_surface, detail_surface.get_rect(center=(rect.centerx, rect.centery + 32)))
 
     @staticmethod
     def home_action_from_pixel(px, py):
         if HOME_VS_ROBOT_RECT.collidepoint(px, py):
             return "vs_robot"
+        if HOME_VS_HUMAN_RECT.collidepoint(px, py):
+            return "vs_human"
         if HOME_SETTINGS_RECT.collidepoint(px, py):
             return "settings"
         return None

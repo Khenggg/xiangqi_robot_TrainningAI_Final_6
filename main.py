@@ -89,6 +89,7 @@ home_screen_active = True
 settings_menu_active = False
 difficulty_menu_message = ""
 debug_dashboard = None
+pvp_mode = None
 
 
 def set_debug_dashboard(enabled):
@@ -125,6 +126,8 @@ def _cleanup_all():
         hw.cleanup()
     if debug_dashboard is not None:
         debug_dashboard.close()
+    if pvp_mode is not None:
+        pvp_mode.close()
     try: pygame.quit()
     except: pass
     print("[CLEANUP] ✅ Xong!")
@@ -143,8 +146,12 @@ print(f"[FEN] {state.current_fen}")
 # Khởi chạy main loop. The launcher keeps difficulty selection out of the boot flow.
 try:
     while running:
+        if pvp_mode is not None:
+            pvp_mode.poll_remote()
         # 2a. Vẽ khung hình
-        if settings_menu_active:
+        if pvp_mode is not None:
+            pvp_mode.draw()
+        elif settings_menu_active:
             renderer.draw_settings_menu(getattr(config, "DEBUG_DASHBOARD", False))
         elif home_screen_active:
             renderer.draw_home_screen()
@@ -167,7 +174,8 @@ try:
             elif home_screen_active:
                 start_vs_robot = event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)
                 if event.type == pygame.MOUSEBUTTONDOWN:
-                    start_vs_robot = renderer.home_action_from_pixel(*canvas_position(event.pos)) == "vs_robot"
+                    home_action = renderer.home_action_from_pixel(*canvas_position(event.pos))
+                    start_vs_robot = home_action == "vs_robot"
                 if start_vs_robot:
                     # Connecting to the robot and calibrating the camera can block, so defer
                     # both until the player explicitly chooses to play against the robot.
@@ -178,9 +186,19 @@ try:
                         debug_dashboard.activity = "Game setup"
                     home_screen_active = False
                     difficulty_menu_active = True
+                elif event.type == pygame.MOUSEBUTTONDOWN and renderer.home_action_from_pixel(*canvas_position(event.pos)) == "vs_human":
+                    from player_vs_player import PlayerVsPlayerMode
+                    pvp_mode = PlayerVsPlayerMode(renderer)
+                    home_screen_active = False
                 elif event.type == pygame.MOUSEBUTTONDOWN and renderer.home_action_from_pixel(*canvas_position(event.pos)) == "settings":
                     home_screen_active = False
                     settings_menu_active = True
+            elif pvp_mode is not None:
+                pvp_action = pvp_mode.handle_event(event, canvas_position(event.pos) if event.type == pygame.MOUSEBUTTONDOWN else (0, 0))
+                if pvp_action == "home":
+                    pvp_mode.close()
+                    pvp_mode = None
+                    home_screen_active = True
             elif settings_menu_active:
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     settings_menu_active = False
