@@ -739,35 +739,60 @@ class HardwareManager:
         samples = {name: [] for name in expected_cells}
         valid_reports = 0
         sample_count = max(1, int(getattr(self.config, "VISUAL_PICK_SAMPLE_COUNT", 3)))
-        for _ in range(sample_count):
+        print(
+            f"[BOARD SYNC][PRE-MOVE] Checking scanned board against current FEN; "
+            f"required cells={expected_cells}, samples={sample_count}.",
+            flush=True,
+        )
+        for sample_index in range(sample_count):
             try:
                 frame, detections = self.cam_monitor.get_fresh_snapshot()
                 if frame is None:
+                    print(f"[BOARD SYNC][PRE-MOVE] sample {sample_index + 1}: no camera frame.", flush=True)
                     continue
+                recognition = self.recognize_board_state(frame)
                 report = self.board_reconciler.reconcile(
                     expected_board,
                     expected_cells,
-                    self.recognize_board_state(frame),
+                    recognition,
                     detections,
                 )
                 if not report.available:
-                    print(f"[BOARD SYNC] Recognition unavailable: {report.error}")
+                    print(
+                        f"[BOARD SYNC][PRE-MOVE] sample {sample_index + 1}: "
+                        f"recognition unavailable: {report.error}; recognition={recognition!r}",
+                        flush=True,
+                    )
                     continue
                 if not report.board_matches:
                     if report.mismatches:
-                        print(f"[BOARD SYNC] FEN mismatch at {list(report.mismatches)}; robot motion blocked.")
-                    else:
-                        print(f"[BOARD SYNC] Unknown CChess cells at {list(report.unknown_cells)}; robot motion blocked.")
+                        print(
+                            f"[BOARD SYNC][PRE-MOVE] sample {sample_index + 1}: "
+                            f"FEN mismatches={self._format_board_differences(expected_board, recognition.get('board'), report.mismatches)}; "
+                            f"unknown_cells={list(report.unknown_cells)}; robot motion blocked.",
+                            flush=True,
+                        )
+                    elif report.unknown_cells:
+                        print(
+                            f"[BOARD SYNC][PRE-MOVE] sample {sample_index + 1}: "
+                            f"unknown CChess cells={list(report.unknown_cells)}; robot motion blocked.",
+                            flush=True,
+                        )
                     continue
                 if not report.picks_verified:
                     failures = {name: obs.reason for name, obs in report.picks.items() if not obs.verified}
-                    print(f"[BOARD SYNC] Pick verification failed: {failures}")
+                    print(
+                        f"[BOARD SYNC][PRE-MOVE] sample {sample_index + 1}: "
+                        f"pick verification failed: {failures}; observations={report.picks!r}",
+                        flush=True,
+                    )
                     continue
                 valid_reports += 1
+                print(f"[BOARD SYNC][PRE-MOVE] sample {sample_index + 1}: board and pick checks passed.", flush=True)
                 for name, observation in report.picks.items():
                     samples[name].append(observation.target)
             except Exception as e:
-                print(f"[BOARD SYNC] Snapshot error: {e}")
+                print(f"[BOARD SYNC][PRE-MOVE] sample {sample_index + 1}: snapshot error: {e!r}", flush=True)
 
         minimum = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
         for name, values in samples.items():
@@ -775,10 +800,33 @@ class HardwareManager:
 
         verified = valid_reports >= minimum and all(target is not None for target in targets.values())
         if verified:
-            print(f"[BOARD SYNC] ✅ {valid_reports}/{sample_count} snapshots match FEN; using physical pick offsets.")
+            print(
+                f"[BOARD SYNC][PRE-MOVE] PASS: {valid_reports}/{sample_count} scans match current FEN; "
+                "using measured pick positions.",
+                flush=True,
+            )
         else:
-            print("[BOARD SYNC] Robot motion blocked: board/pick state was not stable enough.")
+            print(
+                f"[BOARD SYNC][PRE-MOVE] FAIL: {valid_reports}/{sample_count} scans passed "
+                f"(minimum={minimum}); robot motion blocked.",
+                flush=True,
+            )
         return targets, verified
+
+    @staticmethod
+    def _format_board_differences(expected_board, observed_board, cells):
+        if not isinstance(observed_board, list) or len(observed_board) != 10:
+            return f"cells={list(cells)} (observed board unavailable)"
+        differences = []
+        for col, row in cells:
+            try:
+                expected = expected_board[row][col]
+                observed = observed_board[row][col]
+            except (IndexError, TypeError):
+                differences.append(f"({col},{row}): cell data unavailable")
+            else:
+                differences.append(f"({col},{row}): expected={expected!r}, scanned={observed!r}")
+        return differences
 
     def verify_physical_board(self, expected_board):
         """Confirm the board after the robot has placed a piece before FEN commit."""
@@ -789,27 +837,45 @@ class HardwareManager:
         sample_count = max(1, int(getattr(self.config, "VISUAL_PICK_SAMPLE_COUNT", 3)))
         minimum = int(getattr(self.config, "VISUAL_PICK_MIN_STABLE_SAMPLES", 2))
         matches = 0
-        for _ in range(sample_count):
+        print(
+            f"[BOARD SYNC][RECOVERY] Comparing scanned board with candidate FEN; "
+            f"samples={sample_count}, need={minimum}.",
+            flush=True,
+        )
+        for sample_index in range(sample_count):
             try:
                 frame, detections = self.cam_monitor.get_fresh_snapshot()
                 if frame is None:
+                    print(f"[BOARD SYNC][RECOVERY] sample {sample_index + 1}: no camera frame.", flush=True)
                     continue
+                recognition = self.recognize_board_state(frame)
                 report = self.board_reconciler.reconcile(
-                    expected_board, {}, self.recognize_board_state(frame), detections
+                    expected_board, {}, recognition, detections
                 )
                 if report.board_matches:
                     matches += 1
+                    print(f"[BOARD SYNC][RECOVERY] sample {sample_index + 1}: candidate FEN matches.", flush=True)
                 elif report.available:
-                    print(f"[BOARD SYNC] Post-move mismatch at {list(report.mismatches)}.")
+                    print(
+                        f"[BOARD SYNC][RECOVERY] sample {sample_index + 1}: mismatch="
+                        f"{self._format_board_differences(expected_board, recognition.get('board'), report.mismatches)}, "
+                        f"unknown_cells={list(report.unknown_cells)}.",
+                        flush=True,
+                    )
                 else:
-                    print(f"[BOARD SYNC] Post-move recognition unavailable: {report.error}")
+                    print(
+                        f"[BOARD SYNC][RECOVERY] sample {sample_index + 1}: "
+                        f"recognition unavailable: {report.error}; recognition={recognition!r}",
+                        flush=True,
+                    )
             except Exception as e:
-                print(f"[BOARD SYNC] Post-move snapshot error: {e}")
+                print(f"[BOARD SYNC][RECOVERY] sample {sample_index + 1}: snapshot error: {e!r}", flush=True)
 
         verified = matches >= minimum
         print(
-            f"[BOARD SYNC] {'✅' if verified else '❌'} Post-move FEN verification: "
-            f"{matches}/{sample_count} matching snapshots."
+            f"[BOARD SYNC][RECOVERY] {'PASS' if verified else 'FAIL'}: "
+            f"{matches}/{sample_count} scans match candidate FEN (need={minimum}).",
+            flush=True,
         )
         return verified
 

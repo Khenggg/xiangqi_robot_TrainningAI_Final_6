@@ -111,7 +111,17 @@ class FR5Robot:
 
             err = self.robot.Mode(0)
             if err != 0:
-                print(f"[ROBOT] ⚠️ Set Mode(0) thất bại, code={err}")
+                state = getattr(self.robot, "robot_state_pkg", None)
+                current_mode = (
+                    getattr(state, "robot_mode", "unknown")
+                    if state is not None and not isinstance(state, type)
+                    else "unavailable"
+                )
+                print(
+                    f"[ROBOT] ⚠️ Set Mode(0) thất bại, code={err}; "
+                    f"mode hiện tại từ state stream={current_mode} "
+                    "(0=Auto, 1=Manual)."
+                )
 
             self._validate_gripper_config()
             self._set_gripper_safe_idle()
@@ -125,8 +135,36 @@ class FR5Robot:
 
         except Exception as e:
             print(f"[ROBOT] ❌ Lỗi connect: {e}")
+            self._log_connect_failure_state()
             self.connected = False
             raise
+
+    def _log_connect_failure_state(self):
+        """Print read-only controller state to expose why startup I/O was rejected."""
+        state = getattr(self.robot, "robot_state_pkg", None)
+        if state is None or isinstance(state, type):
+            print(
+                "[ROBOT DIAG] Chưa nhận được gói trạng thái realtime; "
+                "bỏ qua đọc fault/Tool DO."
+            )
+            return
+
+        try:
+            tool_do = int(state.tl_dgt_output_l) & 0b11
+            print(
+                "[ROBOT DIAG] "
+                f"mode={state.robot_mode} (0=Auto, 1=Manual), "
+                f"enabled={state.rbtEnableState}, "
+                f"program_state={state.program_state}, "
+                f"robot_state={state.robot_state}, "
+                f"estop={state.EmergencyStop}, "
+                f"safety_stop=({state.safety_stop0_state},"
+                f"{state.safety_stop1_state}), "
+                f"fault=({state.main_code},{state.sub_code}), "
+                f"tool_do_bits={tool_do:02b} (DO1,DO0)."
+            )
+        except Exception as diag_error:
+            print(f"[ROBOT DIAG] Không đọc được trạng thái controller: {diag_error}")
     
     def _load_teaching_points(self):
         """Đọc teaching points R1, R2, R3, R4 để tính toán Bilinear Interpolation."""
@@ -493,9 +531,11 @@ class FR5Robot:
             try:
                 self._set_tool_do(output_id, config.GRIPPER_IDLE_STATUS)
             except Exception as exc:
-                failures.append(exc)
+                failures.append(f"DO{output_id}: {exc}")
         if failures:
-            raise GripperCommandError("Could not force both gripper outputs LOW") from failures[0]
+            raise GripperCommandError(
+                "Could not force both gripper outputs LOW (" + "; ".join(failures) + ")"
+            )
 
     def gripper_ctrl(self, action):
         """Pulse one gripper motor direction, then leave both Tool DO outputs LOW."""

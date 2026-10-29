@@ -583,6 +583,11 @@ class InputHandler:
         self.state.set_status("📸 Đang đối soát lại bàn thật...", color=(0, 100, 180), duration=5.0)
         # No robot command is issued here.  Matching the old board means the
         # arm did not complete the move; matching expected_board means it did.
+        print(
+            "[BOARD SYNC][RECOVERY] First comparison: physical scan vs current FEN "
+            "(old board before pending AI move).",
+            flush=True,
+        )
         if self.hw.verify_physical_board(self.state.board):
             self.state.clear_pending_ai_move()
             self.state.snapshot_continue_required = False
@@ -599,6 +604,11 @@ class InputHandler:
                 )
             return
 
+        print(
+            "[BOARD SYNC][RECOVERY] Second comparison: physical scan vs expected FEN "
+            "after pending AI move.",
+            flush=True,
+        )
         if self.hw.verify_physical_board(pending["expected_board"]):
             self._finalize_pending_ai_move(
                 "✅ Đã xác nhận bàn thật — đến lượt bạn.", (0, 100, 180)

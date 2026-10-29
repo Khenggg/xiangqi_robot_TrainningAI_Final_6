@@ -1,11 +1,13 @@
 """VS Human screens embedded in the main Pygame window."""
 import os
 import json
+import copy
 import queue
 import random
 import socket
 import tempfile
 import threading
+import time
 
 import pygame
 
@@ -16,6 +18,10 @@ ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 PIECE_GLYPHS = {
     "r_K": "帥", "r_A": "仕", "r_E": "相", "r_R": "俥", "r_N": "傌", "r_C": "炮", "r_P": "兵",
     "b_K": "將", "b_A": "士", "b_E": "象", "b_R": "車", "b_N": "馬", "b_C": "砲", "b_P": "卒",
+}
+PIECE_NAMES = {
+    "r_K": "Tướng", "r_A": "Sĩ", "r_E": "Tượng", "r_R": "Xe", "r_N": "Mã", "r_C": "Pháo", "r_P": "Tốt",
+    "b_K": "Tướng", "b_A": "Sĩ", "b_E": "Tượng", "b_R": "Xe", "b_N": "Mã", "b_C": "Pháo", "b_P": "Tốt",
 }
 INK = (33, 48, 43)
 MUTED = (94, 101, 77)
@@ -206,6 +212,7 @@ class LocalRoom:
         self.winner = None
         self.physical_sync = True
         self.camera_status = "Không robot." if mode == "local" else "Robot và camera đang khởi tạo."
+        self.retry_available = False
 
 
 class PlayerVsPlayerMode:
@@ -223,6 +230,14 @@ class PlayerVsPlayerMode:
         self.code_input = ""
         self.active_tab = "r"
         self.player_side = None
+        self.pick_test_board = None
+        self.pick_test_selected = None
+        self.pick_test_busy = False
+        self.pick_test_blocked = False
+        self.pick_test_reconciling = False
+        self.pick_test_reconcile_results = queue.Queue()
+        self.robot_retry_pending = None
+        self.robot_retry_busy = False
         self.status = "Tạo phòng trên máy này, sau đó nhập mã để người chơi thứ hai vào."
         self.camera_status = ""
         self.cell = 65
@@ -231,7 +246,8 @@ class PlayerVsPlayerMode:
         self.menu_buttons = {
             "robot": pygame.Rect(460, 490, 520, 76),
             "local": pygame.Rect(460, 590, 520, 76),
-            "join": pygame.Rect(460, 820, 520, 72),
+            "pick_test": pygame.Rect(460, 690, 520, 68),
+            "join": pygame.Rect(460, 870, 520, 64),
             "back": pygame.Rect(28, 30, 170, 58),
         }
 
@@ -249,11 +265,12 @@ class PlayerVsPlayerMode:
             try:
                 self.hardware.cleanup()
             except Exception as exc:
-                print(f"[PVP] Cleanup hardware error: {exc}")
+                print(f"[PVP][ERROR][CLEANUP] Hardware cleanup failed: {exc!r}", flush=True)
             self.hardware = None
 
     def poll_remote(self):
         """Apply socket events on the UI thread; robot operations stay on the host thread."""
+        self._poll_pick_test_reconcile_result()
         if self.room_host is not None:
             while True:
                 try:
@@ -279,12 +296,17 @@ class PlayerVsPlayerMode:
                             # the previous move. Resync silently instead of blaming Black.
                             self._publish_state()
                         elif xiangqi.is_valid_move(src, dst, self.room.board, "b"):
+                            print(f"[PVP][REMOTE MOVE] Black requested {src} -> {dst}.", flush=True)
                             self._perform_move("b", src, dst)
                         else:
                             self.status = "Nước đi của Đen không hợp lệ theo luật cờ."
+                            print(f"[PVP][ERROR][REMOTE MOVE] Illegal move from Black: {src} -> {dst}.", flush=True)
                             self._publish_state()
                     except (KeyError, TypeError, ValueError, IndexError):
                         self.status = "Nhận được yêu cầu nước đi không hợp lệ từ máy kia."
+                        print("[PVP][ERROR][REMOTE MOVE] Malformed move event received.", flush=True)
+                elif event.get("type") == "retry_robot_move":
+                    self._retry_robot_move()
                 elif event.get("type") == "disconnected":
                     if self.room is not None:
                         self.room.joined_black = False
@@ -292,6 +314,7 @@ class PlayerVsPlayerMode:
                         self.player_side = "r"
                         self.active_tab = "r"
                         self.status = "Người chơi ĐEN đã ngắt kết nối; đang chờ người tham gia lại bằng mã phòng."
+                        print("[PVP][WARN][ROOM] Black player disconnected.", flush=True)
                         self._publish_state()
 
         if self.room_client is not None:
@@ -310,9 +333,11 @@ class PlayerVsPlayerMode:
                     self.room.joined_black = bool(event.get("joined", True))
                     self.room.physical_sync = bool(event.get("physical_sync", True))
                     self.room.camera_status = event.get("camera_status", self.room.camera_status)
+                    self.room.retry_available = bool(event.get("retry_available", False))
                     self.status = event.get("status", self.status)
                 elif event.get("type") == "disconnected":
                     self.status = "Mất kết nối với phòng chủ. Người chơi chủ có thể đã đóng phòng."
+                    print("[PVP][ERROR][ROOM] Lost connection to the host room.", flush=True)
                     self.room_client.close()
                     self.room_client = None
                     break
@@ -326,6 +351,7 @@ class PlayerVsPlayerMode:
             "last_move": room.last_move, "over": room.over, "winner": room.winner,
             "joined": room.joined_black, "physical_sync": room.physical_sync,
             "camera_status": room.camera_status, "status": self.status,
+            "retry_available": room.retry_available,
         })
 
     def draw(self):
@@ -334,6 +360,8 @@ class PlayerVsPlayerMode:
             self._draw_menu()
         elif self.page == "host":
             self._draw_host()
+        elif self.page == "pick_test":
+            self._draw_pick_test()
         else:
             self._draw_game()
 
@@ -352,14 +380,52 @@ class PlayerVsPlayerMode:
         self._text("Hai tab ĐỎ / ĐEN dùng chung một bàn cờ trên máy này.", (720, 418), self.renderer.ui_font, MUTED)
         self._button(self.menu_buttons["robot"], "TẠO PHÒNG 2 NGƯỜI + ROBOT", JADE)
         self._button(self.menu_buttons["local"], "THỬ 2 NGƯỜI (KHÔNG ROBOT)", (129, 120, 95))
-        self._text("Người chơi thứ hai nhập mã phòng do chủ phòng cung cấp:", (720, 730), self.renderer.log_font, INK)
-        entry = pygame.Rect(570, 760, 300, 54)
+        self._button(self.menu_buttons["pick_test"], "TEST GẮP / THẢ FR3", JADE_DARK)
+        self._text("Người chơi thứ hai nhập mã phòng do chủ phòng cung cấp:", (720, 780), self.renderer.log_font, INK)
+        entry = pygame.Rect(570, 805, 300, 48)
         self.renderer._draw_panel(entry, fill=(255, 252, 242), border=GOLD, radius=8)
         shown = self.code_input if self.code_input else "NHẬP MÃ PHÒNG"
         self._text(shown, entry.center, self.renderer.ui_font, INK if self.code_input else MUTED)
         self._button(self.menu_buttons["join"], "NHẬP MÃ ĐỂ VÀO PHÒNG", RED)
         self._button(self.menu_buttons["back"], "‹ HOME", JADE_DARK, self.renderer.log_font)
-        self._draw_status(self.status, (720, 940), width=900)
+        self._draw_status(self.status, (720, 970), width=900)
+
+    def _draw_pick_test(self):
+        self._button(self.menu_buttons["back"], "‹ VS NGƯỜI", JADE_DARK, self.renderer.log_font)
+        self._text("TEST GẮP / THẢ FR3", (720, 105), self.renderer.title_font)
+        self._text(
+            "Chọn quân bất kỳ, sau đó chọn một ô trống để robot gắp và đặt.",
+            (720, 160), self.renderer.log_font, MUTED,
+        )
+        self._draw_board(
+            board=self.pick_test_board,
+            selected=self.pick_test_selected,
+            last_move=None,
+            use_room_state=False,
+        )
+        self._draw_status(self.status, (1050, 320), width=600,
+                          color=RED if self.pick_test_blocked else MUTED)
+        if self.pick_test_blocked:
+            self._draw_status(
+                ("Đang quét bàn thật; cửa sổ vẫn hoạt động." if self.pick_test_reconciling
+                 else "Test đã dừng sau lỗi. Bàn thật cần khớp bàn test mới mở lại được."),
+                (1050, 430), width=600, color=RED,
+            )
+            self._button(
+                pygame.Rect(790, 560, 520, 70),
+                "ĐANG QUÉT BÀN…" if self.pick_test_reconciling else "QUÉT LẠI BÀN ĐỂ TIẾP TỤC",
+                (129, 120, 95) if self.pick_test_reconciling else JADE_DARK,
+                self.renderer.log_font,
+            )
+        elif self.pick_test_busy:
+            self._draw_status("Robot đang thực hiện, vui lòng chờ…", (1050, 430), width=600)
+        else:
+            self._draw_status(
+                "Vị trí bàn thử bắt đầu theo thế cờ chuẩn. Bàn thật cần khớp với bàn hiển thị.",
+                (1050, 430), width=600,
+            )
+        self._draw_status("Các nước test chỉ cập nhật bàn thử, không vào ván VS người.",
+                          (1050, 510), width=600)
 
     def _draw_host(self):
         self._text("BẠN LÀ CHỦ PHÒNG", (720, 330), self.renderer.title_font)
@@ -391,15 +457,26 @@ class PlayerVsPlayerMode:
         self._draw_status(self.status, (1050, 300), width=590)
         self._draw_status(self.room.camera_status, (1050, 440), width=590, color=RED if not self.room.physical_sync else MUTED)
 
-        if self.room.mode == "robot" and not self.room.physical_sync and self.room_client is None:
-            confirm_rect = pygame.Rect(790, 560, 520, 70)
-            self._button(confirm_rect, "ĐÃ KIỂM TRA BÀN THẬT — TIẾP TỤC", RED, self.renderer.log_font)
+        retry_rect = pygame.Rect(790, 550, 520, 70)
+        if self.room.mode == "robot" and not self.room.physical_sync:
+            self._button(
+                retry_rect,
+                "QUÉT / GẤP LẠI NƯỚC VỪA LỖI",
+                RED if self.room.retry_available else (129, 120, 95),
+                self.renderer.log_font,
+            )
+
         close_rect = pygame.Rect(790, 660, 520, 70)
         self._button(close_rect, "ĐÓNG VÁN · VỀ MENU VS NGƯỜI", (129, 120, 95), self.renderer.log_font)
         if not self.room.joined_black:
             self._draw_status(f"Đang chờ người chơi thứ hai nhập mã {self.room.code}.", (720, 920), width=1000)
 
-    def _draw_board(self):
+    def _draw_board(self, board=None, selected=None, last_move=None, use_room_state=True):
+        flipped = use_room_state and self.player_side == "b"
+        if use_room_state:
+            board = self.room.board
+            selected = self.room.selected
+            last_move = self.room.last_move
         left, top = self.board_left, self.board_top
         right, bottom = left + 8 * self.cell, top + 9 * self.cell
         board_rect = pygame.Rect(left - 34, top - 34, right - left + 68, bottom - top + 68)
@@ -417,18 +494,21 @@ class PlayerVsPlayerMode:
         river = pygame.Rect(left + 1, top + 4*self.cell + 1, right - left - 2, self.cell - 2)
         pygame.draw.rect(self.screen, (236, 212, 169), river)
         self._text("楚 河       漢 界", river.center, self.renderer.log_font, (152, 119, 80))
-        if self.room.last_move:
-            for col, row in self.room.last_move:
-                pygame.draw.circle(self.screen, (57, 132, 91), self._xy(col, row), 25, 3)
-        if self.room.selected:
-            pygame.draw.circle(self.screen, (25, 118, 184), self._xy(*self.room.selected), 30, 4)
+        if last_move:
+            for col, row in last_move:
+                view_col, view_row = self._board_view_pos(col, row, flipped)
+                pygame.draw.circle(self.screen, (57, 132, 91), self._xy(view_col, view_row), 25, 3)
+        if selected:
+            view_col, view_row = self._board_view_pos(*selected, flipped)
+            pygame.draw.circle(self.screen, (25, 118, 184), self._xy(view_col, view_row), 30, 4)
         piece_font = pygame.font.SysFont("simsun", 30, bold=True)
         for row in range(10):
             for col in range(9):
-                piece = self.room.board[row][col]
+                piece = board[row][col]
                 if piece == ".":
                     continue
-                x, y = self._xy(col, row)
+                view_col, view_row = self._board_view_pos(col, row, flipped)
+                x, y = self._xy(view_col, view_row)
                 is_red = piece.startswith("r_")
                 pygame.draw.circle(self.screen, (255, 244, 220), (x, y), 25)
                 pygame.draw.circle(self.screen, (173, 48, 40) if is_red else (41, 45, 49), (x, y), 25, 2)
@@ -437,6 +517,11 @@ class PlayerVsPlayerMode:
 
     def _xy(self, col, row):
         return self.board_left + col*self.cell, self.board_top + row*self.cell
+
+    @staticmethod
+    def _board_view_pos(col, row, flipped):
+        """Convert logical board coordinates to the viewer's orientation."""
+        return (8 - col, 9 - row) if flipped else (col, row)
 
     def _draw_status(self, message, center, width, color=MUTED):
         words = str(message).split()
@@ -485,10 +570,13 @@ class PlayerVsPlayerMode:
                 except OSError as exc:
                     self.room = None
                     self.status = f"Không mở được phòng localhost: {exc}"
+                    print(f"[PVP][ERROR][ROOM CREATE] Could not bind local room: {exc!r}", flush=True)
                     return None
                 self.code_input = ""
                 self.status = "Nhập lại mã vừa được cấp để người chơi thứ hai vào phòng."
                 self.page = "host"
+            elif self.menu_buttons["pick_test"].collidepoint(x, y):
+                self._open_pick_test()
             elif self.menu_buttons["join"].collidepoint(x, y):
                 self._join(self.code_input)
         elif self.page == "host":
@@ -502,10 +590,14 @@ class PlayerVsPlayerMode:
                 self._close_room_resources()
                 self.code_input = ""
                 return None
-            if (self.room.mode == "robot" and not self.room.physical_sync and self.room_client is None
-                    and pygame.Rect(790, 560, 520, 70).collidepoint(x, y)):
-                self.room.physical_sync = True
-                self.room.camera_status = "Chủ phòng xác nhận bàn thật khớp với bàn trên màn hình."
+            if self.room.mode == "robot" and not self.room.physical_sync and pygame.Rect(790, 550, 520, 70).collidepoint(x, y):
+                if self.room_client is not None:
+                    if not self.room_client.send({"type": "retry_robot_move"}):
+                        self.status = "Không gửi được yêu cầu gắp lại cho chủ phòng."
+                    else:
+                        self.status = "Đã gửi yêu cầu quét/gắp lại nước vừa lỗi cho chủ phòng."
+                else:
+                    self._retry_robot_move()
                 return None
             if pygame.Rect(90, 142, 270, 62).collidepoint(x, y):
                 if self.player_side != "r":
@@ -520,10 +612,137 @@ class PlayerVsPlayerMode:
                 self.active_tab = "b"
                 return None
             self._on_board_click(x, y)
+        elif self.page == "pick_test":
+            if self.menu_buttons["back"].collidepoint(x, y):
+                return self._back_to_menu()
+            if self.pick_test_blocked and pygame.Rect(790, 560, 520, 70).collidepoint(x, y):
+                self._reconcile_pick_test_board()
+                return None
+            self._on_pick_test_click(x, y)
         return None
+
+    def _open_pick_test(self):
+        try:
+            if self.hardware is None:
+                print("[PVP][PICK TEST] Connecting FR3 and camera for pick test.", flush=True)
+                self.status = "Đang kết nối FR3 và camera cho test gắp…"
+                self.draw()
+                pygame.display.flip()
+                self.hardware = _initialize_robot_hardware()
+            if self.pick_test_board is None:
+                self.pick_test_board = xiangqi.get_board()
+            self.pick_test_selected = None
+            self.page = "pick_test"
+            self.status = "Chọn một quân rồi chọn ô trống để test gắp/thả; có thể test mọi vị trí trên bàn."
+            print("[PVP][PICK TEST] Ready. Select a piece, then an empty destination.", flush=True)
+        except Exception as exc:
+            self.status = f"Không mở được test gắp: {exc}"
+            print(f"[PVP][PICK TEST][ERROR][INIT] {exc!r}", flush=True)
+
+    def _on_pick_test_click(self, x, y):
+        if self.pick_test_busy or self.pick_test_blocked or self.pick_test_board is None:
+            return
+        col = round((x - self.board_left) / self.cell)
+        row = round((y - self.board_top) / self.cell)
+        if not (0 <= col < 9 and 0 <= row < 10):
+            return
+        pos = (col, row)
+        piece = self.pick_test_board[row][col]
+        if piece != ".":
+            self.pick_test_selected = pos
+            self.status = f"Đã chọn quân ở ({col},{row}); chọn ô trống để robot đặt quân."
+            return
+        if self.pick_test_selected is None:
+            self.status = "Chọn quân đang có trên bàn trước."
+            return
+        source = self.pick_test_selected
+        self._run_pick_test(source, pos)
+
+    def _run_pick_test(self, source, destination):
+        if self.pick_test_busy or self.pick_test_blocked:
+            return
+        if self.hardware is None or not self.hardware.robot.connected:
+            self.pick_test_blocked = True
+            self.status = "FR3 mất kết nối; dừng test để kiểm tra bàn thật."
+            print("[PVP][PICK TEST][ERROR] FR3 is disconnected; refusing pick test.", flush=True)
+            return
+
+        moving_piece = self.pick_test_board[source[1]][source[0]]
+        if moving_piece == "." or self.pick_test_board[destination[1]][destination[0]] != ".":
+            self.pick_test_selected = None
+            self.status = "Test chỉ gắp quân đang có và đặt vào ô trống."
+            return
+
+        self.pick_test_busy = True
+        self.pick_test_selected = None
+        self.status = f"Đang test gắp {moving_piece} từ {source} sang {destination}…"
+        self.draw()
+        pygame.display.flip()
+        print(
+            f"[PVP][PICK TEST] Start piece={moving_piece!r}, source={source}, destination={destination}.",
+            flush=True,
+        )
+        try:
+            target = self.hardware.execute_pick_place_test(source, destination)
+            self.pick_test_board[destination[1]][destination[0]] = moving_piece
+            self.pick_test_board[source[1]][source[0]] = "."
+            self.status = f"Test gắp/thả xong: {source} → {destination}. Chọn quân tiếp theo."
+            print(
+                f"[PVP][PICK TEST] PASS source={source}, destination={destination}, "
+                f"visual_target=({target.col:.3f},{target.row:.3f}), confidence={target.confidence:.3f}.",
+                flush=True,
+            )
+        except Exception as exc:
+            self.pick_test_blocked = True
+            self.status = f"Test dừng: {exc}. Kiểm tra bàn thật trước khi tiếp tục."
+            print(f"[PVP][PICK TEST][ERROR] source={source}, destination={destination}: {exc!r}", flush=True)
+        finally:
+            self.pick_test_busy = False
+
+    def _reconcile_pick_test_board(self):
+        if (self.hardware is None or self.pick_test_board is None or self.pick_test_busy
+                or self.pick_test_reconciling):
+            return
+        hardware = self.hardware
+        expected_board = copy.deepcopy(self.pick_test_board)
+        self.pick_test_reconciling = True
+        self.status = "Đang quét bàn thật ở nền; cửa sổ vẫn nhận thao tác."
+        print("[PVP][PICK TEST] Starting background scan against the current test-board state.", flush=True)
+
+        def reconcile():
+            try:
+                verified = hardware.verify_physical_board(expected_board)
+                self.pick_test_reconcile_results.put((verified, None))
+            except Exception as exc:
+                self.pick_test_reconcile_results.put((False, exc))
+
+        threading.Thread(target=reconcile, name="pvp-pick-test-reconcile", daemon=True).start()
+
+    def _poll_pick_test_reconcile_result(self):
+        if not self.pick_test_reconciling:
+            return
+        try:
+            verified, error = self.pick_test_reconcile_results.get_nowait()
+        except queue.Empty:
+            return
+        self.pick_test_reconciling = False
+        if error is not None:
+            self.status = f"Không quét xác nhận được bàn test: {error}"
+            print(f"[PVP][PICK TEST][ERROR][VERIFY] {error!r}", flush=True)
+            return
+        if verified:
+            self.pick_test_blocked = False
+            self.status = "Bàn thật khớp bàn test; có thể tiếp tục test gắp."
+            print("[PVP][PICK TEST] Board verified; test unlocked.", flush=True)
+        else:
+            self.status = "Bàn thật chưa khớp bàn test. Chỉnh lại quân theo bàn hiển thị rồi quét lại."
+            print("[PVP][PICK TEST][ERROR] Physical board still differs from test board; test remains locked.", flush=True)
 
     def _create_robot_room(self):
         try:
+            self.robot_retry_pending = None
+            self.robot_retry_busy = False
+            print("[PVP][ROBOT] Starting FR3 and camera initialization.", flush=True)
             self.status = "Đang kết nối FR3 và khởi tạo camera…"
             pygame.event.pump()
             self._draw_menu()
@@ -538,9 +757,11 @@ class PlayerVsPlayerMode:
             self.page = "host"
             self.code_input = ""
             self.status = "Đưa mã phòng cho người chơi thứ hai."
+            print(f"[PVP][ROOM CREATE] Robot room ready; code={self.room.code}.", flush=True)
         except Exception as exc:
             self.close()
             self.status = f"Không tạo được phòng robot: {exc}"
+            print(f"[PVP][ERROR][ROBOT INIT] Could not create robot room: {exc!r}", flush=True)
 
     def _join(self, entered):
         entered = entered.strip().upper()
@@ -563,9 +784,11 @@ class PlayerVsPlayerMode:
                 self.page = "game"
             except (OSError, ValueError, KeyError, TypeError, RuntimeError, socket.timeout) as exc:
                 self.status = f"Không vào được phòng {entered}: {exc}"
+                print(f"[PVP][ERROR][ROOM JOIN] code={entered!r}, error={exc!r}", flush=True)
             return
         if entered != self.room.code:
             self.status = "Mã không hợp lệ. Hãy nhập đúng mã chủ phòng vừa cung cấp."
+            print(f"[PVP][ERROR][ROOM JOIN] Wrong code entered: {entered!r}.", flush=True)
             return
         self.room.joined_black = True
         self.active_tab = "r"
@@ -585,7 +808,8 @@ class PlayerVsPlayerMode:
             self.status = "Đang chờ chủ phòng xử lý nước đi trước…"
             return
         if self.room.mode == "robot" and not self.room.physical_sync:
-            self.status = "Chờ chủ phòng xác nhận bàn thật trước nước tiếp theo."
+            self.status = "Camera chưa xác nhận bàn khớp; cần chỉnh bàn thật trước khi đi tiếp."
+            print("[PVP][ERROR][MOVE BLOCKED] Physical board is not camera-verified.", flush=True)
             return
         if self.active_tab != self.player_side:
             self.status = f"Cửa sổ này được gán quân {'ĐỎ' if self.player_side == 'r' else 'ĐEN'}."
@@ -597,6 +821,7 @@ class PlayerVsPlayerMode:
         row = round((y - self.board_top) / self.cell)
         if not (0 <= col < 9 and 0 <= row < 10):
             return
+        col, row = self._board_view_pos(col, row, self.player_side == "b")
         pos = (col, row)
         piece = self.room.board[row][col]
         if self.room.selected is None:
@@ -624,13 +849,30 @@ class PlayerVsPlayerMode:
             if not self.room_client.send({"type": "move", "src": src, "dst": dst}):
                 self.remote_move_pending = False
                 self.status = "Không gửi được nước đi tới máy chủ phòng."
+                print(f"[PVP][ERROR][MOVE SEND] Could not send {src} -> {dst} to host.", flush=True)
             else:
                 self.status = "Đã gửi nước đi cho chủ phòng; đang chờ FR3/bàn cờ xác nhận."
+                print(f"[PVP][MOVE SEND] {side} requested {src} -> {dst}.", flush=True)
             return
         if self.room.mode == "robot":
+            self.robot_retry_pending = {
+                "side": side,
+                "src": tuple(src),
+                "dst": tuple(dst),
+                "pre_board": copy.deepcopy(board),
+                "expected_board": copy.deepcopy(expected_board),
+                "moving_piece": moving_piece,
+                "captured_piece": captured_piece,
+            }
+            self.room.retry_available = True
             if self.hardware is None or not self.hardware.robot.connected:
                 self.room.physical_sync = False
                 self.room.camera_status = "Robot mất kết nối; kiểm tra bàn thật trước khi tiếp tục."
+                print(
+                    "[PVP][ERROR][ROBOT MOVE] Refused move because FR3 is disconnected; "
+                    f"hardware_present={self.hardware is not None}.",
+                    flush=True,
+                )
                 self._publish_state()
                 return
             try:
@@ -647,8 +889,10 @@ class PlayerVsPlayerMode:
                 self.room.physical_sync = False
                 self.room.camera_status = f"Robot báo lỗi; kiểm tra bàn thật: {exc}"
                 self.status = "Nước đi chưa được xác nhận; bàn cờ trên màn hình chưa đổi."
+                print(f"[PVP][ERROR][ROBOT MOVE] {src} -> {dst} failed: {exc!r}", flush=True)
                 self._publish_state()
                 return
+            print(f"[PVP][ROBOT MOVE] FR3 completed {src} -> {dst}.", flush=True)
 
         self.room.board = expected_board
         self.room.last_move = (src, dst)
@@ -658,24 +902,201 @@ class PlayerVsPlayerMode:
             self.room.winner = side
         else:
             self.room.turn = opponent
-        self.status = f"{'ĐỎ' if side == 'r' else 'ĐEN'} đã đi {PIECE_GLYPHS.get(moving_piece, moving_piece)}" + (" và ăn quân." if captured_piece != "." else ".")
+        self.status = (
+            f"{'ĐỎ' if side == 'r' else 'ĐEN'} đã đi quân {PIECE_NAMES.get(moving_piece, 'cờ')}"
+            + (" và ăn quân." if captured_piece != "." else ".")
+        )
 
         if self.room.mode == "robot":
             try:
                 if self.hardware.cam_monitor and self.hardware.yolo_detector:
                     self.hardware.capture_baseline_if_needed(force_delay=1.0)
-                frame, _detections = self.hardware.cam_monitor.get_fresh_snapshot()
-                vision = self.hardware.recognize_board_state(frame)
-                if vision and vision.get("success") and vision.get("board") == expected_board:
-                    self.room.physical_sync = True
-                    self.room.camera_status = "Camera xác nhận bàn thật khớp với nước đi."
+                sample_count = 3
+                minimum_matches = 2
+                matches = 0
+                sample_diagnostics = []
+                print(
+                    f"[PVP][CAMERA] Verifying board after {src} -> {dst} "
+                    f"with {sample_count} scans; need {minimum_matches} matches.",
+                    flush=True,
+                )
+                for sample_index in range(sample_count):
+                    if sample_index:
+                        time.sleep(0.15)
+                    frame, detections = self.hardware.cam_monitor.get_fresh_snapshot()
+                    vision = self.hardware.recognize_board_state(frame) if frame is not None else None
+                    observed_board = vision.get("board") if isinstance(vision, dict) else None
+                    differences, unknown_cells = self._describe_board_difference(
+                        expected_board, observed_board
+                    )
+                    if vision and vision.get("success") and observed_board == expected_board:
+                        matches += 1
+                        print(
+                            f"[PVP][CAMERA] scan {sample_index + 1}/{sample_count}: MATCH.",
+                            flush=True,
+                        )
+                    else:
+                        diagnostic = {
+                            "scan": sample_index + 1,
+                            "success": bool(vision and vision.get("success")),
+                            "error": vision.get("error") if isinstance(vision, dict) else "no recognition result",
+                            "mismatches": differences,
+                            "unknown_cells": unknown_cells,
+                            "detection_count": len(detections or []),
+                        }
+                        sample_diagnostics.append(diagnostic)
+                        print(f"[PVP][CAMERA][MISMATCH] {diagnostic}", flush=True)
+
+                self.room.physical_sync = matches >= minimum_matches
+                if self.room.physical_sync:
+                    self.robot_retry_pending = None
+                    self.room.retry_available = False
+                    self.room.camera_status = f"Camera xác nhận bàn ({matches}/{sample_count} lần quét)."
+                    print(
+                        f"[PVP][CAMERA] PASS: {matches}/{sample_count} scans match after {src} -> {dst}.",
+                        flush=True,
+                    )
                 else:
-                    self.room.physical_sync = False
-                    self.room.camera_status = "Camera chưa xác nhận bàn khớp. Kiểm tra bàn thật trước nước tiếp theo."
+                    first_diagnostic = sample_diagnostics[0] if sample_diagnostics else {}
+                    differences = first_diagnostic.get("mismatches", [])
+                    unknown_cells = first_diagnostic.get("unknown_cells", [])
+                    if differences:
+                        short_diff = "; ".join(differences[:3])
+                        extra = f" (+{len(differences) - 3} ô khác)" if len(differences) > 3 else ""
+                        self.room.camera_status = f"Camera thấy bàn lệch: {short_diff}{extra}"
+                    elif unknown_cells:
+                        self.room.camera_status = f"Camera chưa nhận diện rõ các ô {unknown_cells[:6]}"
+                    else:
+                        self.room.camera_status = "Camera chưa nhận diện được trạng thái bàn sau nước đi."
+                    print(
+                        f"[PVP][ERROR][CAMERA MISMATCH] FAIL: only {matches}/{sample_count} scans "
+                        f"matched after {src} -> {dst}; need {minimum_matches}.",
+                        flush=True,
+                    )
             except Exception as exc:
                 self.room.physical_sync = False
+                self.room.retry_available = self.robot_retry_pending is not None
                 self.room.camera_status = f"Camera chưa xác nhận được bàn ({exc}). Kiểm tra bàn thật."
+                print(f"[PVP][ERROR][CAMERA] Verification after {src} -> {dst} failed: {exc!r}", flush=True)
         self._publish_state()
+
+    def _retry_robot_move(self):
+        """Safely recover the last FR3 move; never replay on an unclassified board."""
+        pending = self.robot_retry_pending
+        if pending is None or self.room is None or self.room.mode != "robot":
+            self.status = "Không có nước FR3 lỗi đang chờ để thử lại."
+            return
+        if self.robot_retry_busy:
+            return
+        if self.hardware is None or not self.hardware.robot.connected:
+            self.status = "FR3 chưa kết nối; chưa thể gắp lại nước đi."
+            self.room.camera_status = self.status
+            self._publish_state()
+            return
+
+        self.robot_retry_busy = True
+        src, dst = pending["src"], pending["dst"]
+        pre_board, expected_board = pending["pre_board"], pending["expected_board"]
+        self.status = f"Đang quét bàn để xác định trạng thái trước khi gắp lại {src} → {dst}…"
+        print(f"[PVP][RETRY] Begin safe recovery for {src} -> {dst}.", flush=True)
+        self.draw()
+        pygame.display.flip()
+        try:
+            # If the move actually completed and only recognition failed, accept it
+            # without physically moving the piece a second time.
+            if self.hardware.verify_physical_board(expected_board):
+                self._commit_retried_move(pending)
+                self.room.physical_sync = True
+                self.room.retry_available = False
+                self.room.camera_status = "Camera xác nhận bàn sau khi quét khôi phục."
+                self.robot_retry_pending = None
+                self.status = "Nước đi đã hoàn tất; camera xác nhận lại thành công."
+                print("[PVP][RETRY] Scan matches expected post-move board; no duplicate robot move.", flush=True)
+                self._publish_state()
+                return
+
+            # Only repeat the pick/place if the camera proves that the physical
+            # board is still exactly in its pre-move state.
+            if not self.hardware.verify_physical_board(pre_board):
+                self.room.physical_sync = False
+                self.room.retry_available = True
+                self.room.camera_status = "Bàn thật không khớp cả trước lẫn sau nước đi; cần chỉnh quân rồi thử quét lại."
+                self.status = "Không gắp lại để tránh làm sai thêm: camera chưa xác định được bàn đang ở trạng thái nào."
+                print(
+                    f"[PVP][RETRY][BLOCKED] Physical board matches neither pre nor expected state for {src} -> {dst}.",
+                    flush=True,
+                )
+                self._publish_state()
+                return
+
+            print(f"[PVP][RETRY] Camera confirms pre-move board; replaying {src} -> {dst}.", flush=True)
+            expected_cells = {"moving": src}
+            if pending["captured_piece"] != ".":
+                expected_cells["captured"] = dst
+            targets = self.hardware.get_visual_pick_targets(expected_cells)
+            self.hardware.robot.move_piece(
+                src[0], src[1], dst[0], dst[1], pending["captured_piece"] != ".",
+                moving_visual_target=targets.get("moving"),
+                captured_visual_target=targets.get("captured"),
+            )
+            self._commit_retried_move(pending)
+            if self.hardware.verify_physical_board(expected_board):
+                self.room.physical_sync = True
+                self.room.retry_available = False
+                self.room.camera_status = "Camera xác nhận bàn sau khi gắp lại."
+                self.robot_retry_pending = None
+                self.status = f"Đã gắp lại thành công nước {src} → {dst}; ván cờ tiếp tục."
+                print(f"[PVP][RETRY] PASS replayed {src} -> {dst}; post-move board verified.", flush=True)
+            else:
+                self.room.physical_sync = False
+                self.room.retry_available = True
+                self.room.camera_status = "FR3 đã thử gắp lại nhưng camera vẫn chưa xác nhận bàn."
+                self.status = "Đã thử gắp lại nhưng bàn chưa khớp; có thể quét/gắp lại lần nữa sau khi kiểm tra quân."
+                print(f"[PVP][RETRY][MISMATCH] Replay completed but expected board not verified for {src} -> {dst}.", flush=True)
+        except Exception as exc:
+            self.room.physical_sync = False
+            self.room.retry_available = True
+            self.room.camera_status = f"Lỗi khi khôi phục nước đi: {exc}"
+            self.status = "Khôi phục chưa thành công. Kiểm tra bàn thật/FR3 rồi mới thử lại."
+            print(f"[PVP][RETRY][ERROR] {src} -> {dst} failed: {exc!r}", flush=True)
+        finally:
+            self.robot_retry_busy = False
+            self._publish_state()
+
+    def _commit_retried_move(self, pending):
+        """Commit the saved turn only when the initial FR3 failure left it pending."""
+        expected_board = pending["expected_board"]
+        self.room.board = copy.deepcopy(expected_board)
+        self.room.last_move = (pending["src"], pending["dst"])
+        if self.room.turn == pending["side"]:
+            opponent = "b" if pending["side"] == "r" else "r"
+            if (xiangqi.get_king_pos(opponent, self.room.board) is None
+                    or not xiangqi.find_all_valid_moves(opponent, self.room.board)):
+                self.room.over = True
+                self.room.winner = pending["side"]
+            else:
+                self.room.turn = opponent
+
+    @staticmethod
+    def _describe_board_difference(expected_board, observed_board):
+        """Return explicit (col,row) expected/scanned differences for camera logs."""
+        if not isinstance(observed_board, list) or len(observed_board) != 10:
+            return [], ["board unavailable or invalid shape"]
+        differences = []
+        unknown_cells = []
+        for row in range(10):
+            if not isinstance(observed_board[row], list) or len(observed_board[row]) != 9:
+                return [], [f"row {row} has invalid shape"]
+            for col in range(9):
+                expected = expected_board[row][col]
+                observed = observed_board[row][col]
+                if observed == "x":
+                    unknown_cells.append((col, row))
+                elif observed != expected:
+                    differences.append(
+                        f"({col},{row}) expected={expected!r}, scanned={observed!r}"
+                    )
+        return differences, unknown_cells
 
 
 def _initialize_robot_hardware():
