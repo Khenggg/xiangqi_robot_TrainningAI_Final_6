@@ -11,6 +11,10 @@ from src.vision.pick_consensus import FreshPickTransientError, select_consensus
 from src.vision.top_face_pick_estimator import TopFacePickEstimator
 
 
+def pvp_pick_enabled(config):
+    return bool(getattr(config, "VISUAL_PVP_PICK_ENABLED", False))
+
+
 def ring_pick_enabled(config):
     return bool(getattr(config, "VISUAL_RING_PICK_ENABLED", False))
 

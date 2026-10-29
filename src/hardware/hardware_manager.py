@@ -19,6 +19,7 @@ from src.vision.height_pick_geometry import geometry_from_board, HeightPickEstim
 from src.vision.top_face_pick_estimator import TopFacePickEstimator
 from src.vision.ring_pick_estimator import (
     ring_pick_enabled, current_pick_enabled, exclusive_pick_required, resolve_ring_pick_targets,
+    pvp_pick_enabled,
 )
 from src.vision.pick_consensus import select_consensus, FreshPickTransientError, require_pick_target
 from src.vision.board_reconciler import BoardReconciler
@@ -262,7 +263,7 @@ class HardwareManager:
             self.cam_monitor.start()
             self.yolo_detector = YoloSnapshotDetector(self.perspective_path, self.class_id_to_name)
             print("[INIT] SnapshotDetector & CameraMonitor initialized (CChess ONNX enabled).")
-            if (getattr(self.config, "VISUAL_PICK_ENABLED", False)
+            if (pvp_pick_enabled(self.config) or getattr(self.config, "VISUAL_PICK_ENABLED", False)
                     or ring_pick_enabled(self.config)
                     or getattr(self.config, "VISUAL_BOARD_SYNC_REQUIRED", True)):
                 try:
@@ -287,7 +288,9 @@ class HardwareManager:
                     )
                     self.board_reconciler = BoardReconciler(self.pick_estimator)
                     print("[INIT] ✅ Visual pick / board reconciliation initialized.")
-                    if getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False):
+                    if pvp_pick_enabled(self.config):
+                        print("[PVP PICK] Enabled: bbox foot -> table homography; logical-cell fallback.")
+                    elif getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False):
                         intrinsic_path = Path(self.project_dir) / self.config.VISUAL_CAMERA_INTRINSICS_PATH
                         if not intrinsic_path.exists():
                             print("[HEIGHT PICK] Camera intrinsics missing. Run CALIBRATE_CAMERA_INTRINSICS.bat "
@@ -348,9 +351,12 @@ class HardwareManager:
 
     # --- WRAPPER VISION UTILS ---
     def _top_face_enabled(self):
-        return bool(getattr(getattr(self, "config", None), "VISUAL_TOP_FACE_ENABLED", False))
+        cfg = getattr(self, "config", None)
+        return not pvp_pick_enabled(cfg) and bool(getattr(cfg, "VISUAL_TOP_FACE_ENABLED", False))
 
     def _occupancy_snapshot(self):
+        if pvp_pick_enabled(getattr(self, "config", None)):
+            return self.cam_monitor.get_fresh_snapshot()
         if ring_pick_enabled(getattr(self, "config", None)):
             return self.cam_monitor.get_fresh_pick_snapshot()
         if self._top_face_enabled():
@@ -456,11 +462,14 @@ class HardwareManager:
         return targets
 
     def get_robot_center_pick_targets(self, expected_cells):
-        """Shared T/game resolver: calibrated top rims, or explicitly legacy.
+        """Shared T/game resolver: PvP foot mapping first, otherwise v2 modes.
 
         Top mode fails closed. Only when that mode is disabled does the old
         box-center/foot fallback path below remain available.
         """
+        if pvp_pick_enabled(getattr(self, "config", None)):
+            print("[PVP PICK] Using legacy PvP foot-point/table-plane picker.")
+            return self.get_visual_pick_targets(expected_cells)
         if ring_pick_enabled(getattr(self, "config", None)):
             return resolve_ring_pick_targets(self, expected_cells)
         if not current_pick_enabled(getattr(self, "config", None)):
@@ -601,9 +610,11 @@ class HardwareManager:
         """Measure production XY and approach SAFE_Z only; no gripper/FEN changes."""
         if not self.robot or not self.robot.connected:
             raise RuntimeError("Robot chưa kết nối")
-        if not (ring_pick_enabled(self.config) or getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False)):
-            raise RuntimeError("Hover diagnostic requires height picking")
+        if not (pvp_pick_enabled(self.config) or ring_pick_enabled(self.config) or getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False)):
+            raise RuntimeError("Hover diagnostic requires PvP, height or ring picking")
         target = self.get_robot_center_pick_targets({"moving": source}).get("moving")
+        # Hover remains measured-only: a synthetic grid target would apply
+        # bilinear offsets unlike pick_at(None)'s direct corner teaching points.
         require_pick_target(self, {"moving": target}, "moving")
         self.robot.hover_at(*source, visual_target=target)
         return target
@@ -619,8 +630,9 @@ class HardwareManager:
         if not self.is_cell_visually_clear(destination):
             raise RuntimeError("Ô đích chưa trống hoặc camera không xác nhận được")
         target = self.get_robot_center_pick_targets({"moving": source}).get("moving")
-        required = exclusive_pick_required(getattr(self, "config", None)) or self._top_face_enabled() or bool(getattr(getattr(self, "config", None),
-                                                          "VISUAL_HEIGHT_PICK_ENABLED", False))
+        cfg = getattr(self, "config", None)
+        required = not pvp_pick_enabled(cfg) and (exclusive_pick_required(cfg) or self._top_face_enabled()
+                    or bool(getattr(cfg, "VISUAL_HEIGHT_PICK_ENABLED", False)))
         if target is None and required:
             require_pick_target(self, {"moving": None}, "moving")
         if validate_request:

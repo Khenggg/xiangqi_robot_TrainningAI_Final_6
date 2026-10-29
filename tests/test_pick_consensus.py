@@ -264,13 +264,13 @@ class BoundedAcquisitionTests(unittest.TestCase):
 
 
 class MotionCoordinatorTests(unittest.TestCase):
-    def test_default_height_ai_motion_blocks_missing_visual_center(self):
+    def test_height_ai_motion_blocks_missing_visual_center_when_pvp_disabled(self):
         config = importlib.import_module('config')
         self.assertTrue(config.VISUAL_PICK_ENABLED)
         self.assertFalse(config.VISUAL_TOP_FACE_ENABLED)
         state, hw = state_with_pending(), self.hardware()
         hw.get_robot_center_pick_targets.return_value = {'moving': None}
-        with self.assertRaises(RuntimeError):
+        with patch.object(config, 'VISUAL_PVP_PICK_ENABLED', False), self.assertRaises(RuntimeError):
             coordinator()(state, hw, config)
         hw.robot.move_piece.assert_not_called()
         hw.verify_visual_move.assert_not_called()

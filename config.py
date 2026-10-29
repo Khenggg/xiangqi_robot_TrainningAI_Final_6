@@ -99,8 +99,11 @@ VIDEO_FRAME_HEIGHT = 480
 # Chỉ bù vị trí gắp khi snapshot mới từ camera xác nhận quân nằm gần ô logic.
 # Tắt cờ này để trở lại hoàn toàn hành vi gắp tại tâm ô như trước đây.
 VISUAL_PICK_ENABLED = True
-VISUAL_RING_PICK_ENABLED = False  # New: colored top ring -> height plane -> metric circle center (takes priority).
-VISUAL_CURRENT_PICK_ENABLED = True  # Preserve current picking logic; both switches False blocks picking.
+# Match the PvP picker: 85%-bbox foot -> table homography, then logical fallback.
+# This switch takes priority over ring/top-face/height picking below.
+VISUAL_PVP_PICK_ENABLED = True
+VISUAL_RING_PICK_ENABLED = False  # Ring priority applies only when PvP mode is disabled.
+VISUAL_CURRENT_PICK_ENABLED = True  # With PvP disabled, Ring=False/Current=False blocks picking.
 VISUAL_PICK_MIN_CONFIDENCE = 0.45
 VISUAL_PICK_MAX_OFFSET_CELLS = 0.25
 # Extra pick area beyond each playing-grid edge, including corners; keep R1-R4 unchanged.

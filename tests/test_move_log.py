@@ -10,6 +10,8 @@ class MoveLogTests(unittest.TestCase):
     def make_state(self):
         state = GameState()
         state.api_client.send_move_update_board = Mock()
+        state.api_client.create_match = Mock()
+        state.api_client.end_match = Mock()
         state.board = xiangqi.get_board()
         return state
 
