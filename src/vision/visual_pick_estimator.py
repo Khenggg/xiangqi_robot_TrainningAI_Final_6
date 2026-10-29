@@ -109,7 +109,7 @@ class VisualPickEstimator:
               f"({col:.3f},{row:.3f}), conf={confidence:.2f}, offset={offset:.3f} cells")
         return target
 
-    def has_detection_in_cell(self, detections, expected_col, expected_row, cell_half_width=0.5):
+    def has_detection_in_cell(self, detections, expected_col, expected_row, cell_half_width=0.5, strict=False):
         """Return occupancy for an entire calibrated cell, independent of pick offset.
 
         A piece shifted too far to safely pick can still obstruct a square.  This
@@ -120,11 +120,22 @@ class VisualPickEstimator:
         if not 0.0 < half_width <= 0.5:
             raise ValueError("cell_half_width must be in (0, 0.5]")
         for _class_id, confidence, box in detections or []:
-            if float(confidence) < self.min_confidence:
+            confidence = float(confidence)
+            if strict and not math.isfinite(confidence):
+                raise ValueError('Nonfinite occupancy confidence')
+            if confidence < self.min_confidence:
                 continue
             try:
+                bounds = np.asarray(box, dtype=float)
+                if (strict and (bounds.shape != (4,) or not np.isfinite(bounds).all()
+                                or bounds[2] <= bounds[0] or bounds[3] <= bounds[1])):
+                    raise ValueError('Invalid measured occupancy box')
                 col, row = self._box_to_grid(box)
+                if strict and not np.isfinite([col, row]).all():
+                    raise ValueError('Nonfinite occupancy projection')
             except (ValueError, TypeError, cv2.error):
+                if strict:
+                    raise
                 continue
             if abs(col - expected_col) <= half_width and abs(row - expected_row) <= half_width:
                 return True

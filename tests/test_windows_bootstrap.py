@@ -84,8 +84,12 @@ class WindowsBootstrapTests(unittest.TestCase):
         system_directory = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32"
         if not all((system_directory / name).is_file() for name in ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")):
             self.skipTest("Do not request system runtime installation from an automated test")
-        creation = self.run_command([sys.executable, "-m", "venv", "--without-pip", ".venv312"])
-        self.assertEqual(creation.returncode, 0, creation.stderr)
+        # test_04 already created this isolated no-pip environment. Rewriting
+        # python.exe immediately after RUN can fail while Windows releases it.
+        # This test still works in isolation and verifies the no-pip precondition.
+        if not (self.root / '.venv312/Scripts/python.exe').exists():
+            creation = self.run_command([sys.executable, "-m", "venv", "--without-pip", ".venv312"])
+            self.assertEqual(creation.returncode, 0, creation.stderr)
         python = str(self.root / ".venv312/Scripts/python.exe")
         self.assertNotEqual(self.run_command([python, "-m", "pip", "--version"]).returncode, 0)
         result = self.run_command(["cmd.exe", "/c", "SETUP_WINDOWS.bat"])

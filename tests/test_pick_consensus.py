@@ -37,6 +37,7 @@ def state_with_pending(capture=False):
         state = GameState()
         state.api_client = client.return_value
         state.api_client.room_id = None
+        state.api_client.token = ""
     state.board = [['.' for _ in range(9)] for _ in range(10)]
     state.board[4][4] = 'b_R'
     state.board[9][4] = 'r_K'
@@ -47,8 +48,8 @@ def state_with_pending(capture=False):
     state.update_fen_from_board()
     after = copy.deepcopy(state.board)
     after[4][6], after[4][4] = after[4][4], '.'
-    state.set_pending_ai_move(((4, 4), (6, 4)), after, 'r_P' if capture else '.')
     state.game_epoch, state.ai_epoch, state.human_commit_generation = 10, 20, 30
+    state.set_pending_ai_move(((4, 4), (6, 4)), after, 'r_P' if capture else '.')
     return state
 
 
@@ -420,7 +421,7 @@ class MotionCoordinatorTests(unittest.TestCase):
     def test_real_motion_coordinator_capture_checkpoint_resumes_source_only(self):
         from src.hardware.robot_VIP import FR5Robot
         state, hw = state_with_pending(True), self.hardware()
-        robot = FR5Robot.__new__(FR5Robot)
+        robot = FR5Robot()
         robot.connected, robot.dry = True, True
         for name in ('pick_at', 'move_to_extra_safe', 'place_in_capture_bin', 'place_at', 'go_to_home_chess'):
             setattr(robot, name, Mock())
@@ -454,22 +455,22 @@ class MotionCoordinatorTests(unittest.TestCase):
         hw.verify_visual_move.assert_not_called()
         state.api_client.send_move_update_board.assert_not_called()
 
-    def test_main_all_motion_exception_handlers_mark_execution_unsuccessful(self):
-        import ast
-        from pathlib import Path
-        tree = ast.parse((Path(__file__).parents[1] / 'main.py').read_text(encoding='utf-8'))
-        guarded = [node for node in ast.walk(tree) if isinstance(node, ast.Try)
-                   and any(isinstance(child, ast.Expr) and isinstance(child.value, ast.Call)
-                           and isinstance(child.value.func, ast.Name)
-                           and child.value.func.id == 'execute_pending_ai_motion'
-                           for statement in node.body if isinstance(statement, (ast.Expr, ast.If))
-                           for child in ast.walk(statement))]
-        self.assertEqual(len(guarded), 1)
-        for handler in guarded[0].handlers:
-            self.assertTrue(any(isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
-                                and node.value.value is False and any(isinstance(t, ast.Name)
-                                and t.id == 'robot_success' for t in node.targets)
-                                for node in ast.walk(handler)))
+    def test_main_dispatch_does_not_commit_when_motion_or_verification_fails(self):
+        from src.core.ai_turn_flow import dispatch_pending_ai_move
+        for failure in ('motion', 'verification'):
+            state, hw = state_with_pending(), self.hardware()
+            before = state.current_fen
+            hw.config = SimpleNamespace(DRY_RUN=False, VISUAL_PICK_ENABLED=True,
+                                        VISUAL_TOP_FACE_ENABLED=True, VISUAL_MOTION_ASYNC_ENABLED=False)
+            if failure == 'motion':
+                hw.robot.move_piece.side_effect = RuntimeError('controller failure')
+            else:
+                hw.verify_visual_move.return_value = False
+            dispatch_pending_ai_move(state, hw, InputHandler(state, hw), hw.config)
+            self.assertEqual(state.current_fen, before, failure)
+            self.assertIsNotNone(state.pending_ai_move, failure)
+            self.assertTrue(state.physical_sync_fault, failure)
+            state.api_client.send_move_update_board.assert_not_called()
 
 
 class RetryOwnershipAndUiTests(unittest.TestCase):
@@ -594,8 +595,8 @@ class RetryOwnershipAndUiTests(unittest.TestCase):
         self.assertIsNone(state.pending_ai_move)
         self.assertIsNone(state.visual_pick_retry)
         self.assertFalse(state.physical_sync_fault)
-        self.assertTrue(state.manual_override_active)
-        self.assertIn('FEN đã cập nhật', state.status_message)
+        self.assertFalse(state.manual_override_active)
+        self.assertIn('FEN máy chủ chưa đồng bộ', state.status_message)
         handler.handle_keyboard(pygame.K_r)
         self.assertEqual(hw.robot.move_piece.call_count, 1)
         state.api_client.send_move_update_board.assert_called_once()

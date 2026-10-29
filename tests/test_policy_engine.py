@@ -1,4 +1,5 @@
 import torch
+import unittest
 
 from src.ai.policy_engine import (
     DIFFICULTY_ARCHITECTURES,
@@ -8,7 +9,7 @@ from src.ai.policy_engine import (
     move_to_action,
 )
 from src.core import xiangqi
-from src.ai.ai_controller import AIController
+from src.ai.ai_controller import AIController, AIEngineError
 
 
 def test_encoder_and_move_index_are_stable():
@@ -118,7 +119,8 @@ def test_hard_level_never_falls_back_to_cloud():
         MOONFISH_THINK_MS = 1000
         AI_DIFFICULTY_PROFILES = {"hard": {"depth": 11, "nodes": 150_000, "temperature": 0.4, "think_ms": 2_000}}
 
-    assert AIController(LocalEngine(), CloudEngine(), Config()).pick_move(xiangqi.get_board()) is None
+    with unittest.TestCase().assertRaisesRegex(AIEngineError, "Moonfish unavailable"):
+        AIController(LocalEngine(), CloudEngine(), Config()).pick_move(xiangqi.get_board())
 
 
 def test_impossible_uses_the_original_moonfish_call_without_limits():

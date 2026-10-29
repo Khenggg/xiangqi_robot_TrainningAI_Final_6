@@ -26,6 +26,9 @@ class InputHandler:
     def __init__(self, game_state, hw_manager):
         self.state = game_state
         self.hw = hw_manager
+        runtime = getattr(game_state, 'rollback_runtime', None)
+        if runtime:
+            runtime.attach_hardware(hw_manager)
         self._motion_thread = None
         self._last_move_confirmation_failure = None
         stability_config = getattr(self.hw, "config", None)
@@ -210,6 +213,11 @@ class InputHandler:
         return True
 
     def start_pending_ai_motion(self):
+        if bool(getattr(getattr(self.state, 'rollback_runtime', None), 'blocked', False)):
+            return False
+        if not self.state.pending_ai_move_is_current():
+            self.state.set_status("Pending không còn hợp lệ; không chạy arm.", duration=30)
+            return False
         if self._defer_motion(self.start_pending_ai_motion):
             return
         source, destination = self.state.pending_ai_move["move"]
@@ -232,6 +240,17 @@ class InputHandler:
     def handle_mouse_down(self, mx, my):
         import pygame  # type: ignore
         if getattr(self.state, "physical_motion_busy", False):
+            return
+        runtime = getattr(self.state, 'rollback_runtime', None)
+        if runtime and runtime.blocked:
+            for rect, key in ((BTN_SCAN_FEN_RECT, pygame.K_v),
+                              (BTN_CONFIRM_MOVE_RECT, pygame.K_SPACE),
+                              (BTN_CONTINUE_RECT, pygame.K_v)):
+                if rect.collidepoint(mx, my):
+                    self.handle_keyboard(key)
+                    return
+            self.state.set_status('Rollback/phục hồi đang khóa game. V/SPACE quét lại; '
+                                  'E: xác nhận arm về nghỉ và kẹp rỗng; X: hủy khi bàn S2.', duration=30)
             return
         if getattr(self.state, "visual_pick_retry", None):
             if BTN_PICK_RETRY_RECT.collidepoint(mx, my):
@@ -278,6 +297,10 @@ class InputHandler:
             self._handle_pick_test_click(mx, my)
             return
         if getattr(self.state, "pick_test_resume_required", False):
+            return
+
+        if (getattr(self.state, "physical_sync_fault", False)
+                and not getattr(self.state, "emergency_mode", False)):
             return
 
         # Manual Override (Mouse Drag)
@@ -467,6 +490,11 @@ class InputHandler:
         A failed snapshot leaves scanning paused rather than accepting a blind
         recovery.
         """
+        if bool(getattr(getattr(self.state, 'rollback_runtime', None), 'blocked', False)):
+            return self._run_rollback_action('resume')
+        if getattr(self.state, "physical_sync_fault", False):
+            self._reconcile_physical_sync_fault()
+            return not self.state.physical_sync_fault
         detector = getattr(self.hw, "yolo_detector", None)
         camera = getattr(self.hw, "cam_monitor", None)
         if detector is None or camera is None:
@@ -512,6 +540,21 @@ class InputHandler:
         import pygame  # type: ignore
         if getattr(self.state, "physical_motion_busy", False):
             return
+        runtime = getattr(self.state, 'rollback_runtime', None)
+        if runtime and runtime.blocked:
+            if key in (pygame.K_v, pygame.K_SPACE, pygame.K_RETURN):
+                self._run_rollback_action('resume')
+            elif key == pygame.K_e:
+                self._run_rollback_action('confirm')
+            elif key == pygame.K_x:
+                self._run_rollback_action('abort')
+            elif key == pygame.K_a:
+                self._run_rollback_action('confirm_abort')
+            else:
+                self.state.set_status('Rollback đang khóa game. V/SPACE quét lại. '
+                    'E: xác nhận arm về nghỉ/kẹp rỗng để tiếp tục; '
+                    'X: hủy tại S2; A: xác nhận kẹp rỗng và hủy tại S2.', duration=3600)
+            return
         if self.state.game_over:
             return
 
@@ -546,6 +589,12 @@ class InputHandler:
             return
 
         if key == pygame.K_v:
+            if (runtime and runtime.cycle and runtime.cycle.status == 'BUILDING'
+                    and runtime.cycle.s2 is not None):
+                self._run_rollback_action('resume')
+                return
+            if self._retry_failed_engine():
+                return
             if self.state.physical_sync_fault:
                 self._reconcile_physical_sync_fault()
             else:
@@ -554,7 +603,7 @@ class InputHandler:
 
         # Z KEY: Rollback
         if key == pygame.K_z:
-            self.state.handle_rollback(self.hw)
+            self._run_rollback_action('start')
 
         # M KEY: Emergency client-side move mode. This is intentionally
         # explicit so a camera failure cannot silently switch control paths.
@@ -573,17 +622,101 @@ class InputHandler:
         elif key == pygame.K_SPACE:
             self._handle_space_key()
 
+    def _run_rollback_action(self, action):
+        if self._defer_motion(lambda: self._run_rollback_action(action)):
+            return
+        runtime = self.state.rollback_runtime
+        try:
+            if action == 'start':
+                runtime.start(worker_owned=True)
+            else:
+                runtime.resume(empty_gripper_confirmed=action in ('confirm', 'confirm_abort'),
+                               abort=action in ('abort', 'confirm_abort'))
+            if not runtime.blocked:
+                self._board_stability_monitor.reset()
+                self._player_turn_arbiter.deactivate()
+                self._unified_active = False
+                self._observed_baseline_time = None
+                self._last_move_confirmation_failure = None
+        except Exception as exc:
+            runtime.recovery_error = str(exc)
+            self.state.set_status(f'Rollback dừng an toàn: {exc}; chưa chạy lại arm.', duration=3600)
+
+    def _retry_failed_engine(self):
+        if (not getattr(self.state, "ai_failure", None)
+                or getattr(self.state, "pending_ai_move", None)
+                or getattr(self.state, "physical_sync_fault", False)):
+            return False
+        if self.state.prepare_ai_retry_after_physical_miss():
+            self.state.snapshot_continue_required = False
+            self.state.set_status("AI đang thử lại tính nước; FEN giữ nguyên.", color=(0, 100, 180), duration=10)
+        else:
+            self.state.set_status("AI worker cũ chưa dừng; chưa thể thử lại.", duration=10)
+        return True
+
     def _reconcile_physical_sync_fault(self):
+        if bool(getattr(getattr(self.state, 'rollback_runtime', None), 'blocked', False)):
+            return self._run_rollback_action('resume')
         """Supervised recovery for a stopped physical-board synchronization."""
+        # Controller probes and camera recognition are bounded but can take
+        # seconds during an outage. Keep the live display on the UI thread.
+        if self._defer_motion(self._reconcile_physical_sync_fault):
+            return
         pending = self.state.pending_ai_move
-        if not pending or not self.hw.verify_physical_board:
-            self.state.set_status("❌ Không có trạng thái đối soát để khôi phục.", color=(180, 0, 0), duration=8.0)
+        verifier = getattr(self.hw, "verify_physical_board", None)
+        current = getattr(self.state, "pending_ai_move_is_current", None)
+        if pending and callable(current) and not current():
+            self.state.set_status("Pending thuộc trạng thái cũ; FEN giữ nguyên. Rollback/New Game để phục hồi.", duration=30)
+            return
+        robot = getattr(self.hw, 'robot', None)
+        if getattr(robot, 'communication_fault', False) is True:
+            resume = getattr(robot, 'can_resume_after_communication_fault', None)
+            try:
+                ready = callable(resume) and resume() is True
+            except Exception:
+                ready = False
+            if not ready:
+                self.state.set_status('Chưa có phản hồi controller mới xác nhận arm đã dừng. '
+                                      'Kiểm tra controller/kết nối rồi V; FEN giữ nguyên.', duration=30)
+                return
+        if not callable(verifier):
+            self.state.set_status("❌ Không có camera đối soát; FEN giữ nguyên.", color=(180, 0, 0), duration=8.0)
+            return
+        if pending is None:
+            # Rollback cancelled the previous command. Only the restored full
+            # board can unlock scanning; no automatic arm replay is scheduled.
+            try:
+                matches = verifier(self.state.board)
+            except Exception:
+                matches = False
+            if matches:
+                self.state.physical_sync_fault = False
+                self.state.snapshot_continue_required = False
+                self.state.snapshot_continue_can_commit_pending = False
+                self.state.manual_override_active = False
+                self.state.emergency_mode = False
+                self._board_stability_monitor.reset()
+                self.hw.capture_baseline_if_needed(force_delay=0.0)
+                self.state.set_status("✅ Bàn thật khớp FEN đã phục hồi; có thể đi tiếp.", color=(0, 120, 0), duration=8)
+            else:
+                self.state.set_status("⚠️ Khôi phục bàn thật đúng FEN rồi V/SPACE để xác nhận.", duration=30)
             return
 
         self.state.set_status("📸 Đang đối soát lại bàn thật...", color=(0, 100, 180), duration=5.0)
         # No robot command is issued here.  Matching the old board means the
         # arm did not complete the move; matching expected_board means it did.
-        if self.hw.verify_physical_board(self.state.board):
+        def board_matches(board):
+            try:
+                return bool(verifier(board))
+            except Exception as exc:
+                print(f"[BOARD SYNC] Verification failed: {exc}")
+                return False
+
+        if board_matches(self.state.board):
+            if pending.get("manual_handoff"):
+                src, dst = pending["move"]
+                self.state.set_status(f"Chưa thực hiện nước Đen {src}→{dst}. Di tay rồi V/SPACE để xác nhận.", duration=30)
+                return
             self.state.clear_pending_ai_move()
             self.state.snapshot_continue_required = False
             retry = getattr(self.state, "prepare_ai_retry_after_physical_miss", None)
@@ -599,19 +732,16 @@ class InputHandler:
                 )
             return
 
-        if self.hw.verify_physical_board(pending["expected_board"]):
+        if board_matches(pending["expected_board"]):
             self._finalize_pending_ai_move(
                 "✅ Đã xác nhận bàn thật — đến lượt bạn.", (0, 100, 180)
             )
             return
 
         src, dst = pending["move"]
-        if pending.get("captured_piece") != ".":
-            # CChess can misclassify unrelated pieces, making a whole-board
-            # FEN comparison too strict for the supervised capture recovery.
-            # V is pressed only after the operator has completed this known
-            # pending move, so the source/destination occupancy check is the
-            # relevant physical evidence here.
+        if pending.get("captured_piece") != "." or pending.get("manual_handoff"):
+            # Identity inference can be noisy. Supervised completion of this
+            # known move may use fresh source-empty/destination-present proof.
             verify_geometry = getattr(self.hw, "verify_visual_move", None)
             geometry_matches = False
             if callable(verify_geometry):
@@ -640,16 +770,29 @@ class InputHandler:
         if not self.state.commit_pending_ai_move():
             return False
         self.state.snapshot_continue_required = False
-        self.state.api_client.send_move_update_board(self.state.current_fen)
+        self.state.sync_remote_board()
         if xiangqi.get_king_pos("r", self.state.board) is None:
             self.state.handle_game_over("b")
             self.state.api_client.end_match(winner="BLACK", reason="CHECKMATE")
         else:
-            self.hw.capture_baseline_if_needed(force_delay=1.0)
+            baseline_ready = bool(self.hw.capture_baseline_if_needed(force_delay=1.0))
             self.state.set_status(status_message, color=status_color, duration=8.0)
+            runtime = getattr(self.state, 'rollback_runtime', None)
+            if runtime and callable(getattr(self.hw, 'verify_rollback_board', None)):
+                if runtime.seal(baseline_ready=baseline_ready):
+                    self.state.set_status(status_message + ' Z: rollback cycle gần nhất.',
+                                          color=status_color, duration=30)
+        self.state.refresh_remote_sync_status()
         return True
 
     def _handle_space_key(self, auto_retry=False):
+        if bool(getattr(getattr(self.state, 'rollback_runtime', None), 'blocked', False)):
+            return self._run_rollback_action('resume')
+        if getattr(self.state, "physical_sync_fault", False):
+            self._reconcile_physical_sync_fault()
+            return False
+        if self.state.turn != "r" or self.state.game_over:
+            return False
         if self._player_turn_mode == PlayerTurnMode.UNIFIED:
             self.state.set_status("⚠️ UNIFIED: SPACE chỉ yêu cầu poll state-machine.", color=(180, 100, 0))
             return False
@@ -745,18 +888,13 @@ class InputHandler:
         return committed
 
     def _continue_after_snapshot_pause(self):
+        if bool(getattr(getattr(self.state, 'rollback_runtime', None), 'blocked', False)):
+            return self._run_rollback_action('resume')
         """Apply the operator-approved recovery shown by the Continue button."""
-        if (getattr(self.state, "physical_sync_fault", False)
-                and getattr(self.state, "snapshot_continue_can_commit_pending", False)
-                and getattr(self.state, "pending_ai_move", None)):
-            # The robot command completed but visual confirmation returned e.g.
-            # 0/3.  Continue is an explicit operator override to advance the
-            # FEN to the move already made on the physical board.
-            if self.state.commit_pending_ai_move():
-                self.state.api_client.send_move_update_board(self.state.current_fen)
-        elif getattr(self.state, "physical_sync_fault", False):
-            # A robot exception is not proof that it completed the move.  Keep
-            # the original verified reconciliation path instead of guessing.
+        if self._retry_failed_engine():
+            return
+        if getattr(self.state, "physical_sync_fault", False):
+            # Continue, SPACE and V share exactly the same fresh camera proof.
             self._reconcile_physical_sync_fault()
             return
         else:
@@ -797,6 +935,8 @@ class InputHandler:
     def try_auto_confirm_move(self, retries=10, retry_seconds=0.2):
         """Reuse the existing rule-validated snapshot flow after hand exit."""
         import time
+        if bool(getattr(getattr(self.state, 'rollback_runtime', None), 'blocked', False)):
+            return False
         if self.state.turn != "r" or self.state.game_over:
             return False
         if not self.hw.yolo_detector or not self.hw.yolo_detector.has_baseline():
@@ -829,10 +969,12 @@ class InputHandler:
     def poll_board_stability(self):
         """Commit one legal Red move after repeated stable board observations."""
         if (getattr(self.state, "physical_motion_busy", False)
+                or bool(getattr(getattr(self.state, 'rollback_runtime', None), 'blocked', False))
                 or self.state.turn != "r" or self.state.game_over
                 or getattr(self.state, "visual_pick_retry", None)
                 or getattr(self.state, "pick_test_mode", False)
                 or getattr(self.state, "pick_test_resume_required", False)
+                or getattr(self.state, "physical_sync_fault", False)
                 or getattr(self.state, "manual_override_active", False)):
             self._board_stability_monitor.reset()
             return False

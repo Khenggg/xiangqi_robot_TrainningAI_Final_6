@@ -231,12 +231,14 @@ class BoardRenderer:
 
         if not game_state.get("game_over"):
             # Nút SURRENDER
-            pygame.draw.rect(self.screen, VERMILION_COLOR, BTN_SURRENDER_RECT, border_radius=14)
+            pygame.draw.rect(self.screen, (121, 116, 100) if game_state.get('rollback_active')
+                             else VERMILION_COLOR, BTN_SURRENDER_RECT, border_radius=14)
             txt = self.ui_font.render("SURRENDER", True, (255, 255, 255))
             self.screen.blit(txt, txt.get_rect(center=BTN_SURRENDER_RECT.center))
 
             # Nút NEW GAME
-            pygame.draw.rect(self.screen, JADE_COLOR, BTN_NEW_GAME_RECT, border_radius=14)
+            pygame.draw.rect(self.screen, (121, 116, 100) if game_state.get('rollback_active')
+                             else JADE_COLOR, BTN_NEW_GAME_RECT, border_radius=14)
             txt_new = self.ui_font.render("NEW GAME", True, (255, 255, 255))
             self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
 
@@ -262,8 +264,18 @@ class BoardRenderer:
         )
         emergency_active = game_state.get("emergency_mode", False)
         for rect, key, label_lines, color in actions:
+            if game_state.get('rollback_active'):
+                if key == 'SPACE':
+                    label_lines = ('QUÉT LẠI', 'ROLLBACK')
+                if key in ('M', 'T'):
+                    color = (121, 116, 100)
+            if key == 'Z' and not game_state.get('rollback_enabled', False):
+                label_lines = ('ROLLBACK KHÓA', 'ĐANG PHỤC HỒI' if game_state.get('rollback_active')
+                               else 'CHỜ XONG CYCLE')
             active = (key == "M" and emergency_active) or (key == "T" and game_state.get("pick_test_mode", False))
             button_color = (139, 48, 38) if active else color
+            if key == 'Z' and not game_state.get('rollback_enabled', False):
+                button_color = (121, 116, 100)
             pygame.draw.rect(self.screen, button_color, rect, border_radius=12)
             key_surf = self.ui_font.render(key, True, (255, 255, 255))
             self.screen.blit(key_surf, (rect.x + 18, rect.y + 17))
@@ -283,7 +295,7 @@ class BoardRenderer:
                 text = self.button_font.render(label, True, (255, 255, 255))
                 self.screen.blit(text, text.get_rect(center=rect.center))
         else:
-            can_continue = game_state.get("snapshot_continue_required", False)
+            can_continue = game_state.get("snapshot_continue_required", False) or game_state.get('rollback_active', False)
             continue_color = JADE_COLOR if can_continue else (121, 116, 100)
             pygame.draw.rect(self.screen, continue_color, BTN_CONTINUE_RECT, border_radius=12)
             continue_key = self.ui_font.render("▶", True, (255, 255, 255))
@@ -291,7 +303,8 @@ class BoardRenderer:
             self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 18, BTN_CONTINUE_RECT.y + 17))
             self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 66, BTN_CONTINUE_RECT.y + 17))
 
-        note = ("T: chọn quân → chọn ô trống" if game_state.get("pick_test_mode", False)
+        note = ("V: quét | E: kẹp rỗng | X: hủy" if game_state.get('rollback_active')
+                else "T: chọn quân → chọn ô trống" if game_state.get("pick_test_mode", False)
                 else "M đang bật: đi tay Đỏ / Đen" if emergency_active else "Chọn phím hoặc bấm nút")
         note_surf = self.log_font.render(note, True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(note_surf, note_surf.get_rect(center=(panel.centerx, 816)))
@@ -379,7 +392,30 @@ class BoardRenderer:
         dst_col, dst_row = entry["dst"]
         src = f"{chr(ord('a') + src_col)}{src_row}"
         dst = f"{chr(ord('a') + dst_col)}{dst_row}"
-        return f"{piece} {src} -> {dst}"
+        return f"{piece} {src} -> {dst}" + (' [ĐÃ HOÀN TÁC]' if entry.get('rolled_back') else '')
+
+    def draw_rollback_guides(self, game_state):
+        """Show actual inverse transfer and exact captured-piece destinations."""
+        if not game_state.get('rollback_active'):
+            return
+        def caption(piece):
+            name = PIECE_LOG_NAMES.get(piece[-1:], 'Quân')
+            return name + (' Đỏ' if piece.startswith('r_') else ' Đen')
+        for item in game_state.get('rollback_target_cells', []):
+            center = self.grid_to_pixel(*item['square'])
+            pygame.draw.circle(self.screen, (30, 150, 120), center, PIECE_RADIUS + 5, 2)
+            label = self.log_font.render('Về: ' + caption(item['piece']), True, (20, 110, 90))
+            self.screen.blit(label, label.get_rect(center=(center[0], center[1] - PIECE_RADIUS - 20)))
+        transfer = game_state.get('rollback_transfer')
+        if transfer:
+            for key, color in (('src', (215, 145, 20)), ('dst', (30, 150, 120))):
+                center = self.grid_to_pixel(*transfer[key])
+                pygame.draw.circle(self.screen, color, center, PIECE_RADIUS + 9, 4)
+        for restoration in game_state.get('rollback_restorations', []):
+            center = self.grid_to_pixel(*restoration['square'])
+            pygame.draw.circle(self.screen, (190, 70, 40), center, PIECE_RADIUS + 15, 3)
+            label = self.log_font.render(caption(restoration['piece']), True, (190, 50, 30))
+            self.screen.blit(label, label.get_rect(center=(center[0], center[1] + PIECE_RADIUS + 23)))
 
     def draw_recent_moves(self, moves):
         """Draw the latest eight moves in their moving side's color."""

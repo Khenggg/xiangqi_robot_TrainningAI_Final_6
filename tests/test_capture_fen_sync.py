@@ -12,6 +12,7 @@ def empty_board():
 class CaptureFenSyncTests(unittest.TestCase):
     def make_state(self):
         state = GameState()
+        state.api_client.token = ""
         state.api_client.send_move_update_board = Mock()
         state.board = empty_board()
         state.board[0][4] = "b_K"

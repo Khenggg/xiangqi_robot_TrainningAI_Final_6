@@ -27,8 +27,7 @@ import config  # type: ignore
 from src.core import xiangqi  # type: ignore
 
 from src.core.game_state import GameState  # type: ignore
-from src.core.visual_move_coordinator import execute_pending_ai_motion
-from src.vision.pick_consensus import PickTargetUnavailable
+from src.core.ai_turn_flow import AIJobResult, evaluate_ai_result, dispatch_pending_ai_move
 from src.hardware.hardware_manager import HardwareManager  # type: ignore
 from src.ui.input_handler import InputHandler  # type: ignore
 from src.ui.debug_dashboard import DebugDashboard  # type: ignore
@@ -82,6 +81,10 @@ def canvas_position(position):
 
 # Khởi tạo các module quản lý SRP
 state = GameState(allow_mouse_move=config.DRY_RUN)
+state.api_client.configure_outbox(os.environ.get(
+    'XIANGQI_OUTBOX_PATH', os.path.join(_BASE_DIR, 'logs', 'simulation-outbox.json')))
+rollback_recovered = state.rollback_runtime.configure(os.environ.get(
+    'XIANGQI_ROLLBACK_JOURNAL_PATH', os.path.join(_BASE_DIR, 'logs', 'rollback-journal.json')))
 hw = None
 input_mgr = None
 difficulty_menu_active = False
@@ -106,11 +109,25 @@ def set_debug_dashboard(enabled):
 
 def _start_selected_game():
     assert hw is not None
+    if rollback_recovered or state.rollback_runtime.blocked:
+        # The restored room/state owns this session; never substitute a fresh
+        # room or baseline for an unfinished physical transaction.
+        state.set_status('Đã tải journal. V đối soát; E xác nhận arm về nghỉ/kẹp rỗng để phục hồi.', duration=3600)
+        return
     hw.capture_baseline_if_needed(force_delay=1.0)
     if not config.DRY_RUN:
+        state.api_client.discard_unassigned_fen()
         state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
+    state.rollback_runtime.new_session()
+
+_cleanup_done = False
+
 
 def _cleanup_all():
+    global _cleanup_done
+    if _cleanup_done:
+        return
+    _cleanup_done = True
     print("\n[CLEANUP] Đang dọn dẹp hệ thống...")
     # Never close camera/SDK while the physical worker still owns them.
     motion_worker = getattr(input_mgr, "_motion_thread", None)
@@ -119,9 +136,17 @@ def _cleanup_all():
     # [API] Force Kết thúc trận đấu khi thoát chương trình
     try:
         if state and state.api_client:
-            state.api_client.end_match(reason="OTHER")
+            if not state.rollback_runtime.preserve_room:
+                if state.rollback_runtime.close_session():
+                    state.api_client.end_match(reason="OTHER")
+            # Queued FEN/end jobs are durable even if the provider is offline.
+            state.api_client.shutdown(wait_seconds=2.0)
     except: pass
     if hw is not None:
+        if state.rollback_runtime.preserve_room:
+            # A timed-out pick may still hold a piece. Cleanup must not open,
+            # de-energize or move that arm before operator recovery.
+            hw.recovery_mode = True
         hw.cleanup()
     if debug_dashboard is not None:
         debug_dashboard.close()
@@ -143,6 +168,7 @@ print(f"[FEN] {state.current_fen}")
 # Khởi chạy main loop. The launcher keeps difficulty selection out of the boot flow.
 try:
     while running:
+        state.refresh_remote_sync_status()
         # 2a. Vẽ khung hình
         if settings_menu_active:
             renderer.draw_settings_menu(getattr(config, "DEBUG_DASHBOARD", False))
@@ -152,6 +178,7 @@ try:
             renderer.draw_ui(state.get_render_state())
             renderer.draw_pieces(state.pick_test_board if state.pick_test_mode else state.board)
             renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
+            renderer.draw_rollback_guides(state.get_render_state())
             if state.game_over:
                 renderer.draw_game_over(state.winner)
         if difficulty_menu_active:
@@ -171,7 +198,8 @@ try:
                 if start_vs_robot:
                     # Connecting to the robot and calibrating the camera can block, so defer
                     # both until the player explicitly chooses to play against the robot.
-                    hw = HardwareManager(config, _BASE_DIR).initialize_all()
+                    hw = HardwareManager(config, _BASE_DIR).initialize_all(
+                        recovery_mode=rollback_recovered or state.rollback_runtime.blocked)
                     input_mgr = InputHandler(state, hw)
                     if debug_dashboard is not None:
                         debug_dashboard.robot = hw.robot
@@ -238,11 +266,16 @@ try:
                 state.ai_thinking = True
                 state.ai_think_start = time.time()
                 
-                def _ai_worker(job_token):
-                    # Đã loại bỏ truyền difficulty, AI Controller sẽ tự handle sức mạnh cố định
-                    state.ai_results[job_token] = hw.ai_ctrl.pick_move(board_snapshot, color="b")
+                def _ai_worker(job_token, position):
+                    try:
+                        outcome = AIJobResult(move=hw.ai_ctrl.pick_move(position, color="b"))
+                    except Exception as exc:
+                        outcome = AIJobResult(error=str(exc))
+                    # Reset/rollback can supersede a worker before it returns.
+                    if job_token == (state.game_epoch, state.ai_epoch, state.human_commit_generation):
+                        state.ai_results[job_token] = outcome
                     
-                state.ai_thread = threading.Thread(target=_ai_worker, args=(ai_job_token,), daemon=True)
+                state.ai_thread = threading.Thread(target=_ai_worker, args=(ai_job_token, board_snapshot), daemon=True)
                 state.ai_thread.start()
                 print("[AI] 🧵 Thinking thread started...")
 
@@ -252,12 +285,14 @@ try:
                     state.ai_thinking = False
                     state.ai_thread = None
                     completed_token = state.ai_job_token
-                    best = state.ai_results.pop(completed_token, None)
+                    outcome = state.ai_results.pop(completed_token, AIJobResult(error="Worker không trả kết quả."))
                     state.ai_result = None
                     result_is_current = completed_token == (state.game_epoch, state.ai_epoch, state.human_commit_generation)
                     if not result_is_current:
                         print("[AI] Discarded stale worker result.")
                         best = None
+                    else:
+                        best = evaluate_ai_result(state, outcome)
                     
                     # Chống Loop
                     if best:
@@ -279,67 +314,8 @@ try:
                         is_cap = cap_p != "."
                         expected_after, _ = xiangqi.make_temp_move(state.board, best)
                         state.set_pending_ai_move(best, expected_after, cap_p)
-                        expected_after_capture = None
-                        if is_cap:
-                            expected_after_capture = [row[:] for row in state.board]
-                            expected_after_capture[d[1]][d[0]] = "."
-
-                        robot_success = True
-                        if not config.DRY_RUN:
-                            if hw.robot.connected:
-                                print(f"[AI] Robot executing move: {xiangqi.format_move(s, d)}")
-                                try:
-                                    if getattr(config, "VISUAL_MOTION_ASYNC_ENABLED", False):
-                                        input_mgr.start_pending_ai_motion()
-                                        robot_success = False  # Worker verifies and commits exactly once.
-                                    else:
-                                        execute_pending_ai_motion(state, hw, config)
-                                except PickTargetUnavailable as exc:
-                                    robot_success = False
-                                    state.pause_visual_pick("ai", s, d, exc)
-                                except Exception as e:
-                                    # Even 112/MoveCart errors are NOT proof of completion.
-                                    robot_success = False
-                                    state.physical_sync_fault = True
-                                    state.snapshot_continue_required = True
-                                    state.snapshot_continue_can_commit_pending = False
-                                    error_str = str(e)
-                                    print(f"⚠️ Robot error: {error_str}")
-                                    state.set_status(f"Robot dừng: {error_str}. Kiểm tra bàn thật rồi V; FEN giữ nguyên.",
-                                                     color=(180, 0, 0), duration=3600)
-                                    if "112" in error_str or "MoveCart" in error_str:
-                                        print("[ROBOT] Recoverable motion error; camera verification is required before FEN commit.")
-                                    else:
-                                        print("❌ [CRITICAL] Robot critical error, stopping game.")
-                                        time.sleep(2)
-                            else:
-                                print(f"\n{'='*50}")
-                                print(f"🤖 AI đi: {state.board[s[1]][s[0]]} {xiangqi.format_move(s, d)} {'ĂN' if is_cap else ''}")
-                                print(f"👉 Hãy di quân này trên bàn thật, rồi bấm SPACE!")
-                                print(f"{'='*50}\n")
-
-                        if robot_success:
-                            state.commit_pending_ai_move()
-                            print(f"[FEN] {state.current_fen}")
-                            
-                            # [API] Gửi cập nhật nước đi của AI lên Server
-                            state.api_client.send_move_update_board(state.current_fen)
-                            
-                            if xiangqi.get_king_pos('r', state.board) is None:
-                                state.handle_game_over('b')
-                                state.api_client.end_match(winner="BLACK", reason="CHECKMATE")
-                            else:
-                                if hw.robot.connected:
-                                    hw.capture_baseline_if_needed(force_delay=1.0)
-                                    state.set_status("Your turn!", color=(0, 100, 180), duration=5.0)
-                                else:
-                                    hw.clear_yolo_baseline()
-                                    state.set_status(f"🤖 AI: ({s[0]},{s[1]})→({d[0]},{d[1]}) | Di quân rồi SPACE", color=(0, 80, 160), duration=30.0)
-                                print("[GAME] Your turn...")
-                    elif result_is_current:
-                        print("[AI] No moves available -> AI Lost")
-                        state.handle_game_over("r")
-                        state.api_client.end_match(winner="RED", reason="CHECKMATE")
+                        print(f"[AI] Pending move: {xiangqi.format_move(s, d)}")
+                        dispatch_pending_ai_move(state, hw, input_mgr, config)
 
         window.blit(pygame.transform.smoothscale(screen, (WINDOW_WIDTH, WINDOW_HEIGHT)), (0, 0))
         pygame.display.flip()
@@ -350,3 +326,5 @@ except (KeyboardInterrupt, SystemExit):
 except Exception as e:
     print(f"\n[MAIN] ❌ Unexpected error: {e}")
     traceback.print_exc()
+finally:
+    _cleanup_all()

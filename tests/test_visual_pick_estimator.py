@@ -270,7 +270,7 @@ class BoardReconcilerTests(unittest.TestCase):
 
 class PendingAiMoveTests(unittest.TestCase):
     def test_commits_a_verified_pending_move_once_and_releases_sync_fault(self):
-        state = GameState.__new__(GameState)
+        state = GameState()
         state.board = [["." for _ in range(9)] for _ in range(10)]
         state.board[2][3] = "b_R"
         state.turn = "b"

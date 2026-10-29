@@ -23,6 +23,17 @@ import threading
 import time
 import os
 import atexit
+import queue
+import re
+from collections import deque
+
+
+class EngineError(RuntimeError):
+    """Engine transport, process or protocol failure; never a no-move result."""
+
+
+class EngineTimeoutError(EngineError):
+    """The engine did not answer before the request deadline."""
 
 
 class MoonfishEngine:
@@ -46,15 +57,22 @@ class MoonfishEngine:
         'b_R': 'r', 'b_C': 'c', 'b_P': 'p',
     }
 
-    def __init__(self, engine_path: str):
+    def __init__(self, engine_path: str, startup_timeout_sec=10, search_timeout_sec=30):
         """
         Args:
             engine_path: Absolute or relative path to moonfish_ucci.py
         """
         self.engine_path = engine_path
         self.process: subprocess.Popen | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._ready = False
+        self.startup_timeout_sec = startup_timeout_sec
+        self.search_timeout_sec = search_timeout_sec
+        self._output = None
+        self._stderr = deque(maxlen=20)
+        self._readers = []
+        self._cancel = threading.Event()
+        atexit.register(self._atexit_cleanup)
 
         if not os.path.isfile(engine_path):
             raise FileNotFoundError(
@@ -74,92 +92,121 @@ class MoonfishEngine:
             nnue_path: Not used for Moonfish (kept for compatibility).
         """
         import sys
-        
-        # Run Python script with current Python interpreter
-        # Use absolute path for the script
-        script_path = os.path.abspath(self.engine_path)
-        script_dir = os.path.dirname(script_path)
-        script_name = os.path.basename(script_path)
-        
-        self.process = subprocess.Popen(
-            [sys.executable, script_name],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,  # Capture stderr for debugging
-            encoding='utf-8',
-            bufsize=1,            # line-buffered
-            cwd=script_dir,  # Run in the script's directory
-        )
-
-        # Đăng ký atexit handler để đảm bảo subprocess bị kill khi thoát
-        atexit.register(self._atexit_cleanup)
-
-        self._send('ucci')
-
-        # Wait for 'ucciok' (with 10-second timeout)
-        # Moonfish prints "Moonfish" first, then waits for commands
-        deadline = time.time() + 10
-        found_name = False
-        while time.time() < deadline:
-            line = self.process.stdout.readline().strip()
-            if not line:
-                # Check stderr for errors
-                if self.process.stderr:
-                    err_line = self.process.stderr.readline().strip()
-                    if err_line:
-                        print(f"[MOONFISH] stderr: {err_line}")
-                continue
-            
-            # Debug output (comment out for production)
-            # print(f"[MOONFISH] DEBUG: Received line: '{line}'")
-            
-            # Moonfish prints its name first
-            if line == 'Moonfish' or 'Moonfish' in line:
-                found_name = True
-                # print("[MOONFISH] Engine name received.")
-                continue
-            
-            if line == 'ucciok':
-                self._ready = True
-                print("[MOONFISH] Engine ready!")
+        with self._lock:
+            if self._ready and self.process is not None and self.process.poll() is None:
                 return
-        
-        if found_name:
-            # Engine responded but didn't send ucciok - might be waiting for more input
-            self._ready = True
-            print("[MOONFISH] Engine ready (name received)!")
+            self._dispose_process()
+            self._cancel.clear()
+            script_path = os.path.abspath(self.engine_path)
+            try:
+                self.process = subprocess.Popen(
+                    [sys.executable, '-u', os.path.basename(script_path)],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    encoding='utf-8', errors='replace', bufsize=1,
+                    cwd=os.path.dirname(script_path),
+                )
+                # Readers capture only this session's queue and streams. Old output
+                # can never become a bestmove response in a restarted session.
+                output = self._output = queue.Queue()
+                stderr = self._stderr = deque(maxlen=20)
+                self._readers = [
+                    threading.Thread(target=self._read_stdout,
+                                     args=(self.process.stdout, output), daemon=True),
+                    threading.Thread(target=self._drain_stderr,
+                                     args=(self.process.stderr, stderr), daemon=True),
+                ]
+                for reader in self._readers:
+                    reader.start()
+                self._send('ucci')
+                deadline = time.monotonic() + self.startup_timeout_sec
+                while self._next_line(deadline, 'startup') != 'ucciok':
+                    pass
+                self._ready = True
+                print('[MOONFISH] Engine ready!')
+            except Exception as error:
+                self._dispose_process()
+                if isinstance(error, EngineError):
+                    raise
+                raise EngineError(f'[MOONFISH] Startup failed: {error}') from error
+
+    @staticmethod
+    def _read_stdout(stream, output):
+        try:
+            for line in stream:
+                output.put(line.strip())
+        finally:
+            output.put(None)  # EOF is a failure, not a no-move answer.
+
+    @staticmethod
+    def _drain_stderr(stream, diagnostics):
+        # Fixed-size reads drain even a very long line without retaining it all.
+        while True:
+            chunk = stream.read(4096)
+            if not chunk:
+                return
+            diagnostics.append(chunk)
+
+    def _next_line(self, deadline, phase):
+        while True:
+            if self._cancel.is_set():
+                raise EngineError(f'[MOONFISH] {phase} cancelled.')
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise EngineTimeoutError(f'[MOONFISH] {phase} timeout.')
+            try:
+                line = self._output.get(timeout=min(remaining, 0.1))
+            except queue.Empty:
+                continue
+            if line is None:
+                details = ''.join(self._stderr)[-1000:]
+                raise EngineError(f'[MOONFISH] Process ended during {phase}. {details}')
+            return line
+
+    def _dispose_process(self, graceful=False):
+        """Called under the request lock; reap before closing reader streams."""
+        process = self.process
+        self._ready = False
+        if process is None:
             return
-            
-        raise RuntimeError("[MOONFISH] Engine did not respond with 'ucciok' in time.")
+        try:
+            if process.poll() is None:
+                if graceful:
+                    try:
+                        self._send('quit')
+                        process.wait(timeout=0.3)
+                    except (EngineError, subprocess.TimeoutExpired):
+                        process.kill()
+                else:
+                    process.kill()
+            process.wait(timeout=2)
+        finally:
+            for reader in self._readers:
+                reader.join(timeout=1)
+            for stream in (process.stdin, process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
+            self.process = None
+            self._output = None
+            self._readers = []
 
     def _atexit_cleanup(self):
         """Được gọi bởi atexit — force kill subprocess nếu vẫn còn chạy."""
-        if self.process and self.process.poll() is None:
-            try:
-                self.process.kill()
-                self.process.wait(timeout=2)
-                print("[MOONFISH] atexit: subprocess killed.")
-            except Exception:
-                pass
+        try:
+            self.stop()
+        except Exception:
+            pass
 
     def stop(self):
         """Gracefully shut down the engine subprocess."""
-        if self.process:
-            try:
-                self._send('quit')
-                self.process.wait(timeout=3)
-            except Exception:
-                try:
-                    self.process.terminate()
-                    self.process.wait(timeout=2)
-                except Exception:
-                    self.process.kill()
-            self.process = None
-            self._ready = False
-            print("[MOONFISH] Engine stopped.")
+        # Wake a pending request before acquiring its lock, so stop cannot wait
+        # behind a silent search for the full search timeout.
+        self._cancel.set()
+        with self._lock:
+            self._dispose_process(graceful=True)
 
     def __del__(self):
-        self.stop()
+        if hasattr(self, '_lock'):
+            self._atexit_cleanup()
 
     # -------------------------------------------------------------------------
     # Core public method — drop-in replacement for ai.pick_best_move()
@@ -184,52 +231,54 @@ class MoonfishEngine:
             ((src_col, src_row), (dst_col, dst_row))  in our coordinate system,
             or None if the engine has no move.
         """
-        if not self._ready:
-            raise RuntimeError("[MOONFISH] Engine is not started. Call engine.start() first.")
-
         with self._lock:
-            fen = self.board_to_fen(board, color)
-            print(f"[MOONFISH] FEN: {fen}")
+            if not self._ready:
+                raise EngineError('[MOONFISH] Engine is not started. Call engine.start() first.')
+            try:
+                return self._search(board, color, movetime_ms, depth, nodes, temperature)
+            except EngineError:
+                self._dispose_process()
+                raise
 
-            self._send(f'position fen {fen}')
-            
-            # Moonfish doesn't support movetime properly, use depth instead
-            if depth is None:
-                # Convert movetime to approximate depth (rough estimate)
-                # 1000ms ~ depth 3, 3000ms ~ depth 5, 5000ms ~ depth 6
-                if movetime_ms <= 1000:
-                    depth = 3
-                elif movetime_ms <= 3000:
-                    depth = 5
-                else:
-                    depth = 6
-            
-            command = f'go depth {depth} movetime {max(1, int(movetime_ms))}'
-            if nodes is not None:
-                command += f' nodes {max(1, int(nodes))}'
-            self._send(command)
-            if temperature is not None:
-                print(f"[MOONFISH] difficulty temperature={temperature:.2f}")
+    def _search(self, board, color, movetime_ms, depth, nodes, temperature):
+        fen = self.board_to_fen(board, color)
+        print(f"[MOONFISH] FEN: {fen}")
 
-            # Read lines until we get 'bestmove ...'
-            best_move_str = None
-            deadline = time.time() + 30  # Safety timeout
-            while time.time() < deadline:
-                line = self.process.stdout.readline().strip()
-                if not line:
-                    time.sleep(0.01)
-                    continue
-                if line.startswith('bestmove'):
-                    parts = line.split()
-                    best_move_str = parts[1] if len(parts) > 1 else None
-                    print(f"[MOONFISH] bestmove: {best_move_str}")
-                    break
+        self._send(f'position fen {fen}')
 
-            if best_move_str and best_move_str != '(none)' and best_move_str != 'null':
+        # Moonfish doesn't support movetime properly, use depth instead
+        if depth is None:
+            # Convert movetime to approximate depth (rough estimate)
+            # 1000ms ~ depth 3, 3000ms ~ depth 5, 5000ms ~ depth 6
+            if movetime_ms <= 1000:
+                depth = 3
+            elif movetime_ms <= 3000:
+                depth = 5
+            else:
+                depth = 6
+
+        command = f'go depth {depth} movetime {max(1, int(movetime_ms))}'
+        if nodes is not None:
+            command += f' nodes {max(1, int(nodes))}'
+        self._send(command)
+        if temperature is not None:
+            print(f"[MOONFISH] difficulty temperature={temperature:.2f}")
+
+        # Read lines until we get 'bestmove ...'
+        deadline = time.monotonic() + self.search_timeout_sec
+        while True:
+            line = self._next_line(deadline, 'search')
+            if line == 'resign':
+                return None
+            if line.startswith('bestmove'):
+                parts = line.split()
+                if len(parts) < 2:
+                    raise EngineError('[MOONFISH] Malformed bestmove response.')
+                best_move_str = parts[1]
+                print(f"[MOONFISH] bestmove: {best_move_str}")
+                if best_move_str in ('(none)', 'null', '0000'):
+                    return None
                 return self._uci_to_move(best_move_str)
-
-            print("[MOONFISH] No valid move returned.")
-            return None
 
     # -------------------------------------------------------------------------
     # Board → FEN conversion
@@ -280,8 +329,8 @@ class MoonfishEngine:
           - file: 'a'–'i' → column 0–8
           - rank: '0'–'9' → UCCI rank (0 = Red's back rank = our row 9)
         """
-        if len(uci_move) < 4:
-            return None
+        if not re.fullmatch(r'[a-i][0-9][a-i][0-9]', uci_move):
+            raise EngineError(f'[MOONFISH] Invalid move response: {uci_move!r}')
         src_col = ord(uci_move[0]) - ord('a')      # 'a'=0 ... 'i'=8
         src_row = 9 - int(uci_move[1])             # UCCI rank 0 → our row 9, rank 9 → our row 0
         dst_col = ord(uci_move[2]) - ord('a')
@@ -294,8 +343,13 @@ class MoonfishEngine:
 
     def _send(self, cmd: str):
         """Write a command line to the engine's stdin."""
-        self.process.stdin.write(cmd + '\n')
-        self.process.stdin.flush()
+        try:
+            if self.process is None or self.process.poll() is not None:
+                raise EngineError('[MOONFISH] Engine process is unavailable.')
+            self.process.stdin.write(cmd + '\n')
+            self.process.stdin.flush()
+        except (OSError, ValueError) as error:
+            raise EngineError(f'[MOONFISH] Failed to send command: {error}') from error
 
 
 # =============================================================================

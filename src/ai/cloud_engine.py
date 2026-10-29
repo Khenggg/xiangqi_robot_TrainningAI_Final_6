@@ -4,6 +4,7 @@
 # ==================================
 import requests
 import time
+import re
 from src.core.fen_utils import board_array_to_fen
 
 class CloudEngine:
@@ -34,7 +35,7 @@ class CloudEngine:
             movetime_ms: Không sử dụng trên Cloud API (cố định ở server).
             
         Returns:
-            Tuple ((src_col, src_row), (dst_col, dst_row)) hoặc None nếu lỗi.
+            Tuple ((src_col, src_row), (dst_col, dst_row)); lỗi raise exception.
         """
         # 1. Chuyển đổi trạng thái bàn cờ sang chuỗi FEN
         fen = board_array_to_fen(board, turn_color, move_number=1)
@@ -76,8 +77,8 @@ class CloudEngine:
         a-i -> 0-8
         0-9 -> 9-0 (inversion for internal board representation)
         """
-        if len(uci_str) < 4:
-            return None
+        if not isinstance(uci_str, str) or not re.fullmatch(r'[a-iA-I][0-9][a-iA-I][0-9]', uci_str):
+            raise ValueError(f'Invalid cloud move response: {uci_str!r}')
             
         src_col_char = uci_str[0].lower()
         src_row_char = uci_str[1]

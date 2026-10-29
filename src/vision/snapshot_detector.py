@@ -8,6 +8,8 @@ import numpy as np
 import os
 import time
 from src.core import xiangqi
+from src.vision.legal_successor_matcher import LegalSuccessorMatcher
+from src.vision.player_turn_types import MatchKind
 
 
 class SnapshotDetector:
@@ -100,6 +102,10 @@ class SnapshotDetector:
                 if s is not None and d is not None:
                     print(f"[SNAPSHOT] CChess ONNX Direct Move: {p} {xiangqi.format_move(s, d)}")
                     return s, d, p
+            # A recognized layout is authoritative evidence of the whole board.
+            # Never salvage one plausible move from an invalid/ambiguous layout
+            # via occupancy; that could open an AI turn on the wrong FEN.
+            return None, None, None
 
         # === 2. FALLBACK: YOLO OCCUPANCY GRID COMPARISON ===
         if self._baseline_occ is None:
@@ -121,55 +127,18 @@ class SnapshotDetector:
         return self._compare_snapshots(self._baseline_occ, t2_occ, board, frame, cchess_result=cchess_result)
 
     def _detect_move_from_cchess(self, current_board, rec_board):
-        """Phát hiện nước đi trực tiếp từ CChess ONNX layout classification."""
+        """Require one exact full-board legal Red successor, never a guess."""
         try:
-            from src.core import xiangqi
-        except ImportError:
-            return None, None, None
-
-        # 1. Tìm các ô quân Đỏ bị thay đổi (rời đi)
-        src_candidates = []
-        for r in range(self.num_rows):
-            for c in range(self.num_cols):
-                p = current_board[r][c]
-                rec_p = rec_board[r][c]
-                if p.startswith("r") and rec_p != p:
-                    src_candidates.append(((c, r), p))
-
-        # 2. Tìm các ô đích có thể xuất hiện quân đỏ
-        dst_candidates = []
-        for r in range(self.num_rows):
-            for c in range(self.num_cols):
-                rec_p = rec_board[r][c]
-                orig_p = current_board[r][c]
-                if rec_p.startswith("r") and orig_p != rec_p:
-                    dst_candidates.append(((c, r), rec_p))
-
-        # 3. Thử từng cặp (src, dst) theo luật cờ tướng
-        valid_moves = []
-        for (sc, sr), p_src in src_candidates:
-            for (dc, dr), p_dst in dst_candidates:
-                if (sc, sr) == (dc, dr):
-                    continue
-                if xiangqi.is_valid_move((sc, sr), (dc, dr), current_board, "r"):
-                    is_exact_piece = (p_src == p_dst)
-                    valid_moves.append(((sc, sr), (dc, dr), p_src, is_exact_piece))
-
-        # Ưu tiên nước đi khớp đúng loại quân (vừa hợp luật vừa đúng loại quân nhận diện)
-        exact_moves = [m for m in valid_moves if m[3]]
-        if len(exact_moves) == 1:
-            s, d, p, _ = exact_moves[0]
-            return s, d, p
-        elif len(valid_moves) == 1:
-            s, d, p, _ = valid_moves[0]
-            return s, d, p
-        elif len(exact_moves) > 1:
-            s, d, p, _ = exact_moves[0]
-            return s, d, p
-        elif len(valid_moves) > 1:
-            s, d, p, _ = valid_moves[0]
-            return s, d, p
-
+            baseline = tuple(tuple(row) for row in current_board)
+            if baseline != getattr(self, '_layout_baseline', None):
+                self._layout_matcher = LegalSuccessorMatcher(current_board)
+                self._layout_baseline = baseline
+            result = self._layout_matcher.match(rec_board)
+            if result.kind == MatchKind.UNIQUE:
+                src, dst = result.move
+                return src, dst, current_board[src[1]][src[0]]
+        except (TypeError, ValueError):
+            pass
         return None, None, None
 
     def has_baseline(self):

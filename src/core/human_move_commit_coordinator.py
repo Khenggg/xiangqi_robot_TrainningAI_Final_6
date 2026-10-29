@@ -24,6 +24,15 @@ class HumanMoveCommitCoordinator:
         with self._lock:
             if key in self._consumed:
                 return "DUPLICATE"
+            token = request.turn_token
+            if isinstance(token, tuple) and len(token) >= 2:
+                if token[:2] != (getattr(self.state, "game_epoch", 0),
+                                 getattr(self.state, "human_commit_generation", 0)):
+                    return "STALE"
+            if (getattr(self.state, "physical_sync_fault", False)
+                    or bool(getattr(getattr(self.state, 'rollback_runtime', None), 'blocked', False))
+                    or getattr(self.state, "pending_ai_move", None)):
+                return "PHYSICAL_SYNC_REQUIRED"
             if self.state.game_over or self.state.turn != "r":
                 return "STALE"
             src, dst = request.move

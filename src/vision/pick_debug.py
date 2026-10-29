@@ -17,7 +17,7 @@ def draw_pick_debug(frame, box, cell, observation, consensus, geometry):
     if consensus is not None:
         point = geometry.project(geometry.grid_to_xy([[consensus.col, consensus.row]]), top=False)[0]
         cv2.circle(image, tuple(np.rint(point).astype(int)), 9, (0, 165, 255), 2)
-    lines = ["FROZEN measured frame | D: return LIVE in test",
+    lines = ["MEASURED snapshot | camera feed stays LIVE",
              "Green: bbox center | Cyan: logical BOARD point",
              "Magenta: height XY on BOARD | Orange: consensus on BOARD",
              "Board projections are not gripper pixels",

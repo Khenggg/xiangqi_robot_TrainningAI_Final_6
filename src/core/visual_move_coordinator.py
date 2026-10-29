@@ -17,6 +17,9 @@ def execute_pending_ai_motion(state, hw, config, stage="pre_pick"):
     request = getattr(state, "visual_pick_retry", None)
 
     def ensure_current():
+        pending_is_current = getattr(state, 'pending_ai_move_is_current', None)
+        if callable(pending_is_current) and not pending_is_current():
+            raise RuntimeError('Stale pending transition; no acquisition/motion authorized')
         current_token = tuple(getattr(state, name, 0) for name in
                               ("game_epoch", "ai_epoch", "human_commit_generation"))
         if (state.pending_ai_move is not pending or pending["move"] != (source, destination)

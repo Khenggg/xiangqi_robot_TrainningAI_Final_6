@@ -61,24 +61,25 @@ class HardwareManager:
             8: "r_A", 9: "r_C", 10: "r_R", 11: "r_E", 12: "r_K", 13: "r_N", 14: "r_P",
         }
 
-    def initialize_all(self):
+    def initialize_all(self, *, recovery_mode=False):
         """Khởi tạo toàn bộ Robot, AI, Camera theo đúng thứ tự."""
+        self.recovery_mode = bool(recovery_mode)
         self._init_ai()
-        self._init_robot()
+        self._init_robot(recovery_mode=True) if recovery_mode else self._init_robot()
         self._init_camera()
         return self
 
-    def _init_robot(self):
+    def _init_robot(self, recovery_mode=False):
         if not self.dry_run:
             try:
-                self.robot.connect()
+                self.robot.connect(recovery_mode=True) if recovery_mode else self.robot.connect()
                 print("[MAIN] ✅ Robot kết nối thành công.")
             except Exception as e:
                 print(f"⚠️ [MAIN] Robot connection error: {e}")
                 print("   → Tiếp tục chạy KHÔNG có robot (camera + calibrate vẫn hoạt động)")
                 self.robot.connected = False
 
-            if self.robot.connected:
+            if self.robot.connected and not recovery_mode:
                 try:
                     self.robot.go_to_home_chess()
                 except Exception as e:
@@ -87,7 +88,8 @@ class HardwareManager:
             print("[MAIN] DRY_RUN: Skipping physical robot connection.")
             self.robot.connected = False
 
-        self._calibrate_robot()
+        if not recovery_mode:
+            self._calibrate_robot()
 
     def _calibrate_robot(self):
         print("\n--- ROBOT CALIBRATION (R1 ORIGIN) ---")
@@ -340,7 +342,8 @@ class HardwareManager:
         if self.cap and self.cap.isOpened():
             try: self.cap.release()
             except: pass
-        if self.robot and self.robot.connected and not self.dry_run:
+        if (self.robot and self.robot.connected and not self.dry_run
+                and not getattr(self, 'recovery_mode', False)):
             try: self.robot._set_gripper_safe_idle()
             except Exception as e: print(f"[CLEANUP] ⚠️ Không thể tắt gripper Tool DO: {e}")
             try: self.robot.robot.RobotEnable(0)
@@ -351,11 +354,10 @@ class HardwareManager:
         return bool(getattr(getattr(self, "config", None), "VISUAL_TOP_FACE_ENABLED", False))
 
     def _occupancy_snapshot(self):
-        if ring_pick_enabled(getattr(self, "config", None)):
-            return self.cam_monitor.get_fresh_pick_snapshot()
-        if self._top_face_enabled():
-            return self.cam_monitor.get_fresh_pick_snapshot()
-        return self.cam_monitor.get_fresh_snapshot()
+        # Physical clearance/completion must use measured unfiltered boxes and
+        # propagate inference failure. A legacy [] after YOLO failure is not
+        # evidence of an empty cell, and its foot filter drops valid edge pieces.
+        return self.cam_monitor.get_fresh_pick_snapshot()
 
     def _get_top_face_targets(self, expected_cells):
         targets = {name: None for name in expected_cells}
@@ -575,8 +577,8 @@ class HardwareManager:
             if estimator is not None:
                 from src.vision.pick_debug import draw_pick_debug
                 for name, (frame, box, observation) in diagnostics.items():
-                    self.cam_monitor.pick_debug_frame = draw_pick_debug(
-                        frame, box, expected_cells[name], observation, targets[name], estimator.geometry)
+                    self.cam_monitor.publish_pick_diagnostic(draw_pick_debug(
+                        frame, box, expected_cells[name], observation, targets[name], estimator.geometry))
             elapsed = time.monotonic()-started
             self.last_height_pick_resolution = {
                 "mode": "height" if all(t is not None for t in targets.values()) else "blocked",
@@ -640,12 +642,35 @@ class HardwareManager:
         # explicitly marks the logical-cell fallback, not a camera measurement.
         return target if target is not None else GridTarget(float(source[0]), float(source[1]), 0.0, 0.0)
 
-    def _cell_has_center_detection(self, detections, cell):
+    def _occupancy_estimator(self, frame):
+        """Use the same physical plane as picking, rebuilt from this frame."""
+        if ring_pick_enabled(self.config) or (getattr(self.config, 'VISUAL_HEIGHT_PICK_ENABLED', False)
+                                              and not self._top_face_enabled()):
+            geometry = geometry_from_board(
+                Path(self.project_dir) / self.config.VISUAL_CAMERA_INTRINSICS_PATH,
+                np.load(self.perspective_path), self.actual_camera_index,
+                frame.shape[1::-1], self.config.VISUAL_HEIGHT_BOARD_MM,
+                self.config.VISUAL_HEIGHT_PIECE_MM, self.config.VISUAL_HEIGHT_POSE_MAX_ERROR_PX)
+        elif self._top_face_enabled():
+            if self.top_face_pick_estimator is None:
+                raise RuntimeError('Top-face occupancy geometry unavailable')
+            geometry = self.top_face_pick_estimator.geometry
+            geometry.validate_context(self.actual_camera_index, frame.shape[1::-1],
+                (self.config.VISUAL_BOARD_WIDTH_MM, self.config.VISUAL_BOARD_HEIGHT_MM),
+                self.config.VISUAL_PIECE_HEIGHT_MM, np.load(self.perspective_path),
+                self.config.VISUAL_GEOMETRY_CORNER_TOLERANCE_PX)
+        else:
+            return self.center_pick_estimator
+        return HeightPickEstimator(geometry, self.config.VISUAL_PICK_MIN_CONFIDENCE,
+                                   self.config.VISUAL_PICK_MAX_OFFSET_CELLS)
+
+    def _cell_has_center_detection(self, detections, cell, estimator=None):
         """Whether best.pt sees a confident box centre at a calibrated cell."""
         col, row = cell
         half_width = float(getattr(self.config, "VISUAL_OCCUPANCY_CELL_HALF_WIDTH", 0.5))
-        return self.center_pick_estimator.has_detection_in_cell(
-            detections, col, row, cell_half_width=half_width
+        estimator = estimator if estimator is not None else self.center_pick_estimator
+        return estimator.has_detection_in_cell(
+            detections, col, row, cell_half_width=half_width, strict=True
         )
 
     def is_cell_visually_clear(self, cell):
@@ -659,10 +684,12 @@ class HardwareManager:
         for _ in range(attempts):
             try:
                 frame, detections = self._occupancy_snapshot()
+                estimator = self._occupancy_estimator(frame) if frame is not None else None
+                empty = frame is not None and not self._cell_has_center_detection(detections, cell, estimator)
             except Exception as exc:
                 print(f"[TOP PICK] Occupancy unavailable: {exc}")
                 return False
-            if frame is not None and not self._cell_has_center_detection(detections, cell):
+            if empty:
                 clear_samples += 1
         cleared = clear_samples >= required
         print(f"[CENTER PICK] Capture square {cell} clear: {clear_samples}/{attempts}.")
@@ -679,13 +706,14 @@ class HardwareManager:
         for _ in range(attempts):
             try:
                 frame, detections = self._occupancy_snapshot()
+                if frame is None:
+                    continue
+                estimator = self._occupancy_estimator(frame)
+                source_clear = not self._cell_has_center_detection(detections, source_cell, estimator)
+                destination_occupied = self._cell_has_center_detection(detections, destination_cell, estimator)
             except Exception as exc:
                 print(f"[TOP PICK] Move verification unavailable: {exc}")
                 return False
-            if frame is None:
-                continue
-            source_clear = not self._cell_has_center_detection(detections, source_cell)
-            destination_occupied = self._cell_has_center_detection(detections, destination_cell)
             if source_clear and destination_occupied:
                 matching_samples += 1
         verified = matching_samples >= required
@@ -779,6 +807,128 @@ class HardwareManager:
         else:
             print("[BOARD SYNC] Robot motion blocked: board/pick state was not stable enough.")
         return targets, verified
+
+    def verify_rollback_board(self, expected_board, *, allowed_missing_cells=(),
+                              min_samples=3, stable_seconds=1.0, timeout=6.0,
+                              min_confidence=None, cancel_check=None):
+        """Prove a complete layout on consecutive new raw camera exposures.
+
+        This deliberately does not reuse legacy post-move verification: identity
+        confidence and occupancy at the physical piece-height plane are mandatory.
+        Only listed restoration squares may remain empty during WAIT_PLAYER.
+        """
+        allowed = {tuple(cell) for cell in allowed_missing_cells}
+        required = max(3, int(min_samples))
+        duration = max(1., float(stable_seconds))
+        threshold = float(min_confidence if min_confidence is not None else
+                          getattr(self.config, 'ROLLBACK_LAYOUT_MIN_CONFIDENCE', .8))
+        def report():
+            return dict(matched=False, complete=False, stable_samples=0, stable_seconds=0.,
+                        observed_board=None, missing=[], extra=[], wrong=[], unknown=[],
+                        low_confidence=[], geometry_errors=[], errors=[])
+        result = report()
+        if (len(expected_board) != 10 or any(len(row) != 9 for row in expected_board)
+                or any(p in ('x', '?', None) for row in expected_board for p in row)
+                or not 0 < threshold <= 1 or not np.isfinite(timeout) or timeout <= 0):
+            result['errors'] = ['Invalid rollback proof request']
+            return result
+        if not getattr(self, 'cam_monitor', None):
+            result['errors'] = ['Raw camera unavailable']
+            return result
+        started = time.monotonic()
+        consecutive, first_good, previous_layout = 0, None, None
+        # Keep references so Python cannot recycle object IDs during this proof.
+        frames = []
+        while time.monotonic() - started < timeout:
+            result = report()
+            if cancel_check and cancel_check():
+                result['errors'] = ['Rollback verification cancelled']
+                return result
+            try:
+                frame, detections = self.cam_monitor.get_fresh_pick_snapshot()
+                if frame is None or any(frame is item for item in frames):
+                    raise ValueError('No new raw camera frame')
+                frames.append(frame)
+                recognition = self.recognize_board_state(frame)
+                if not recognition or not recognition.get('success'):
+                    raise ValueError('Board identity recognition unavailable')
+                observed = recognition.get('board')
+                confidence = np.asarray(recognition.get('confidence'), dtype=float)
+                if (observed is None or len(observed) != 10 or any(len(row) != 9 for row in observed)
+                        or confidence.shape != (10, 9)):
+                    raise ValueError('Board or layout confidence shape invalid')
+                result['observed_board'] = [list(row) for row in observed]
+                estimator = self._occupancy_estimator(frame)
+                if not isinstance(estimator, HeightPickEstimator):
+                    result['geometry_errors'].append('Commissioned piece-height occupancy geometry required')
+                else:
+                    for detection in detections:
+                        if not np.isfinite(float(detection[1])) or float(detection[1]) < estimator.min_confidence:
+                            result['geometry_errors'].append('Uncertain raw occupancy detection')
+                for row in range(10):
+                    for col in range(9):
+                        cell = (col, row)
+                        piece, expected = observed[row][col], expected_board[row][col]
+                        if piece in ('x', '?', None):
+                            result['unknown'].append(cell)
+                        if not np.isfinite(confidence[row][col]) or confidence[row][col] < threshold:
+                            result['low_confidence'].append(cell)
+                        if piece != expected:
+                            if piece == '.' and expected != '.':
+                                result['missing'].append(cell)
+                            elif expected == '.':
+                                result['extra'].append(cell)
+                            else:
+                                result['wrong'].append(cell)
+                        if isinstance(estimator, HeightPickEstimator):
+                            occupied = self._cell_has_center_detection(detections, cell, estimator)
+                            if occupied != (piece not in ('.', 'x', '?', None)):
+                                result['geometry_errors'].append(cell)
+                            elif occupied and estimator.estimate_pick_target(detections, col, row) is None:
+                                # Occupancy spans the whole cell; proving a final
+                                # layout also requires a measured center within
+                                # the commissioned safe pick offset/confidence.
+                                result['geometry_errors'].append(cell)
+                                result['errors'].append(f'Unsafe measured piece center at {cell}: '
+                                    f'expected {expected}, observed {piece}; adjust piece position')
+                invalid = any(result[key] for key in ('extra', 'wrong', 'unknown', 'low_confidence', 'geometry_errors'))
+                invalid = invalid or any(cell not in allowed for cell in result['missing'])
+                for category in ('missing', 'extra', 'wrong', 'unknown', 'low_confidence'):
+                    for col, row in result[category]:
+                        if category == 'missing' and (col, row) in allowed:
+                            continue
+                        result['errors'].append(
+                            f'{category} at {(col, row)}: expected {expected_board[row][col]}, '
+                            f'observed {observed[row][col]}, confidence {confidence[row][col]:.3f}')
+                for issue in result['geometry_errors']:
+                    if isinstance(issue, tuple):
+                        col, row = issue
+                        result['errors'].append(f'Piece-height occupancy mismatch at {issue}: '
+                            f'expected {expected_board[row][col]}, observed {observed[row][col]}')
+                    else:
+                        result['errors'].append(str(issue))
+                layout = tuple(tuple(row) for row in observed)
+                now = time.monotonic()
+                if invalid:
+                    consecutive, first_good, previous_layout = 0, None, None
+                else:
+                    if layout != previous_layout:
+                        consecutive, first_good = 0, now
+                    consecutive += 1
+                    previous_layout = layout
+                    result['stable_samples'] = consecutive
+                    result['stable_seconds'] = now - first_good
+                    if consecutive >= required and now - first_good >= duration:
+                        result['matched'] = True
+                        result['complete'] = not result['missing']
+                        # Transient evidence is not included in any durable journal.
+                        result['frame'], result['detections'] = frame, detections
+                        return result
+            except Exception as exc:
+                consecutive, first_good, previous_layout = 0, None, None
+                result['errors'] = [str(exc)]
+            time.sleep(.05)
+        return result
 
     def verify_physical_board(self, expected_board):
         """Confirm the board after the robot has placed a piece before FEN commit."""

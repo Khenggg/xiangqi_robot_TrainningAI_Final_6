@@ -25,6 +25,10 @@ except ImportError:
     robot_sdk_core = None
 
 
+class RobotMotionError(RuntimeError):
+    """A failed motion aborts the entire pick/place sequence."""
+
+
 class GripperCommandError(RuntimeError):
     """The gripper output state is unsafe or could not be commanded."""
 
@@ -38,6 +42,8 @@ class FR5Robot:
         self.tool_num    = 0
         self.user_num    = 1
         self.default_vel = config.MOVE_SPEED
+        self.communication_fault = False
+        self._communication_fault_at = None
 
         # Two-direction direct-drive gripper: Tool DO1=open, Tool DO0=close.
         self.gripper_open_do_id = config.GRIPPER_OPEN_DO_ID
@@ -87,7 +93,7 @@ class FR5Robot:
     # KẾT NỐI
     # -------------------------------------------------------------------------
 
-    def connect(self):
+    def connect(self, *, recovery_mode=False):
         if self.dry:
             print("[ROBOT] DRY RUN — không kết nối thực tế")
             self.connected = True
@@ -104,6 +110,13 @@ class FR5Robot:
                 raise Exception("SDK không thể kết nối tới robot")
 
             print(f"[ROBOT] ✅ Đã kết nối tới {self.ip}")
+
+            if recovery_mode:
+                # Recovery must never enable the arm, change its mode, move,
+                # pulse/reset outputs, or assume the jaws contain no piece.
+                self._latch_communication_fault()
+                self._load_teaching_points()  # Read-only controller queries.
+                return
 
             err = self.robot.RobotEnable(1)
             if err != 0:
@@ -343,6 +356,114 @@ class FR5Robot:
     # DI CHUYỂN ROBOT
     # -------------------------------------------------------------------------
 
+    def _latch_communication_fault(self):
+        self.communication_fault = True
+        self._communication_fault_at = time.monotonic()
+
+    def _require_communication_ready(self):
+        if self.communication_fault:
+            raise robot_sdk_core.RobotCommunicationError(
+                "Previous command completion is unknown; verify controller idle before resuming"
+            )
+
+    def verify_rollback_ready(self, *, operator_empty_gripper_confirmed=False,
+                              uncertain_recovery=False, timeout=.5):
+        """Read-only proof of fresh idle, outputs LOW and parked TCP.
+
+        Motor outputs LOW do not prove empty jaws. A recovery call needs a new
+        explicit operator confirmation; that confirmation is never cached here.
+        """
+        result = dict(ready=False, errors=[], pose=None)
+        if self.dry or not self.connected or self.robot is None:
+            result['errors'].append('Physical controller unavailable')
+            return result
+        uncertain = uncertain_recovery or getattr(self, 'communication_fault', False)
+        if uncertain and operator_empty_gripper_confirmed is not True:
+            result['errors'].append('Confirm parked arm and empty gripper for this recovery attempt')
+            return result
+        try:
+            response = self.robot.GetControllerIP()
+            if not isinstance(response, (tuple, list)) or len(response) < 2 or response[0] != 0:
+                raise ValueError('Controller communication probe failed')
+            taught = self.robot.GetRobotTeachingPoint('HOMECHESS')
+            targets = []
+            if isinstance(taught, (tuple, list)) and len(taught) > 1 and taught[0] == 0:
+                targets.append([float(value) for value in taught[1][:6]])
+            if getattr(config, 'ROLLBACK_IDLE_POSE_COMMISSIONED', False) is True:
+                if (getattr(config, 'ROLLBACK_IDLE_TOOL_NUM', None) != self.tool_num or
+                        getattr(config, 'ROLLBACK_IDLE_USER_NUM', None) != self.user_num):
+                    raise ValueError('Commissioned IDLE tool/user mismatch')
+                targets.append([config.IDLE_X, config.IDLE_Y, config.IDLE_Z] + list(config.ROTATION))
+            if not targets:
+                raise ValueError('No verified HOMECHESS or commissioned IDLE pose')
+            probe_finished = time.monotonic()
+            if self.robot.has_fresh_idle_state(after=probe_finished, timeout=timeout, max_age=.5) is not True:
+                raise ValueError('Controller lacks fresh fault-free idle/DO LOW proof')
+            health_before = self.robot._latest_state_health
+            packet = self.robot.robot_state_pkg
+            pose = [float(v) for v in packet.tl_cur_pos]
+            result['pose'] = pose
+            if (health_before is None or time.monotonic() - health_before[0] > .5
+                    or self.robot._latest_state_health != health_before):
+                raise ValueError('Controller state changed or became stale during proof')
+            expected = dict(motion_done=1, mc_queue_len=0, robot_state=1, main_code=0,
+                sub_code=0, safety_stop0_state=0, safety_stop1_state=0, EmergencyStop=0,
+                collisionState=0, tool=self.tool_num, user=self.user_num)
+            if any(getattr(packet, name, None) != value for name, value in expected.items()):
+                raise ValueError('Realtime controller safety/tool/user state mismatch')
+            if packet.tl_dgt_output_l & 3:
+                raise ValueError('Gripper outputs are not LOW')
+            position_tolerance = float(getattr(config, 'ROLLBACK_PARK_POSITION_TOLERANCE_MM', 2.))
+            angle_tolerance = float(getattr(config, 'ROLLBACK_PARK_ANGLE_TOLERANCE_DEG', 2.))
+            if (len(pose) != 6 or not all(math.isfinite(v) for v in pose)
+                    or not 0 < position_tolerance <= 5 or not 0 < angle_tolerance <= 5):
+                raise ValueError('Invalid parked pose or tolerance')
+            def at_target(target):
+                return (len(target) == 6 and all(math.isfinite(v) for v in target)
+                    and all(abs(pose[i] - target[i]) <= position_tolerance for i in range(3))
+                    and all(abs((pose[i] - target[i] + 180.) % 360. - 180.) <= angle_tolerance for i in range(3, 6)))
+            if not any(at_target(target) for target in targets):
+                raise ValueError('TCP is not parked at HOMECHESS/commissioned IDLE')
+            if uncertain:
+                self.communication_fault = False
+                self._communication_fault_at = None
+            result['ready'] = True
+        except Exception as exc:
+            result['errors'].append(str(exc))
+        return result
+
+    def can_resume_after_communication_fault(self):
+        """Clear the latch only after a successful read probe and fresh idle packet.
+
+        Board/FEN recovery may proceed without arm commands; a matching old board
+        alone never proves an accepted but unacknowledged motion has stopped.
+        """
+        if not self.communication_fault:
+            return True
+        if self.dry or not self.connected or self.robot is None:
+            return False
+        probe_started = time.monotonic()
+        try:
+            response = self.robot.GetControllerIP()
+            if not isinstance(response, (list, tuple)) or len(response) < 2 or response[0] != 0:
+                return False
+            if self.robot.has_fresh_idle_state(
+                    after=max(probe_started, self._communication_fault_at), timeout=.5, max_age=.5) is not True:
+                return False
+        except Exception:
+            return False
+        self.communication_fault = False
+        self._communication_fault_at = None
+        return True
+
+    def _call_arm_motion(self, method, **kwargs):
+        self._require_communication_ready()
+        try:
+            return getattr(self.robot, method)(**kwargs)
+        except robot_sdk_core.RobotCommunicationError:
+            self._latch_communication_fault()
+            raise
+
     def move_safe_pose(self, pose, speed=None, col=None, row=None, label=None):
         """Di chuyển an toàn đến pose. Luôn dùng MoveCart để đảm bảo đường thẳng."""
         vel = speed or self.default_vel
@@ -354,13 +475,13 @@ class FR5Robot:
             return 0
 
         # Luôn dùng MoveCart để đảm bảo di chuyển thẳng, tránh đá quân cờ
-        err = self.robot.MoveCart(
+        err = self._call_arm_motion("MoveCart",
             desc_pos=pose, tool=self.tool_num, user=self.user_num,
             vel=vel, acc=0.0, ovl=100.0, blendT=-1.0, config=-1
         )
-        if err not in (0, 112):
+        if err != 0:
             print(f"[ROBOT] ❌ Lỗi MoveCart: {err}")
-            raise Exception(f"Robot MoveCart error code: {err}")
+            raise RobotMotionError(f"Robot MoveCart error code: {err}")
         return err
 
     def movej_joint(self, joint_pos, desc_pos, speed=None, label=None):
@@ -372,13 +493,13 @@ class FR5Robot:
             time.sleep(0.2)
             return 0
             
-        err = self.robot.MoveJ(
+        err = self._call_arm_motion("MoveJ",
             joint_pos=joint_pos, desc_pos=desc_pos, tool=self.tool_num, user=self.user_num,
             vel=vel, acc=0.0, ovl=100.0, exaxis_pos=[0]*4, blendT=-1.0, offset_flag=0, offset_pos=[0]*6
         )
-        if err not in (0, 112):
+        if err != 0:
             print(f"[ROBOT] ❌ Lỗi movej_joint MoveJ: {err}")
-            raise Exception(f"Robot movej_joint error code: {err}")
+            raise RobotMotionError(f"Robot movej_joint error code: {err}")
         return err
 
     def movel_pose(self, pose, speed=None, label=None):
@@ -390,13 +511,13 @@ class FR5Robot:
             time.sleep(0.2)
             return 0
 
-        err = self.robot.MoveCart(
+        err = self._call_arm_motion("MoveCart",
             desc_pos=pose, tool=self.tool_num, user=self.user_num,
             vel=vel, acc=0.0, ovl=100.0, blendT=-1.0, config=-1
         )
-        if err not in (0, 112):
+        if err != 0:
             print(f"[ROBOT] ❌ Lỗi MoveCart (movel): {err}")
-            raise Exception(f"Robot MoveCart error code: {err}")
+            raise RobotMotionError(f"Robot MoveCart error code: {err}")
         return err
 
     # -------------------------------------------------------------------------
@@ -409,6 +530,8 @@ class FR5Robot:
         pose = [config.IDLE_X, config.IDLE_Y, config.IDLE_Z] + list(config.ROTATION)
         try:
             self.move_safe_pose(pose)
+        except (RobotMotionError, robot_sdk_core.RobotCommunicationError):
+            raise
         except Exception as e:
             print(f"[ROBOT] ⚠️ Lỗi khi về IDLE trực tiếp: {e}. Thử nâng Z lên cao...")
             # Nâng Z an toàn trước khi di chuyển
@@ -416,6 +539,8 @@ class FR5Robot:
                 high_z_pose = [config.IDLE_X, config.IDLE_Y, config.IDLE_Z + 100.0] + list(config.ROTATION)
                 self.move_safe_pose(high_z_pose)
                 self.move_safe_pose(pose)
+            except (RobotMotionError, robot_sdk_core.RobotCommunicationError):
+                raise
             except Exception as e2:
                 print(f"[ROBOT] ❌ Lỗi cả khi qua điểm trung gian Z cao: {e2}")
 
@@ -445,6 +570,8 @@ class FR5Robot:
                     self.movej_joint(joints, pose)
                     print("[ROBOT] ✅ Đã về HOMECHESS (bằng Joint).")
                     return
+                except (RobotMotionError, robot_sdk_core.RobotCommunicationError):
+                    raise
                 except Exception as je:
                     print(f"[ROBOT] ⚠️ Lỗi MoveJ bằng khớp: {je}. Tiếp tục thử MoveJ Pose...")
                     
@@ -452,6 +579,8 @@ class FR5Robot:
             self.move_safe_pose(pose)
             print("[ROBOT] ✅ Đã về HOMECHESS (bằng Pose).")
             
+        except (RobotMotionError, robot_sdk_core.RobotCommunicationError):
+            raise
         except Exception as e:
             print(f"[ROBOT] ⚠️ go_to_home_chess lỗi: {e} → về IDLE")
             self.go_to_idle_home()
@@ -481,7 +610,14 @@ class FR5Robot:
         if self.dry:
             print(f"[ROBOT] DRY Tool DO{output_id}={'ON' if status else 'OFF'}")
             return 0
-        err = self.robot.SetToolDO(id=output_id, status=status, block=0)
+        # LOW deenergizing commands remain available while the motion latch is on.
+        if status != config.GRIPPER_IDLE_STATUS:
+            self._require_communication_ready()
+        try:
+            err = self.robot.SetToolDO(id=output_id, status=status, block=0)
+        except robot_sdk_core.RobotCommunicationError:
+            self._latch_communication_fault()
+            raise
         if err != 0:
             raise GripperCommandError(f"SetToolDO(DO{output_id}, {status}) failed: {err}")
         return err
@@ -695,13 +831,7 @@ class FR5Robot:
             trash_pose = self.teaching_points["R_Trash"]["pose"]
             
             # Di chuyển đến R_Trash bằng MoveJ (an toàn hơn)
-            err = self.movej_joint(trash_joints, trash_pose)
-            if err not in (0, 112):
-                print(f"[ROBOT] ⚠️ Không thể đến R_Trash, dùng tọa độ config backup")
-                # Fallback: dùng tọa độ từ config
-                safe_z = current_z if current_z is not None else config.SAFE_Z
-                pose_safe = [config.CAPTURE_BIN_X, config.CAPTURE_BIN_Y, safe_z] + list(config.ROTATION)
-                self.move_safe_pose(pose_safe)
+            self.movej_joint(trash_joints, trash_pose)
         else:
             print(f"[ROBOT] ⚠️ Không tìm thấy R_Trash, dùng tọa độ config")
             # Fallback: dùng tọa độ từ config
@@ -741,6 +871,7 @@ class FR5Robot:
         print(f"[ROBOT] ♟️ Di chuyển: ({s_col},{s_row}) → ({d_col},{d_row})"
               + (" [ĂN QUÂN]" if is_capture else ""))
         print(f"[ROBOT] 🔍 DEBUG: s_col={s_col}, s_row={s_row}, d_col={d_col}, d_row={d_row}")
+        self._require_communication_ready()
 
         def require_target(target, label):
             if target is None or not np.isfinite([target.col, target.row]).all():
@@ -764,7 +895,7 @@ class FR5Robot:
                 self.connect()
             except Exception as e:
                 print(f"[ROBOT] ❌ Không thể kết nối, hủy nước đi: {e}")
-                return
+                raise RuntimeError("Robot connection failed; move not executed") from e
 
         # Tính khoảng cách di chuyển để quyết định có cần nâng cao hơn không
         distance = abs(d_col - s_col) + abs(d_row - s_row)

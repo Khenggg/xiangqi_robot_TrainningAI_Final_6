@@ -337,6 +337,7 @@ class EmergencyClientMoveTests(unittest.TestCase):
 
     def test_emergency_black_move_updates_fen_and_returns_turn_to_red(self):
         state = GameState(allow_mouse_move=False)
+        state.api_client.token = ""
         state.api_client.send_move_update_board = lambda fen: None
         state.turn = "b"
         state.ai_thread = object()
@@ -357,6 +358,7 @@ class EmergencyClientMoveTests(unittest.TestCase):
 
     def test_verified_missed_pick_reopens_one_fresh_ai_turn(self):
         state = GameState(allow_mouse_move=False)
+        state.api_client.token = ""
         state.api_client.send_move_update_board = lambda fen: None
         state.turn = "b"
         state.human_commit_generation = 4
@@ -437,11 +439,13 @@ class EmergencyClientMoveTests(unittest.TestCase):
 
     def test_v_after_manual_capture_completion_commits_expected_fen(self):
         state = GameState(allow_mouse_move=False)
+        state.api_client.token = ""
         sent_fens = []
         state.api_client.send_move_update_board = sent_fens.append
         expected_board = [row[:] for row in state.board]
         expected_board[3][0] = "."
         expected_board[6][0] = "b_P"
+        state.turn = "b"
         state.set_pending_ai_move(((0, 3), (0, 6)), expected_board, "r_P")
         state.physical_sync_fault = True
 
@@ -469,11 +473,13 @@ class EmergencyClientMoveTests(unittest.TestCase):
 
     def test_v_manual_capture_uses_move_geometry_when_full_fen_check_is_noisy(self):
         state = GameState(allow_mouse_move=False)
+        state.api_client.token = ""
         sent_fens = []
         state.api_client.send_move_update_board = sent_fens.append
         expected_board = [row[:] for row in state.board]
         expected_board[2][1] = "."
         expected_board[7][1] = "b_C"
+        state.turn = "b"
         state.set_pending_ai_move(((1, 2), (1, 7)), expected_board, "r_C")
         state.physical_sync_fault = True
 
@@ -505,6 +511,7 @@ class EmergencyClientMoveTests(unittest.TestCase):
 
     def test_retry_start_authority_is_consumed_exactly_once(self):
         state = GameState(allow_mouse_move=False)
+        state.api_client.token = ""
         state.turn = "b"
         state.human_commit_generation = 5
         state.ai_started_for_human_commit_generation = 5
@@ -521,6 +528,7 @@ class EmergencyClientMoveTests(unittest.TestCase):
                 return True
 
         state = GameState(allow_mouse_move=False)
+        state.api_client.token = ""
         state.turn = "b"
         state.ai_thread = Worker()
 

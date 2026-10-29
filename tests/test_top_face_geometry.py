@@ -373,7 +373,7 @@ class TopFaceEstimatorTests(unittest.TestCase):
 
 class GuardedMotionTests(unittest.TestCase):
     def robot(self):
-        robot = FR5Robot.__new__(FR5Robot)
+        robot = FR5Robot()
         robot.connected, robot.dry = True, True
         for method in ('pick_at', 'move_to_extra_safe', 'place_in_capture_bin', 'place_at', 'go_to_home_chess', 'connect'):
             setattr(robot, method, Mock())
@@ -544,9 +544,18 @@ class HardwareTopModeTests(unittest.TestCase):
             self.assertIsNone(hw.get_robot_center_pick_targets({'moving': (2, 3)})['moving'])
         hw.get_visual_pick_targets.assert_not_called()
 
-    def test_occupancy_uses_boxes_even_when_no_top_face_is_available(self):
+    def test_occupancy_fails_closed_when_top_plane_geometry_is_unavailable(self):
         hw = self.hardware()
         hw.top_face_pick_estimator = None
+        self.assertFalse(hw.is_cell_visually_clear((4, 3)))
+        hw.center_pick_estimator.has_detection_in_cell.assert_not_called()
+        hw.cam_monitor.get_fresh_snapshot.assert_not_called()
+
+    def test_occupancy_uses_raw_boxes_without_requiring_a_top_contour(self):
+        hw = self.hardware()
+        # The calibrated occupancy mapper is independent of contour quality.
+        # Its projection contract is covered by metric camera tests.
+        hw._occupancy_estimator = Mock(return_value=hw.center_pick_estimator)
         hw.center_pick_estimator.has_detection_in_cell.return_value = True
         self.assertFalse(hw.is_cell_visually_clear((4, 3)))
         hw.center_pick_estimator.has_detection_in_cell.assert_called()

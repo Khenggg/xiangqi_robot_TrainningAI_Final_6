@@ -22,7 +22,8 @@ class SimulationClientTests(unittest.TestCase):
 
         result = client.send_move_update_board(capture_fen)
 
-        self.assertEqual({"captured": "r_N"}, result)
+        self.assertTrue(result.success)
+        self.assertEqual({"captured": "r_N"}, result.move)
         self.assertEqual(2, post.call_count)
         self.assertEqual(capture_fen, post.call_args.kwargs["json"]["fen"])
         sleep.assert_called_once_with(0.25)
@@ -35,7 +36,9 @@ class SimulationClientTests(unittest.TestCase):
         client = TuongKyDaiSuClient("https://example.test", "token")
         client.room_id = "room"
 
-        self.assertIsNone(client.send_move_update_board("bad-fen"))
+        result = client.send_move_update_board("bad-fen")
+        self.assertFalse(result.success)
+        self.assertFalse(result.retryable)
         post.assert_called_once()
 
 

@@ -292,17 +292,27 @@ class CameraMonitor:
 
         print("[CAM MONITOR] Detection background thread exited cleanly.")
 
-    def _draw_overlay(self, frame, detections):
-        """Vẽ hiển thị bàn cờ: Lưới phối cảnh + Quân cờ CChess (hoặc bounding box YOLO)."""
+    def _current_pick_diagnostic(self):
+        """Return a bounded measured snapshot, independent of the live feed."""
         with self._lock:
-            if self._last_pick_diagnostic is not None:
-                if self._pick_diagnostic_until == 0.0:
-                    # Robot motion blocks the UI loop; start the eight seconds
-                    # on first display, not before a long pick/place operation.
-                    self._pick_diagnostic_until = time.monotonic() + 8.0
-                if time.monotonic() < self._pick_diagnostic_until:
-                    return self._last_pick_diagnostic.copy()
+            if self._last_pick_diagnostic is None:
+                return None
+            if self._pick_diagnostic_until == 0.0:
+                self._pick_diagnostic_until = time.monotonic() + 8.0
+            if time.monotonic() >= self._pick_diagnostic_until:
                 self._last_pick_diagnostic = None
+                self._pick_diagnostic_until = 0.0
+                return None
+            return self._last_pick_diagnostic.copy()
+
+    def _draw_overlay(self, frame, detections, show_pick_diagnostic=True):
+        """Vẽ hiển thị bàn cờ: Lưới phối cảnh + Quân cờ CChess (hoặc bounding box YOLO)."""
+        # Preserve the exact diagnostic renderer for explicit callers. Gameplay
+        # always requests the live overlay and puts this snapshot in an inset.
+        if show_pick_diagnostic:
+            diagnostic = self._current_pick_diagnostic()
+            if diagnostic is not None:
+                return diagnostic
         display = frame.copy()
 
         # --- 1. Vẽ lưới perspective ---
@@ -383,6 +393,34 @@ class CameraMonitor:
         with self._lock:
             self._last_pick_diagnostic = frame.copy()
             self._pick_diagnostic_until = 0.0
+
+    @property
+    def pick_debug_frame(self):
+        """Compatibility for test-mode D; assignments share diagnostic expiry."""
+        with self._lock:
+            return self._last_pick_diagnostic
+
+    @pick_debug_frame.setter
+    def pick_debug_frame(self, frame):
+        with self._lock:
+            self._last_pick_diagnostic = frame.copy() if frame is not None else None
+            self._pick_diagnostic_until = 0.0
+
+    def _draw_pick_inset(self, display):
+        diagnostic = self._current_pick_diagnostic()
+        if diagnostic is None or min(display.shape[:2]) < 80:
+            return display
+        height, width = display.shape[:2]
+        scale = min((width / 3) / diagnostic.shape[1], (height / 3) / diagnostic.shape[0])
+        thumb = cv2.resize(diagnostic, (max(1, round(diagnostic.shape[1] * scale)),
+                                       max(1, round(diagnostic.shape[0] * scale))))
+        th, tw = thumb.shape[:2]
+        left, top = width - tw - 8, height - th - 8
+        cv2.rectangle(display, (left - 2, top - 20), (left + tw + 2, top + th + 2), (0, 0, 0), -1)
+        display[top:top + th, left:left + tw] = thumb
+        cv2.putText(display, "MEASURED SNAPSHOT / LIVE FEED", (left + 2, top - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, .32, (255, 255, 255), 1)
+        return display
 
     def _predict_yolo(self, image):
         with self._inference_lock:
@@ -543,8 +581,8 @@ class CameraMonitor:
             detections = self._last_detections
 
         if frame is not None:
-            debug = getattr(self, "pick_debug_frame", None)
-            display = debug.copy() if debug is not None else self._draw_overlay(frame, detections)
+            display = self._draw_overlay(frame, detections, show_pick_diagnostic=False)
+            display = self._draw_pick_inset(display)
             cv2.imshow(self.window_name, display)
 
         return cv2.waitKey(1)
