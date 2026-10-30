@@ -244,18 +244,28 @@ class TuongKyDaiSuClient:
             return bool(self._sync_jobs or self._unassigned_fen is not None or self._unassigned_end is not None)
 
     @property
+    def current_sync_pending(self):
+        """UI status belongs to the current match, not the durable backlog."""
+        with self._sync_lock:
+            if self.room_id:
+                return str(self.room_id) in self._sync_jobs
+            return self._unassigned_fen is not None or self._unassigned_end is not None
+
+    @property
     def sync_blocked(self):
         with self._sync_lock:
-            job = self._sync_jobs.get(str(self.room_id))
-            return bool(job and job.get("blocked")) or any(j.get("blocked") for j in self._sync_jobs.values())
+            job = self._sync_jobs.get(str(self.room_id)) if self.room_id else None
+            return bool(job and job.get("blocked"))
 
     @property
     def sync_error(self):
         with self._sync_lock:
-            job = self._sync_jobs.get(str(self.room_id))
+            if self.room_id:
+                job = self._sync_jobs.get(str(self.room_id))
+                return job.get("error", "") if job else ""
             if self._unassigned_fen is not None or self._unassigned_end is not None:
                 return "Room ID trống"
-            return job.get("error", "") if job else next((j.get("error", "") for j in self._sync_jobs.values() if j.get("error")), "")
+            return ""
 
     @property
     def missing_room(self):

@@ -305,6 +305,56 @@ class RemoteSyncRecoveryTests(unittest.TestCase):
         state.refresh_remote_sync_status()
         self.assertFalse(state.remote_sync_pending)
 
+    def test_old_blocked_room_does_not_warn_on_healthy_current_match(self):
+        state = state_with_pending()
+        client = self.client()
+        state.api_client = client
+        client.room_id = 'current-room'
+        client._sync_jobs['old-room'] = dict(fen='old', blocked=True, error='old rejection')
+        state.set_status('Move accepted — AI thinking...', duration=8)
+        for _ in range(3):
+            state.refresh_remote_sync_status()
+        self.assertEqual('Move accepted — AI thinking...', state.status_message)
+        self.assertFalse(state.remote_sync_pending)
+        self.assertFalse(client.sync_blocked)
+        self.assertEqual('', client.sync_error)
+        self.assertTrue(client.sync_pending)  # Old job remains durable.
+        self.assertIn('old-room', client._sync_jobs)
+
+    def test_old_rejection_does_not_mislabel_current_transient_retry(self):
+        state = state_with_pending()
+        client = self.client()
+        state.api_client = client
+        client.room_id = 'current-room'
+        client._sync_jobs['old-room'] = dict(fen='old', blocked=True, error='old rejection')
+        client.queue_fen('current')
+        state.refresh_remote_sync_status()
+        self.assertIn('đang thử lại', state.status_message)
+        self.assertNotIn('Máy chủ từ chối FEN', state.status_message)
+        client.send_move_update_board = Mock(return_value=FenSyncResult(True))
+        client._drain_sync()
+        state.refresh_remote_sync_status()
+        self.assertFalse(state.remote_sync_pending)
+        self.assertNotIn('đang thử lại', state.status_message)
+        self.assertTrue(client.sync_pending)
+
+    def test_switching_rooms_clears_old_rejection_suffix(self):
+        state = state_with_pending()
+        client = self.client()
+        state.api_client = client
+        client.queue_fen('rejected')
+        client.send_move_update_board = Mock(return_value=FenSyncResult(False, error='invalid'))
+        client._drain_sync()
+        state.refresh_remote_sync_status()
+        self.assertIn('Máy chủ từ chối FEN', state.status_message)
+        client.room_id = 'new-room'
+        state.refresh_remote_sync_status()
+        self.assertNotIn('Máy chủ từ chối FEN', state.status_message)
+        self.assertFalse(state.remote_sync_pending)
+        client.room_id = None
+        state.refresh_remote_sync_status()
+        self.assertFalse(state.remote_sync_pending)
+
     def test_remote_permanent_rejection_is_distinct_from_transient_retry(self):
         state = state_with_pending()
         client = self.client()

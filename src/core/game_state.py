@@ -269,7 +269,9 @@ class GameState:
         refresh = getattr(self.api_client, "refresh_sync", None)
         if callable(refresh) and not config.DRY_RUN:
             refresh()
-        pending = getattr(self.api_client, "sync_pending", None)
+        pending = getattr(self.api_client, "current_sync_pending", None)
+        if not isinstance(pending, bool):
+            pending = getattr(self.api_client, "sync_pending", None)
         if config.DRY_RUN:
             self.remote_sync_pending = False
         elif isinstance(pending, bool):
