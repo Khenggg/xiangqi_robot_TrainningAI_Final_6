@@ -256,3 +256,4 @@ IDLE_Y = 149.608
 IDLE_Z = 348.199
 # --- CCHESS RECOGNITION (ONNX) ---
 CCHESS_RECOGNITION_ENABLED = True  # Bật/tắt CChess ONNX recognition bổ sung
+ROLLBACK_LAYOUT_MIN_CONFIDENCE = 0.7  # Rollback accepts layout scores strictly above this value.

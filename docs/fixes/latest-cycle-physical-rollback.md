@@ -49,7 +49,7 @@ DRY_RUN không gửi FEN rollback tới provider.
 ## Proof và giới hạn nghiệm thu
 
 Proof cần ít nhất ba frame raw mới liên tiếp qua ít nhất một giây, 90 ô có
-confidence hợp lệ (mặc định `ROLLBACK_LAYOUT_MIN_CONFIDENCE=0.8`) và occupancy
+confidence **lớn hơn 0.7** (cấu hình `ROLLBACK_LAYOUT_MIN_CONFIDENCE=0.7`) và occupancy
 theo chế độ đang chọn: PvP dùng điểm chân bbox/homography; height/ring dùng
 piece-height geometry. Proof toàn bàn xác nhận đúng quân/đúng ô, không bắt mọi
 quân không tham gia hoàn tác phải có tâm trong giới hạn gắp. Ngay trước từng

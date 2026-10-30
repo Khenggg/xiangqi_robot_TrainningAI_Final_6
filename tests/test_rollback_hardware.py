@@ -64,6 +64,29 @@ class RollbackHardwareTests(unittest.TestCase):
         h._occupancy_estimator.return_value = SimpleNamespace(has_detection_in_cell=lambda *a, **k: False)
         self.assertTrue(self.verify(h)['geometry_errors'])
 
+    def test_layout_confidence_must_be_strictly_above_point_seven(self):
+        for score, accepted in ((.699, False), (.7, False), (.700001, True), (.799, True),
+                                (float('nan'), False), (float('inf'), False)):
+            with self.subTest(score=score):
+                h = self.hardware()
+                h.recognize_board_state.return_value['confidence'][1][0] = score
+                result = self.verify(h)
+                self.assertEqual(accepted, result['matched'])
+                self.assertEqual([] if accepted else [(0, 1)], result['low_confidence'])
+
+    def test_layout_threshold_override_and_wrong_piece_still_reject(self):
+        h = self.hardware()
+        h.recognize_board_state.return_value['confidence'][1][0] = .799
+        self.assertFalse(self.verify(h, min_confidence=.8)['matched'])
+        for piece in ('x', 'b_P'):
+            with self.subTest(piece=piece):
+                h = self.hardware()
+                observed = [row[:] for row in self.board]
+                observed[1][0] = piece
+                h.recognize_board_state.return_value['board'] = observed
+                h.recognize_board_state.return_value['confidence'][1][0] = .799
+                self.assertFalse(self.verify(h)['matched'])
+
     def test_allowed_missing_is_stable_but_incomplete(self):
         h = self.hardware()
         expected = [row[:] for row in self.board]

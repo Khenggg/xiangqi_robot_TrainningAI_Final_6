@@ -836,7 +836,7 @@ class HardwareManager:
         required = max(3, int(min_samples))
         duration = max(1., float(stable_seconds))
         threshold = float(min_confidence if min_confidence is not None else
-                          getattr(self.config, 'ROLLBACK_LAYOUT_MIN_CONFIDENCE', .8))
+                          getattr(self.config, 'ROLLBACK_LAYOUT_MIN_CONFIDENCE', .7))
         def report():
             return dict(matched=False, complete=False, stable_samples=0, stable_seconds=0.,
                         observed_board=None, missing=[], extra=[], wrong=[], unknown=[],
@@ -889,7 +889,7 @@ class HardwareManager:
                         piece, expected = observed[row][col], expected_board[row][col]
                         if piece in ('x', '?', None):
                             result['unknown'].append(cell)
-                        if not np.isfinite(confidence[row][col]) or confidence[row][col] < threshold:
+                        if not np.isfinite(confidence[row][col]) or confidence[row][col] <= threshold:
                             result['low_confidence'].append(cell)
                         if piece != expected:
                             if piece == '.' and expected != '.':

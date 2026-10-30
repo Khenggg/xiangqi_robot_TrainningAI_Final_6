@@ -19,8 +19,9 @@ không khôi phục transaction đã bị thay thế khi mở app lại.
 Proof toàn bàn dùng occupancy theo mode gắp đang chọn (PvP: foot/homography;
 height/ring: piece-height), không yêu cầu tâm của mọi quân đều gắp được. Target
 đo mới trong giới hạn gắp chỉ bắt buộc với quân nguồn trước mỗi transfer. Vẫn giữ
-đủ 90 ô đúng loại/màu, confidence, ô trống, ảnh mới và ổn định; không giảm ngưỡng
-confidence để vượt qua cảnh báo. Quy tắc này thay thế ràng buộc piece-height cho
+đủ 90 ô đúng loại/màu, confidence, ô trống, ảnh mới và ổn định. Theo yêu cầu người
+dùng, confidence layout chấp nhận khi **lớn hơn 0.7**, không chấp nhận bằng 0.7
+hay NaN/Inf. Quy tắc này thay thế ràng buộc piece-height cho
 mọi mode và safe-pick offset cho mọi quân trong bản đặc tả cũ bên dưới.
 
 ---
