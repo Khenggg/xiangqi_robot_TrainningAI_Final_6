@@ -1,6 +1,7 @@
 import unittest
 from types import SimpleNamespace
 from copy import deepcopy
+from unittest.mock import Mock
 
 from src.core.rollback_coordinator import RollbackCoordinator
 
@@ -61,6 +62,15 @@ class CoordinatorTests(unittest.TestCase):
         self.assertEqual(len(self.commits), 1)
         c.resume()
         self.assertEqual(len(self.motions), 1)
+
+    def test_unpickable_source_still_pauses_before_motion_or_commit(self):
+        c = self.make()
+        c.hw.get_robot_center_pick_targets = Mock(return_value={'moving': None})
+        self.assertEqual('PAUSED_FAULT', c.start())
+        c.hw.get_robot_center_pick_targets.assert_called_once_with({'moving': (0, 0)})
+        self.assertEqual([], self.motions)
+        self.assertEqual([], self.commits)
+        self.assertIn('measured target', c.error)
 
     def test_baseline_retry_does_not_repeat_motion_or_commit(self):
         c = self.make()

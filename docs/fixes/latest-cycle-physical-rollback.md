@@ -49,9 +49,13 @@ DRY_RUN không gửi FEN rollback tới provider.
 ## Proof và giới hạn nghiệm thu
 
 Proof cần ít nhất ba frame raw mới liên tiếp qua ít nhất một giây, 90 ô có
-confidence hợp lệ (mặc định `ROLLBACK_LAYOUT_MIN_CONFIDENCE=0.8`), cùng geometry
-piece-height và tâm nằm trong giới hạn gắp. Unknown, sai loại/màu, thêm quân,
-lệch tâm hoặc geometry lỗi đều không cấp quyền commit/motion tiếp theo.
+confidence hợp lệ (mặc định `ROLLBACK_LAYOUT_MIN_CONFIDENCE=0.8`) và occupancy
+theo chế độ đang chọn: PvP dùng điểm chân bbox/homography; height/ring dùng
+piece-height geometry. Proof toàn bàn xác nhận đúng quân/đúng ô, không bắt mọi
+quân không tham gia hoàn tác phải có tâm trong giới hạn gắp. Ngay trước từng
+transfer, quân nguồn vẫn phải có target đo mới đủ an toàn; không fallback về tâm
+ô logic. Unknown, sai loại/màu, thêm quân, confidence thấp hoặc geometry lỗi vẫn
+chặn proof. Cảnh báo `low_confidence` độc lập với độ lệch tâm, không được bỏ qua.
 
 Idle/DO LOW không chứng minh kẹp rỗng. Recovery dùng TCP thực tại HOMECHESS hoặc
 IDLE được commissioning rõ ràng; dung sai mặc định 2 mm/2 độ, không tự đoán pose.

@@ -16,6 +16,13 @@ phục hồi nghiêm ngặt. Điều này thay thế các mô tả kiểm tra/se
 Sau transaction, nước chơi mới phải lưu việc thu hồi authority cũ một lần để
 không khôi phục transaction đã bị thay thế khi mở app lại.
 
+Proof toàn bàn dùng occupancy theo mode gắp đang chọn (PvP: foot/homography;
+height/ring: piece-height), không yêu cầu tâm của mọi quân đều gắp được. Target
+đo mới trong giới hạn gắp chỉ bắt buộc với quân nguồn trước mỗi transfer. Vẫn giữ
+đủ 90 ô đúng loại/màu, confidence, ô trống, ảnh mới và ổn định; không giảm ngưỡng
+confidence để vượt qua cảnh báo. Quy tắc này thay thế ràng buộc piece-height cho
+mọi mode và safe-pick offset cho mọi quân trong bản đặc tả cũ bên dưới.
+
 ---
 
 ## Problem Statement

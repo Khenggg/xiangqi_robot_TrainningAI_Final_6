@@ -1,5 +1,7 @@
 """Rollback proofs with fake camera/controller; never connects hardware."""
 from types import SimpleNamespace
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 import numpy as np
@@ -7,6 +9,7 @@ import numpy as np
 from src.hardware.hardware_manager import HardwareManager
 from src.hardware.robot_VIP import FR5Robot
 from src.vision.height_pick_geometry import HeightPickEstimator
+from src.vision.visual_pick_estimator import VisualPickEstimator
 
 
 class Clock:
@@ -180,7 +183,7 @@ class RollbackHardwareTests(unittest.TestCase):
         self.assertTrue(any('(0, 0)' in error and 'b_P' in error and 'expected .' in error
                             for error in result['errors']))
 
-    def test_restored_piece_with_unsafe_offset_denied_but_safe_measurement_passes(self):
+    def test_layout_occupancy_does_not_require_unrelated_piece_to_be_pickable(self):
         h = self.hardware()
         self.board[4][4] = 'r_P'
         geometry = SimpleNamespace(width=800., height=900.,
@@ -192,14 +195,41 @@ class RollbackHardwareTests(unittest.TestCase):
             np.zeros((2, 2, 3)), [(0, .99, box)])
         with patch('builtins.print'):
             result = self.verify(h)
-        self.assertFalse(result['matched'])
-        self.assertIn((4, 4), result['geometry_errors'])
+        self.assertTrue(result['matched'])
+        self.assertTrue(result['complete'])
+        self.assertEqual([], result['geometry_errors'])
         self.assertFalse(result['missing'])
+        self.assertIsNone(estimator.estimate_pick_target([(0, .99, box)], 4, 4))
         box[:] = [4., 3.9, 4.2, 4.1]  # center col4.1 within safe limit
         with patch('builtins.print'):
             result = self.verify(h)
         self.assertTrue(result['matched'])
         self.assertTrue(result['complete'])
+
+    def test_pvp_rollback_occupancy_uses_foot_mapping_without_intrinsics(self):
+        h = self.hardware()
+        h.config.VISUAL_PVP_PICK_ENABLED = True
+        h.config.VISUAL_HEIGHT_PICK_ENABLED = True
+        h.config.VISUAL_RING_PICK_ENABLED = True
+        h.config.VISUAL_TOP_FACE_ENABLED = True
+        self.board[3][8] = 'b_P'
+        with tempfile.TemporaryDirectory() as folder:
+            matrix = Path(folder) / 'perspective.npy'
+            np.save(matrix, np.eye(3))
+            h.pick_estimator = VisualPickEstimator(matrix, foot_ratio=.85)
+            del h._occupancy_estimator
+            box = [8.3, 2.15, 8.5, 3.15]  # foot at row3, col8.4; center at row2.65
+            h.cam_monitor.get_fresh_pick_snapshot.side_effect = lambda: (
+                np.zeros((2, 2, 3)), [(0, .99, box)])
+            with patch('src.hardware.hardware_manager.geometry_from_board',
+                       side_effect=AssertionError('PvP must not load height/intrinsics')):
+                result = self.verify(h)
+            self.assertTrue(result['matched'], result['errors'])
+            self.assertTrue(result['complete'])
+            self.assertIsNone(h.pick_estimator.estimate_pick_target([(0, .99, box)], 8, 3))
+            # A visible piece in a different square still cannot prove S2.
+            self.board[3][8] = '.'
+            self.assertFalse(self.verify(h)['matched'])
 
 
 if __name__ == '__main__': unittest.main()

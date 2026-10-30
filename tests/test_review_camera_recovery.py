@@ -69,6 +69,9 @@ class CameraRecoveryTests(unittest.TestCase):
         monitor.cap.read.return_value = (True, np.zeros((640, 640, 3), np.uint8))
         hw = HardwareManager.__new__(HardwareManager)
         hw.config = SimpleNamespace(**{k: getattr(config, k) for k in dir(config) if k.startswith('VISUAL_')})
+        # These synthetic tilted/top-plane fixtures explicitly exercise height,
+        # independent of the application's default PvP switch.
+        hw.config.VISUAL_PVP_PICK_ENABLED = False
         hw.config.VISUAL_HEIGHT_BOARD_MM = (400., 450.)
         hw.config.VISUAL_CAMERA_INTRINSICS_PATH = 'intrinsics.json'
         intrinsics = dict(schema=1, camera_index=0, frame_size=[640, 640],
@@ -94,6 +97,20 @@ class CameraRecoveryTests(unittest.TestCase):
             box = SimpleNamespace(cls=[0], conf=[.99], xyxy=[np.array([280, 525, 320, 575])])
             hw.cam_monitor._predict_yolo = Mock(return_value=[SimpleNamespace(boxes=[box])])
             self.assertTrue(hw.verify_visual_move((4, 8), (4, 9)))
+
+    def test_pvp_foot_occupancy_keeps_edge_piece_and_rejects_inference_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hw = self.hardware(tmp)
+            hw.config.VISUAL_PVP_PICK_ENABLED = True
+            hw.pick_estimator = VisualPickEstimator(hw.perspective_path, point_mode='foot')
+            box = SimpleNamespace(cls=[0], conf=[.99], xyxy=[np.array([280, 525, 320, 575])])
+            hw.cam_monitor._predict_yolo = Mock(return_value=[SimpleNamespace(boxes=[box])])
+            with patch('src.hardware.hardware_manager.geometry_from_board',
+                       side_effect=AssertionError('PvP must not use height geometry')):
+                self.assertTrue(hw.verify_visual_move((4, 8), (4, 9)))
+                self.assertFalse(hw.is_cell_visually_clear((4, 9)))
+                hw.cam_monitor._predict_yolo.side_effect = RuntimeError('inference unavailable')
+                self.assertFalse(hw.is_cell_visually_clear((4, 9)))
 
     def test_no_vision_does_not_authorize_empty_capture(self):
         with tempfile.TemporaryDirectory() as tmp:

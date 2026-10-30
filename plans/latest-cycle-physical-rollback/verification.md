@@ -7,12 +7,12 @@ kiểm tra nhiều subcase; không coi số test là số case đã nghiệm thu
 | Case trong plan | Bằng chứng offline | Phần cần nghiệm thu thật |
 |---|---|---|
 | A01–A07 | `test_rollback_cycle`: sáu nhóm capture, đổi thứ tự, đích trống và S0; `test_rollback_coordinator`: executor/capture/manual | Từng mẫu gắp/đặt, capture và vị trí nghỉ |
-| A08–A10 | Hardware verifier geometry/safe center; coordinator full-board/source/target gates | Góc/biên bàn, calibration và sai lệch thực tế |
+| A08–A10 | Hardware verifier occupancy theo mode; coordinator đo tâm an toàn riêng quân nguồn trước motion | Góc/biên bàn, calibration và sai lệch thực tế |
 | B01–B10 | Cycle seal/consume; integration Z, async ownership, latest partial cycle, baseline gate; normal suite AI/pending guards | Trạng thái controller và timing UI thật |
 | B11 | Integration SPACE không có nước, legacy snapshot không ghi đè ledger | Nhiễu camera thực tế |
 | B12 | Integration Emergency không tạo ledger, nút gameplay/poll khóa khi partial; review test terminal durability; reset/epoch regression | Test/operator thao tác xuyên suốt phiên thật |
 | C01–C05 | Pure full-board restoration subsets, wrong/unexpected; coordinator WAIT_PLAYER và final proof | Người chơi phục hồi một/hai quân, thông báo mismatch thật |
-| C06–C07 | 90-cell confidence/unknown, stable reset, unsafe .4-cell vs safe .1-cell measured center | Tay che/mờ/ánh sáng và ngưỡng confidence được commissioning |
+| C06–C07 | 90-cell confidence/unknown, stable reset; occupancy .4-cell vẫn đúng ô; nguồn không có target đo vẫn bị chặn; PvP không tải intrinsics | Tay che/mờ/ánh sáng và ngưỡng confidence được commissioning |
 | C08 | Giới hạn được nêu trong spec/docs, không có physical ID | Không hứa phát hiện tráo hai quân giống hệt |
 | D01–D06 | Camera/geometry failure, checkpoint before/after, lost ACK, unknown board, controller packet/pose/DO guards; existing motion112 tests | Lỗi kết nối/112, kẹp còn giữ quân, rơi quân với phần cứng thật |
 | D07–D08 | Coordinator verified-abort, partial progress và abort record roundtrip | Operator phục hồi S2 an toàn |

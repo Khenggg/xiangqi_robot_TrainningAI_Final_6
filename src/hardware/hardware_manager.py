@@ -654,6 +654,11 @@ class HardwareManager:
 
     def _occupancy_estimator(self, frame):
         """Use the same physical plane as picking, rebuilt from this frame."""
+        if pvp_pick_enabled(self.config):
+            estimator = getattr(self, 'pick_estimator', None)
+            if not isinstance(estimator, VisualPickEstimator) or estimator.point_mode != 'foot':
+                raise RuntimeError('PvP foot-point occupancy geometry unavailable')
+            return estimator
         if ring_pick_enabled(self.config) or (getattr(self.config, 'VISUAL_HEIGHT_PICK_ENABLED', False)
                                               and not self._top_face_enabled()):
             geometry = geometry_from_board(
@@ -824,7 +829,7 @@ class HardwareManager:
         """Prove a complete layout on consecutive new raw camera exposures.
 
         This deliberately does not reuse legacy post-move verification: identity
-        confidence and occupancy at the physical piece-height plane are mandatory.
+        confidence and occupancy in the active pick mapping are mandatory.
         Only listed restoration squares may remain empty during WAIT_PLAYER.
         """
         allowed = {tuple(cell) for cell in allowed_missing_cells}
@@ -869,8 +874,11 @@ class HardwareManager:
                     raise ValueError('Board or layout confidence shape invalid')
                 result['observed_board'] = [list(row) for row in observed]
                 estimator = self._occupancy_estimator(frame)
-                if not isinstance(estimator, HeightPickEstimator):
-                    result['geometry_errors'].append('Commissioned piece-height occupancy geometry required')
+                valid_estimator = (
+                    isinstance(estimator, VisualPickEstimator) and estimator.point_mode == 'foot'
+                    if pvp_pick_enabled(self.config) else isinstance(estimator, HeightPickEstimator))
+                if not valid_estimator:
+                    result['geometry_errors'].append('Configured occupancy geometry required')
                 else:
                     for detection in detections:
                         if not np.isfinite(float(detection[1])) or float(detection[1]) < estimator.min_confidence:
@@ -890,17 +898,14 @@ class HardwareManager:
                                 result['extra'].append(cell)
                             else:
                                 result['wrong'].append(cell)
-                        if isinstance(estimator, HeightPickEstimator):
+                        if valid_estimator:
                             occupied = self._cell_has_center_detection(detections, cell, estimator)
                             if occupied != (piece not in ('.', 'x', '?', None)):
                                 result['geometry_errors'].append(cell)
-                            elif occupied and estimator.estimate_pick_target(detections, col, row) is None:
-                                # Occupancy spans the whole cell; proving a final
-                                # layout also requires a measured center within
-                                # the commissioned safe pick offset/confidence.
-                                result['geometry_errors'].append(cell)
-                                result['errors'].append(f'Unsafe measured piece center at {cell}: '
-                                    f'expected {expected}, observed {piece}; adjust piece position')
+                            # Whole-board proof establishes identity/occupancy,
+                            # not pickability of every unrelated/restored piece.
+                            # Coordinator requires a fresh measured source target
+                            # immediately before each individual transfer.
                 invalid = any(result[key] for key in ('extra', 'wrong', 'unknown', 'low_confidence', 'geometry_errors'))
                 invalid = invalid or any(cell not in allowed for cell in result['missing'])
                 for category in ('missing', 'extra', 'wrong', 'unknown', 'low_confidence'):
@@ -913,7 +918,7 @@ class HardwareManager:
                 for issue in result['geometry_errors']:
                     if isinstance(issue, tuple):
                         col, row = issue
-                        result['errors'].append(f'Piece-height occupancy mismatch at {issue}: '
+                        result['errors'].append(f'Occupancy mismatch at {issue}: '
                             f'expected {expected_board[row][col]}, observed {observed[row][col]}')
                     else:
                         result['errors'].append(str(issue))
