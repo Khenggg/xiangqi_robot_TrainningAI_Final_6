@@ -180,7 +180,7 @@ try:
             renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
             renderer.draw_rollback_guides(state.get_render_state())
             if state.game_over:
-                renderer.draw_game_over(state.winner)
+                renderer.draw_game_over(state.winner, state.game_over_reason)
         if difficulty_menu_active:
             renderer.draw_difficulty_menu(hw.difficulty_availability(), difficulty_menu_message)
 

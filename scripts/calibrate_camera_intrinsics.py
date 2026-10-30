@@ -1,6 +1,7 @@
 """Camera intrinsics only: no board clicks, top-rim profile or robot tests."""
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -20,12 +21,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--camera", type=int, default=config.VIDEO_SOURCE)
     parser.add_argument("--backend", choices=("auto", "dshow", "msmf", "any"), default=config.VIDEO_BACKEND)
-    parser.add_argument("--square-mm", type=float, required=True,
+    parser.add_argument("--square-mm", type=float,
                         help="Measured printed checkerboard square size")
     parser.add_argument("--cols", type=int, default=9)
     parser.add_argument("--rows", type=int, default=6)
     parser.add_argument("--output", type=Path, default=ROOT / config.VISUAL_CAMERA_INTRINSICS_PATH)
     args = parser.parse_args()
+    if args.square_mm is None:
+        print("Close RUN. Print assets/calibration/checkerboard-20mm.svg at Actual Size.")
+        print("Measure the side of ONE printed black/white square; do not assume printer scale.")
+        args.square_mm = float(input("Measured square side (mm): "))
+    if not math.isfinite(args.square_mm) or args.square_mm <= 0:
+        raise ValueError("Measured square side must be a finite positive number in mm")
+    if args.cols < 3 or args.rows < 3:
+        raise ValueError("Checkerboard must have at least 3 inner corners per axis")
     cap = open_camera(args.camera, args.backend)
     try:
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.VIDEO_FRAME_WIDTH)

@@ -100,6 +100,103 @@ class WindowsBootstrapTests(unittest.TestCase):
         self.assertNotIn("Dependencies OK", result.stdout)
         self.assertNotIn("Setup complete. Double-click", result.stdout)
 
+    def test_06_repeated_healthy_setup_skips_install_even_with_unreachable_index(self):
+        system_directory = Path(os.environ.get('WINDIR', r'C:\Windows')) / 'System32'
+        if not all((system_directory / name).is_file() for name in
+                   ('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll')):
+            self.skipTest('Do not install system runtime in a test')
+        # An empty lock intentionally models a fully satisfied environment;
+        # real imports/models are covered by check_runtime on the project.
+        # Do not start the app or access physical hardware from this fixture.
+        check = self.root / 'scripts/check_runtime.py'
+        original = check.read_bytes()
+        original_environment = self.environment
+        try:
+            python = str(self.root / '.venv312/Scripts/python.exe')
+            if not Path(python).exists():
+                creation = self.run_command([sys.executable, '-m', 'venv', '.venv312'])
+                self.assertEqual(creation.returncode, 0, creation.stderr)
+            else:
+                creation = self.run_command([python, '-m', 'ensurepip'])
+                self.assertEqual(creation.returncode, 0, creation.stderr)
+            check.write_text("print('Fixture preflight OK')\n", encoding='utf-8')
+            self.environment = dict(self.environment, PIP_INDEX_URL='http://127.0.0.1:1',
+                                    PIP_RETRIES='0', PIP_DEFAULT_TIMEOUT='1')
+            for _ in range(2):
+                result = self.run_command(['cmd.exe', '/c', 'SETUP_WINDOWS.bat'])
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('skipping pip install and downloads', result.stdout)
+                self.assertIn('Fixture preflight OK', result.stdout)
+                self.assertIn('Setup complete. Double-click', result.stdout)
+        finally:
+            check.write_bytes(original)
+            self.environment = original_environment
+
+
+@unittest.skipUnless(sys.platform == 'win32', 'Windows PowerShell cache tests')
+class RuntimeCacheTests(unittest.TestCase):
+    def run_cache_case(self, cached, downloaded, expected_downloads, expected_installs):
+        with tempfile.TemporaryDirectory(prefix='xiangqi cache ') as folder:
+            root = Path(folder)
+            cache = root / '.setup-cache'
+            cache.mkdir()
+            installer = cache / 'vc_redist.x64.exe'
+            installer.write_text(cached)
+            harness = root / 'cache-test.ps1'
+            harness.write_text(r'''
+param($SourceScript, $Downloaded, [int]$ExpectedDownloads, [int]$ExpectedInstalls)
+$ErrorActionPreference = 'Stop'
+$projectRoot = $PSScriptRoot
+$logDirectory = Join-Path $projectRoot 'logs'
+$env:WINDIR = Join-Path $projectRoot 'fake-windows'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($SourceScript, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+$names = @('Install-VisualCppRuntime', 'Test-MicrosoftInstaller')
+$functions = $ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in $names}, $true)
+foreach ($function in $functions) { Invoke-Expression $function.Extent.Text }
+$script:downloads = 0; $script:installs = 0
+function Get-AuthenticodeSignature {
+    param($LiteralPath)
+    $status = if ((Get-Content -LiteralPath $LiteralPath -Raw) -eq 'verified') {'Valid'} else {'NotSigned'}
+    return [pscustomobject]@{Status=$status; SignerCertificate=[pscustomobject]@{Subject='CN=Microsoft, O=Microsoft Corporation, C=US'}}
+}
+function Invoke-WebRequest {
+    param([switch]$UseBasicParsing, $Uri, $OutFile)
+    $script:downloads++
+    [IO.File]::WriteAllText($OutFile, $Downloaded)
+}
+function Start-Process {
+    param($FilePath, $ArgumentList, $Verb, $WindowStyle, [switch]$Wait, [switch]$PassThru)
+    $script:installs++
+    return [pscustomobject]@{ExitCode=0}
+}
+try { Install-VisualCppRuntime } catch {
+    if ($ExpectedInstalls -ne 0) { throw }
+}
+if ($script:downloads -ne $ExpectedDownloads -or $script:installs -ne $ExpectedInstalls) {
+    throw "Unexpected downloads=$script:downloads installs=$script:installs"
+}
+if (Test-Path -LiteralPath (Join-Path $projectRoot '.setup-cache/vc_redist.x64.exe.download')) {
+    throw 'Partial download not cleaned up'
+}
+''', encoding='utf-8')
+            result = subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                                     '-File', str(harness), str(ROOT / 'scripts/windows_bootstrap.ps1'),
+                                     downloaded, str(expected_downloads), str(expected_installs)],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return installer.read_text()
+
+    def test_verified_cached_installer_is_reused_without_network(self):
+        self.assertEqual(self.run_cache_case('verified', 'unused', 0, 1), 'verified')
+
+    def test_invalid_cache_downloads_verified_replacement(self):
+        self.assertEqual(self.run_cache_case('broken', 'verified', 1, 1), 'verified')
+
+    def test_untrusted_download_never_executes_or_replaces_cache(self):
+        self.assertEqual(self.run_cache_case('old', 'untrusted', 1, 0), 'old')
+
 
 if __name__ == "__main__":
     unittest.main()

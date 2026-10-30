@@ -1,7 +1,20 @@
 # Spec: Hoàn tác vật lý cycle Đỏ–Đen gần nhất
 
 **Date:** 2026-10-28
-**Status:** Ready — design only, not implemented
+**Status:** Implemented offline; updated user requirement 2026-10-30 below takes precedence.
+
+## Yêu cầu bổ sung 2026-10-30 — chỉ kích hoạt bằng Z
+
+Trước khi nhấn Z, giữ nguyên luồng chơi vsc-v3 và baseline thông thường. Chỉ ghi
+S0/S1/S2 và ledger trong RAM lúc commit; không ghi journal rollback mới, quét toàn bàn, kiểm tra controller hay
+seal cycle để chuẩn bị Z. Cycle đủ hai nước cho phép yêu cầu Z; kiểm tra an toàn,
+baseline rollback và seal READY bắt đầu trong worker sau thao tác Z, trước mọi
+motion hoàn tác. Chuẩn bị lỗi được thử lại bằng V/E hoặc hủy X khi chưa có motion.
+Journal cũ chưa có coordinator/pending rollback FEN không được kích hoạt recovery
+hay thay bàn của ván mới khi mở app. Transaction đã chạy vẫn giữ checkpoint và
+phục hồi nghiêm ngặt. Điều này thay thế các mô tả kiểm tra/seal trước Z ở bên dưới.
+Sau transaction, nước chơi mới phải lưu việc thu hồi authority cũ một lần để
+không khôi phục transaction đã bị thay thế khi mở app lại.
 
 ---
 

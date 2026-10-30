@@ -12,12 +12,12 @@ class AIJobResult:
 
 def evaluate_ai_result(state, result):
     """Return a legal move, or pause an engine error without inventing a win."""
+    if state.game_over:
+        return None
     error = result.error
     move = result.move
     if error is None and move is None:
-        if not xiangqi.find_all_valid_moves('b', state.board):
-            state.handle_game_over('r')
-            state.api_client.end_match(winner='RED', reason='CHECKMATE')
+        if state.check_no_legal_moves():
             return None
         error = 'Engine không trả nước đi dù Đen vẫn còn nước hợp lệ.'
     if error is None:

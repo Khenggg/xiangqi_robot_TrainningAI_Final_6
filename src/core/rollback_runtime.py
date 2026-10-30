@@ -61,8 +61,10 @@ class RollbackRuntime:
         self.recovery_error = ''
         self.restart_pending = False
         self.needs_seal = False
+        self.last_issue = ''
         self.session_closed = False
         self._coordinator_record = None
+        self._durable_transaction = False
         self.scope = None
 
     @property
@@ -73,6 +75,15 @@ class RollbackRuntime:
     @property
     def preserve_room(self):
         return self.blocked
+
+    def lock_message(self):
+        if self.recovery_error:
+            return f'Journal lỗi: {self.recovery_error}. Giữ file để kiểm tra.'
+        if self.coordinator is not None and self.coordinator.active:
+            return self.state.status_message or 'Rollback đang dở. V quét lại; E xác nhận kẹp rỗng.'
+        if self.needs_seal and not self.restart_pending:
+            return (self.last_issue or 'Đang kiểm tra yêu cầu Z') + '. V thử lại; E xác nhận kẹp rỗng; X hủy yêu cầu Z.'
+        return (self.last_issue or 'Cần đối soát rollback dở sau khi mở lại') + '. V kiểm tra; E xác nhận arm về nghỉ/kẹp rỗng.'
 
     def attach_hardware(self, hw):
         self.hw = hw
@@ -153,6 +164,11 @@ class RollbackRuntime:
                 # Keep archived evidence, but never resurrect a closed room or
                 # carry that game's move feed/rollback authority into New Game.
                 return False
+            if coordinator is None and not pending_sync:
+                # Ordinary game snapshots (including old pre-Z seal failures)
+                # never authorize rollback recovery or replace a fresh game.
+                self.audit = audit
+                return False
             snapshot.apply_to(self.state)
             self.cycle, self.coordinator = cycle, coordinator
             self.revision, self.audit, self.move_audit = revision, audit, moves
@@ -160,6 +176,7 @@ class RollbackRuntime:
             self.pending_sync = pending_sync
             self.needs_seal = bool(saved.get('needs_seal', False))
             self._coordinator_record = record
+            self._durable_transaction = True
             self.state.api_client.room_id = saved.get('room_id')
             self._cancel_ai()
             self.restart_pending = True
@@ -173,8 +190,13 @@ class RollbackRuntime:
             return False
 
     @_serialized
-    def persist(self):
+    def persist(self, *, force=False):
         if self.journal is None:
+            return
+        if (not force and not self._durable_transaction and not self.needs_seal
+                and self._coordinator_record is None and not self.pending_sync):
+            # Before Z the ledger is memory-only. Disk failures in optional
+            # rollback bookkeeping must not affect ordinary vsc-v3 gameplay.
             return
         try:
             self.journal.save(dict(version=1, scope=self.scope,
@@ -187,6 +209,9 @@ class RollbackRuntime:
                 needs_seal=self.needs_seal,
                 session_closed=self.session_closed,
                 applied_commits=sorted(self.applied_commits), queued_commits=sorted(self.queued_commits)))
+            # After the first ordinary move supersedes a completed transaction,
+            # archive its old authority once before returning to memory-only.
+            self._durable_transaction = bool(self._coordinator_record or self.needs_seal or self.pending_sync)
         except Exception as exc:
             self.recovery_error = str(exc)
             self.state.set_status(f'Không lưu được journal; khóa thao tác: {exc}', duration=3600)
@@ -226,13 +251,13 @@ class RollbackRuntime:
         if cycle is not None and cycle.status == 'BUILDING' and cycle.s2 is None:
             cycle.complete(StateSnapshot.from_state(self.state),
                            MoveRecord('b', src, dst, piece, victim, True))
-            self.needs_seal = callable(getattr(self.hw, 'verify_rollback_board', None))
+            # Record S2 only. Hardware/readiness work begins exclusively on Z.
         self.persist()
 
     def eligibility(self, *, worker_owned=False):
         state = self.state
         if self.blocked:
-            return False, 'Đang rollback/phục hồi — V quét lại, E xác nhận kẹp rỗng, X hủy khi bàn S2'
+            return False, self.lock_message()
         if state.game_over:
             return False, 'Không rollback trận đã kết thúc'
         if any((getattr(state, 'physical_motion_busy', False) and not worker_owned, state.ai_thinking,
@@ -242,37 +267,47 @@ class RollbackRuntime:
                 state.snapshot_continue_required)):
             return False, 'Chờ arm, AI và đối soát/baseline hoàn tất'
         cycle = self.cycle
-        if cycle is None or cycle.status != 'READY':
+        if (cycle is None or cycle.status not in ('BUILDING', 'READY')
+                or cycle.s2 is None):
             return False, 'Chỉ mở Z sau một cycle Đỏ–Đen đã xác minh'
         if cycle.game_epoch != state.game_epoch or state.turn != 'r' or (
                 cycle.s2.board != tuple(tuple(row) for row in state.board)):
             return False, 'Cycle cũ không còn khớp state hiện tại'
         return True, 'Z: hoàn tác cycle Đỏ–Đen gần nhất'
 
-    def seal(self, *, baseline_ready=False):
+    def seal(self, *, baseline_ready=False, empty_gripper_confirmed=False):
         cycle = self.cycle
-        if (cycle is None or cycle.status != 'BUILDING' or cycle.s2 is None
+        if (not self.needs_seal or cycle is None or cycle.status != 'BUILDING' or cycle.s2 is None
                 or self.state.game_over or self.hw is None):
             return False
         try:
             proof = self.hw.verify_rollback_board(self.state.board)
-            safety = self.hw.robot.verify_rollback_ready()
+            safety = self.hw.robot.verify_rollback_ready(
+                operator_empty_gripper_confirmed=empty_gripper_confirmed)
             if not (isinstance(proof, dict) and proof.get('matched') is True
                     and proof.get('complete') is True and isinstance(safety, dict)
                     and safety.get('ready') is True and baseline_ready):
-                self.state.set_status('Cycle đã đi xong nhưng chưa đủ proof bàn/arm/baseline; '
-                                      'Z đang khóa. V để đối soát lại.', duration=3600)
+                errors = list(proof.get('errors', [])) if isinstance(proof, dict) else []
+                errors += list(safety.get('errors', [])) if isinstance(safety, dict) else []
+                if not baseline_ready:
+                    errors.append('Chưa lấy được baseline bàn')
+                self.last_issue = '; '.join(map(str, errors[:2])) or 'Chưa đủ xác minh bàn/arm cho yêu cầu Z'
+                self.state.set_status(self.lock_message(), duration=3600)
+                self._record('preparation_failed', errors=errors)
+                self.persist()
                 return False
             cycle.seal(arm_parked=True, controller_idle=True, board_verified=True,
                        baseline_ready=True, no_fault=not self.state.physical_sync_fault)
             self.needs_seal = False
+            self.last_issue = ''
             self.state.snapshot_continue_required = False
             self.state.manual_override_active = False
             self._record('cycle_ready', cycle_id=cycle.cycle_id)
             self.persist()
             return True
         except Exception as exc:
-            self.state.set_status(f'Z chưa sẵn sàng: {exc}. V để đối soát lại.', duration=3600)
+            self.last_issue = str(exc)
+            self.state.set_status(self.lock_message(), duration=3600)
             return False
 
     def _cancel_ai(self):
@@ -293,6 +328,16 @@ class RollbackRuntime:
         if self.journal is None:
             self.state.set_status('Chưa cấu hình durable rollback journal; không chạy arm.', duration=30)
             return False
+        self._cancel_ai()
+        self.state.manual_override_active = True
+        if self.cycle.status == 'BUILDING':
+            self.needs_seal = True
+            self.state.set_status('Đã nhấn Z — đang kiểm tra bàn và arm trước hoàn tác.', duration=3600)
+            if not self.seal(baseline_ready=self._baseline()):
+                return False
+        return self._begin_transaction()
+
+    def _begin_transaction(self):
         from src.core.rollback_coordinator import RollbackCoordinator
         # Coordinator retains its immutable authority even when runtime consumes
         # the ledger after the final local commit.
@@ -320,6 +365,20 @@ class RollbackRuntime:
                 self.coordinator.resume(operator_empty_gripper_confirmed=empty_gripper_confirmed)
             self._after_operation()
             return not self.blocked
+        if self.needs_seal and not self.restart_pending:
+            if abort:
+                # Preparation has issued no motion and committed no state.
+                self.needs_seal = False
+                self.state.manual_override_active = False
+                self.last_issue = ''
+                self.state.set_status('Đã hủy yêu cầu Z trước chuyển động. Tiếp tục chơi.', duration=15)
+                self._record('preparation_cancelled')
+                self.persist()
+                return True
+            if self.seal(baseline_ready=self._baseline(),
+                         empty_gripper_confirmed=empty_gripper_confirmed):
+                return self._begin_transaction()
+            return False
         if self.restart_pending:
             if self.hw is None:
                 return False
@@ -328,7 +387,9 @@ class RollbackRuntime:
             proof = self.hw.verify_rollback_board(self.state.board)
             if not (safety.get('ready') is True and proof.get('matched') is True
                     and proof.get('complete') is True and self._baseline()):
-                self.state.set_status('Phục hồi chưa khớp bàn/arm/kẹp rỗng. Kiểm tra rồi E để xác nhận.', duration=3600)
+                errors = list(safety.get('errors', [])) + list(proof.get('errors', []))
+                self.last_issue = '; '.join(map(str, errors[:2])) or 'Phục hồi chưa khớp bàn/arm/baseline'
+                self.state.set_status(self.lock_message(), duration=3600)
                 return False
             self.restart_pending = False
             self.state.manual_override_active = False
@@ -336,8 +397,6 @@ class RollbackRuntime:
             if self.state.turn == 'b':
                 self.state.prepare_ai_retry_after_physical_miss()
             self.persist()
-        if self.cycle and self.cycle.status == 'BUILDING' and self.cycle.s2:
-            return self.seal(baseline_ready=self._baseline())
         return not self.blocked
 
     def _baseline(self):

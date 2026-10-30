@@ -578,9 +578,25 @@ class BoardRenderer:
             fx, fy = self.grid_to_pixel(fc, fr)
             pygame.draw.circle(self.screen, (220, 0, 0), (fx, fy), PIECE_RADIUS + 6, 4)
 
-    def draw_game_over(self, winner):
+    @staticmethod
+    def game_over_text(winner, reason=None):
+        title = 'AI THẮNG' if winner == 'b' else 'BẠN THẮNG'
+        if reason == 'NO_LEGAL_MOVES':
+            detail = ('Bạn' if winner == 'b' else 'AI') + ' không còn nước đi hợp lệ.'
+        elif reason == 'RESIGN':
+            detail = 'Bạn đã đầu hàng.'
+        else:
+            detail = 'Ván đấu đã kết thúc.'
+        return title, detail
+
+    def draw_game_over(self, winner, reason=None):
         """Vẽ thông báo kết thúc game."""
-        msg = "AI WINS (SAVED)" if winner == "b" else "YOU WIN (NOT SAVED)"
-        color = (0, 255, 0) if winner == "b" else (255, 0, 0)
-        txt = self.game_font.render(msg, True, color)
-        self.screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)))
+        title, detail = self.game_over_text(winner, reason)
+        panel = pygame.Rect(0, 0, 580, 150)
+        panel.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+        pygame.draw.rect(self.screen, (248, 242, 224), panel, border_radius=14)
+        pygame.draw.rect(self.screen, (48, 80, 64), panel, width=3, border_radius=14)
+        for text, font, y in ((title, self.ui_font, panel.top + 47),
+                              (detail, self.button_font, panel.top + 100)):
+            rendered = font.render(text, True, (34, 66, 50))
+            self.screen.blit(rendered, rendered.get_rect(center=(panel.centerx, y)))

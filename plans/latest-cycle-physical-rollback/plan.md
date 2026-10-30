@@ -8,6 +8,12 @@ Risk: high-risk — thay đổi quyền phát motion, state/FEN, recovery và AP
 
 ## 1. Phạm vi xác nhận
 
+**Cập nhật theo yêu cầu 2026-10-30:** trước Z chỉ ghi ledger, không chạy bất kỳ
+proof/scan/controller gate nào riêng cho rollback. Giữ luồng chơi vsc-v3 và T1
+thông thường. Sau Z mới chuẩn bị/seal, khóa transaction và hoàn tác; bỏ khóa
+recovery từ journal cũ nếu chưa có coordinator/pending rollback sync. Xem phần
+bổ sung đầu `spec.md`; phần này thay thế các bước seal trước Z trong plan cũ.
+
 Một lần nhấn Z hoàn tác **toàn bộ cycle gần nhất**: một nước Đỏ và một nước Đen.
 Z chỉ mở sau khi máy đã hoàn tất, controller/arm đã nghỉ, bàn và baseline đúng.
 Hoàn tác xong không được lùi tiếp cycle cũ; chỉ một cycle mới hoàn tất mới cấp Z.

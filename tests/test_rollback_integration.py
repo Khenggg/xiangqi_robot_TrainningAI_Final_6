@@ -153,21 +153,20 @@ class RollbackIntegrationTests(unittest.TestCase):
             self.assertEqual('DONE', runtime.coordinator.phase)
             self.assertEqual(2, len(motions))
 
-    def test_failed_baseline_blocks_game_until_resealed(self):
+    def test_failed_z_baseline_preparation_retries_before_any_motion(self):
         with tempfile.TemporaryDirectory() as directory:
             state, runtime, hw, handler, initial, actual, motions = self.setup_physical_cycle(directory)
-            # Reproduce a normal completed Black cycle whose final baseline failed.
-            runtime.cycle.status = 'BUILDING'
-            runtime.needs_seal = True
+            # Baseline readiness for rollback is checked only after Z.
             hw.capture_baseline_if_needed.return_value = False
-            handler.handle_keyboard(pygame.K_SPACE)
+            handler.handle_keyboard(pygame.K_z)
             self.assertTrue(runtime.blocked)
             self.assertFalse(runtime.eligibility()[0])
             self.assertEqual([], motions)
             hw.capture_baseline_if_needed.return_value = True
             handler.handle_keyboard(pygame.K_v)
             self.assertFalse(runtime.blocked)
-            self.assertTrue(runtime.eligibility()[0])
+            self.assertEqual('DONE', runtime.coordinator.phase)
+            self.assertEqual(2, len(motions))
 
     def test_outbox_failure_locks_new_moves_until_durable_s0_enqueue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -236,9 +235,10 @@ class RollbackIntegrationTests(unittest.TestCase):
             self.assertEqual(2, len(motions))
             self.assertEqual(initial, recovered.board)
 
-    def test_complete_logical_cycle_is_not_ready_until_physical_seal(self):
+    def test_complete_logical_cycle_can_request_z_without_pre_scanning(self):
         state, _ = state_and_cycle()
-        self.assertFalse(state.rollback_runtime.eligibility()[0])
+        self.assertTrue(state.rollback_runtime.eligibility()[0])
+        self.assertEqual('BUILDING', state.rollback_runtime.cycle.status)
         self.assertIsNotNone(state.rollback_runtime.cycle)
 
     def test_emergency_cycle_cannot_become_physical_rollback(self):

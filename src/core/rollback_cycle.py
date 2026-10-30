@@ -50,6 +50,8 @@ def _validate_metadata(data):
         raise ValueError('Invalid snapshot metadata')
     if type(data['game_over']) is not bool or data['winner'] not in (None, 'r', 'b'):
         raise ValueError('Invalid game result metadata')
+    if data.get('game_over_reason') not in (None, 'CHECKMATE', 'NO_LEGAL_MOVES', 'RESIGN'):
+        raise ValueError('Invalid game result reason')
     if not isinstance(data['current_fen'], str):
         raise ValueError('Invalid saved FEN')
     for key in ('game_epoch', 'ai_epoch', 'human_commit_generation', 'ai_started_for_human_commit_generation'):
@@ -92,19 +94,26 @@ class StateSnapshot:
     @classmethod
     def from_state(cls, state):
         data = {key: getattr(state, key, default) for key, default in _STATE_FIELDS.items()}
+        reason = getattr(state, 'game_over_reason', None)
+        if reason is not None:
+            data['game_over_reason'] = reason
         return cls(_board(state.board), json.dumps(data, sort_keys=True))
 
     @classmethod
     def from_dict(cls, data):
         if not isinstance(data, dict):
             raise ValueError('Invalid snapshot object')
-        return cls(_board(data['board']), json.dumps(
-            {k: data.get(k, default) for k, default in _STATE_FIELDS.items()}, sort_keys=True))
+        metadata = {k: data.get(k, default) for k, default in _STATE_FIELDS.items()}
+        # Optional so older snapshots retain their original canonical signature.
+        if 'game_over_reason' in data:
+            metadata['game_over_reason'] = data['game_over_reason']
+        return cls(_board(data['board']), json.dumps(metadata, sort_keys=True))
 
     def to_dict(self):
         return dict(json.loads(self.state_json), board=[list(row) for row in self.board])
 
     def apply_to(self, state):
+        state.game_over_reason = self.to_dict().get('game_over_reason')
         for key, value in self.to_dict().items():
             # Runtime move consumers use tuple coordinates.
             if key == 'last_move' and value is not None:

@@ -1,4 +1,4 @@
-> **Cài trên máy Windows mới:** double-click `SETUP_WINDOWS.bat`, chờ `Setup complete`, rồi double-click `RUN.bat`. SETUP tự chuẩn bị Python và thư viện; xem [hướng dẫn Windows](docs/WINDOWS_SETUP.md) để biết điều kiện và xử lý lỗi.
+> **Cài trên máy Windows mới:** clone nhánh `feat/player-vs-robot`, double-click `SETUP_WINDOWS.bat`, chờ `Setup complete`, rồi double-click `RUN.bat`. SETUP kiểm tra và dùng lại thành phần hợp lệ, chỉ cài phần còn thiếu/sai phiên bản; xem [hướng dẫn Windows](docs/WINDOWS_SETUP.md) về calibration thực tế và xử lý lỗi.
 
 # XIANGQI ROBOT CỜ TƯỚNG VIP — SPECIFICATION DOCUMENT
 
@@ -7,9 +7,25 @@
 
 ---
 
-## Visual correction mặt trên quân (10 mm)
+## Điểm gắp mặc định và calibration
 
-Mode mới dùng `best.pt` làm ROI, vành mặt trên và camera geometry mới để tìm XY;
+Nhánh `feat/player-vs-robot` gộp luồng gắp PvP v3 với rollback chu kỳ vật lý gần nhất.
+Rollback chỉ chạy kiểm tra riêng sau khi nhấn **Z**. Trước Z chỉ lưu hai nước gần
+nhất; game tiếp tục luồng vsc-v3, không quét liên tục để mở Z. Nếu chuẩn bị Z lỗi
+nhưng chưa di chuyển arm: V thử lại, E xác nhận arm/kẹp hoặc X hủy yêu cầu.
+Sau mỗi nước người chơi hoặc nước AI đã xác nhận, bên đến lượt không còn nước đi
+hợp lệ sẽ thua, kể cả khi chưa bị chiếu. Client hiển thị **BẠN THẮNG / AI THẮNG**
+kèm lý do hết nước; đầu hàng hiển thị lý do riêng. Lỗi engine hoặc nước robot chưa
+xác nhận không được dùng để suy ra thắng/thua.
+Mặc định `VISUAL_PVP_PICK_ENABLED = True`: dùng chân bbox 85% qua homography bàn,
+ưu tiên hơn ring/top-face/height. Xem [luồng PvP](docs/pvp-pick-mode.md).
+RUN vẫn calibrate/xác nhận lưới bàn; SETUP không mở camera, không đổi offset robot
+hay ghi đè profile camera. Camera vật lý khác cần đo nội tại riêng nếu bật chế độ
+phụ thuộc nội tại; file calibration trong repo không dùng chung cho mọi webcam.
+
+## Visual correction mặt trên quân (10 mm) — chế độ tùy chọn
+
+Khi tắt PvP và bật top-face, mode dùng `best.pt` làm ROI, vành mặt trên và camera geometry để tìm XY;
 thiếu calibration hoặc tâm không đủ tin cậy sẽ dừng gắp, không fallback.
 Chạy `CALIBRATE_PICK_GEOMETRY.bat` khi RUN đã đóng và làm theo
 [hướng dẫn commissioning và R/X thử lại](docs/top-face-visual-pick.md). Kích thước vùng giao điểm
@@ -926,7 +942,8 @@ Robot ở tư thế khớp thẳng hàng, đặc biệt khi di chuyển đến c
 
 ### Visual correction hiện tại
 
-Nhánh mặc định giữ AUTO CALIBRATION lưới và R1–R4, dùng tâm bbox ảnh gốc
+Phần dưới mô tả chế độ height tùy chọn khi tắt PvP; mặc định nhánh này dùng
+[chân bbox PvP](docs/pvp-pick-mode.md). Chế độ height giữ AUTO CALIBRATION lưới và R1–R4, dùng tâm bbox ảnh gốc
 qua phép giao tia nhìn với mặt phẳng mặt quân cao **9 mm**. Tư thế camera
 được tính lại từ bốn góc trong `perspective.npy` mỗi chu kỳ lấy điểm gắp.
 AI/nhận diện trạng thái bàn, tọa độ ô và đường đặt quân không đổi.
@@ -1016,9 +1033,10 @@ XY và độ dịch so với ô logic. Chế độ này hỗ trợ quan sát; `S
 
 ### Clone và chạy trên Windows khác
 
-1. Cài Python 3.12 (64-bit), clone repo và checkout `feature/visual-correction-v2`.
-2. Chạy `SETUP_WINDOWS.bat` để tạo `.venv312` và cài các phiên bản trong
-   `requirements-lock-win-py312.txt`. RUN ưu tiên môi trường này.
+1. Clone repo và checkout `feat/player-vs-robot`.
+2. Chạy `SETUP_WINDOWS.bat` để tự chuẩn bị Python 3.12 x64, `.venv312` và các phiên bản trong
+   `requirements-lock-win-py312.txt`. Thành phần hợp lệ được dùng lại; RUN và các launcher
+   calibration/đo geometry dùng đúng `.venv312`, không chọn Python khác trên máy.
 3. Kết nối camera/controller, kiểm tra IP robot và tên teaching points
    R1–R4/HOMECHESS trên controller. Teaching points được đọc từ robot, không
    nằm trong repo. Chạy RUN và xác nhận auto-calibrate lưới mỗi lần setup.
@@ -1029,12 +1047,10 @@ Repo kèm `calibration/camera_intrinsics.json` đang dùng: camera index 0,
 ảnh; camera khác cần calibrate nội tại riêng dù cùng index. `perspective.npy`
 được tạo lại khi auto-calibrate, không dùng bản của máy cũ.
 
-Cấu hình thử nghiệm hiện tại: lưới 324×368 mm, chiều cao bù 6 mm (quân thực
-đã đo 9 mm), SAFE_Z 182 mm, PICK_Z/PLACE_Z 180 mm. SAFE_Z chỉ cách độ cao gắp
-2 mm; đây là cấu hình thử tại workstation, chưa xác nhận khoảng hở trên máy
-khác. Không chạy arm tự động trong script setup.
+Cấu hình robot, lưới, chiều cao bù và offset lấy từ `config.py`; SETUP không sửa
+các giá trị này. Chúng phụ thuộc workstation và cần kiểm tra trên phần cứng thực tế
+trước khi chạy arm. Không chạy arm tự động trong script setup.
 
-Model PT/ONNX có trong repo. Nếu không có Moonfish binary offline, launcher
-thông báo dùng đường engine có sẵn; chức năng online cần mạng. Clone giữ code,
+Model PT/ONNX và engine Moonfish Python có trong repo; chức năng online cần mạng. Clone giữ code,
 model và cấu hình, nhưng không đảm bảo hiệu năng máy/USB hay độ chính xác gắp
 vật lý giống nhau khi camera, TCP, teaching points hoặc setup thay đổi.

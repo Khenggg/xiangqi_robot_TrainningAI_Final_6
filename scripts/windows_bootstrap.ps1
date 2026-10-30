@@ -33,25 +33,43 @@ function Invoke-Checked {
 function Install-VisualCppRuntime {
     $systemDirectory = Join-Path $env:WINDIR 'System32'
     $missing = @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll') | Where-Object { -not (Test-Path -LiteralPath (Join-Path $systemDirectory $_)) }
-    if ($missing.Count -eq 0) { return }
+    if ($missing.Count -eq 0) {
+        Write-Host '[SETUP] Microsoft Visual C++ runtime already installed; skipping download.'
+        return
+    }
     $cacheDirectory = Join-Path $projectRoot '.setup-cache'
     New-Item -ItemType Directory -Force -Path $cacheDirectory | Out-Null
     $installer = Join-Path $cacheDirectory 'vc_redist.x64.exe'
-    Write-Host '[SETUP] Downloading Microsoft Visual C++ x64 runtime required by PyTorch/ONNX.'
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $previousProgress = $ProgressPreference
-    try {
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -UseBasicParsing -Uri 'https://aka.ms/vc14/vc_redist.x64.exe' -OutFile $installer
-    } finally { $ProgressPreference = $previousProgress }
-    $signature = Get-AuthenticodeSignature -LiteralPath $installer
-    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation(?:,|$)') {
-        throw 'Microsoft runtime installer signature is invalid. Setup stopped before executing it.'
+    if (-not (Test-MicrosoftInstaller $installer)) {
+        Write-Host '[SETUP] Downloading Microsoft Visual C++ x64 runtime required by PyTorch/ONNX.'
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $previousProgress = $ProgressPreference
+        $temporaryInstaller = $installer + '.download'
+        try {
+            $ProgressPreference = 'SilentlyContinue'
+            Invoke-WebRequest -UseBasicParsing -Uri 'https://aka.ms/vc14/vc_redist.x64.exe' -OutFile $temporaryInstaller
+            if (-not (Test-MicrosoftInstaller $temporaryInstaller)) {
+                throw 'Microsoft runtime installer signature is invalid. Setup stopped before executing it.'
+            }
+            Move-Item -LiteralPath $temporaryInstaller -Destination $installer -Force
+        } finally {
+            $ProgressPreference = $previousProgress
+            if (Test-Path -LiteralPath $temporaryInstaller) { Remove-Item -LiteralPath $temporaryInstaller }
+        }
+    } else {
+        Write-Host '[SETUP] Reusing verified Microsoft runtime installer from .setup-cache.'
     }
     Write-Host '[SETUP] Installing Microsoft runtime. Accept the Windows administrator permission prompt if shown.'
     $process = Start-Process -FilePath $installer -ArgumentList @('/install', '/passive', '/norestart', '/log', ('"{0}"' -f (Join-Path $logDirectory 'vc-runtime-installer.log'))) -Verb RunAs -WindowStyle Hidden -Wait -PassThru
     if ($process.ExitCode -notin @(0, 3010, 1638)) { throw "Microsoft runtime installation failed (exit $($process.ExitCode)). See logs/vc-runtime-installer.log." }
     if ($process.ExitCode -eq 3010) { Write-Host '[SETUP] Microsoft runtime requested a Windows restart; if preflight fails, restart and run SETUP again.' }
+}
+
+function Test-MicrosoftInstaller {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    return ($signature.Status -eq 'Valid' -and $signature.SignerCertificate.Subject -match 'O=Microsoft Corporation(?:,|$)')
 }
 
 function Test-Python312 {
@@ -138,9 +156,22 @@ try {
             }
             Invoke-Checked $basePython @('-m', 'venv', (Join-Path $projectRoot '.venv312'))
         }
-        Write-Host '[SETUP] Installing locked dependencies. Large downloads can take several minutes.'
-        Invoke-Checked $venvPython @('-m', 'ensurepip', '--upgrade')
-        Invoke-Checked $venvPython @('-m', 'pip', 'install', '--only-binary=:all:', '--timeout', '120', '--retries', '5', '--log', (Join-Path $logDirectory 'pip-install.log'), '-r', (Join-Path $projectRoot 'requirements-lock-win-py312.txt'))
+        $dependenciesReady = $false
+        try {
+            Invoke-Checked $venvPython @('-X', 'utf8', $checkScript, '--dependencies-only')
+            Invoke-Checked $venvPython @('-m', 'pip', 'check')
+            $dependenciesReady = $true
+        } catch {
+            Write-Host '[SETUP] Missing or mismatched dependencies detected; installing/repairing from lock file.'
+        }
+        if ($dependenciesReady) {
+            Write-Host '[SETUP] Dependencies already match lock file; skipping pip install and downloads.'
+        } else {
+            Write-Host '[SETUP] Installing locked dependencies. Existing matching packages and pip cache are reused.'
+            Invoke-Checked $venvPython @('-m', 'ensurepip', '--upgrade')
+            Invoke-Checked $venvPython @('-m', 'pip', 'install', '--only-binary=:all:', '--timeout', '120', '--retries', '5', '--log', (Join-Path $logDirectory 'pip-install.log'), '-r', (Join-Path $projectRoot 'requirements-lock-win-py312.txt'))
+            Invoke-Checked $venvPython @('-X', 'utf8', $checkScript, '--dependencies-only')
+        }
         Invoke-Checked $venvPython @('-m', 'pip', 'check')
         Invoke-Checked $venvPython @('-X', 'utf8', $checkScript)
         Write-Host 'Dependencies OK'

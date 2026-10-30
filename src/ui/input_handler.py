@@ -249,8 +249,7 @@ class InputHandler:
                 if rect.collidepoint(mx, my):
                     self.handle_keyboard(key)
                     return
-            self.state.set_status('Rollback/phục hồi đang khóa game. V/SPACE quét lại; '
-                                  'E: xác nhận arm về nghỉ và kẹp rỗng; X: hủy khi bàn S2.', duration=30)
+            self.state.set_status(runtime.lock_message(), duration=3600)
             return
         if getattr(self.state, "visual_pick_retry", None):
             if BTN_PICK_RETRY_RECT.collidepoint(mx, my):
@@ -284,8 +283,8 @@ class InputHandler:
         # Surrender Button
         if BTN_SURRENDER_RECT.collidepoint(mx, my) and not self.state.game_over:
             print("[GAME] YOU SURRENDER!")
-            self.state.handle_game_over("b")
-            self.state.api_client.end_match(winner="BLACK", reason="RESIGN")
+            if self.state.handle_game_over("b", reason='RESIGN'):
+                self.state.api_client.end_match(winner="BLACK", reason="RESIGN")
             return
 
         # New Game Button
@@ -551,9 +550,7 @@ class InputHandler:
             elif key == pygame.K_a:
                 self._run_rollback_action('confirm_abort')
             else:
-                self.state.set_status('Rollback đang khóa game. V/SPACE quét lại. '
-                    'E: xác nhận arm về nghỉ/kẹp rỗng để tiếp tục; '
-                    'X: hủy tại S2; A: xác nhận kẹp rỗng và hủy tại S2.', duration=3600)
+                self.state.set_status(runtime.lock_message(), duration=3600)
             return
         if self.state.game_over:
             return
@@ -589,10 +586,6 @@ class InputHandler:
             return
 
         if key == pygame.K_v:
-            if (runtime and runtime.cycle and runtime.cycle.status == 'BUILDING'
-                    and runtime.cycle.s2 is not None):
-                self._run_rollback_action('resume')
-                return
             if self._retry_failed_engine():
                 return
             if self.state.physical_sync_fault:
@@ -639,8 +632,8 @@ class InputHandler:
                 self._observed_baseline_time = None
                 self._last_move_confirmation_failure = None
         except Exception as exc:
-            runtime.recovery_error = str(exc)
-            self.state.set_status(f'Rollback dừng an toàn: {exc}; chưa chạy lại arm.', duration=3600)
+            runtime.last_issue = str(exc)
+            self.state.set_status(f'Đối soát chưa thành công: {exc}. V/E thử lại; chưa chạy lại arm.', duration=3600)
 
     def _retry_failed_engine(self):
         if (not getattr(self.state, "ai_failure", None)
@@ -770,18 +763,11 @@ class InputHandler:
         if not self.state.commit_pending_ai_move():
             return False
         self.state.snapshot_continue_required = False
-        self.state.sync_remote_board()
-        if xiangqi.get_king_pos("r", self.state.board) is None:
-            self.state.handle_game_over("b")
-            self.state.api_client.end_match(winner="BLACK", reason="CHECKMATE")
-        else:
-            baseline_ready = bool(self.hw.capture_baseline_if_needed(force_delay=1.0))
+        if not self.state.game_over:
+            self.state.sync_remote_board()
+            # Ordinary vsc-v3 next-turn baseline; no rollback scan/probe here.
+            self.hw.capture_baseline_if_needed(force_delay=1.0)
             self.state.set_status(status_message, color=status_color, duration=8.0)
-            runtime = getattr(self.state, 'rollback_runtime', None)
-            if runtime and callable(getattr(self.hw, 'verify_rollback_board', None)):
-                if runtime.seal(baseline_ready=baseline_ready):
-                    self.state.set_status(status_message + ' Z: rollback cycle gần nhất.',
-                                          color=status_color, duration=30)
         self.state.refresh_remote_sync_status()
         return True
 

@@ -21,8 +21,8 @@ class RollbackRuntimeReviewTests(unittest.TestCase):
         runtime = state.rollback_runtime
         with tempfile.TemporaryDirectory() as folder:
             runtime.configure(Path(folder) / 'rollback.json')
-            runtime.persist()
             state.handle_game_over('r')
+            runtime.persist(force=True)
             saved = runtime.journal.load()
             self.assertTrue(saved['committed_snapshot']['game_over'])
             self.assertEqual(saved['committed_snapshot']['winner'], 'r')
@@ -36,7 +36,7 @@ class RollbackRuntimeReviewTests(unittest.TestCase):
                 runtime = state.rollback_runtime
                 path = Path(folder) / 'rollback.json'
                 runtime.configure(path)
-                runtime.persist()
+                runtime.persist(force=True)
                 saved = runtime.journal.load()
                 saved['committed_snapshot'][field] = value
                 runtime.journal.save(saved)
@@ -59,7 +59,7 @@ class RollbackRuntimeReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'rollback.json'
             runtime.configure(path)
-            runtime.persist()
+            runtime.persist(force=True)
             saved = runtime.journal.load()
             saved['applied_commits'] = ['rollback:pending-review']
             saved['pending_sync'] = {'rollback:pending-review': {
@@ -81,7 +81,7 @@ class RollbackRuntimeReviewTests(unittest.TestCase):
                     handler.handle_keyboard(pygame.K_z)
                     self.assertEqual(runtime.coordinator.phase, 'DONE')
                 else:
-                    self.assertEqual(runtime.cycle.status, 'READY')
+                    self.assertEqual(runtime.cycle.status, 'BUILDING')
                 self.assertTrue(runtime.close_session())
                 recovered = self.state()
                 recovered.api_client.room_id = 'fresh-room'
