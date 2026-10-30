@@ -126,6 +126,9 @@ def _cleanup_all():
     motion_worker = getattr(input_mgr, "_motion_thread", None)
     if motion_worker is not None and motion_worker.is_alive():
         motion_worker.join()
+    scan_worker = getattr(input_mgr, "_manual_scan_thread", None)
+    if scan_worker is not None and scan_worker.is_alive():
+        scan_worker.join()
     # [API] Force Kết thúc trận đấu khi thoát chương trình
     try:
         if state and state.api_client:
@@ -165,6 +168,7 @@ try:
             renderer.draw_ui(state.get_render_state())
             renderer.draw_pieces(state.pick_test_board if state.pick_test_mode else state.board)
             renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
+            renderer.draw_manual_rollback_guides(state.get_render_state())
             if state.game_over:
                 renderer.draw_game_over(state.winner, state.game_over_reason)
         if difficulty_menu_active:
@@ -230,6 +234,9 @@ try:
             key = hw.cam_monitor.update_display()
             if key == ord("q") and not getattr(state, "physical_motion_busy", False): running = False
 
+        if input_mgr is not None:
+            input_mgr.poll_manual_rollback()
+
         # Inspect the board itself rather than the object moving a piece.
         # SPACE remains the safe manual fallback when camera confidence is poor.
         if (getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False)
@@ -240,7 +247,7 @@ try:
         # 2d. Xử lý AI Turn (Non-blocking)
         if (hw is not None and input_mgr is not None and not home_screen_active and not settings_menu_active
                 and not difficulty_menu_active and state.turn == "b" and not state.game_over
-                and not state.physical_sync_fault):
+                and not state.physical_sync_fault and not state.manual_rollback.active):
             
             # --- Khởi động Thread suy nghĩ ---
             if state.can_start_ai_turn():

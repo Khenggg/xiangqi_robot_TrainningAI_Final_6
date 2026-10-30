@@ -853,6 +853,53 @@ class HardwareManager:
         )
         return verified
 
+    def sample_manual_rollback(self, expected_board):
+        """Acquire one new raw exposure and prove its entire identity layout."""
+        from src.vision.manual_rollback_verifier import match_layout
+        sample = dict(matched=False, frame=None, detections=[], observed_board=None,
+                      error='Camera or full-board recognizer unavailable')
+        if self.cam_monitor is None or self.cchess_recognizer is None:
+            return sample
+        try:
+            sample['captured_at'] = time.monotonic()
+            frame, detections = self.cam_monitor.get_fresh_pick_snapshot()
+            sample.update(frame=frame, detections=detections)
+            if frame is None:
+                return sample
+            recognition = self.recognize_board_state(frame)
+            if recognition is not None:
+                board = recognition.get('board')
+                sample['observed_board'] = [list(row) for row in board] if board is not None else None
+                sample['matched'] = match_layout(expected_board, recognition)
+            sample['error'] = '' if sample['matched'] else 'Restore every piece to its marked position'
+        except Exception as error:
+            sample['error'] = str(error)
+        return sample
+
+    def publish_manual_rollback_baseline(self, sample):
+        """Keep measured YOLO baseline separate from the full identity proof.
+
+        CChess has already verified every square on several fresh exposures.
+        YOLO's filtered foot-point occupancy can miss pieces even on that same
+        correct board. Capture its measured grid for comparison to later YOLO
+        frames; requiring it to equal CChess occupancy permanently blocks undo.
+        """
+        detector = self.yolo_detector
+        sample.pop('baseline_error', None)
+        if detector is None:
+            sample['baseline_error'] = 'Bộ lưu baseline chưa sẵn sàng.'
+            return False
+        if not sample.get('matched') or sample.get('frame') is None:
+            sample['baseline_error'] = 'Chưa có ảnh xác nhận toàn bàn.'
+            return False
+        try:
+            if detector.capture_baseline(sample['frame'], sample['detections']) is True:
+                return True
+            sample['baseline_error'] = 'Không lưu được ảnh baseline; camera sẽ thử lại.'
+        except Exception as error:
+            sample['baseline_error'] = 'Lỗi lưu baseline: ' + str(error)
+        return False
+
     def capture_baseline_if_needed(self, force_delay=0.0):
         if self.cam_monitor and self.yolo_detector:
             if force_delay > 0:

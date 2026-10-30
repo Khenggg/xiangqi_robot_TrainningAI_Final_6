@@ -29,7 +29,8 @@ class HumanMoveCommitCoordinator:
                 if token[:2] != (getattr(self.state, "game_epoch", 0),
                                  getattr(self.state, "human_commit_generation", 0)):
                     return "STALE"
-            if (getattr(self.state, "physical_sync_fault", False)
+            if (getattr(getattr(self.state, "manual_rollback", None), "active", False)
+                    or getattr(self.state, "physical_sync_fault", False)
                     or getattr(self.state, "pending_ai_move", None)):
                 return "PHYSICAL_SYNC_REQUIRED"
             if self.state.game_over or self.state.turn != "r":

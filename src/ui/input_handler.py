@@ -4,7 +4,7 @@ import traceback
 from src.core import xiangqi  # type: ignore
 from src.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT,
                                    BTN_CONTINUE_RECT, BTN_SCAN_FEN_RECT, BTN_CONFIRM_MOVE_RECT,
-                                   BTN_EMERGENCY_RECT, BTN_PICK_TEST_RECT, NUM_COLS, NUM_ROWS)  # type: ignore
+                                   BTN_EMERGENCY_RECT, BTN_ROLLBACK_RECT, BTN_PICK_TEST_RECT, NUM_COLS, NUM_ROWS)  # type: ignore
 from src.ui.board_renderer import BTN_PICK_RETRY_RECT, BTN_PICK_CANCEL_RECT
 from src.core.game_state import GameState
 from src.core.visual_move_coordinator import execute_pending_ai_motion
@@ -28,6 +28,10 @@ class InputHandler:
         self.state = game_state
         self.hw = hw_manager
         self._motion_thread = None
+        self._manual_scan_thread = None
+        self._manual_scan_result = None
+        self._manual_scan_at = 0.0
+        self._manual_verifier = None
         self._last_move_confirmation_failure = None
         stability_config = getattr(self.hw, "config", None)
         self._board_stability_monitor = BoardStabilityMonitor(
@@ -55,6 +59,81 @@ class InputHandler:
         self._human_commit_coordinator = HumanMoveCommitCoordinator(game_state)
         self._unified_active = False
         self._observed_game_epoch = getattr(game_state, "game_epoch", 0)
+
+    def _begin_manual_rollback(self):
+        runtime = self.state.manual_rollback
+        if runtime.active:
+            return
+        if not runtime.eligible:
+            self.state.set_status('Rollback chỉ dùng sau một lượt Đỏ + AI đã hoàn tất.', duration=6)
+            return
+        if not getattr(self.hw, 'cam_monitor', None) or not getattr(self.hw, 'cchess_recognizer', None):
+            self.state.set_status('Rollback cần camera và nhận diện toàn bàn cờ.', duration=8)
+            return
+        if runtime.begin():
+            from src.vision.manual_rollback_verifier import ManualRollbackVerifier
+            self._manual_verifier = ManualRollbackVerifier()
+            self._manual_scan_result = None
+            self._manual_scan_at = 0.0
+            self._board_stability_monitor.reset()
+            self._player_turn_arbiter.deactivate()
+            self._unified_active = False
+            self.state.set_status('Đưa quân về các vòng tròn. Camera tự xác nhận bàn đã khôi phục.', duration=3600)
+
+    def poll_manual_rollback(self):
+        """Consume worker evidence on the UI thread; never wait on camera inference."""
+        runtime = self.state.manual_rollback
+        if not runtime.active:
+            return
+        result = self._manual_scan_result
+        if result is not None:
+            self._manual_scan_result = None
+            token, sample, captured_at = result
+            if token == runtime.session_token:
+                observed = sample.get('observed_board')
+                update = getattr(runtime, 'update_observed_board', None)
+                if observed is not None and callable(update):
+                    update(observed)
+                evidence_at = sample.get('captured_at', captured_at)
+                if 'captured_at' in sample and time.monotonic() - evidence_at > 5.0:
+                    sample = dict(sample, matched=False, error='Ảnh đã cũ; đang chụp lại.')
+                if self._manual_verifier.observe(sample, evidence_at):
+                    try:
+                        baseline_ready = self.hw.publish_manual_rollback_baseline(sample)
+                    except Exception:
+                        baseline_ready = False
+                    if baseline_ready and runtime.complete():
+                        self._board_stability_monitor.reset()
+                        self._player_turn_arbiter.deactivate()
+                        self._unified_active = False
+                        self._observed_baseline_time = None
+                        self._last_move_confirmation_failure = None
+                        self.state.set_status('Đã khôi phục bàn cờ — lượt của bạn.', color=(0, 120, 0), duration=8)
+                        return
+                    self._manual_verifier.reset()
+                    detail = (sample.get('baseline_error', 'Không lưu được baseline; camera sẽ thử lại.')
+                              if not baseline_ready else 'Trạng thái ván đã thay đổi; chưa thể hoàn tác.')
+                    self.state.set_status(detail, duration=8)
+                elif sample.get('error'):
+                    self.state.set_status('Rollback: ' + str(sample['error']), duration=8)
+        worker = self._manual_scan_thread
+        if worker is not None and worker.is_alive():
+            return
+        now = time.monotonic()
+        if now - self._manual_scan_at < .25:
+            return
+        self._manual_scan_at = now
+        token, target = runtime.session_token, runtime.target_board
+        def sample_board():
+            try:
+                evidence = self.hw.sample_manual_rollback(target)
+            except Exception:
+                evidence = dict(matched=False, error='Không đọc được camera; tiếp tục chờ.')
+            self._manual_scan_result = (token, evidence, time.monotonic())
+        import threading
+        self._manual_scan_thread = threading.Thread(target=sample_board, daemon=True,
+                                                    name='manual-rollback-camera')
+        self._manual_scan_thread.start()
 
     def _interaction_capability(self):
         """Hardware must explicitly provide obstruction evidence for UNIFIED."""
@@ -211,6 +290,8 @@ class InputHandler:
         return True
 
     def start_pending_ai_motion(self):
+        if getattr(getattr(self.state, 'manual_rollback', None), 'active', False) is True:
+            return False
         if not self.state.pending_ai_move_is_current():
             self.state.set_status("Pending không còn hợp lệ; không chạy arm.", duration=30)
             return False
@@ -236,6 +317,8 @@ class InputHandler:
 
     def handle_mouse_down(self, mx, my):
         import pygame  # type: ignore
+        if getattr(getattr(self.state, 'manual_rollback', None), 'active', False) is True:
+            return
         if getattr(self.state, "physical_motion_busy", False):
             return
         if getattr(self.state, "visual_pick_retry", None):
@@ -248,6 +331,7 @@ class InputHandler:
             if not (BTN_NEW_GAME_RECT.collidepoint(mx, my) or BTN_SURRENDER_RECT.collidepoint(mx, my)):
                 return
         client_actions = (
+            (BTN_ROLLBACK_RECT, pygame.K_z),
             (BTN_SCAN_FEN_RECT, pygame.K_v),
             (BTN_CONFIRM_MOVE_RECT, pygame.K_SPACE),
             (BTN_EMERGENCY_RECT, pygame.K_m),
@@ -471,6 +555,8 @@ class InputHandler:
         A failed snapshot leaves scanning paused rather than accepting a blind
         recovery.
         """
+        if getattr(getattr(self.state, 'manual_rollback', None), 'active', False) is True:
+            return False
         if getattr(self.state, "physical_sync_fault", False):
             self._reconcile_physical_sync_fault()
             return not self.state.physical_sync_fault
@@ -517,7 +603,12 @@ class InputHandler:
 
     def handle_keyboard(self, key):
         import pygame  # type: ignore
+        if getattr(getattr(self.state, 'manual_rollback', None), 'active', False) is True:
+            return
         if getattr(self.state, "physical_motion_busy", False):
+            return
+        if key == pygame.K_z:
+            self._begin_manual_rollback()
             return
         if self.state.game_over:
             return
@@ -712,6 +803,8 @@ class InputHandler:
         return True
 
     def _handle_space_key(self, auto_retry=False):
+        if getattr(getattr(self.state, 'manual_rollback', None), 'active', False) is True:
+            return False
         if getattr(self.state, "physical_sync_fault", False):
             self._reconcile_physical_sync_fault()
             return False
@@ -808,6 +901,8 @@ class InputHandler:
 
     def _continue_after_snapshot_pause(self):
         """Apply the operator-approved recovery shown by the Continue button."""
+        if getattr(getattr(self.state, 'manual_rollback', None), 'active', False) is True:
+            return False
         if self._retry_failed_engine():
             return
         if getattr(self.state, "physical_sync_fault", False):
@@ -883,6 +978,8 @@ class InputHandler:
 
     def poll_board_stability(self):
         """Commit one legal Red move after repeated stable board observations."""
+        if getattr(getattr(self.state, 'manual_rollback', None), 'active', False) is True:
+            return False
         if (getattr(self.state, "physical_motion_busy", False)
                 or self.state.turn != "r" or self.state.game_over
                 or getattr(self.state, "visual_pick_retry", None)

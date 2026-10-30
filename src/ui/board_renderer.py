@@ -51,6 +51,7 @@ CLIENT_ACTION_WIDTH = 304
 BTN_SCAN_FEN_RECT = pygame.Rect(CLIENT_ACTION_X, 342, CLIENT_ACTION_WIDTH, 64)
 BTN_CONFIRM_MOVE_RECT = pygame.Rect(CLIENT_ACTION_X, 422, CLIENT_ACTION_WIDTH, 64)
 BTN_EMERGENCY_RECT = pygame.Rect(CLIENT_ACTION_X, 502, CLIENT_ACTION_WIDTH, 64)
+BTN_ROLLBACK_RECT = pygame.Rect(CLIENT_ACTION_X, 582, CLIENT_ACTION_WIDTH, 64)
 BTN_CONTINUE_RECT = pygame.Rect(CLIENT_ACTION_X, 662, CLIENT_ACTION_WIDTH, 64)
 BTN_PICK_RETRY_RECT = pygame.Rect(CLIENT_ACTION_X, 662, 148, 64)
 BTN_PICK_CANCEL_RECT = pygame.Rect(CLIENT_ACTION_X + 156, 662, 148, 64)
@@ -253,6 +254,7 @@ class BoardRenderer:
         self.screen.blit(title, title.get_rect(center=(panel.centerx, 274)))
 
         actions = (
+            (BTN_ROLLBACK_RECT, "Z", ("ROLLBACK",), AMBER_COLOR),
             (BTN_SCAN_FEN_RECT, "V", ("QUÉT / ĐỐI SOÁT FEN",), JADE_COLOR),
             (BTN_CONFIRM_MOVE_RECT, "SPACE", ("XÁC NHẬN", "NƯỚC ĐỎ"), JADE_DARK),
             (BTN_EMERGENCY_RECT, "M", ("EMERGENCY MODE",), VERMILION_COLOR),
@@ -262,6 +264,8 @@ class BoardRenderer:
         for rect, key, label_lines, color in actions:
             active = (key == "M" and emergency_active) or (key == "T" and game_state.get("pick_test_mode", False))
             button_color = (139, 48, 38) if active else color
+            if game_state.get("manual_rollback_active") or (key == "Z" and not game_state.get("manual_rollback_enabled")):
+                button_color = (121, 116, 100)
             pygame.draw.rect(self.screen, button_color, rect, border_radius=12)
             key_surf = self.ui_font.render(key, True, (255, 255, 255))
             self.screen.blit(key_surf, (rect.x + 18, rect.y + 17))
@@ -378,6 +382,15 @@ class BoardRenderer:
         src = f"{chr(ord('a') + src_col)}{src_row}"
         dst = f"{chr(ord('a') + dst_col)}{dst_row}"
         return f"{piece} {src} -> {dst}"
+
+    def draw_manual_rollback_guides(self, game_state):
+        if not game_state.get('manual_rollback_active'):
+            return
+        for circle in game_state.get('manual_rollback_circles', []):
+            color = (215, 65, 50) if circle['side'] == 'r' else (45, 115, 220)
+            # Two ring sizes keep coincident piece/return squares visible.
+            radius = PIECE_RADIUS + (6 if circle['role'] == 'source' else 13)
+            pygame.draw.circle(self.screen, color, self.grid_to_pixel(*circle['square']), radius, 4)
 
     def draw_recent_moves(self, moves):
         """Draw the latest eight moves in their moving side's color."""

@@ -10,7 +10,12 @@
 ## Điểm gắp mặc định và calibration
 
 Nhánh `feat/player-vs-robot` dùng luồng gắp PvP v3.
-Chức năng hoàn tác đã được gỡ bỏ; phím **Z** không thực hiện thao tác.
+Nhấn **Z / ROLLBACK** sau khi AI hoàn tất lượt để hoàn tác cặp nước gần nhất.
+Tự đưa quân về các vòng tròn cùng màu (Đỏ / Xanh), kể cả quân bị ăn.
+Camera tự xác nhận toàn bàn qua ít nhất 3 ảnh mới trong 1 giây, rồi khôi phục
+FEN và baseline để tiếp tục lượt người chơi. Tay máy không chạy khi hoàn tác.
+Không hỗ trợ hoàn tác khi đang nghĩ/gắp, bàn đang lỗi đồng bộ hoặc trận đã kết thúc.
+Xem [hướng dẫn hoàn tác thủ công](docs/manual-rollback.md).
 Sau mỗi nước người chơi hoặc nước AI đã xác nhận, bên đến lượt không còn nước đi
 hợp lệ sẽ thua, kể cả khi chưa bị chiếu. Client hiển thị **BẠN THẮNG / AI THẮNG**
 kèm lý do hết nước; đầu hàng hiển thị lý do riêng. Lỗi engine hoặc nước robot chưa

@@ -1,8 +1,10 @@
-# Physical rollback removed
+# Robot-executed rollback removed
+
+The new [manual camera-verified rollback](../manual-rollback.md) replaces the old feature.
+The removal details below describe the old robot-executed implementation.
 
 The rollback feature has been removed, including the earlier logical undo.
-Z has no action; no reversal motion, rollback board scan, journal load or
-rollback recovery prompt runs during gameplay or startup. Existing rollback
+No robot reversal motion, journal load or persistent rollback recovery runs. Existing rollback
 journal files are ignored. Historical design plans remain under
 `plans/latest-cycle-physical-rollback/` for reference only.
 

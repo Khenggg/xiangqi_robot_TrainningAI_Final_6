@@ -77,6 +77,8 @@ class GameState:
         self.visual_pick_retry = None
         self.visual_capture_checkpoint = None
         self.remote_sync_pending = False
+        from src.core.manual_rollback import ManualRollback
+        self.manual_rollback = ManualRollback(self)
 
     def update_fen_from_board(self):
         """Cập nhật current_fen từ board array hiện tại."""
@@ -103,9 +105,13 @@ class GameState:
                                   if getattr(self, "visual_pick_retry", None) else None),
             "recent_moves": self.move_log[-8:],
         }
+        rendered.update(self.manual_rollback.render_state())
         return rendered
 
     def reset_game(self, hw_manager=None):
+        if self.manual_rollback.active:
+            return False
+        self.manual_rollback.invalidate()
         # [API] Đóng room cũ trước khi tạo game mới
         if self.api_client.room_id:
             print("[GAME] 🔚 Đóng room cũ trước khi tạo game mới...")
@@ -187,8 +193,9 @@ class GameState:
         self.invalid_flash_expiry = time.time() + duration
 
     def handle_game_over(self, the_winner, reason='CHECKMATE'):
-        if self.game_over:
+        if self.game_over or self.manual_rollback.active:
             return False
+        self.manual_rollback.invalidate()
         self.visual_pick_retry = None
         self.winner = the_winner
         self.game_over_reason = reason
@@ -201,7 +208,7 @@ class GameState:
         """End only a committed position; no engine/camera result proves a loss."""
         if self.game_over:
             return True
-        if self.pending_ai_move is not None or self.physical_sync_fault:
+        if self.manual_rollback.active or self.pending_ai_move is not None or self.physical_sync_fault:
             return False
         side = self.turn
         king_missing = xiangqi.get_king_pos(side, self.board) is None
@@ -219,6 +226,8 @@ class GameState:
 
     def set_pending_ai_move(self, move, expected_board, captured_piece):
         """Remember the only state transition a fault-recovery may commit."""
+        if self.manual_rollback.active:
+            return False
         self.pending_ai_move = {
             "move": move,
             "expected_board": [row[:] for row in expected_board],
@@ -346,7 +355,7 @@ class GameState:
         loop create one fresh AI job for that same human move; it never reuses
         a potentially stale robot command.
         """
-        if self.game_over or self.turn != "b":
+        if self.manual_rollback.active or self.game_over or self.turn != "b":
             return False
         worker = self.ai_thread
         is_alive = getattr(worker, "is_alive", None)
@@ -366,7 +375,8 @@ class GameState:
     def can_start_ai_turn(self):
         """Whether the main loop may create exactly one Black AI worker."""
         return (
-            not getattr(self, "physical_motion_busy", False)
+            not getattr(getattr(self, 'manual_rollback', None), 'active', False)
+            and not getattr(self, "physical_motion_busy", False)
             and not getattr(self, "pick_test_mode", False)
             and not getattr(self, "visual_pick_retry", None)
             and not getattr(self, "physical_sync_fault", False)
@@ -393,7 +403,7 @@ class GameState:
 
     def commit_pending_ai_move(self):
         """Atomically commit a camera-verified physical AI move to the FEN board."""
-        if not self.pending_ai_move_is_current():
+        if self.manual_rollback.active or not self.pending_ai_move_is_current():
             return False
         pending = self.pending_ai_move
         src, dst = pending["move"]
@@ -410,9 +420,13 @@ class GameState:
         self.visual_pick_retry = None
         self.visual_capture_checkpoint = None
         self.check_no_legal_moves()
+        self.manual_rollback.record_black(src, dst)
         return True
 
     def process_human_move(self, src, dst, p_name):
+        if self.manual_rollback.active:
+            return False
+        self.manual_rollback.record_human(src, dst)
         print(f"[HUMAN] ✅ Moved: {p_name} {xiangqi.format_move(src, dst)}")
         self.set_status("✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
         
@@ -441,6 +455,9 @@ class GameState:
         exactly one AI/robot reply.  A Black move is an operator correction:
         it cancels any in-flight AI result and hands the turn back to Red.
         """
+        if self.manual_rollback.active:
+            return False
+        self.manual_rollback.invalidate()
         # An operator edit supersedes any unverified robot transition.  Never
         # let a later Continue overwrite the corrected client position.
         self.pending_ai_move = None
@@ -452,6 +469,7 @@ class GameState:
         color = self.turn
         if color == "r":
             self.process_human_move(src, dst, p_name)
+            self.manual_rollback.invalidate()
             return
 
         print(f"[EMERGENCY] ✅ Manual Black move: {p_name} {xiangqi.format_move(src, dst)}")
