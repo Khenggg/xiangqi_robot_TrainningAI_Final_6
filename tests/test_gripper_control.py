@@ -111,6 +111,22 @@ class GripperControlTests(unittest.TestCase):
             robot.gripper_ctrl(config.GRIPPER_ACTION_OPEN_MAX)
         self.assertEqual(robot.robot.calls, [])
 
+    @patch('src.hardware.robot_VIP.time.sleep')
+    def test_initial_low_failure_reports_each_output_and_cancels_before_motion(self, _sleep):
+        robot = self.make_gripper()
+        robot.robot.failing_indexes = {1, 2}
+        with patch.object(robot, 'board_to_pose', return_value=[0] * 6), \
+                patch.object(robot, '_pick_outward_offset', return_value=[0, 0]), \
+                patch.object(robot, 'move_safe_pose') as approach, \
+                patch.object(robot, 'movel_pose') as descend:
+            with self.assertRaisesRegex(GripperCommandError, r'DO1=LOW: .*77.*DO0=LOW: .*77') as caught:
+                robot.pick_at(2, 3)
+        approach.assert_not_called()
+        descend.assert_not_called()
+        self.assertEqual([(config.GRIPPER_OPEN_DO_ID, 0, 0),
+                          (config.GRIPPER_CLOSE_DO_ID, 0, 0)], robot.robot.calls)
+        self.assertIsInstance(caught.exception.__cause__, GripperCommandError)
+
     def test_invalid_timing_is_rejected_before_io(self):
         robot = self.make_gripper()
         with patch.object(config, "GRIPPER_OPEN_MAX_PULSE_SEC", "fast"):

@@ -204,9 +204,11 @@ class SingleAttemptTransport(xmlrpc.client.Transport):
     Callers must reconcile the physical board before attempting another move.
     """
 
-    def __init__(self, timeout=10.0):
+    def __init__(self, timeout=10.0, cancel_check=None):
         super().__init__()
         self.timeout = float(timeout)
+        self._request_lock = threading.Lock()
+        self.cancel_check = cancel_check
         if self.timeout <= 0 or not math.isfinite(self.timeout):
             raise ValueError("RPC timeout must be finite and positive")
 
@@ -220,13 +222,22 @@ class SingleAttemptTransport(xmlrpc.client.Transport):
     def request(self, host, handler, request_body, verbose=False):
         # Transport.request normally retries RemoteDisconnected/ECONNRESET once.
         # Even one resend is unsafe for a motion with an ambiguous response.
-        try:
-            return self.single_request(host, handler, request_body, verbose)
-        except (OSError, http.client.HTTPException, xmlrpc.client.Error, ExpatError) as exc:
+        with self._request_lock:
+            if self.cancel_check is not None and self.cancel_check():
+                raise RobotCommunicationError('Robot connection closed before send; command not sent')
+            # A controller can expire keepalive while the player is thinking.
+            # Start each distinct command on a fresh socket rather than replay
+            # a command after discovering that its cached socket was stale.
             self.close()
-            raise RobotCommunicationError(
-                "Robot RPC failed; command completion is unknown; automatic replay disabled"
-            ) from exc
+            try:
+                return self.single_request(host, handler, request_body, verbose)
+            except (OSError, http.client.HTTPException, xmlrpc.client.Error, ExpatError) as exc:
+                raise RobotCommunicationError(
+                    f"Robot RPC failed ({type(exc).__name__}: {exc}); "
+                    "command completion is unknown; automatic replay disabled"
+                ) from exc
+            finally:
+                self.close()
 
 
 def xmlrpc_timeout(func):
@@ -294,7 +305,8 @@ class RPC():
         self.lock = threading.Lock()  # 增加锁
         self.ip_address = ip
         link = 'http://' + self.ip_address + ":20003"
-        self.robot = xmlrpc.client.ServerProxy(link, transport=SingleAttemptTransport(self.rpc_timeout))#xmlrpc连接机器人20003端口，用于发送机器人指令数据帧
+        self.robot = xmlrpc.client.ServerProxy(link, transport=SingleAttemptTransport(
+            self.rpc_timeout, cancel_check=lambda: self.closeRPC_state or self.stop_event.is_set()))
 
         self.sock_cli_state = None
         self.robot_realstate_exit = False

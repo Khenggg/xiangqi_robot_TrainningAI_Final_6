@@ -5,6 +5,7 @@ import threading
 import time
 import unittest
 import xmlrpc.client
+from xmlrpc.server import SimpleXMLRPCRequestHandler, SimpleXMLRPCServer
 from unittest.mock import Mock, patch
 from xml.parsers.expat import ExpatError
 
@@ -20,6 +21,7 @@ class RobotTransportSafetyTests(unittest.TestCase):
         rpc.reconnect_flag = False
         rpc.closeRPC_state = False
         rpc.is_conect = True
+        transport.cancel_check = lambda: rpc.closeRPC_state or rpc.stop_event.is_set()
         rpc.GetSafetyCode = Mock(return_value=0)
         return rpc
 
@@ -44,6 +46,83 @@ class RobotTransportSafetyTests(unittest.TestCase):
                             getattr(rpc, method)(**args)
                     self.assertEqual(send.call_count, 1)
                     self.assertEqual(xmlrpc.client.loads(send.call_args.args[2])[1], method)
+
+    def test_idle_peer_closed_connection_does_not_break_next_distinct_command(self):
+        """A loopback controller fixture closes keepalive after a valid reply."""
+        peer_closed = threading.Event()
+        received = []
+
+        class ClosingHandler(SimpleXMLRPCRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def do_POST(self):
+                super().do_POST()
+                self.close_connection = True
+
+            def finish(self):
+                super().finish()
+                try:
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                self.connection.close()
+                peer_closed.set()
+
+        server = SimpleXMLRPCServer(('127.0.0.1', 0), requestHandler=ClosingHandler,
+                                    logRequests=False, allow_none=True)
+        def set_output(*args):
+            received.append(args)
+            return 0
+        server.register_function(set_output, 'SetToolDO')
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        transport = sdk.SingleAttemptTransport(timeout=1)
+        rpc = self.rpc(transport)
+        rpc.robot = xmlrpc.client.ServerProxy(f'http://127.0.0.1:{server.server_address[1]}', transport=transport)
+        try:
+            self.assertEqual(0, rpc.SetToolDO(0, 0))
+            self.assertTrue(peer_closed.wait(2))
+            self.assertEqual(0, rpc.SetToolDO(1, 0))
+            self.assertEqual([(0, 0, 0, 0), (1, 0, 0, 0)], received)
+        finally:
+            transport.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+
+    def test_queued_output_is_cancelled_if_connection_closes_while_waiting(self):
+        transport = sdk.SingleAttemptTransport()
+        rpc = self.rpc(transport)
+        gate_passed = threading.Event()
+        failures = []
+        original_gate = rpc._wait_for_reconnect
+
+        def gate():
+            original_gate()
+            gate_passed.set()
+
+        def command():
+            try:
+                rpc.SetToolDO(0, 1)
+            except Exception as exc:
+                failures.append(exc)
+
+        worker = threading.Thread(target=command)
+        with patch.object(rpc, '_wait_for_reconnect', side_effect=gate), \
+                patch.object(transport, 'single_request') as send:
+            try:
+                with transport._request_lock:
+                    worker.start()
+                    self.assertTrue(gate_passed.wait(2))
+                    rpc.stop_event.set()
+            finally:
+                rpc.stop_event.set()
+                worker.join(2)
+            self.assertFalse(worker.is_alive())
+            send.assert_not_called()
+        self.assertEqual(1, len(failures))
+        self.assertIsInstance(failures[0], sdk.RobotCommunicationError)
+        self.assertIn('command not sent', str(failures[0]))
 
     def test_http_connections_have_a_real_socket_timeout(self):
         transport = sdk.SingleAttemptTransport(timeout=.25)

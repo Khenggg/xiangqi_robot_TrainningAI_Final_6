@@ -1,5 +1,6 @@
 import time
 import math
+import traceback
 from src.core import xiangqi  # type: ignore
 from src.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT,
                                    BTN_CONTINUE_RECT, BTN_SCAN_FEN_RECT, BTN_CONFIRM_MOVE_RECT,
@@ -227,6 +228,7 @@ class InputHandler:
         except PickTargetUnavailable as exc:
             self.state.pause_visual_pick("ai", source, destination, exc)
         except Exception as exc:
+            traceback.print_exc()
             if self.state.pending_ai_move is None:
                 self.state.manual_override_active = True
                 self.state.set_status(f"FEN đã cập nhật; lỗi đồng bộ: {exc}. V để lấy lại baseline.", duration=30)

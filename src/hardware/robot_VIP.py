@@ -629,9 +629,10 @@ class FR5Robot:
             try:
                 self._set_tool_do(output_id, config.GRIPPER_IDLE_STATUS)
             except Exception as exc:
-                failures.append(exc)
+                failures.append((output_id, exc))
         if failures:
-            raise GripperCommandError("Could not force both gripper outputs LOW") from failures[0]
+            details = '; '.join(f'DO{output_id}=LOW: {exc}' for output_id, exc in failures)
+            raise GripperCommandError(f'Gripper LOW failed — {details}') from failures[0][1]
 
     def gripper_ctrl(self, action):
         """Pulse one gripper motor direction, then leave both Tool DO outputs LOW."""

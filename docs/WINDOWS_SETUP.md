@@ -35,6 +35,12 @@ Nếu chủ động chuyển sang chế độ height/ring cần nội tại ốn
 
 Cửa sổ giữ lại thông báo lỗi. Log nằm trong thư mục `logs`, tên bắt đầu bằng `setup-windows-` hoặc `run-windows-`. Gửi log mới nhất khi cần hỗ trợ.
 
+Nếu client báo `Gripper LOW failed`, xem ngõ ra `DO0/DO1`, mã lỗi controller
+hoặc lỗi RPC trong thông báo và traceback ở log RUN. Client giữ nước AI pending
+và dừng trước thao tác tiếp theo; đã nhận nước người chơi không có nghĩa là lệnh
+kẹp của robot đã thực hiện thành công. Mỗi RPC dùng kết nối HTTP mới để tránh
+socket cũ hết hạn trong lúc chờ, và không tự gửi lại lệnh khi mất phản hồi.
+
 Nếu tải thư viện bị gián đoạn, kiểm tra Internet rồi double-click SETUP lại. Có thư mục `.venv312` chưa có nghĩa là đã cài đủ; chỉ coi setup hoàn tất khi có thông báo **Setup complete**.
 
 Nếu báo thiếu model/tài nguyên, kiểm tra đã giải nén hoặc clone đầy đủ đúng nhánh. File `best.pt` không thay thế thư viện Ultralytics: cần cả file trọng số và môi trường Python hợp lệ.
