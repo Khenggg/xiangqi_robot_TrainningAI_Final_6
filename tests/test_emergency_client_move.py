@@ -231,9 +231,6 @@ class EmergencyClientMoveTests(unittest.TestCase):
             def set_status(self, *args, **kwargs):
                 pass
 
-            def save_rollback_state(self, *args):
-                pass
-
             def process_human_move(self, *args):
                 self.turn = "b"
 
@@ -249,7 +246,7 @@ class EmergencyClientMoveTests(unittest.TestCase):
             self.assertTrue(handler._handle_space_key())
         self.assertFalse(state.manual_override_active)
 
-    def test_emergency_click_move_saves_rollback_state(self):
+    def test_emergency_click_move_commits_selected_move(self):
         class Detector:
             _baseline_occ = [[False for _ in range(9)] for _ in range(10)]
             _baseline_time = 4.0
@@ -267,13 +264,10 @@ class EmergencyClientMoveTests(unittest.TestCase):
             board = xiangqi.get_board()
 
             def __init__(self):
-                self.rollback = None
-
-            def save_rollback_state(self, occ, baseline_time):
-                self.rollback = (occ, baseline_time)
+                self.moves = []
 
             def process_human_move(self, *args):
-                pass
+                self.moves.append(args)
 
         class Hardware:
             yolo_detector = Detector()
@@ -286,8 +280,7 @@ class EmergencyClientMoveTests(unittest.TestCase):
             handler.handle_mouse_down(0, 0)
             handler.handle_mouse_down(0, 0)
 
-        self.assertIsNotNone(state.rollback)
-        self.assertEqual(4.0, state.rollback[1])
+        self.assertEqual([((0, 6), (0, 5), "r_P")], state.moves)
 
     def test_continue_restarts_snapshot_scanning_from_current_fen(self):
         class State:

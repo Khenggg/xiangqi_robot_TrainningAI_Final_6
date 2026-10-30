@@ -62,25 +62,24 @@ class HardwareManager:
             8: "r_A", 9: "r_C", 10: "r_R", 11: "r_E", 12: "r_K", 13: "r_N", 14: "r_P",
         }
 
-    def initialize_all(self, *, recovery_mode=False):
+    def initialize_all(self):
         """Khởi tạo toàn bộ Robot, AI, Camera theo đúng thứ tự."""
-        self.recovery_mode = bool(recovery_mode)
         self._init_ai()
-        self._init_robot(recovery_mode=True) if recovery_mode else self._init_robot()
+        self._init_robot()
         self._init_camera()
         return self
 
-    def _init_robot(self, recovery_mode=False):
+    def _init_robot(self):
         if not self.dry_run:
             try:
-                self.robot.connect(recovery_mode=True) if recovery_mode else self.robot.connect()
+                self.robot.connect()
                 print("[MAIN] ✅ Robot kết nối thành công.")
             except Exception as e:
                 print(f"⚠️ [MAIN] Robot connection error: {e}")
                 print("   → Tiếp tục chạy KHÔNG có robot (camera + calibrate vẫn hoạt động)")
                 self.robot.connected = False
 
-            if self.robot.connected and not recovery_mode:
+            if self.robot.connected:
                 try:
                     self.robot.go_to_home_chess()
                 except Exception as e:
@@ -89,8 +88,7 @@ class HardwareManager:
             print("[MAIN] DRY_RUN: Skipping physical robot connection.")
             self.robot.connected = False
 
-        if not recovery_mode:
-            self._calibrate_robot()
+        self._calibrate_robot()
 
     def _calibrate_robot(self):
         print("\n--- ROBOT CALIBRATION (R1 ORIGIN) ---")
@@ -345,8 +343,7 @@ class HardwareManager:
         if self.cap and self.cap.isOpened():
             try: self.cap.release()
             except: pass
-        if (self.robot and self.robot.connected and not self.dry_run
-                and not getattr(self, 'recovery_mode', False)):
+        if self.robot and self.robot.connected and not self.dry_run:
             try: self.robot._set_gripper_safe_idle()
             except Exception as e: print(f"[CLEANUP] ⚠️ Không thể tắt gripper Tool DO: {e}")
             try: self.robot.robot.RobotEnable(0)
@@ -823,128 +820,6 @@ class HardwareManager:
             print("[BOARD SYNC] Robot motion blocked: board/pick state was not stable enough.")
         return targets, verified
 
-    def verify_rollback_board(self, expected_board, *, allowed_missing_cells=(),
-                              min_samples=3, stable_seconds=1.0, timeout=6.0,
-                              min_confidence=None, cancel_check=None):
-        """Prove a complete layout on consecutive new raw camera exposures.
-
-        This deliberately does not reuse legacy post-move verification: identity
-        confidence and occupancy in the active pick mapping are mandatory.
-        Only listed restoration squares may remain empty during WAIT_PLAYER.
-        """
-        allowed = {tuple(cell) for cell in allowed_missing_cells}
-        required = max(3, int(min_samples))
-        duration = max(1., float(stable_seconds))
-        threshold = float(min_confidence if min_confidence is not None else
-                          getattr(self.config, 'ROLLBACK_LAYOUT_MIN_CONFIDENCE', .7))
-        def report():
-            return dict(matched=False, complete=False, stable_samples=0, stable_seconds=0.,
-                        observed_board=None, missing=[], extra=[], wrong=[], unknown=[],
-                        low_confidence=[], geometry_errors=[], errors=[])
-        result = report()
-        if (len(expected_board) != 10 or any(len(row) != 9 for row in expected_board)
-                or any(p in ('x', '?', None) for row in expected_board for p in row)
-                or not 0 < threshold <= 1 or not np.isfinite(timeout) or timeout <= 0):
-            result['errors'] = ['Invalid rollback proof request']
-            return result
-        if not getattr(self, 'cam_monitor', None):
-            result['errors'] = ['Raw camera unavailable']
-            return result
-        started = time.monotonic()
-        consecutive, first_good, previous_layout = 0, None, None
-        # Keep references so Python cannot recycle object IDs during this proof.
-        frames = []
-        while time.monotonic() - started < timeout:
-            result = report()
-            if cancel_check and cancel_check():
-                result['errors'] = ['Rollback verification cancelled']
-                return result
-            try:
-                frame, detections = self.cam_monitor.get_fresh_pick_snapshot()
-                if frame is None or any(frame is item for item in frames):
-                    raise ValueError('No new raw camera frame')
-                frames.append(frame)
-                recognition = self.recognize_board_state(frame)
-                if not recognition or not recognition.get('success'):
-                    raise ValueError('Board identity recognition unavailable')
-                observed = recognition.get('board')
-                confidence = np.asarray(recognition.get('confidence'), dtype=float)
-                if (observed is None or len(observed) != 10 or any(len(row) != 9 for row in observed)
-                        or confidence.shape != (10, 9)):
-                    raise ValueError('Board or layout confidence shape invalid')
-                result['observed_board'] = [list(row) for row in observed]
-                estimator = self._occupancy_estimator(frame)
-                valid_estimator = (
-                    isinstance(estimator, VisualPickEstimator) and estimator.point_mode == 'foot'
-                    if pvp_pick_enabled(self.config) else isinstance(estimator, HeightPickEstimator))
-                if not valid_estimator:
-                    result['geometry_errors'].append('Configured occupancy geometry required')
-                else:
-                    for detection in detections:
-                        if not np.isfinite(float(detection[1])) or float(detection[1]) < estimator.min_confidence:
-                            result['geometry_errors'].append('Uncertain raw occupancy detection')
-                for row in range(10):
-                    for col in range(9):
-                        cell = (col, row)
-                        piece, expected = observed[row][col], expected_board[row][col]
-                        if piece in ('x', '?', None):
-                            result['unknown'].append(cell)
-                        if not np.isfinite(confidence[row][col]) or confidence[row][col] <= threshold:
-                            result['low_confidence'].append(cell)
-                        if piece != expected:
-                            if piece == '.' and expected != '.':
-                                result['missing'].append(cell)
-                            elif expected == '.':
-                                result['extra'].append(cell)
-                            else:
-                                result['wrong'].append(cell)
-                        if valid_estimator:
-                            occupied = self._cell_has_center_detection(detections, cell, estimator)
-                            if occupied != (piece not in ('.', 'x', '?', None)):
-                                result['geometry_errors'].append(cell)
-                            # Whole-board proof establishes identity/occupancy,
-                            # not pickability of every unrelated/restored piece.
-                            # Coordinator requires a fresh measured source target
-                            # immediately before each individual transfer.
-                invalid = any(result[key] for key in ('extra', 'wrong', 'unknown', 'low_confidence', 'geometry_errors'))
-                invalid = invalid or any(cell not in allowed for cell in result['missing'])
-                for category in ('missing', 'extra', 'wrong', 'unknown', 'low_confidence'):
-                    for col, row in result[category]:
-                        if category == 'missing' and (col, row) in allowed:
-                            continue
-                        result['errors'].append(
-                            f'{category} at {(col, row)}: expected {expected_board[row][col]}, '
-                            f'observed {observed[row][col]}, confidence {confidence[row][col]:.3f}')
-                for issue in result['geometry_errors']:
-                    if isinstance(issue, tuple):
-                        col, row = issue
-                        result['errors'].append(f'Occupancy mismatch at {issue}: '
-                            f'expected {expected_board[row][col]}, observed {observed[row][col]}')
-                    else:
-                        result['errors'].append(str(issue))
-                layout = tuple(tuple(row) for row in observed)
-                now = time.monotonic()
-                if invalid:
-                    consecutive, first_good, previous_layout = 0, None, None
-                else:
-                    if layout != previous_layout:
-                        consecutive, first_good = 0, now
-                    consecutive += 1
-                    previous_layout = layout
-                    result['stable_samples'] = consecutive
-                    result['stable_seconds'] = now - first_good
-                    if consecutive >= required and now - first_good >= duration:
-                        result['matched'] = True
-                        result['complete'] = not result['missing']
-                        # Transient evidence is not included in any durable journal.
-                        result['frame'], result['detections'] = frame, detections
-                        return result
-            except Exception as exc:
-                consecutive, first_good, previous_layout = 0, None, None
-                result['errors'] = [str(exc)]
-            time.sleep(.05)
-        return result
-
     def verify_physical_board(self, expected_board):
         """Confirm the board after the robot has placed a piece before FEN commit."""
         if not self.board_reconciler or not self.cam_monitor:
@@ -1003,11 +878,6 @@ class HardwareManager:
         """
         provider = getattr(self, "occlusion_provider", None)
         return bool(provider()) if callable(provider) else False
-
-    def restore_yolo_baseline(self, occ, baseline_time):
-        if self.yolo_detector and occ is not None:
-            self.yolo_detector._baseline_occ = [row[:] for row in occ]
-            self.yolo_detector._baseline_time = baseline_time
 
     def recognize_board_state(self, frame=None):
         """Nhận diện toàn bộ bàn cờ (10x9) bằng CChessRecognizer ONNX models.

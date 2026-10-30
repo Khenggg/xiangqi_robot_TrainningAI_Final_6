@@ -1,3 +1,5 @@
+> Historical design: rollback has been removed. This document does not describe the current runtime.
+
 # Spec: Hoàn tác vật lý cycle Đỏ–Đen gần nhất
 
 **Date:** 2026-10-28

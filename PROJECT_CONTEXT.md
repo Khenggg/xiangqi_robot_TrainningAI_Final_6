@@ -40,7 +40,7 @@ xiangqi_robot_TrainningAI_Final_6/
 │   ├── core/                     # TẦNG LOGIC CỜ TƯỚNG (THUẦN TÚY, KHÔNG DEPENDENCY UI)
 │   │   ├── xiangqi.py            # Toàn bộ luật cờ tướng: is_valid_move, check/checkmate, Zobrist hash
 │   │   ├── fen_utils.py          # Chuyển đổi qua lại giữa Board Array 10x9 và chuỗi FEN chuẩn
-│   │   └── game_state.py         # Quản lý vòng đời trạng thái ván cờ, FEN, lượt đi, rollback
+│   │   └── game_state.py         # Quản lý vòng đời trạng thái ván cờ, FEN, lượt đi
 │   │
 │   ├── vision/                   # TẦNG THỊ GIÁC MÁY TÍNH
 │   │   ├── calibrate_camera.py   # Hiệu chỉnh 4 góc bàn cờ (Perspective Transform) tạo perspective.npy
@@ -59,7 +59,7 @@ xiangqi_robot_TrainningAI_Final_6/
 │   │
 │   ├── ui/                       # TẦNG GIAO DIỆN
 │   │   ├── board_renderer.py     # Render Pygame 800x600, vẽ bàn cờ, quân cờ, hiệu ứng nước đi
-│   │   └── input_handler.py      # Xử lý phím SPACE (chụp T2), phím Z (Rollback), chuột (Manual Override)
+│   │   └── input_handler.py      # Xử lý phím SPACE (chụp T2), chuột (Manual Override)
 │   │
 │   └── api/
 │       └── simulation_client.py  # Client đẩy nước đi FEN trực tiếp lên tuongkydaisu.com cho khán giả xem
@@ -162,8 +162,6 @@ ret, frame = self.cap.read()
    - Robot di chuyển đến $src \rightarrow$ gắp quân Đen $\rightarrow$ đặt vào $dst \rightarrow$ lùi về vị trí `HOMECHESS`.
    - Hệ thống đợi 1.0s và tự động gọi `capture_baseline_if_needed()` để lấy **Baseline T1 mới**.
    - Chuyển lại lượt cho Người chơi Đỏ.
-4. **Hoàn tác (Rollback):**
-   - Bấm phím `Z`: Khôi phục lại trạng thái FEN, mảng cờ và cả frame baseline T1 trước đó.
 
 ---
 

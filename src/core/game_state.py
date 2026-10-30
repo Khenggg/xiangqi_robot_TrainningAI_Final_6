@@ -60,8 +60,6 @@ class GameState:
         self.ai_results: Dict[Any, Any] = {}
         self.ai_retry_requested: bool = False
         
-        # Rollback State
-        self._pre_space_state: Optional[Dict[str, Any]] = None
         self.manual_override_active: bool = False
         # Set only when the snapshot/FEN pipeline has explicitly paused the
         # game.  Emergency mode is a separate, deliberate control mode.
@@ -79,12 +77,6 @@ class GameState:
         self.visual_pick_retry = None
         self.visual_capture_checkpoint = None
         self.remote_sync_pending = False
-        from src.core.rollback_runtime import RollbackRuntime
-        self.rollback_runtime = RollbackRuntime(self)
-
-    def rollback_is_blocked(self):
-        runtime = getattr(self, 'rollback_runtime', None)
-        return bool(runtime and runtime.blocked)
 
     def update_fen_from_board(self):
         """Cập nhật current_fen từ board array hiện tại."""
@@ -111,17 +103,9 @@ class GameState:
                                   if getattr(self, "visual_pick_retry", None) else None),
             "recent_moves": self.move_log[-8:],
         }
-        runtime = getattr(self, 'rollback_runtime', None)
-        if runtime:
-            rendered.update(runtime.render_state())
-            if any(entry.get('rolled_back') for entry in runtime.move_audit):
-                rendered['recent_moves'] = runtime.move_audit[-8:]
         return rendered
 
     def reset_game(self, hw_manager=None):
-        if self.rollback_is_blocked():
-            self.set_status('Hoàn tất hoặc phục hồi/hủy rollback trước New Game.', duration=30)
-            return False
         # [API] Đóng room cũ trước khi tạo game mới
         if self.api_client.room_id:
             print("[GAME] 🔚 Đóng room cũ trước khi tạo game mới...")
@@ -138,7 +122,6 @@ class GameState:
             # target that room while its asynchronous close is outstanding.
             self.api_client.room_id = None
         
-        self._pre_space_state = None
         discard = getattr(self.api_client, "discard_unassigned_fen", None)
         if callable(discard):
             discard()
@@ -193,7 +176,6 @@ class GameState:
         # [API] Tạo room mới (nếu không ở chế độ DRY_RUN)
         if not config.DRY_RUN:
             self.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
-        self.rollback_runtime.reset()
 
     def set_status(self, msg, color=(200, 0, 0), duration=2.5):
         self.status_message = msg
@@ -207,122 +189,33 @@ class GameState:
     def handle_game_over(self, the_winner, reason='CHECKMATE'):
         if self.game_over:
             return False
-        runtime = self.rollback_runtime
-        if (runtime.recovery_error or runtime.restart_pending or runtime.pending_sync
-                or (runtime.coordinator is not None and runtime.coordinator.active)):
-            return False
-        self.rollback_runtime.invalidate('game_over')
         self.visual_pick_retry = None
         self.winner = the_winner
         self.game_over_reason = reason
         self.game_over = True
         self.ai_epoch += 1
         self.ai_job_token = None
-        self.rollback_runtime.needs_seal = False
-        self.rollback_runtime.persist()
         return True
 
     def check_no_legal_moves(self):
         """End only a committed position; no engine/camera result proves a loss."""
         if self.game_over:
             return True
-        runtime = self.rollback_runtime
-        # A verified Black commit can await baseline sealing. A terminal board
-        # needs no next-turn baseline; handle_game_over invalidates that cycle.
-        if (runtime.recovery_error or runtime.restart_pending or runtime.pending_sync
-                or (runtime.coordinator is not None and runtime.coordinator.active)
-                or self.pending_ai_move is not None
-                or self.physical_sync_fault):
+        if self.pending_ai_move is not None or self.physical_sync_fault:
             return False
         side = self.turn
         king_missing = xiangqi.get_king_pos(side, self.board) is None
         if not king_missing and xiangqi.find_all_valid_moves(side, self.board):
             return False
         winner = 'b' if side == 'r' else 'r'
-        reason = 'CHECKMATE' if king_missing else 'NO_LEGAL_MOVES'
+        reason = ('CHECKMATE' if king_missing or xiangqi.is_king_in_check(side, self.board)
+                  else 'NO_LEGAL_MOVES')
         if not self.handle_game_over(winner, reason=reason):
             return False
         self.sync_remote_board()
         # Preserve the server's established terminal-result vocabulary.
         self.api_client.end_match(winner='BLACK' if winner == 'b' else 'RED', reason='CHECKMATE')
         return True
-
-    def save_rollback_state(self, baseline_occ=None, baseline_time=None):
-        self._pre_space_state = {
-            "game_epoch": self.game_epoch,
-            "board": [row[:] for row in self.board],
-            "turn": self.turn,
-            "last_move": self.last_move,
-            "current_fen": self.current_fen,
-            "move_number": self.move_number,
-            "r_captured": list(self.r_captured),
-            "b_captured": list(self.b_captured),
-            "move_history": list(self.move_history),
-            "move_log": list(self.move_log),
-            "baseline_occ": baseline_occ,
-            "baseline_time": baseline_time,
-        }
-        # Compatibility snapshot for legacy recovery; it does not authorize Z.
-
-    def handle_rollback(self, hw_manager=None):
-        """Rollback về trạng thái trước khi bấm SPACE lần cuối (phím Z)."""
-        if self.rollback_runtime.journal is not None:
-            self.rollback_runtime.attach_hardware(hw_manager)
-            return self.rollback_runtime.start()
-        if self._pre_space_state is None:
-            print("[ROLLBACK] ⚠️ Không có state để rollback!")
-            self.set_status("⚠️  Không có nước nào để rollback!", color=(180, 100, 0), duration=2.5)
-            return
-
-        if self._pre_space_state.get("game_epoch") != self.game_epoch:
-            self._pre_space_state = None
-            self.set_status("Snapshot rollback thuộc ván cũ; đã bỏ qua.", duration=5.0)
-            return
-        # Logical rollback cannot undo a real robot motion. Cancel its old
-        # transition, then require a fresh full-board proof before any move.
-        self.pending_ai_move = None
-        self.physical_sync_fault = True
-        self.selected_pos = None
-        self.game_over = False
-        self.winner = None
-        self.game_over_reason = None
-        print("[ROLLBACK] ↩️ Khôi phục trạng thái trước SPACE...")
-        self.visual_pick_retry = None
-        self.visual_capture_checkpoint = None
-        self.game_epoch += 1
-        self.ai_epoch += 1
-        self.ai_job_token = None
-        self.ai_results = {}
-        self.ai_retry_requested = False
-        self.ai_thread = None
-        self.ai_result = None
-        self.ai_failure = None
-        self.ai_thinking = False
-        s = self._pre_space_state
-        self.board = [row[:] for row in s["board"]]
-        self.turn = s["turn"]
-        self.last_move = s["last_move"]
-        self.current_fen = s["current_fen"]
-        self.move_number = s["move_number"]
-        self.r_captured = list(s["r_captured"])
-        self.b_captured = list(s["b_captured"])
-        self.move_history = list(s["move_history"])
-        self.move_log = list(s.get("move_log", []))
-
-        if hw_manager:
-            hw_manager.restore_yolo_baseline(s.get("baseline_occ"), s.get("baseline_time"))
-
-        print("[ROLLBACK] 📸 T1 baselines restored.")
-
-        self._pre_space_state = None   # Xóa sau khi rollback
-        self.sync_remote_board()
-        self.set_status("↩️ FEN đã rollback. Khôi phục bàn thật rồi V/SPACE để xác nhận.", color=(180, 100, 0), duration=3600)
-        print(f"[ROLLBACK] ✅ Done. FEN: {self.current_fen}")
-        
-        self.manual_override_active = True
-        self.snapshot_continue_required = True
-        self.snapshot_continue_can_commit_pending = False
-        self.emergency_mode = False
 
     def set_pending_ai_move(self, move, expected_board, captured_piece):
         """Remember the only state transition a fault-recovery may commit."""
@@ -364,7 +257,6 @@ class GameState:
 
     def refresh_remote_sync_status(self):
         """Main-loop polling is read-only; the client worker owns HTTP retries."""
-        self.rollback_runtime.retry_pending_sync()
         refresh = getattr(self.api_client, "refresh_sync", None)
         if callable(refresh) and not config.DRY_RUN:
             refresh()
@@ -373,8 +265,6 @@ class GameState:
             self.remote_sync_pending = False
         elif isinstance(pending, bool):
             self.remote_sync_pending = pending
-        if self.rollback_runtime.pending_sync:
-            self.remote_sync_pending = True
         suffix = " | FEN máy chủ chưa đồng bộ; đang thử lại."
         rejected = " | Máy chủ từ chối FEN; cần kiểm tra kết nối/token/FEN."
         missing = " | Chưa có room máy chủ; FEN đang chờ tạo room."
@@ -476,8 +366,7 @@ class GameState:
     def can_start_ai_turn(self):
         """Whether the main loop may create exactly one Black AI worker."""
         return (
-            not self.rollback_is_blocked()
-            and not getattr(self, "physical_motion_busy", False)
+            not getattr(self, "physical_motion_busy", False)
             and not getattr(self, "pick_test_mode", False)
             and not getattr(self, "visual_pick_retry", None)
             and not getattr(self, "physical_sync_fault", False)
@@ -504,12 +393,11 @@ class GameState:
 
     def commit_pending_ai_move(self):
         """Atomically commit a camera-verified physical AI move to the FEN board."""
-        if self.rollback_is_blocked() or not self.pending_ai_move_is_current():
+        if not self.pending_ai_move_is_current():
             return False
         pending = self.pending_ai_move
         src, dst = pending["move"]
         captured_piece = pending["captured_piece"]
-        moving_piece = self.board[src[1]][src[0]]
         self._record_move("b", src, dst, self.board[src[1]][src[0]])
         if captured_piece != ".":
             self.r_captured.append(captured_piece)
@@ -521,16 +409,10 @@ class GameState:
         self.physical_sync_fault = False
         self.visual_pick_retry = None
         self.visual_capture_checkpoint = None
-        self.rollback_runtime.black_committed(src, dst, moving_piece, captured_piece)
         self.check_no_legal_moves()
         return True
 
-    def process_human_move(self, src, dst, p_name, *, rollback_eligible=True):
-        if self.rollback_is_blocked():
-            return False
-        from src.core.rollback_cycle import StateSnapshot
-        before = StateSnapshot.from_state(self)
-        victim = self.board[dst[1]][dst[0]]
+    def process_human_move(self, src, dst, p_name):
         print(f"[HUMAN] ✅ Moved: {p_name} {xiangqi.format_move(src, dst)}")
         self.set_status("✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
         
@@ -546,8 +428,6 @@ class GameState:
         self.human_commit_generation += 1
         self.move_number += 1
         self.update_fen_from_board()
-        self.rollback_runtime.human_committed(before, src, dst, p_name, victim,
-                                               eligible=rollback_eligible)
         print(f"[FEN] {self.current_fen}")
         
         # [API] Đồng bộ nước đi lên máy chủ Simulation
@@ -561,9 +441,6 @@ class GameState:
         exactly one AI/robot reply.  A Black move is an operator correction:
         it cancels any in-flight AI result and hands the turn back to Red.
         """
-        if self.rollback_is_blocked():
-            return False
-        self.rollback_runtime.invalidate('emergency')
         # An operator edit supersedes any unverified robot transition.  Never
         # let a later Continue overwrite the corrected client position.
         self.pending_ai_move = None
@@ -574,7 +451,7 @@ class GameState:
         self.snapshot_continue_can_commit_pending = False
         color = self.turn
         if color == "r":
-            self.process_human_move(src, dst, p_name, rollback_eligible=False)
+            self.process_human_move(src, dst, p_name)
             return
 
         print(f"[EMERGENCY] ✅ Manual Black move: {p_name} {xiangqi.format_move(src, dst)}")
@@ -596,7 +473,6 @@ class GameState:
         self.ai_results = {}
         self.ai_retry_requested = False
         self.update_fen_from_board()
-        self.rollback_runtime.persist()
         self.set_status("✅ Emergency Black move accepted — Red to move.", color=(0, 120, 0), duration=6.0)
         if not self.check_no_legal_moves():
             self.sync_remote_board()

@@ -25,6 +25,7 @@ sys.path.insert(0, _BASE_DIR)
 
 import config  # type: ignore
 from src.core import xiangqi  # type: ignore
+from src.ai.ai_controller import ai_think_budget_seconds
 
 from src.core.game_state import GameState  # type: ignore
 from src.core.ai_turn_flow import AIJobResult, evaluate_ai_result, dispatch_pending_ai_move
@@ -83,8 +84,6 @@ def canvas_position(position):
 state = GameState(allow_mouse_move=config.DRY_RUN)
 state.api_client.configure_outbox(os.environ.get(
     'XIANGQI_OUTBOX_PATH', os.path.join(_BASE_DIR, 'logs', 'simulation-outbox.json')))
-rollback_recovered = state.rollback_runtime.configure(os.environ.get(
-    'XIANGQI_ROLLBACK_JOURNAL_PATH', os.path.join(_BASE_DIR, 'logs', 'rollback-journal.json')))
 hw = None
 input_mgr = None
 difficulty_menu_active = False
@@ -109,16 +108,10 @@ def set_debug_dashboard(enabled):
 
 def _start_selected_game():
     assert hw is not None
-    if rollback_recovered or state.rollback_runtime.blocked:
-        # The restored room/state owns this session; never substitute a fresh
-        # room or baseline for an unfinished physical transaction.
-        state.set_status('Đã tải journal. V đối soát; E xác nhận arm về nghỉ/kẹp rỗng để phục hồi.', duration=3600)
-        return
     hw.capture_baseline_if_needed(force_delay=1.0)
     if not config.DRY_RUN:
         state.api_client.discard_unassigned_fen()
         state.api_client.create_match(red_name="Người chơi Thật", black_name="Robot AI")
-    state.rollback_runtime.new_session()
 
 _cleanup_done = False
 
@@ -136,17 +129,11 @@ def _cleanup_all():
     # [API] Force Kết thúc trận đấu khi thoát chương trình
     try:
         if state and state.api_client:
-            if not state.rollback_runtime.preserve_room:
-                if state.rollback_runtime.close_session():
-                    state.api_client.end_match(reason="OTHER")
+            state.api_client.end_match(reason="OTHER")
             # Queued FEN/end jobs are durable even if the provider is offline.
             state.api_client.shutdown(wait_seconds=2.0)
     except: pass
     if hw is not None:
-        if state.rollback_runtime.preserve_room:
-            # A timed-out pick may still hold a piece. Cleanup must not open,
-            # de-energize or move that arm before operator recovery.
-            hw.recovery_mode = True
         hw.cleanup()
     if debug_dashboard is not None:
         debug_dashboard.close()
@@ -178,7 +165,6 @@ try:
             renderer.draw_ui(state.get_render_state())
             renderer.draw_pieces(state.pick_test_board if state.pick_test_mode else state.board)
             renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
-            renderer.draw_rollback_guides(state.get_render_state())
             if state.game_over:
                 renderer.draw_game_over(state.winner, state.game_over_reason)
         if difficulty_menu_active:
@@ -198,8 +184,7 @@ try:
                 if start_vs_robot:
                     # Connecting to the robot and calibrating the camera can block, so defer
                     # both until the player explicitly chooses to play against the robot.
-                    hw = HardwareManager(config, _BASE_DIR).initialize_all(
-                        recovery_mode=rollback_recovered or state.rollback_runtime.blocked)
+                    hw = HardwareManager(config, _BASE_DIR).initialize_all()
                     input_mgr = InputHandler(state, hw)
                     if debug_dashboard is not None:
                         debug_dashboard.robot = hw.robot
@@ -265,14 +250,16 @@ try:
                 state.ai_job_token = ai_job_token
                 state.ai_thinking = True
                 state.ai_think_start = time.time()
+                state.ai_think_deadline = time.monotonic() + ai_think_budget_seconds(config)
                 
                 def _ai_worker(job_token, position):
                     try:
                         outcome = AIJobResult(move=hw.ai_ctrl.pick_move(position, color="b"))
                     except Exception as exc:
                         outcome = AIJobResult(error=str(exc))
-                    # Reset/rollback can supersede a worker before it returns.
-                    if job_token == (state.game_epoch, state.ai_epoch, state.human_commit_generation):
+                    # Reset can supersede a worker before it returns.
+                    if (job_token == state.ai_job_token
+                            and job_token == (state.game_epoch, state.ai_epoch, state.human_commit_generation)):
                         state.ai_results[job_token] = outcome
                     
                 state.ai_thread = threading.Thread(target=_ai_worker, args=(ai_job_token, board_snapshot), daemon=True)
@@ -281,13 +268,21 @@ try:
 
             # --- Chờ Thread xong ---
             elif state.ai_thinking and state.ai_thread is not None:
-                if not state.ai_thread.is_alive():
+                timed_out = time.monotonic() >= state.ai_think_deadline
+                if timed_out or not state.ai_thread.is_alive():
                     state.ai_thinking = False
                     state.ai_thread = None
                     completed_token = state.ai_job_token
                     outcome = state.ai_results.pop(completed_token, AIJobResult(error="Worker không trả kết quả."))
+                    if timed_out:
+                        outcome = AIJobResult(error="AI quá thời hạn suy nghĩ; dùng nước hợp lệ dự phòng.")
                     state.ai_result = None
                     result_is_current = completed_token == (state.game_epoch, state.ai_epoch, state.human_commit_generation)
+                    state.ai_job_token = None
+                    if timed_out and result_is_current:
+                        # The abandoned worker cannot publish into this turn or
+                        # a later retry. The controller retains its engine slot.
+                        state.ai_epoch += 1
                     if not result_is_current:
                         print("[AI] Discarded stale worker result.")
                         best = None

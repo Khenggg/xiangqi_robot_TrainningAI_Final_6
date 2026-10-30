@@ -9,10 +9,8 @@
 
 ## Điểm gắp mặc định và calibration
 
-Nhánh `feat/player-vs-robot` gộp luồng gắp PvP v3 với rollback chu kỳ vật lý gần nhất.
-Rollback chỉ chạy kiểm tra riêng sau khi nhấn **Z**. Trước Z chỉ lưu hai nước gần
-nhất; game tiếp tục luồng vsc-v3, không quét liên tục để mở Z. Nếu chuẩn bị Z lỗi
-nhưng chưa di chuyển arm: V thử lại, E xác nhận arm/kẹp hoặc X hủy yêu cầu.
+Nhánh `feat/player-vs-robot` dùng luồng gắp PvP v3.
+Chức năng hoàn tác đã được gỡ bỏ; phím **Z** không thực hiện thao tác.
 Sau mỗi nước người chơi hoặc nước AI đã xác nhận, bên đến lượt không còn nước đi
 hợp lệ sẽ thua, kể cả khi chưa bị chiếu. Client hiển thị **BẠN THẮNG / AI THẮNG**
 kèm lý do hết nước; đầu hàng hiển thị lý do riêng. Lỗi engine hoặc nước robot chưa
@@ -47,7 +45,6 @@ Chưa có xác nhận độ chính xác gắp thật chỉ từ kiểm thử ph�
 ✅ Tính toán nước đi tốt nhất bằng AI  
 ✅ Điều khiển robot gắp/đặt quân chính xác ±0.1mm  
 ✅ Truyền hình trực tiếp lên web (tuongkydaisu.com)  
-✅ Rollback nước đi (phím Z)  
 ✅ Manual override khi camera lỗi  
 
 ### **Công nghệ sử dụng**
@@ -182,9 +179,6 @@ Dự-án-gốc/
     5. Cập nhật FEN bộ nhớ → chụp T1 baseline mới
     6. Quay lại lượt Người
 
-  [Rollback — phím Z]
-    → Khôi phục toàn bộ state (board, FEN, T1 baseline) về trước SPACE vừa bấm
-
 ### 2.2. BOARD & FEN
 
   Board lưu dạng list 10x9: board[row][col] = "r_P", "b_K", "."
@@ -224,7 +218,6 @@ Dự-án-gốc/
 ### 2.5. PHÍM TẮT
 
 - `SPACE` → Chụp T2 snapshot, detect nước đi người chơi
-- `Z` → Rollback về trước SPACE vừa bấm (undo 1 nước)
 - `Q` → Thoát cửa sổ camera
 
 ### 2.6. CHECKLIST
@@ -237,7 +230,6 @@ Dự-án-gốc/
   [x] Chỉnh PICK_Z/PLACE_Z (PICK_Z=183, PLACE_Z=190 — cập nhật 2026-03-06)
   [x] Pikafish config (PIKAFISH_EXE, PIKAFISH_NNUE, PIKAFISH_THINK_MS)
   [x] Tải Pikafish 2026-01-02
-  [x] Rollback (phím Z)
   [x] robot_VIP.py — Tool DO0/DO1 pulse gripper control
   [x] Tách file logic khỏi main.py vào kiến trúc Modular src/
   [x] Fix robot.connected bị set False sai khi go_to_home_chess lỗi
@@ -278,7 +270,7 @@ EXPORT:
 #### 3.1.3. `game_state.py`
 Chứa class `GameState`. Quản lý toàn bộ vòng đời data, xóa bỏ biến Global.
 Lưu giữ: `board`, `turn`, `current_fen`, `move_history`, `game_over`
-Method chính: `update_fen_from_board()`, `reset_game()`, `handle_rollback()`, `process_human_move()`, `handle_game_over()`.
+Method chính: `update_fen_from_board()`, `reset_game()`, `process_human_move()`, `handle_game_over()`.
 
 ---
 
@@ -427,7 +419,7 @@ Giao diện người dùng đồ họa bằng Pygame và trình quản lý sự 
 
 #### 3.5.1. `input_handler.py`
 Điều phối tác vụ do người dùng tạo ra vào GameState và HardwareManager.
-  - **Phím** (`SPACE` để chạy luồng Vision so sánh ảnh, `Z` để Rollback cả dữ liệu cờ lẫn ảnh Baseline gốc). Nếu vision thất bại, chặn đứng màn hình và bật mode Manual Override.
+  - **Phím** (`SPACE` để chạy luồng Vision so sánh ảnh). Nếu vision thất bại, chặn đứng màn hình và bật mode Manual Override.
   - **Chuột** (Kéo thả Manual Override hoạt động độc lập không xài robot; Nút Surrender/New Game).
 
 #### 3.5.2. `board_renderer.py`
@@ -720,17 +712,6 @@ py main.py
    - Về vị trí HOMECHESS (hoặc IDLE)
 4. Tự động chụp baseline mới (T1 mới)
 5. Chuyển lại lượt Người
-
-**Rollback (nếu cần):**
-- Bấm `Z` để hoàn tác nước vừa đi
-- Hệ thống sẽ:
-  - Khôi phục trạng thái bàn cờ
-  - Khôi phục baseline T1 cũ
-  - Hiển thị thông báo "Rollback successful"
-- **Lưu ý:** 
-  - Chỉ rollback được 1 nước (nước vừa đi)
-  - Phải đặt quân cờ vật lý về đúng vị trí cũ
-  - Không rollback được khi đang lượt AI
 
 **Kết thúc game:**
 - Chiếu hết → Hiển thị banner thắng/thua

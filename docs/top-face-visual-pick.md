@@ -80,7 +80,7 @@ sau khi lượt đo trả về, không phải nút dừng arm đang chạy.
   **không** tự thử lại. Kiểm tra/chỉnh tay rồi V đối soát. X ở game giữ FEN và
   trạng thái chờ phục hồi, không tự chuyển lượt.
 - Retry gắn với epoch game/AI, nước đi, trạng thái bàn và metadata pending.
-  Reset/rollback/đổi trạng thái làm yêu cầu cũ hết hiệu lực. Không chọn quân khác
+  Reset/đổi trạng thái làm yêu cầu cũ hết hiệu lực. Không chọn quân khác
   hay chạy AI mới trong khi đang chờ R/X.
 
 Log `[TOP PICK]` ghi attempt, nhóm `support` (index từ 0), số samples hợp lệ,

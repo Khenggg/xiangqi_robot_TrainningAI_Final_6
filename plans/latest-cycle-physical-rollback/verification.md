@@ -1,3 +1,5 @@
+> Historical design: rollback has been removed. This document does not describe the current runtime.
+
 # Bằng chứng và phạm vi kiểm chứng rollback
 
 Các test dùng camera/controller/arm/provider giả hoặc geometry tổng hợp. Không

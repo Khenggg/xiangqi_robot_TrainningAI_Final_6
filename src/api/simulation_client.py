@@ -42,8 +42,6 @@ class TuongKyDaiSuClient:
         self._outbox_path = None
         self._persistence_error = ""
         self._stopping = False
-        # Logical rollback commits survive an acknowledged/deleted HTTP job.
-        self._fen_commits = {}
         
         self.headers_simulation = {
             "Authorization": f"Bearer {self.token}",
@@ -95,15 +93,7 @@ class TuongKyDaiSuClient:
                         raise ValueError("Malformed unassigned end")
                     sequence = max((int(job.get("sequence", 0))
                                     for job in restored.values()), default=0)
-                    commits = saved.get("fen_commits", {})
-                    if not isinstance(commits, dict) or any(
-                            not isinstance(key, str) or not isinstance(value, dict)
-                            or not isinstance(value.get("fen"), str)
-                            or not isinstance(value.get("revision"), int)
-                            for key, value in commits.items()):
-                        raise ValueError("Malformed logical FEN commits")
                     self._sync_jobs = restored
-                    self._fen_commits = commits
                     self._unassigned_fen = pending
                     self._unassigned_end = pending_end
                     self._sync_sequence = sequence
@@ -126,8 +116,7 @@ class TuongKyDaiSuClient:
                 jobs[room]["error"] = "Remote sync failed"
         payload = {"version": 1, "scope": self._outbox_scope(), "jobs": jobs,
                    "unassigned_fen": self._unassigned_fen,
-                   "unassigned_end": self._unassigned_end,
-                   "fen_commits": self._fen_commits}
+                   "unassigned_end": self._unassigned_end}
         target = self._outbox_path
         temporary = target.with_name(target.name + ".tmp")
         try:
@@ -292,38 +281,6 @@ class TuongKyDaiSuClient:
         self.refresh_sync()
         return True
 
-    def queue_fen_commit(self, fen, commit_id, revision, *, room_id=None):
-        """Atomically deduplicate a verified rollback and its outbound FEN.
-
-        HTTP is still serialized by the existing single worker. A retry after
-        a journal/outbox crash must not requeue an older board over newer work.
-        """
-        if not isinstance(commit_id, str) or not commit_id or not isinstance(revision, int):
-            raise ValueError("Invalid logical FEN commit")
-        target_room = self.room_id if room_id is None else room_id
-        key = f"{target_room}:{commit_id}"
-        payload = {"fen": fen, "revision": revision}
-        with self._sync_lock:
-            previous = self._fen_commits.get(key)
-            if previous is not None:
-                if previous != payload:
-                    raise ValueError("Logical FEN commit changed payload")
-                if self._persistence_error:
-                    self._persist_locked()
-                return not self._persistence_error
-            self._fen_commits[key] = payload
-            if target_room:
-                self._unassigned_fen = None
-                self._sync_sequence += 1
-                job = self._sync_jobs.setdefault(str(target_room), {})
-                job.update(fen=fen, sequence=self._sync_sequence, due=0.0,
-                           blocked=False, error='')
-            else:
-                self._unassigned_fen = fen
-            self._persist_locked()
-            persisted = not self._persistence_error
-        self.refresh_sync()
-        return persisted
 
     def end_match(self, winner="DRAW", reason="OTHER"):
         """Close only after the latest queued FEN is acknowledged.

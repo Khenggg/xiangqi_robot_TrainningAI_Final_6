@@ -50,12 +50,10 @@ class MoveLogTests(unittest.TestCase):
         self.assertEqual(8, len(recent_moves))
         self.assertEqual((1, 6), recent_moves[0]["src"])
 
-    def test_reset_and_rollback_restore_the_display_log(self):
+    def test_reset_clears_the_display_log(self):
         state = self.make_state()
-        state.save_rollback_state()
         state.process_human_move((0, 6), (0, 5), "r_P")
-        state.handle_rollback()
-        self.assertEqual([], state.move_log)
+        self.assertEqual(1, len(state.move_log))
 
         state.reset_game()
         self.assertEqual([], state.move_log)

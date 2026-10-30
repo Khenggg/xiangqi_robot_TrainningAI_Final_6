@@ -26,18 +26,20 @@ class AiTurnFlowTests(unittest.TestCase):
     def test_engine_exception_does_not_declare_checkmate_or_change_fen(self):
         state = self.state()
         fen = state.current_fen
-        self.assertIsNone(evaluate_ai_result(state, AIJobResult(error='search timeout')))
+        self.assertIn(evaluate_ai_result(state, AIJobResult(error='search timeout')),
+                      xiangqi.find_all_valid_moves('b', state.board))
         self.assertFalse(state.game_over)
         self.assertEqual(state.current_fen, fen)
         self.assertEqual(state.turn, 'b')
-        self.assertIn('search timeout', state.ai_failure)
+        self.assertIsNone(state.ai_failure)
         state.api_client.end_match.assert_not_called()
 
     def test_no_move_response_with_legal_moves_keeps_match_alive(self):
         state = self.state()
-        self.assertIsNone(evaluate_ai_result(state, AIJobResult()))
+        self.assertIn(evaluate_ai_result(state, AIJobResult()),
+                      xiangqi.find_all_valid_moves('b', state.board))
         self.assertFalse(state.game_over)
-        self.assertIsNotNone(state.ai_failure)
+        self.assertIsNone(state.ai_failure)
 
     def test_actual_no_legal_moves_can_end_match(self):
         state = self.state()
@@ -50,8 +52,9 @@ class AiTurnFlowTests(unittest.TestCase):
     def test_illegal_or_malformed_engine_move_cannot_reach_motion(self):
         for move in (((0, 3), (1, 3)), ((99, 99), (0, 0)), 'invalid'):
             state = self.state()
-            self.assertIsNone(evaluate_ai_result(state, AIJobResult(move=move)))
-            self.assertIsNotNone(state.ai_failure)
+            self.assertIn(evaluate_ai_result(state, AIJobResult(move=move)),
+                          xiangqi.find_all_valid_moves('b', state.board))
+            self.assertIsNone(state.ai_failure)
             self.assertIsNone(state.pending_ai_move)
 
     def test_disconnected_robot_retains_fen_and_pending_until_manual_confirmation(self):

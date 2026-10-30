@@ -28,16 +28,17 @@ once. An uncompleted move can retry only after the old board is verified. With a
 disconnected robot, the move remains pending until the operator moves it by hand
 and confirms it; the client does not advance FEN just because AI found a move.
 
-Rollback cancels the previous pending command and requires the restored physical
-board to match before play resumes. New Game discards the previous rollback
-snapshot. Epoch, base-board and intent guards reject stale commits/acquisitions.
+New Game clears pending commands. Epoch, base-board and intent guards reject
+stale commits/acquisitions.
 Recognized human layouts must match exactly one legal complete Red successor;
 several changed pieces or an unknown/missing unrelated piece cannot start AI.
 
-Engine startup/search use bounded queues. Timeout, EOF and malformed output are
-engine errors rather than checkmate. FEN remains unchanged and V/Continue retries
-with a fresh engine session. Only a genuine position without legal Black moves
-can end the match for that reason.
+Engine thinking has a 30-second total deadline, including startup and provider
+search. Timeout, EOF, resignation, malformed output or an empty engine result
+cannot award a win: the client chooses a legal fallback move, including escaping
+check. Late results are ignored. A side in check with no legal moves loses by
+checkmate; a side with no legal moves outside check still loses by Xiangqi
+stalemate rules. Both Red and Black use the same board-based result checks.
 
 Remote synchronization runs in one background worker. It retains the latest FEN,
 keeps each job tied to its room, retries transient errors and shows missing-room

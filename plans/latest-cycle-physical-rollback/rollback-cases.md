@@ -1,3 +1,5 @@
+> Historical design: rollback has been removed. This document does not describe the current runtime.
+
 # Cases rollback: đối chiếu spec với feature/visual-correction-v2
 
 Ngày: 2026-10-28. Đây là phân tích thiết kế, không phải báo cáo các case đã

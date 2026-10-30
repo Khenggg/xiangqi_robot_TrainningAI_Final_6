@@ -4,7 +4,6 @@ from unittest.mock import Mock
 
 from src.core import xiangqi
 from src.core.game_state import GameState
-from src.core.rollback_cycle import StateSnapshot
 from src.core.ai_turn_flow import AIJobResult, evaluate_ai_result
 from src.ui.board_renderer import BoardRenderer
 from src.ui.input_handler import InputHandler
@@ -39,7 +38,7 @@ class NoLegalMovesResultTests(unittest.TestCase):
 
     def test_verified_ai_stalemates_human_and_skips_next_turn_baseline(self):
         state = self.state('b')
-        # Start a real Red->Black cycle with production-like hardware attached.
+        # Commit a Red move before verifying the terminal Black reply.
         state.turn = 'r'
         state.board[9][4], state.board[8][4] = '.', 'r_K'
         hardware = Mock(config=None)
@@ -57,8 +56,6 @@ class NoLegalMovesResultTests(unittest.TestCase):
         self.assertEqual(('b', 'NO_LEGAL_MOVES'), (state.winner, state.game_over_reason))
         self.assertTrue(state.game_over)
         hardware.capture_baseline_if_needed.assert_not_called()
-        self.assertFalse(state.rollback_runtime.needs_seal)
-        self.assertEqual('INVALIDATED', state.rollback_runtime.cycle.status)
         state.api_client.end_match.assert_called_once_with(winner='BLACK', reason='CHECKMATE')
         events = [call[0] for call in state.api_client.mock_calls]
         self.assertLess(events.index('queue_fen'), events.index('end_match'))
@@ -81,6 +78,39 @@ class NoLegalMovesResultTests(unittest.TestCase):
         self.assertTrue(state.check_no_legal_moves())
         self.assertEqual('b', state.winner)
 
+    def test_checkmate_for_either_side_requires_check_and_no_legal_escape(self):
+        for loser in ('r', 'b'):
+            state = self.state('b')
+            state.board[7][5] = '.'
+            state.board[8][5] = 'b_R'
+            state.board[8][4] = 'b_R'
+            if loser == 'b':
+                state.board = [[('.' if p == '.' else ('b' if p[0] == 'r' else 'r') + p[1:])
+                                for p in row[::-1]] for row in state.board[::-1]]
+            state.turn = loser
+            self.assertTrue(xiangqi.is_king_in_check(loser, state.board))
+            self.assertEqual([], xiangqi.find_all_valid_moves(loser, state.board))
+            self.assertTrue(state.check_no_legal_moves())
+            self.assertEqual('CHECKMATE', state.game_over_reason)
+            self.assertIn('chiếu hết', BoardRenderer.game_over_text(state.winner, state.game_over_reason)[1])
+            self.assertEqual('b' if loser == 'r' else 'r', state.winner)
+
+    def test_timeout_fallback_escapes_check_without_ending_match(self):
+        state = self.state('b')
+        state.board[8][4] = 'b_R'
+        state.board[8][3] = state.board[7][5] = '.'
+        state.turn = 'r'
+        state.board = [[('.' if p == '.' else ('b' if p[0] == 'r' else 'r') + p[1:])
+                        for p in row[::-1]] for row in state.board[::-1]]
+        state.turn = 'b'
+        self.assertTrue(xiangqi.is_king_in_check('b', state.board))
+        move = evaluate_ai_result(state, AIJobResult(error='30s deadline'))
+        self.assertIsNotNone(move)
+        after, _ = xiangqi.make_temp_move(state.board, move)
+        self.assertFalse(xiangqi.is_king_in_check('b', after))
+        self.assertFalse(state.game_over)
+        state.api_client.end_match.assert_not_called()
+
     def test_repeated_checks_do_not_send_duplicate_result(self):
         state = self.state('r')
         state.process_human_move((5, 2), (5, 1), 'r_R')
@@ -94,7 +124,7 @@ class NoLegalMovesResultTests(unittest.TestCase):
         state.board[7][5] = '.'
         state.board[8][5] = 'b_R'
         state.turn = 'r'
-        state.rollback_runtime.restart_pending = True
+        state.physical_sync_fault = True
         self.assertFalse(state.check_no_legal_moves())
         self.assertFalse(state.game_over)
         state.api_client.end_match.assert_not_called()
@@ -113,23 +143,23 @@ class NoLegalMovesResultTests(unittest.TestCase):
         self.assertEqual(('AI THẮNG', 'Bạn đã đầu hàng.'),
                          BoardRenderer.game_over_text('b', 'RESIGN'))
 
-    def test_result_reason_roundtrips_without_changing_old_snapshot_signature(self):
-        state = self.state('r')
-        old = StateSnapshot.from_state(state)
-        self.assertNotIn('game_over_reason', old.to_dict())
-        self.assertEqual(old.signature, StateSnapshot.from_dict(old.to_dict()).signature)
-        for reason in ('NO_LEGAL_MOVES', 'RESIGN'):
-            state.game_over, state.winner, state.game_over_reason = True, 'b', reason
-            snapshot = StateSnapshot.from_state(state)
-            restored = self.state('r')
-            StateSnapshot.from_dict(snapshot.to_dict()).apply_to(restored)
-            self.assertEqual(reason, restored.game_over_reason)
-            old.apply_to(restored)
-            self.assertIsNone(restored.game_over_reason)
-        invalid = old.to_dict()
-        invalid['game_over_reason'] = 'unknown'
-        with self.assertRaisesRegex(ValueError, 'result reason'):
-            StateSnapshot.from_dict(invalid)
+    def test_pending_transition_does_not_send_remote_result(self):
+        state = self.state('b')
+        state.board[7][5] = '.'
+        state.board[8][5] = 'b_R'
+        state.turn = 'r'
+        state.pending_ai_move = {'unverified': True}
+        self.assertFalse(state.check_no_legal_moves())
+        self.assertFalse(state.game_over)
+        state.api_client.end_match.assert_not_called()
+
+    def test_new_game_clears_terminal_reason(self):
+        state = self.state('b')
+        self.assertTrue(state.handle_game_over('b', reason='NO_LEGAL_MOVES'))
+        state.reset_game()
+        self.assertFalse(state.game_over)
+        self.assertIsNone(state.winner)
+        self.assertIsNone(state.game_over_reason)
 
 
 if __name__ == '__main__':

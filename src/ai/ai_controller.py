@@ -1,3 +1,17 @@
+import math
+import threading
+import time
+
+
+def ai_think_budget_seconds(config):
+    """One wall-clock allowance for engine startup, cloud and local search."""
+    try:
+        requested = float(getattr(config, "AI_MAX_THINK_SECONDS", 30.0))
+    except (TypeError, ValueError):
+        return 30.0
+    return min(30.0, requested) if math.isfinite(requested) and requested > 0 else 30.0
+
+
 # ==================================
 # === FILE: VIP/ai_controller.py ===
 # === AI Controller — Smart Engine Wrapper (Hybrid) ===
@@ -24,8 +38,42 @@ class AIController:
         self.cloud_engine = cloud_engine
         self.config = config
         self.policy_engine = policy_engine
+        self._search_lock = threading.Lock()
+        self._search_thread = None
 
     def pick_move(self, board_snapshot, color="b"):
+        """Bound all engine work; never queue another search behind a stuck one.
+
+        An abandoned provider call retains its sole engine slot until it exits.
+        The caller can immediately choose a legal fallback on timeout or busy.
+        """
+        deadline = time.monotonic() + ai_think_budget_seconds(self.config)
+        completed = threading.Event()
+        outcome = {}
+
+        def search():
+            try:
+                outcome['move'] = self._pick_move_with_deadline(board_snapshot, color, deadline)
+            except Exception as error:
+                outcome['error'] = error
+            finally:
+                completed.set()
+
+        with self._search_lock:
+            if self._search_thread is not None and self._search_thread.is_alive():
+                raise AIEngineError("Previous engine search is still busy; use a legal fallback.")
+            worker = threading.Thread(target=search, daemon=True, name="ai-engine-search")
+            self._search_thread = worker
+            worker.start()
+        if not completed.wait(max(0.0, deadline - time.monotonic())):
+            raise AIEngineError("AI thinking deadline exceeded; use a legal fallback.")
+        if time.monotonic() > deadline:
+            raise AIEngineError("AI result arrived after the thinking deadline.")
+        if 'error' in outcome:
+            raise outcome['error']
+        return outcome['move']
+
+    def _pick_move_with_deadline(self, board_snapshot, color, deadline):
         """Gọi Moonfish để lấy nước đi tốt nhất.
 
         Hàm này chạy BLOCKING — phải gọi trong thread riêng.
@@ -45,20 +93,21 @@ class AIController:
         # Player-selected levels must always stay local: cloud fallback would
         # make the advertised strength unpredictable.  Impossible deliberately
         # uses the old call signature so it remains the project's original
-        # Moonfish strength.
+        # Moonfish strength, subject to the total thinking deadline.
         if difficulty in ("easy", "medium", "hard", "impossible"):
             if self.local_engine is None:
                 raise AIEngineError(f"Moonfish {difficulty}-level engine is unavailable.")
             try:
                 if difficulty == "impossible":
                     return self._pick_local(
-                        board_snapshot, color, movetime_ms=self.config.MOONFISH_THINK_MS
+                        board_snapshot, color, deadline=deadline, movetime_ms=self.config.MOONFISH_THINK_MS
                     )
                 if profile is None:
                     raise ValueError(f"Missing configuration for difficulty: {difficulty}")
                 return self._pick_local(
                     board_snapshot,
                     color,
+                    deadline=deadline,
                     movetime_ms=profile["think_ms"],
                     depth=profile["depth"],
                     nodes=profile["nodes"],
@@ -91,7 +140,7 @@ class AIController:
             
             try:
                 result = self._pick_local(
-                    board_snapshot, color, movetime_ms=self.config.MOONFISH_THINK_MS
+                    board_snapshot, color, deadline=deadline, movetime_ms=self.config.MOONFISH_THINK_MS
                 )
                 return result
             except Exception as e:
@@ -99,9 +148,16 @@ class AIController:
         
         raise AIEngineError(f"Unsupported engine configuration: {engine_type}")
 
-    def _pick_local(self, board, color, **limits):
-        # Timeout invalidates the old process. A subsequent operator-requested
-        # pick starts a fresh bounded session in the AI worker, never in the UI.
+    def _pick_local(self, board, color, *, deadline, **limits):
+        # Startup consumes the same allowance as search. The outer worker owns
+        # the engine until both finish, including after the caller times out.
         if getattr(self.local_engine, '_ready', True) is False:
             self.local_engine.start()
+        remaining_ms = int((deadline - time.monotonic()) * 1000)
+        if remaining_ms <= 0:
+            raise AIEngineError("AI thinking deadline exhausted before local search.")
+        requested = limits.get("movetime_ms")
+        if requested is None:
+            requested = remaining_ms
+        limits["movetime_ms"] = max(1, min(int(requested), remaining_ms, 30_000))
         return self.local_engine.pick_best_move(board, color, **limits)

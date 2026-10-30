@@ -30,7 +30,6 @@ class HumanMoveCommitCoordinator:
                                  getattr(self.state, "human_commit_generation", 0)):
                     return "STALE"
             if (getattr(self.state, "physical_sync_fault", False)
-                    or bool(getattr(getattr(self.state, 'rollback_runtime', None), 'blocked', False))
                     or getattr(self.state, "pending_ai_move", None)):
                 return "PHYSICAL_SYNC_REQUIRED"
             if self.state.game_over or self.state.turn != "r":

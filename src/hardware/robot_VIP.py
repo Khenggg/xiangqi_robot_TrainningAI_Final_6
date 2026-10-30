@@ -93,7 +93,7 @@ class FR5Robot:
     # KẾT NỐI
     # -------------------------------------------------------------------------
 
-    def connect(self, *, recovery_mode=False):
+    def connect(self):
         if self.dry:
             print("[ROBOT] DRY RUN — không kết nối thực tế")
             self.connected = True
@@ -110,13 +110,6 @@ class FR5Robot:
                 raise Exception("SDK không thể kết nối tới robot")
 
             print(f"[ROBOT] ✅ Đã kết nối tới {self.ip}")
-
-            if recovery_mode:
-                # Recovery must never enable the arm, change its mode, move,
-                # pulse/reset outputs, or assume the jaws contain no piece.
-                self._latch_communication_fault()
-                self._load_teaching_points()  # Read-only controller queries.
-                return
 
             err = self.robot.RobotEnable(1)
             if err != 0:
@@ -365,72 +358,6 @@ class FR5Robot:
             raise robot_sdk_core.RobotCommunicationError(
                 "Previous command completion is unknown; verify controller idle before resuming"
             )
-
-    def verify_rollback_ready(self, *, operator_empty_gripper_confirmed=False,
-                              uncertain_recovery=False, timeout=.5):
-        """Read-only proof of fresh idle, outputs LOW and parked TCP.
-
-        Motor outputs LOW do not prove empty jaws. A recovery call needs a new
-        explicit operator confirmation; that confirmation is never cached here.
-        """
-        result = dict(ready=False, errors=[], pose=None)
-        if self.dry or not self.connected or self.robot is None:
-            result['errors'].append('Physical controller unavailable')
-            return result
-        uncertain = uncertain_recovery or getattr(self, 'communication_fault', False)
-        if uncertain and operator_empty_gripper_confirmed is not True:
-            result['errors'].append('Confirm parked arm and empty gripper for this recovery attempt')
-            return result
-        try:
-            response = self.robot.GetControllerIP()
-            if not isinstance(response, (tuple, list)) or len(response) < 2 or response[0] != 0:
-                raise ValueError('Controller communication probe failed')
-            taught = self.robot.GetRobotTeachingPoint('HOMECHESS')
-            targets = []
-            if isinstance(taught, (tuple, list)) and len(taught) > 1 and taught[0] == 0:
-                targets.append([float(value) for value in taught[1][:6]])
-            if getattr(config, 'ROLLBACK_IDLE_POSE_COMMISSIONED', False) is True:
-                if (getattr(config, 'ROLLBACK_IDLE_TOOL_NUM', None) != self.tool_num or
-                        getattr(config, 'ROLLBACK_IDLE_USER_NUM', None) != self.user_num):
-                    raise ValueError('Commissioned IDLE tool/user mismatch')
-                targets.append([config.IDLE_X, config.IDLE_Y, config.IDLE_Z] + list(config.ROTATION))
-            if not targets:
-                raise ValueError('No verified HOMECHESS or commissioned IDLE pose')
-            probe_finished = time.monotonic()
-            if self.robot.has_fresh_idle_state(after=probe_finished, timeout=timeout, max_age=.5) is not True:
-                raise ValueError('Controller lacks fresh fault-free idle/DO LOW proof')
-            health_before = self.robot._latest_state_health
-            packet = self.robot.robot_state_pkg
-            pose = [float(v) for v in packet.tl_cur_pos]
-            result['pose'] = pose
-            if (health_before is None or time.monotonic() - health_before[0] > .5
-                    or self.robot._latest_state_health != health_before):
-                raise ValueError('Controller state changed or became stale during proof')
-            expected = dict(motion_done=1, mc_queue_len=0, robot_state=1, main_code=0,
-                sub_code=0, safety_stop0_state=0, safety_stop1_state=0, EmergencyStop=0,
-                collisionState=0, tool=self.tool_num, user=self.user_num)
-            if any(getattr(packet, name, None) != value for name, value in expected.items()):
-                raise ValueError('Realtime controller safety/tool/user state mismatch')
-            if packet.tl_dgt_output_l & 3:
-                raise ValueError('Gripper outputs are not LOW')
-            position_tolerance = float(getattr(config, 'ROLLBACK_PARK_POSITION_TOLERANCE_MM', 2.))
-            angle_tolerance = float(getattr(config, 'ROLLBACK_PARK_ANGLE_TOLERANCE_DEG', 2.))
-            if (len(pose) != 6 or not all(math.isfinite(v) for v in pose)
-                    or not 0 < position_tolerance <= 5 or not 0 < angle_tolerance <= 5):
-                raise ValueError('Invalid parked pose or tolerance')
-            def at_target(target):
-                return (len(target) == 6 and all(math.isfinite(v) for v in target)
-                    and all(abs(pose[i] - target[i]) <= position_tolerance for i in range(3))
-                    and all(abs((pose[i] - target[i] + 180.) % 360. - 180.) <= angle_tolerance for i in range(3, 6)))
-            if not any(at_target(target) for target in targets):
-                raise ValueError('TCP is not parked at HOMECHESS/commissioned IDLE')
-            if uncertain:
-                self.communication_fault = False
-                self._communication_fault_at = None
-            result['ready'] = True
-        except Exception as exc:
-            result['errors'].append(str(exc))
-        return result
 
     def can_resume_after_communication_fault(self):
         """Clear the latch only after a successful read probe and fresh idle packet.

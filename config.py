@@ -184,6 +184,7 @@ PLAYER_TURN_INTERACTION_CAPABILITY = "UNAVAILABLE"
 
 # --- THÔNG SỐ AI ---
 AI_THINK_TIME = 10  # Time per move in seconds — AI gets 10s after subtracting TIME_BUFFER (0.5)
+AI_MAX_THINK_SECONDS = 30.0  # Hard total deadline: startup + cloud/local search.
 AI_DEPTH = 30          # Độ sâu mặc định (sẽ bị ghi đè bởi logic tự động)
 
 # --- AI ENGINE CONFIGURATION ---
@@ -256,4 +257,3 @@ IDLE_Y = 149.608
 IDLE_Z = 348.199
 # --- CCHESS RECOGNITION (ONNX) ---
 CCHESS_RECOGNITION_ENABLED = True  # Bật/tắt CChess ONNX recognition bổ sung
-ROLLBACK_LAYOUT_MIN_CONFIDENCE = 0.7  # Rollback accepts layout scores strictly above this value.

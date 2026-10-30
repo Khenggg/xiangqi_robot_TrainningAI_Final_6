@@ -83,9 +83,6 @@ class HumanMoveConfirmationTests(unittest.TestCase):
             turn = "r"
             game_over = False
 
-            def save_rollback_state(self, *args):
-                pass
-
             def set_status(self, text, **kwargs):
                 self.statuses.append(text)
 
@@ -149,9 +146,6 @@ class HumanMoveConfirmationTests(unittest.TestCase):
                 self.board[5][4] = "b_R"
                 self.board[6][0] = "r_P"
                 self.statuses = []
-
-            def save_rollback_state(self, *args):
-                pass
 
             def set_status(self, text, **kwargs):
                 self.statuses.append(text)

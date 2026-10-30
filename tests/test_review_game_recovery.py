@@ -30,23 +30,38 @@ def state_with_pending():
 
 
 class GameRecoveryTests(unittest.TestCase):
-    def test_new_game_discards_old_rollback(self):
-        state = state_with_pending()
-        state.save_rollback_state()
-        state.reset_game()
-        before = state.current_fen
-        state.handle_rollback()
-        self.assertEqual(before, state.current_fen)
-        self.assertIsNone(state._pre_space_state)
+    def test_z_leaves_committed_and_pending_positions_unchanged(self):
+        import pygame
+        for pending in (False, True):
+            with self.subTest(pending=pending):
+                state = state_with_pending()
+                if not pending:
+                    state.physical_sync_fault = False
+                    self.assertTrue(state.commit_pending_ai_move())
+                before = (state.current_fen, [row[:] for row in state.board], state.turn,
+                          list(state.move_log), state.game_epoch, state.ai_epoch,
+                          state.pending_ai_move, state.physical_sync_fault)
+                hardware = Mock(config=None)
+                handler = InputHandler(state, hardware)
+                hardware.reset_mock()
+                handler.handle_keyboard(pygame.K_z)
+                self.assertEqual(before, (state.current_fen, state.board, state.turn,
+                                          state.move_log, state.game_epoch, state.ai_epoch,
+                                          state.pending_ai_move, state.physical_sync_fault))
+                self.assertEqual([], hardware.mock_calls)
 
-    def test_rollback_cancels_pending_but_requires_restored_physical_board(self):
+    def test_new_game_discards_pending_transition(self):
         state = state_with_pending()
-        state.turn = "r"
-        state.save_rollback_state()
-        state.turn = "b"
-        state.handle_rollback()
+        old_epoch = state.game_epoch
+        state.reset_game()
         self.assertIsNone(state.pending_ai_move)
-        self.assertTrue(state.physical_sync_fault)
+        self.assertFalse(state.physical_sync_fault)
+        self.assertGreater(state.game_epoch, old_epoch)
+
+    def test_physical_fault_blocks_moves_until_board_is_verified(self):
+        state = state_with_pending()
+        state.pending_ai_move = None
+        state.turn = "r"
         self.assertFalse(state.can_start_ai_turn())
         request = CommitRequest((state.game_epoch, state.human_commit_generation, 0), ((0, 6), (0, 5)))
         self.assertEqual("PHYSICAL_SYNC_REQUIRED", HumanMoveCommitCoordinator(state).try_commit(request))
