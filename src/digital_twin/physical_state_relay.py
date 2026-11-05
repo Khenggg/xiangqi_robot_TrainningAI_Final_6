@@ -1,8 +1,10 @@
 """Live physical arm telemetry with nominal 3D board piece-state synchronization."""
 import logging
 import threading
+from contextlib import ExitStack
 
 from src.core.project_logging import event
+from src.digital_twin.gripper_events import IDLE, gripper_intent
 from src.digital_twin.world_sync import sync_world_from_robot_snapshot
 from src.domain.board_pose import BoardPlacementState
 from src.domain.game_move import MoveActor
@@ -13,10 +15,12 @@ class PhysicalStateRelay:
     board_sync_available = True
     uncalibrated_board = True
 
-    def __init__(self, backend, telemetry, reason, poll_hz=25, *, world=None, owns_world=True):
+    def __init__(self, backend, telemetry, reason, poll_hz=25, *, world=None, owns_world=True,
+                 display_mapping=None):
         self.backend, self.telemetry, self.reason = backend, telemetry, str(reason)
         self.period_s = 1.0 / max(1.0, float(poll_hz))
         self.placement = BoardPlacementState.compute(0.0)
+        self.display_mapping = display_mapping
         self.world = world or VirtualPhysicalWorld(board_placement_state=self.placement)
         self.owns_world = owns_world
         self._lock = threading.RLock()
@@ -39,7 +43,11 @@ class PhysicalStateRelay:
             telemetry.source = 'PHYSICAL'
             telemetry.controller_ip = getattr(backend, 'ip', None)
             telemetry.register_command_handler(self._reject_command)
-            telemetry.broadcast_custom(self.placement.to_dict())
+            placement_packet = display_mapping.packet() if display_mapping else self.placement.to_dict()
+            if display_mapping is None:
+                placement_packet.update(placement_source="NOMINAL_UNCALIBRATED_DISPLAY",
+                                        motion_authority=False, surface_z_verified=False)
+            telemetry.broadcast_custom(placement_packet)
             self._publish_world()
 
     def _reject_command(self, _):
@@ -57,6 +65,12 @@ class PhysicalStateRelay:
                 physical_grasp_verified=False,
                 payload_evidence="NOMINAL_BOARD_STATE_MIRROR",
             )
+            if self.display_mapping is not None:
+                self.display_mapping.project_pieces(
+                    packet, self._cells, self.world,
+                    # Keep release poses while camera verification/commit is
+                    # pending, even after command animation has finished.
+                    excluded=self._released)
             self.telemetry.update_world_state(packet)
 
     def poll_once(self):
@@ -116,8 +130,12 @@ class PhysicalStateRelay:
         }
         return self.reconcile_to_board_cells(cells)
 
-    def reconcile_to_board_cells(self, piece_cells: dict) -> bool:
-        with self._lock, self.world._physics_lock:
+    def reconcile_to_board_cells(self, piece_cells: dict, *, blocking=True, projection_context=None) -> bool:
+        with ExitStack() as locks:
+            for lock in (self._lock, self.world._physics_lock):
+                if not lock.acquire(blocking=blocking):
+                    return False
+                locks.callback(lock.release)
             if self._command_animation and self.active_move is None:
                 self.world.release_attached_piece()
                 self._command_animation = False
@@ -129,6 +147,7 @@ class PhysicalStateRelay:
                 self.last_error = f"Board reconciliation rejected: {exc}"
                 return False
             self._cells = dict(piece_cells)
+            self.world.projection_context = dict(projection_context) if projection_context is not None else None
             self._committed.clear()
             self.active_move = None
             self._payload_sequence = []
@@ -147,26 +166,59 @@ class PhysicalStateRelay:
                 + [context.piece_id]
             )
 
-    def animate_command_gripper(self, event_name, closed):
+    def _broadcast_gripper_command(self, phase, piece, action=None):
+        if self.telemetry is None or piece is None:
+            return
+        self.telemetry.broadcast_custom({
+            "type": "gripper_command",
+            "source": "PHYSICAL",
+            "phase": phase,
+            "action": action,
+            "piece_id": piece.piece_id,
+            "captured_piece_id": getattr(self.active_move, "captured_piece_id", None),
+            "move_id": getattr(self.active_move, "move_id", None),
+            "physical_grasp_verified": False,
+        })
+
+    def animate_command_gripper(self, event_name, closed, action=None):
         if event_name != 'gripper' or not self._command_animation:
             return
+        intent = gripper_intent(action, closed)
+        if intent == IDLE:
+            return
+        phase = changed = None
         try:
-            self.poll_once()
             with self._lock, self.world._physics_lock:
-                if (closed and self.world.get_attached_piece() is None
+                if (intent == "attach" and self.world.get_attached_piece() is None
                         and len(self._released) < len(self._payload_sequence)):
                     piece = self.world.pieces[self._payload_sequence[len(self._released)]]
+                    if self.display_mapping is not None:
+                        # The world retains a nominal board. A command-following
+                        # display estimate must start at the measured gripper,
+                        # not preserve the nominal cell's (possibly mirrored)
+                        # offset as though it were a verified physical grasp.
+                        piece.set_pose_robot_base(self.world.gripper.grasp_pos, [0, 0, 0, 1])
                     self.world.gripper.attach_piece(piece)
-                elif not closed:
+                    event('twin.animation_attached', 'Viewer estimate attached payload',
+                          piece_id=piece.piece_id, physical_grasp_verified=False)
+                    phase, changed = "CLOSE", piece
+                elif intent == "release":
                     piece = self.world.release_attached_piece()
                     if piece is not None:
                         self._released.append(piece.piece_id)
+                        event('twin.animation_released', 'Viewer estimate released payload',
+                              piece_id=piece.piece_id, physical_grasp_verified=False)
+                        phase, changed = "OPEN", piece
                 self._publish_world()
         except Exception as exc:
             event('twin.animation_failed', str(exc), level=logging.WARNING)
+            return
+        if phase is not None:
+            self._broadcast_gripper_command(phase, changed, action)
 
     def finish_command_animation(self):
         with self._lock:
+            self._command_animation = False
             self.active_move = None
 
     def start(self):

@@ -3,7 +3,7 @@ import math
 import cv2
 import numpy as np
 
-from src.vision.visual_pick_estimator import GridTarget, VisualPickEstimator
+from src.vision.visual_pick_estimator import GridTarget, VisualPickEstimator, grid_offset_mm
 
 
 def fit_metric_circle(points):
@@ -37,10 +37,12 @@ class TopFacePickEstimator:
                  radius_mm=(5.0, 15.0), ambiguity_mm=1.5,
                  max_enclosing_area_ratio=.80, annulus_offset_mm=1.2,
                  min_white_annulus_fraction=.75, max_white_saturation=80,
-                 min_white_value=130):
+                 min_white_value=130, max_offset_mm=None):
         self.geometry = geometry
         self.min_confidence = min_confidence
         self.max_offset_cells = max_offset_cells
+        self.max_offset_mm = None if max_offset_mm is None else float(max_offset_mm)
+        self.board_mm = (float(geometry.width), float(geometry.height))
         self.max_residual = max_residual
         self.min_coverage = min_coverage
         self.min_box_fraction = min_box_fraction
@@ -64,7 +66,9 @@ class TopFacePickEstimator:
                 or not 0 < annulus_offset_mm < radius_mm[0]
                 or not .75 <= min_white_annulus_fraction <= 1
                 or not 0 <= max_white_saturation <= 80
-                or not 130 <= min_white_value <= 255):
+                or not 130 <= min_white_value <= 255
+                or (self.max_offset_mm is not None and
+                    (not math.isfinite(self.max_offset_mm) or self.max_offset_mm <= 0))):
             raise ValueError("Invalid top-rim quality thresholds")
         self.last_reason = "not sampled"
         self.diagnostic = None
@@ -144,7 +148,10 @@ class TopFacePickEstimator:
                     return None
                 # Do not hide a competing supported rim just because it falls
                 # outside the expected-cell gate.
-                rims = [rim for rim in rims if rim[5] <= self.max_offset_cells
+                rims = [rim for rim in rims if (
+                        grid_offset_mm(rim[4][0]-expected_col, rim[4][1]-expected_row,
+                                       self.board_mm) <= self.max_offset_mm
+                        if self.max_offset_mm is not None else rim[5] <= self.max_offset_cells)
                         and -self.max_offset_cells <= rim[4][0] <= 8+self.max_offset_cells
                         and -self.max_offset_cells <= rim[4][1] <= 9+self.max_offset_cells]
                 if not rims:

@@ -1,0 +1,10 @@
+{
+  "command": ".\\tools\\test_fast.ps1 -Workers 2 -ParallelOnly -Tests reports/controller-check-20261031/test_execution_boundaries.py",
+  "environment": "Windows, .venv312 Python 3.12.10, pytest 9.1.1, xdist 3.8.0",
+  "exit_code": 0,
+  "passed": 3,
+  "pytest_seconds": 16.5,
+  "runner_seconds": 18.21,
+  "scope": "explicit mocks only; diagnostic probes, no production fix or physical replay",
+  "source_and_calibration_hashes_unchanged": true
+}

@@ -1,0 +1,197 @@
+{
+  "started_at": "2026-11-02T14:16:10.992119+07:00",
+  "calls": [
+    {
+      "channel": 0,
+      "value": 0,
+      "started": 1793603771.3150432,
+      "result": 0,
+      "finished": 1793603771.3372784
+    },
+    {
+      "channel": 1,
+      "value": 0,
+      "started": 1793603771.3372784,
+      "result": 0,
+      "finished": 1793603771.3525984
+    },
+    {
+      "channel": 0,
+      "value": 1,
+      "started": 1793603771.4762485,
+      "result": 0,
+      "finished": 1793603771.4794347
+    },
+    {
+      "channel": 0,
+      "value": 0,
+      "started": 1793603771.7804399,
+      "result": 0,
+      "finished": 1793603771.8042498
+    },
+    {
+      "channel": 1,
+      "value": 0,
+      "started": 1793603771.8042498,
+      "result": 0,
+      "finished": 1793603771.819934
+    }
+  ],
+  "authorization": "User swapped gripper control wires, confirmed empty jaws and direct observation, requested close/open test",
+  "scope": "One DO0 pulse .30s; both OFF before/after; no arm/mode/enable/reset command",
+  "tested_channel": 0,
+  "direction_after_rewire": "UNVERIFIED",
+  "samples": [
+    {
+      "type": "robot_state",
+      "robot_model": "FR3",
+      "timestamp": 1793603771.155703,
+      "published_at": 1793603771.1757295,
+      "measurement_timestamp": 1793603771.155703,
+      "joints": [
+        -89.46656799316406,
+        -128.62966918945312,
+        106.87108612060547,
+        -68.51183319091797,
+        -89.4968032836914,
+        42.53449249267578
+      ],
+      "tcp": [
+        -104.2756118774414,
+        149.6078643798828,
+        348.1888122558594,
+        179.8590850830078,
+        0.5535993576049805,
+        -42.000553131103516
+      ],
+      "gripper": false,
+      "motion_state": "IDLE",
+      "trajectory_stage": "IDLE",
+      "last_error": null,
+      "placement_version": 1,
+      "source": "PHYSICAL",
+      "controller_ip": "192.168.58.2",
+      "connected": true,
+      "joints_valid": true,
+      "tcp_valid": true,
+      "telemetry_error": null,
+      "command_context": {
+        "session_id": "976789a83f434c5c9b8c7d4d1c4a02bd",
+        "board_revision": 1,
+        "game_epoch": 0,
+        "scene_id": "2f58ace88944434bacfb809a50e967b0",
+        "scene_epoch": null,
+        "placement_version": null,
+        "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+        "commands_allowed": false
+      },
+      "stream_id": "98fd165611b042efa5d65349a35ba82a",
+      "packet_seq": 29897
+    },
+    {
+      "type": "robot_state",
+      "robot_model": "FR3",
+      "timestamp": 1793603771.216223,
+      "published_at": 1793603771.2759967,
+      "measurement_timestamp": 1793603771.216223,
+      "joints": [
+        -89.46656799316406,
+        -128.62945556640625,
+        106.87086486816406,
+        -68.51183319091797,
+        -89.4968032836914,
+        42.53427505493164
+      ],
+      "tcp": [
+        -104.27561950683594,
+        149.6086883544922,
+        348.189453125,
+        179.8590850830078,
+        0.5535998940467834,
+        -42.000335693359375
+      ],
+      "gripper": false,
+      "motion_state": "IDLE",
+      "trajectory_stage": "IDLE",
+      "last_error": null,
+      "placement_version": 1,
+      "source": "PHYSICAL",
+      "controller_ip": "192.168.58.2",
+      "connected": true,
+      "joints_valid": true,
+      "tcp_valid": true,
+      "telemetry_error": null,
+      "command_context": {
+        "session_id": "976789a83f434c5c9b8c7d4d1c4a02bd",
+        "board_revision": 1,
+        "game_epoch": 0,
+        "scene_id": "2f58ace88944434bacfb809a50e967b0",
+        "scene_epoch": null,
+        "placement_version": null,
+        "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+        "commands_allowed": false
+      },
+      "stream_id": "98fd165611b042efa5d65349a35ba82a",
+      "packet_seq": 29902
+    },
+    {
+      "type": "robot_state",
+      "robot_model": "FR3",
+      "timestamp": 1793603771.278016,
+      "published_at": 1793603771.298469,
+      "measurement_timestamp": 1793603771.278016,
+      "joints": [
+        -89.46656799316406,
+        -128.62945556640625,
+        106.87086486816406,
+        -68.51183319091797,
+        -89.4968032836914,
+        42.53427505493164
+      ],
+      "tcp": [
+        -104.27561950683594,
+        149.6086883544922,
+        348.189453125,
+        179.8590850830078,
+        0.5535998940467834,
+        -42.000335693359375
+      ],
+      "gripper": false,
+      "motion_state": "IDLE",
+      "trajectory_stage": "IDLE",
+      "last_error": null,
+      "placement_version": 1,
+      "source": "PHYSICAL",
+      "controller_ip": "192.168.58.2",
+      "connected": true,
+      "joints_valid": true,
+      "tcp_valid": true,
+      "telemetry_error": null,
+      "command_context": {
+        "session_id": "976789a83f434c5c9b8c7d4d1c4a02bd",
+        "board_revision": 1,
+        "game_epoch": 0,
+        "scene_id": "2f58ace88944434bacfb809a50e967b0",
+        "scene_epoch": null,
+        "placement_version": null,
+        "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+        "commands_allowed": false
+      },
+      "stream_id": "98fd165611b042efa5d65349a35ba82a",
+      "packet_seq": 29904
+    }
+  ],
+  "fault_before": [
+    0,
+    0,
+    0
+  ],
+  "fault_after": [
+    0,
+    0,
+    0
+  ],
+  "result": "ONE_CHANNEL_PULSE_ACKNOWLEDGED_AND_BOTH_OFF_ACKNOWLEDGED",
+  "physical_jaw_result": "AWAITING_OPERATOR_OBSERVATION",
+  "finished_at": "2026-11-02T14:16:11.834323+07:00"
+}

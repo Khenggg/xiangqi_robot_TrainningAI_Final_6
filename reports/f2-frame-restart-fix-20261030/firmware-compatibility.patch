@@ -1,0 +1,113 @@
+--- before/src/hardware/robot_VIP.py
++++ after/src/hardware/robot_VIP.py
+@@ -10,6 +10,7 @@
+ import threading
+ import math
+ import logging
++from xmlrpc.client import Fault
+ import numpy as np
+ import cv2
+ 
+@@ -93,6 +94,8 @@
+         self.teaching_points_version = 0
+         self.wobj_identity_as_base = False
+         self.identity_wobj_id = None
++        self._wobj_by_id_unsupported = False
++        self._frame_normalization_error = None
+         self.dispatch_validity = None
+         self.motion_trace = {}
+         self.use_teaching_points = True  # Luôn dùng teaching points
+@@ -139,6 +142,7 @@
+         self.teaching_points_error = None
+         self.wobj_identity_as_base = False
+         self.identity_wobj_id = None
++        self._wobj_by_id_unsupported = False
+         if self.dry:
+             self.connected = True
+             return True
+@@ -322,17 +326,35 @@
+         source_user = next(iter(nonbase_users))
+         try:
+             by_id = getattr(self.robot, "GetWObjCoordWithID", None)
+-            if callable(by_id):
++            use_current = not callable(by_id) or getattr(self, "_wobj_by_id_unsupported", False)
++            if not use_current:
+                 # Motion uses user 0 and can change the controller's active
+                 # selection. A restart must verify the frame named by R1-R4,
+                 # independently of whichever frame happens to be active now.
+-                code, wobj_offset = by_id(source_user)
+-                verification_source = "GetWObjCoordWithID"
+-            else:
++                try:
++                    code, wobj_offset = by_id(source_user)
++                    verification_source = "GetWObjCoordWithID"
++                except Fault as exc:
++                    if (exc.faultCode != -506 or "GetWObjCoordWithID" not in exc.faultString
++                            or "not defined" not in exc.faultString):
++                        raise
++                    self._wobj_by_id_unsupported = True
++                    use_current = True
++                    event("robot.frame_query_unsupported",
++                          "Firmware không hỗ trợ đọc WObj theo ID; chỉ đọc frame đang chọn",
++                          level=logging.WARNING, wobj=source_user, fault_code=exc.faultCode)
++            if use_current:
+                 code, current_user = self.robot.GetActualWObjNum()
+-                if int(code) != 0 or parse_frame_identifier(current_user) != source_user:
+-                    return frames
++                if int(code) != 0:
++                    raise RobotCommandError(f"Không đọc được WObj đang chọn: {code}", code)
++                if parse_frame_identifier(current_user) != source_user:
++                    raise RobotCommandError(
++                        f"Chọn User/WObj {source_user} trên pendant rồi F9/F10 để xác minh lại. "
++                        f"Firmware chỉ đọc được WObj đang chọn (hiện tại: {current_user}).")
+                 code, wobj_offset = self.robot.GetCurWObjCoord()
++                after_code, after_user = self.robot.GetActualWObjNum()
++                if after_code != 0 or parse_frame_identifier(after_user) != source_user:
++                    raise RobotCommandError("WObj thay đổi trong lúc đọc; giữ nguyên frame rồi F9/F10 thử lại")
+                 verification_source = "GetCurWObjCoord"
+             if code != 0:
+                 raise RobotCommandError(f"WObj {source_user} query failed: {code}", code)
+@@ -340,6 +362,7 @@
+             if offset.shape != (6,) or not np.isfinite(offset).all():
+                 raise RobotCommandError(f"WObj {source_user} must contain six finite offsets")
+         except Exception as exc:
++            self._frame_normalization_error = str(exc)
+             event("robot.frame_normalization_failed",
+                   f"Không xác minh được WObj {source_user} để chuẩn hóa frame",
+                   level=logging.WARNING, wobj=source_user, reason=str(exc))
+@@ -385,6 +408,7 @@
+         self.teaching_points = {}
+         self.wobj_identity_as_base = False
+         self.identity_wobj_id = None
++        self._frame_normalization_error = None
+         
+         # Load 4 góc bàn cờ (bắt buộc)
+         point_names = ["R1", "R2", "R3", "R4"]
+@@ -416,6 +440,8 @@
+             frames = self._normalize_identity_wobj_frames(point_names, frames)
+         if len(frames) != 1 or any(value is None for value in next(iter(frames))):
+             found = sorted(str(value) for value in frames)
++            if self._frame_normalization_error:
++                raise RobotCommandError(f"R1-R4: {self._frame_normalization_error}")
+             raise RobotCommandError(
+                 f"R1-R4 require one explicit tool/user frame; found {found}. "
+                 "Re-teach R1-R4 in robot base user 0 with the same tool frame.")
+--- before/src/hardware/hardware_manager.py
++++ after/src/hardware/hardware_manager.py
+@@ -514,6 +514,16 @@
+                 or state.pending_test_motion is not None
+                 or state.recovery_required or state.mode_change_pending or state.move_sync_error or self._piece_move_lock.locked()):
+             raise RuntimeError("Resolve pending motion or board synchronization first")
++        if isinstance(getattr(self.robot, "teaching_points_error", None), str) and self.robot.teaching_points_error:
++            # Operator may have selected the required WObj after a blocked
++            # startup. Refresh read-only metadata on this explicit F9/F10 retry,
++            # before checking fresh telemetry/camera/stop generation again.
++            try:
++                self.robot._load_teaching_points()
++            except Exception as exc:
++                self.robot.teaching_points = {}
++                self.robot.teaching_points_error = f"R1-R4 calibration unavailable: {exc}"
++                raise RuntimeError(self.robot.teaching_points_error) from exc
+         telemetry_ready_fn = getattr(self, "physical_telemetry_ready", None)
+         if callable(telemetry_ready_fn):
+             idle_ready = telemetry_ready_fn(require_idle=True)

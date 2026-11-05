@@ -2,18 +2,21 @@
 from unittest.mock import MagicMock, patch
 import pytest
 import config
-from src.hardware.robot_VIP import FR5Robot, RobotCommandError
+from src.hardware.robot_VIP import FR5Robot, RobotCommandError, GripperCommandError
 from src.motion.stages import MotionStage
 
 
 def ready_robot():
     arm=FR5Robot(); arm.dry=False; arm.connected=True
     arm.physical_motion_authorized=True
+    # Known safe travelling gap: existing motion tests are not testing first-pick opening.
+    arm.gripper_command_known=True; arm.gripper_closed_estimate=False
     arm.robot=MagicMock(); arm.robot.MoveCart.return_value=0
     arm.robot.MoveJ.return_value=0; arm.robot.SetToolDO.return_value=0
     arm.robot.Mode.return_value=0; arm.robot.RobotEnable.return_value=0
     arm.robot.GetRobotTeachingPoint.return_value = (0, [0.0]*12 + [arm.tool_num, arm.user_num])
-    arm.teaching_points={name:{"pose":[x,y,10,180,0,0],"joints":[0]*6}
+    arm.teaching_points={name:{"pose":[x,y,10,180,0,0],"joints":[0]*6,
+                                     "tool":arm.tool_num,"user":arm.user_num}
         for name,x,y in [("R1",-200,500),("R2",-200,180),("R3",160,180),("R4",160,500)]}
     return arm
 
@@ -118,3 +121,36 @@ def test_activation_failure_revokes_previous_authorization():
     with pytest.raises(RobotCommandError): arm.activate_physical_control(commissioned=True)
     assert not arm.physical_motion_authorized
     arm.robot.RobotEnable.assert_not_called()
+
+
+def test_first_pick_opens_unknown_gripper_before_approach(monkeypatch):
+    arm = ready_robot()
+    arm.gripper_command_known = False
+    arm.gripper_closed_estimate = False
+    for name in ("GRIPPER_OPEN_MAX_PULSE_SEC", "GRIPPER_CLOSE_PULSE_SEC",
+                 "GRIPPER_OPEN_SETTLE_SEC", "GRIPPER_CLOSE_SETTLE_SEC",
+                 "GRIPPER_DIRECTION_DEADTIME_SEC"):
+        monkeypatch.setattr(config, name, 0.0)
+    with patch.object(arm._motion_stop, "wait", return_value=True):
+        arm.pick_at(0, 0)
+    open_calls = [c for c in arm.robot.SetToolDO.call_args_list
+                  if c.kwargs.get("id") == config.GRIPPER_OPEN_DO_ID
+                  and c.kwargs.get("status") == config.GRIPPER_ACTIVE_STATUS]
+    assert open_calls
+    first_open = next(index for index, call in enumerate(arm.robot.mock_calls)
+                      if call[0] == "SetToolDO"
+                      and call[2].get("id") == config.GRIPPER_OPEN_DO_ID
+                      and call[2].get("status") == config.GRIPPER_ACTIVE_STATUS)
+    first_move = next(index for index, call in enumerate(arm.robot.mock_calls)
+                      if call[0] == "MoveCart")
+    assert first_open < first_move
+
+
+def test_closed_gripper_refuses_pick_without_motion():
+    arm = ready_robot()
+    arm.gripper_command_known = True
+    arm.gripper_closed_estimate = True
+    with pytest.raises(GripperCommandError, match="closed"):
+        arm.pick_at(0, 0)
+    arm.robot.MoveCart.assert_not_called()
+    arm.robot.SetToolDO.assert_not_called()

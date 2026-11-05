@@ -99,9 +99,11 @@ class VisualPickModes:
                     print(f"[TOP PICK] attempt={attempt + 1}/{maximum} {name}: {result.reason}; support={result.support}")
                     if result.target is not None:
                         col, row = expected_cells[name]
-                        offset = np.hypot(result.target.col - col, result.target.row - row)
-                        if offset > getattr(self.config, "VISUAL_PICK_MAX_OFFSET_CELLS", .25):
-                            raise ValueError("Consensus center outside expected-cell correction limit")
+                        offset_mm = float(np.hypot((result.target.col-col) * pitch[0],
+                                                   (result.target.row-row) * pitch[1]))
+                        max_offset_mm = getattr(self.config, "VISUAL_PICK_MAX_OFFSET_MM", 6.0)
+                        if offset_mm > max_offset_mm:
+                            raise ValueError(f"Consensus center offset {offset_mm:.1f} mm exceeds {max_offset_mm:.1f} mm")
                 if all(result.target is not None for result in results.values()):
                     for name, result in results.items():
                         print(f"[TOP PICK] selected {name} grid=({result.target.col:.4f},{result.target.row:.4f}) "
@@ -172,7 +174,9 @@ class VisualPickModes:
                         estimator = HeightPickEstimator(geometry, self.config.VISUAL_PICK_MIN_CONFIDENCE,
                                                         self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
                                                         outside_margin_mm=getattr(
-                                                            self.config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", None))
+                                                            self.config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", None),
+                                                        max_offset_mm=getattr(
+                                                            self.config, "VISUAL_PICK_MAX_OFFSET_MM", 6.0))
                     elif tuple(frame.shape[1::-1]) != estimator.geometry.frame_size:
                         raise ValueError("Camera resolution changed during pick sampling")
                     for name, cell in expected_cells.items():

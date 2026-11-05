@@ -13,11 +13,15 @@ def make_robot(monkeypatch, fault=None):
     corners = [(-207, 219), (-202, 547), (165, 546), (162, 222)]
     points = {}
     for i, (x, y) in enumerate(corners, 1):
-        points[f'R{i}'] = [x, y, 220, -180, 0, -43] + [0]*6 + [0, 1, 100, 100, 0, 0, 0, 0]
+        points[f'R{i}'] = [x, y, 220, -180, 0, -43] + [0]*6 + [0, 0, 100, 100, 0, 0, 0, 0]
     if fault == 'mixed':
         points['R4'][13] = 2  # Incompatible user frame mismatch.
     elif fault == 'r4_user0':
-        points['R4'][13] = 0  # Live controller R4 user=0 with R1-R3 user=1.
+        for name in ('R1', 'R2', 'R3'):
+            points[name][13] = 1  # Live controller R1-R3 user=1 with R4 user=0.
+    elif fault == 'all_user1':
+        for name in points:
+            points[name][13] = 1  # Base-only policy must reject every nonzero user.
     elif fault == 'missing_metadata':
         points['R4'] = points['R4'][:12]
     elif fault == 'missing_point':
@@ -31,7 +35,7 @@ def make_robot(monkeypatch, fault=None):
     return robot_VIP.FR5Robot(), sdk, points
 
 
-@pytest.mark.parametrize('fault', ['mixed', 'missing_metadata', 'missing_point'])
+@pytest.mark.parametrize('fault', ['mixed', 'missing_metadata', 'missing_point', 'all_user1'])
 def test_calibration_error_keeps_connection_and_blocks_all_actuation(monkeypatch, fault):
     robot, sdk, _ = make_robot(monkeypatch, fault)
     assert robot.connect()
@@ -49,13 +53,47 @@ def test_calibration_error_keeps_connection_and_blocks_all_actuation(monkeypatch
     sdk.SetToolDO.assert_not_called()
 
 
-def test_r4_user_zero_compatible_with_user_one(monkeypatch):
+def test_r4_user_zero_mixed_with_user_one_blocks_actuation(monkeypatch):
     robot, sdk, _ = make_robot(monkeypatch, 'r4_user0')
     assert robot.connect()
-    assert robot.teaching_points_error is None
-    assert (robot.tool_num, robot.user_num) == (0, 1)
-    assert robot._validated_corners().shape == (4, 3)
+    assert robot.connected and robot.robot is sdk
+    assert robot.teaching_points_error
     assert not robot.physical_motion_authorized
+    sdk.RobotEnable.assert_not_called()
+
+
+def test_identity_wobj_mixed_frames_are_normalized_to_base(monkeypatch):
+    robot, sdk, _ = make_robot(monkeypatch, 'r4_user0')
+    sdk.GetActualWObjNum = Mock(return_value=(0, 1))
+    sdk.GetCurWObjCoord = Mock(return_value=(0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    assert robot.connect()
+    assert robot.teaching_points_error is None
+    assert (robot.tool_num, robot.user_num) == (0, 0)
+    assert robot.wobj_identity_as_base is True
+    assert robot.identity_wobj_id == 1
+    assert {point['user'] for point in robot.teaching_points.values()
+            if point is not None} == {0}
+
+
+def test_nonidentity_wobj_mixed_frames_are_still_rejected(monkeypatch):
+    robot, sdk, _ = make_robot(monkeypatch, 'r4_user0')
+    sdk.GetActualWObjNum = Mock(return_value=(0, 1))
+    sdk.GetCurWObjCoord = Mock(return_value=(0, [10.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    assert robot.connect()
+    assert robot.teaching_points_error
+    assert not robot.wobj_identity_as_base
+
+
+def test_all_user_one_is_rejected_by_base_only_policy(monkeypatch):
+    robot, sdk, _ = make_robot(monkeypatch, 'all_user1')
+    assert robot.connect()
+    assert robot.connected and robot.robot is sdk
+    assert robot.teaching_points_error
+    assert "user 0" in robot.teaching_points_error
+    assert not robot.physical_motion_authorized
+    with pytest.raises(robot_VIP.RobotCommandError, match='user 0'):
+        robot.activate_physical_control(commissioned=True)
+    sdk.Mode.assert_not_called()
     sdk.RobotEnable.assert_not_called()
 
 
@@ -63,10 +101,30 @@ def test_valid_connection_loads_taught_frames_without_enabling(monkeypatch):
     robot, sdk, _ = make_robot(monkeypatch)
     assert robot.connect()
     assert robot.teaching_points_error is None
-    assert (robot.tool_num, robot.user_num) == (0, 1)
+    assert (robot.tool_num, robot.user_num) == (0, 0)
     assert robot._validated_corners().shape == (4, 3)
     assert not robot.physical_motion_authorized
     sdk.RobotEnable.assert_not_called()
+
+
+def test_identity_wobj_homechess_frame_is_normalized_before_move():
+    robot = robot_VIP.FR5Robot(dry_run=True)
+    robot.tool_num = 0
+    robot.user_num = 0
+    robot.wobj_identity_as_base = True
+    robot.identity_wobj_id = 1
+    home = [0.0, 0.0, 200.0, 180.0, 0.0, 0.0] + [0.0] * 6 + [0, 1, 0, 0]
+    robot._verify_waypoint_frame(home, "HOMECHESS")
+
+
+def test_nonidentity_wobj_homechess_frame_is_rejected():
+    robot = robot_VIP.FR5Robot(dry_run=True)
+    robot.tool_num = 0
+    robot.user_num = 0
+    robot.wobj_identity_as_base = False
+    home = [0.0, 0.0, 200.0, 180.0, 0.0, 0.0] + [0.0] * 6 + [0, 1, 0, 0]
+    with pytest.raises(robot_VIP.RobotCommandError, match="HOMECHESS"):
+        robot._verify_waypoint_frame(home, "HOMECHESS")
 
 
 def test_actual_sdk_failure_remains_connection_failure(monkeypatch):
@@ -92,9 +150,11 @@ def test_reconnect_reloads_and_clears_calibration_error(monkeypatch):
     robot, sdk, points = make_robot(monkeypatch, 'mixed')
     assert robot.connect()
     assert robot.teaching_points_error
-    points['R4'][13] = 1
+    for name in points:
+        points[name][13] = 0
     assert robot.connect()
     assert robot.teaching_points_error is None
+    assert (robot.tool_num, robot.user_num) == (0, 0)
     assert not robot.physical_motion_authorized
 
 

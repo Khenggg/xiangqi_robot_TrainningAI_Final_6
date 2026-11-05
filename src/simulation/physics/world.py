@@ -31,6 +31,7 @@ from src.simulation.physics.state import (
     GraspResult,
     GraspStatus,
     PiecePhysicalState,
+    PieceSnapshot,
     WorldStateSnapshot,
 )
 from src.simulation.physics.transforms import (
@@ -172,6 +173,7 @@ class VirtualPhysicalWorld:
             self.board_body_id = -1
             self.floor_body_id = -1
             self.pieces: Dict[str, XiangqiPieceBody] = {}
+            self.captured_pieces: Dict[str, PieceSnapshot] = {}
 
             # Settle thresholds
             settle_cfg = self.physics_cfg["settling"]
@@ -195,6 +197,7 @@ class VirtualPhysicalWorld:
             self._spawn_pieces()
 
             self._physics_lock = threading.RLock()
+            self.projection_context = None
 
             # Gripper proxy and PyBullet collision bodies
             self.gripper = VirtualGripper(profile_path=self.gripper_profile_path)
@@ -886,12 +889,44 @@ class VirtualPhysicalWorld:
                 z_clearance_m=0.001,
             )
 
+    def _remove_piece_body(self, piece: XiangqiPieceBody) -> None:
+        """Remove a piece rigid body after its captured snapshot is recorded."""
+        if piece.body_id >= 0 and self.client_id >= 0:
+            try:
+                p.removeBody(piece.body_id, physicsClientId=self.client_id)
+            except Exception:
+                pass
+        self.pieces.pop(piece.piece_id, None)
+
+    def capture_piece(self, piece_id: str, *, evidence: str = "SIMULATED_CAPTURE_SLOT") -> Optional[PieceSnapshot]:
+        """Snapshot a captured piece at its current off-board pose and remove its body.
+
+        The physics world keeps only live bodies. The immutable snapshot is
+        retained for telemetry so the viewer can draw the captured piece in the
+        tray without keeping a simulated rigid body.
+        """
+        with self._physics_lock:
+            piece = self.pieces.get(piece_id)
+            if piece is None:
+                return self.captured_pieces.get(piece_id)
+            if self.gripper.attached_piece is piece:
+                return None
+            piece.captured = True
+            piece.capture_pose_evidence = evidence
+            piece.physical_state = PiecePhysicalState.OUT_OF_BOUNDS
+            piece.set_velocity([0.0] * 3, [0.0] * 3)
+            snapshot = piece.to_snapshot()
+            self.captured_pieces[piece_id] = snapshot
+            self._remove_piece_body(piece)
+            return snapshot
+
     def reset_pieces(self) -> None:
         """Reset all pieces to their initial canonical grid positions, respawning any missing."""
         with self._physics_lock:
             # First release any attached piece
             if self.gripper.attached_piece is not None:
                 self.release_attached_piece()
+            self.captured_pieces.clear()
 
             height_m = self.geom.piece_height_mm / 1000.0
 
@@ -925,9 +960,66 @@ class VirtualPhysicalWorld:
                         physicsClientId=self.client_id,
                     )
                 p_body.physical_state = PiecePhysicalState.SETTLING
+                p_body.captured = False
+                p_body.capture_pose_evidence = None
                 p_body._consecutive_settled_steps = 0
                 p_body.board_placement_state = self.board_placement_state
                 p_body.grid_origin_robot = tuple(self.board_placement_state.grid_origin_robot_m)
+
+    def _plan_captured_positions(self, identities):
+        """Retain simulated releases; use labelled nominal slots after rebuild."""
+        planned = {}
+        needs_slot = []
+        for identity in sorted(identities):
+            stored = self.captured_pieces.get(identity)
+            if stored is not None:
+                planned[identity] = (
+                    list(stored.position_robot_base_m),
+                    list(stored.orientation_quaternion_robot_base),
+                    stored.capture_pose_evidence or "EXISTING_CAPTURED_SNAPSHOT",
+                )
+                continue
+            body = self.pieces.get(identity)
+            if body is not None:
+                position, orientation = body.get_pose_robot_base()
+                if (np.isfinite(position).all()
+                        and not self.board_placement_state.is_in_bounds_robot(position)):
+                    evidence = body.capture_pose_evidence or "EXISTING_SIMULATED_POSE"
+                    planned[identity] = (position, orientation, evidence)
+                    continue
+            needs_slot.append(identity)
+        if needs_slot:
+            from src.domain.capture_layout import capture_slots
+            slots = capture_slots(self.scene_cfg.get("capture_area", {}), self.board_placement_state, self.geom)
+            spacing = self.geom.piece_diameter_mm / 1000.0 + 0.005
+            for identity in needs_slot:
+                slot = next((candidate.copy() for candidate in slots
+                             if all(np.linalg.norm(candidate[:2] - pose[0][:2]) >= spacing
+                                    for pose in planned.values())), None)
+                if slot is None:
+                    raise ValueError("Configured capture area has no free slot for the reconstructed board")
+                slot[2] = self.geom.piece_height_mm / 2000.0
+                planned[identity] = (slot, self.board_placement_state.quat_robot_from_board,
+                                     "NOMINAL_SIMULATED_CAPTURE_SLOT")
+        return planned
+
+    def _apply_captured_positions(self, planned, canonical):
+        """Record captured poses and remove their rigid bodies from physics."""
+        for identity, (position, orientation, evidence) in planned.items():
+            body = self.pieces.get(identity)
+            if body is None:
+                if identity in self.captured_pieces:
+                    continue
+                info = canonical[identity]
+                body = self._spawn_piece_body(piece_id=identity, side=info["side"], p_type=info["type"],
+                                              row=int(info["row"]), col=int(info["col"]), z_clearance_m=0.0)
+            body.set_pose_robot_base(position, orientation)
+            body.set_velocity([0.0] * 3, [0.0] * 3)
+            body.captured = True
+            body.capture_pose_evidence = evidence
+            body.physical_state = PiecePhysicalState.OUT_OF_BOUNDS
+            self.captured_pieces[identity] = body.to_snapshot()
+            self._remove_piece_body(body)
 
     def reconcile_to_board_cells(self, piece_cells: Dict[Tuple[int, int], str]) -> None:
         """Apply a validated full observed board to rigid bodies and colliders.
@@ -952,12 +1044,11 @@ class VirtualPhysicalWorld:
             if len(target_ids) != len(piece_cells):
                 raise ValueError("A piece identity cannot occupy two cells")
 
-            # Remove pieces not in target cells (e.g. captured)
-            for pid in list(self.pieces.keys()):
-                if pid not in target_ids:
-                    p_body = self.pieces[pid]
-                    p.removeBody(p_body.body_id, physicsClientId=self.client_id)
-                    del self.pieces[pid]
+            if any(identity not in p_lookup for identity in self.pieces):
+                raise ValueError("Cannot reconcile unknown world piece identities")
+            for pid in target_ids:
+                self.captured_pieces.pop(pid, None)
+            captured = self._plan_captured_positions(set(p_lookup) - target_ids)
 
             # Position or respawn pieces at target cells
             for (r, c), pid in piece_cells.items():
@@ -989,7 +1080,10 @@ class VirtualPhysicalWorld:
                         physicsClientId=self.client_id,
                     )
                 p_body.physical_state = PiecePhysicalState.RESTING
+                p_body.captured = False
+                p_body.capture_pose_evidence = None
                 p_body._consecutive_settled_steps = self.required_settled_steps
+            self._apply_captured_positions(captured, p_lookup)
 
     def step(self, num_steps: int = 1) -> None:
         """Step the simulation by fixed deterministic timesteps."""
@@ -1132,13 +1226,19 @@ class VirtualPhysicalWorld:
 
     def get_snapshot(self) -> WorldStateSnapshot:
         """Return immutable snapshot of authoritative physics state."""
-        piece_snapshots = [p.to_snapshot() for p in self.pieces.values()]
-        return WorldStateSnapshot(
-            timestamp=time.time(),
-            simulation_time=self.sim_time,
-            gripper=self.gripper.to_state_dict(),
-            pieces=piece_snapshots,
-        )
+        with self._physics_lock:
+            piece_snapshots = [p.to_snapshot() for p in self.pieces.values()]
+            context = dict(self.projection_context) if self.projection_context is not None else None
+            if context is not None:
+                context["placement_version"] = self.board_placement_state.placement_version
+            return WorldStateSnapshot(
+                timestamp=time.time(),
+                simulation_time=self.sim_time,
+                gripper=self.gripper.to_state_dict(),
+                pieces=piece_snapshots,
+                captured_pieces=[self.captured_pieces[pid] for pid in sorted(self.captured_pieces)],
+                projection_context=context,
+            )
 
     def reconcile_piece_move(self, piece_id: str, dst: Tuple[int, int],
                              captured_piece_id: Optional[str] = None) -> None:
@@ -1148,15 +1248,21 @@ class VirtualPhysicalWorld:
             raise ValueError("Destination is outside the board")
         with self._physics_lock:
             piece = self.pieces[piece_id]
-            captured = self.pieces[captured_piece_id] if captured_piece_id else None
+            captured = self.pieces.get(captured_piece_id) if captured_piece_id else None
+            if captured_piece_id and captured is None and captured_piece_id not in self.captured_pieces:
+                raise KeyError(captured_piece_id)
             if piece.attached_to_gripper or (captured and captured.attached_to_gripper):
                 raise ValueError("Human move conflicts with an attached robot payload")
             if captured is piece:
                 raise ValueError("A piece cannot capture itself")
             pos = self.board_placement_state.cell_to_robot_xyz(row, col, z_rel_m=piece.height_m / 2.0)
-            if captured is not None:
-                p.removeBody(captured.body_id, physicsClientId=self.client_id)
-                del self.pieces[captured.piece_id]
+            if captured_piece_id:
+                canonical = {item["id"]: item for item in self.layout_cfg["pieces"]}
+                captured_ids = set(self.captured_pieces)
+                captured_ids.update(identity for identity, body in self.pieces.items() if body.captured)
+                captured_ids.add(captured_piece_id)
+                planned = self._plan_captured_positions(captured_ids)
+                self._apply_captured_positions(planned, canonical)
             piece.set_pose_robot_base(pos, self.board_placement_state.quat_robot_from_board)
             piece.set_velocity([0.0] * 3, [0.0] * 3)
             piece.physical_state = PiecePhysicalState.RESTING

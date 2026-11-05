@@ -1,0 +1,20 @@
+[
+  {
+    "file": "src/hardware/robot_VIP.py",
+    "function": "activate_physical_control",
+    "unchanged_from_HEAD": false,
+    "sha256": "2bd622eecec7e583bffec53744da7e03e0c888bffb9950ffc7559aa6c7d0a407"
+  },
+  {
+    "file": "src/hardware/hardware_manager.py",
+    "function": "activate_physical_game",
+    "unchanged_from_HEAD": false,
+    "sha256": "d4d4cfa8e55789c082865dc1ab5826a54d06e23a17401c9ae17993e1d5dca2e7"
+  },
+  {
+    "file": "src/hardware/hardware_manager.py",
+    "function": "get_robot_center_pick_targets",
+    "unchanged_from_HEAD": false,
+    "sha256": "d4d4cfa8e55789c082865dc1ab5826a54d06e23a17401c9ae17993e1d5dca2e7"
+  }
+]

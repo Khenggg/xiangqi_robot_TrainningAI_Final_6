@@ -1,0 +1,22 @@
+{
+  "status": "PASS",
+  "environment": {
+    "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+    "executable": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\.venv312\\Scripts\\python.exe",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "raw_frames": 200,
+  "checks": [
+    "all saved packet lengths and checksums independently validated",
+    "raw joints/TCP/main/sub independently match JSON",
+    "changing frame counters",
+    "FK matches measured active TCP",
+    "sample stationary within 0.001 degrees",
+    "runtime motion source and calibration hashes unchanged",
+    "all logged RPC names read-only Get allowlist",
+    "no direct actuation calls or SDK owner construction in probe"
+  ],
+  "probe_exit_code": 0,
+  "physical_motion": "NOT RUN",
+  "production_tests": "NOT RUN - no production edits"
+}

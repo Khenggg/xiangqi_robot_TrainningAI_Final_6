@@ -25,7 +25,7 @@ def _system():
     moves = iter([((0, 6), (0, 5)), ((0, 3), (0, 4))])
     execute = Mock(return_value=MotionExecutionResult.ok())
     home = Mock(side_effect=AssertionError("Self-play issued an unrequested home motion"))
-    hw = SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND="VIRTUAL"), dry_run=True,
+    hw = SimpleNamespace(config=SimpleNamespace(GAME_MODE="ROBOT_VS_ROBOT",ROBOT_BACKEND="VIRTUAL"), dry_run=True,
                          is_robot_ready=True, ai_ctrl=SimpleNamespace(pick_move=lambda *a, **k: next(moves)),
                          execute_piece_move=execute, robot=SimpleNamespace(go_to_home_chess=home))
     return state, hw, execute, home

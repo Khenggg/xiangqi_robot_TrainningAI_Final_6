@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from pathlib import Path
 from unittest.mock import Mock
 from urllib.request import urlopen
 from urllib.error import HTTPError
@@ -49,6 +50,7 @@ def test_game_only_history_controls_do_not_require_physical_reconciliation(opera
     state.api_client.send_move_update_board = Mock()
     hw = SimpleNamespace(config=SimpleNamespace(GAME_ONLY=game_only, ROBOT_BACKEND="VIRTUAL" if game_only else "PHYSICAL"),
                          dry_run=game_only, simulation_runtime=None,
+                         stop_coordinator=SimpleNamespace(safe_for_release=lambda **kw: True),
                          capture_baseline_if_needed=Mock(), restore_yolo_baseline=Mock())
     if not game_only:
         state.set_board_observer(Mock(return_value=True))
@@ -104,7 +106,7 @@ def test_game_only_self_play_motion_adapter_never_uses_robot():
 def test_game_only_self_play_commits_without_a_simulator():
     state = GameState()
     state.api_client.send_move_update_board = Mock()
-    hw = SimpleNamespace(config=SimpleNamespace(GAME_ONLY=True, ROBOT_BACKEND="VIRTUAL"),
+    hw = SimpleNamespace(config=SimpleNamespace(GAME_ONLY=True, ROBOT_BACKEND="VIRTUAL", GAME_MODE="ROBOT_VS_ROBOT"),
                          dry_run=True, is_robot_ready=True, simulation_runtime=None,
                          difficulty_availability=lambda: {"easy": True},
                          ai_ctrl=SimpleNamespace(pick_move=lambda board, **kw: ((0, 6), (0, 5))))
@@ -126,14 +128,14 @@ def test_human_sync_failure_is_not_reported_as_accepted():
     state.set_board_observer(lambda cells: False)
     request = SimpleNamespace(turn_token=(0, 0), move=((4, 6), (4, 5)))
     coordinator = HumanMoveCommitCoordinator(state)
-    assert coordinator.try_commit(request) == "REJECTED"
-    assert state.physical_sync_fault and state.move_sync_error
-    assert state.snapshot_continue_required
+    assert coordinator.try_commit(request) == "ACCEPTED"
+    assert not state.physical_sync_fault and state.projection_error
+    assert state.last_commit_result.projection_pending
     # The already observed move remains coherent in FEN and identities.
     assert state.board[5][4] == "r_P" and state.turn == "b"
     assert state.current_fen.split()[1] == "b"
-    assert coordinator.try_commit(request) == "STALE"
-    state.api_client.send_move_update_board.assert_not_called()
+    assert coordinator.try_commit(request) == "DUPLICATE"
+    state.api_client.send_move_update_board.assert_called_once()
 
 
 def test_enable_requires_operator_camera_and_idle_twin():
@@ -173,6 +175,8 @@ def test_viewer_server_serves_assets_but_not_repo_secrets(tmp_path, monkeypatch)
     server.start(8765)
     try:
         assert urlopen(server.url).read() == b"viewer"
+        with urlopen(server.url.removesuffix("robot-3d-viewer/") + "favicon.ico") as response:
+            assert response.status == 204
         with pytest.raises(HTTPError) as error:
             urlopen(server.url + "../secret.txt")
         assert error.value.code == 403
@@ -203,3 +207,61 @@ def test_viewer_serves_local_three_without_exposing_package_or_traversal(tmp_pat
             assert error.value.code == 403
     finally:
         server.close()
+
+
+def test_viewer_uses_vendored_occt_and_serves_wasm_mime(tmp_path, monkeypatch):
+    from src.core.launch_options import check_viewer_assets
+
+    check_viewer_assets(Path(__file__).resolve().parents[2])
+    index = (Path(__file__).resolve().parents[2] / "robot-3d-viewer" / "index.html").read_text(
+        encoding="utf-8")
+    assert './vendor/occt-import-js/occt-import-js.min.js' in index
+    assert 'cdn.jsdelivr.net/npm/occt-import-js' not in index
+
+    viewer_dir = tmp_path / "robot-3d-viewer"
+    vendor = viewer_dir / "vendor" / "occt-import-js"
+    vendor.mkdir(parents=True)
+    (viewer_dir / "index.html").write_text("viewer")
+    (vendor / "occt-import-js.min.js").write_text("js")
+    (vendor / "occt-import-js.wasm").write_bytes(b"wasm")
+    monkeypatch.setattr("src.core.launch_options.webbrowser.open", Mock())
+    server = ViewerServer(tmp_path, 0)
+    server.start(8765)
+    try:
+        base = server.url
+        with urlopen(base + "vendor/occt-import-js/occt-import-js.min.js") as response:
+            assert response.read() == b"js"
+            assert "javascript" in response.headers["Content-Type"]
+        with urlopen(base + "vendor/occt-import-js/occt-import-js.wasm") as response:
+            assert response.read() == b"wasm"
+            assert response.headers["Content-Type"] == "application/wasm"
+    finally:
+        server.close()
+
+
+def test_viewer_http_server_has_enough_module_accept_backlog(tmp_path):
+    server = ViewerServer(tmp_path, 0)
+    try:
+        assert server.server.request_queue_size >= 128
+        assert server.server.daemon_threads is True
+    finally:
+        server.close()
+
+
+def test_game_only_mouse_move_saves_and_restores_rollback_without_camera():
+    state = GameState()
+    state.api_client.send_move_update_board = Mock()
+    hw = SimpleNamespace(
+        config=SimpleNamespace(GAME_ONLY=True, ROBOT_BACKEND="VIRTUAL"),
+        dry_run=True,
+        simulation_runtime=None,
+        stop_coordinator=SimpleNamespace(safe_for_release=lambda **kw: True),
+        capture_baseline_if_needed=Mock(),
+        restore_yolo_baseline=Mock(),
+    )
+    before = [row[:] for row in state.board]
+    assert state.process_human_move((4, 6), (4, 5), "r_P")
+    assert state._pre_space_state is not None
+    assert state.handle_rollback(hw) is None
+    assert state.board == before
+    assert state.turn == "r"

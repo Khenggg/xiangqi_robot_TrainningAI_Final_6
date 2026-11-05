@@ -144,3 +144,40 @@ def test_custom_event_overflow_disconnects_instead_of_silently_losing_history():
         assert client not in publisher._outboxes
         publisher._loop = None
     asyncio.run(observe())
+
+
+def test_initial_snapshot_replays_latest_physical_gripper_command():
+    publisher = TelemetryPublisher(port=0)
+    publisher.broadcast_custom({
+        "type": "gripper_command",
+        "source": "PHYSICAL",
+        "phase": "CLOSE",
+        "action": "close",
+        "piece_id": "black_cannon_0",
+        "captured_piece_id": None,
+        "move_id": "move-1",
+        "physical_grasp_verified": False,
+    })
+    publisher.start()
+
+    async def observe():
+        uri = f"ws://127.0.0.1:{publisher.port}"
+        async with websockets.connect(uri, open_timeout=1, close_timeout=0.1) as ws:
+            packets = []
+            for _ in range(8):
+                try:
+                    packets.append(json.loads(await asyncio.wait_for(ws.recv(), 1)))
+                except asyncio.TimeoutError:
+                    break
+                if packets[-1].get("type") == "gripper_command":
+                    break
+            commands = [p for p in packets if p.get("type") == "gripper_command"]
+            assert commands, packets
+            assert commands[0]["piece_id"] == "black_cannon_0"
+            assert commands[0]["phase"] == "CLOSE"
+            assert commands[0]["source"] == "PHYSICAL"
+
+    try:
+        asyncio.run(observe())
+    finally:
+        publisher.stop()

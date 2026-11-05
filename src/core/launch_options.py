@@ -12,17 +12,40 @@ from src.core.project_logging import event
 from urllib.parse import unquote, urlsplit, urlencode
 
 
+class ViewerHTTPServer(ThreadingHTTPServer):
+    """HTTP server with enough accept backlog for browser ES-module fan-out."""
+    request_queue_size = 128
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+
 def parse_options(argv=None):
     parser = argparse.ArgumentParser(description="Xiangqi game and FR3 viewer")
     modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("--virtual", action="store_true", help="Disable simulation: game only, no hardware")
-    modes.add_argument("--physical", action="store_true", help="Camera + real FR3, initially read-only")
-    parser.add_argument("--no-viewer", action="store_true", help="Do not serve/open the 3D viewer")
+    modes.add_argument("--virtual", "--board-only", dest="virtual", action="store_true",
+                       help="Game only: 2D board, no simulation, camera, robot, or 3D viewer")
+    modes.add_argument("--physical", "--robot", dest="physical", action="store_true",
+                       help="Camera + real FR3 + mirror, initially read-only")
+    parser.add_argument("--simulation", "--sim", dest="simulation", action="store_true",
+                        help="Virtual simulation with the 3D viewer (the default)")
+    parser.add_argument("--no-viewer", "--no-3d", dest="no_viewer", action="store_true",
+                        help="Keep simulation/hardware but do not serve/open the 3D viewer")
+    parser.add_argument("--recalibrate-camera", action="store_true",
+                        help="Open interactive camera perspective calibration even if a saved matrix exists")
+    parser.add_argument("--simulation-profile", choices=("detailed", "fast"),
+                        help="Virtual playback: detailed (slow) or fast; both keep full physics/checks")
     parser.add_argument("--viewer-port", type=int, default=8088)
     parser.add_argument("--telemetry-port", type=int, default=8765)
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
     parser.add_argument("--log-dir", default="logs", help="Directory for per-session logs")
     args = parser.parse_args(argv)
+    if args.simulation and (args.physical or args.virtual):
+        parser.error("--simulation cannot be combined with --board-only or --robot")
+    if args.simulation_profile is not None and (args.physical or args.virtual):
+        parser.error("--simulation-profile requires virtual simulation; omit --board-only/--robot")
+    if args.recalibrate_camera and not args.physical:
+        parser.error("--recalibrate-camera requires --physical")
     if any(not 1 <= p <= 65535 for p in (args.viewer_port, args.telemetry_port)):
         parser.error("Ports must be between 1 and 65535")
     if args.viewer_port == args.telemetry_port and not (args.virtual or args.no_viewer):
@@ -31,10 +54,15 @@ def parse_options(argv=None):
 
 
 def configure_runtime(config, options):
+    config.REQUESTED_EXECUTION_ENVIRONMENT = "PHYSICAL" if options.physical else "VIRTUAL"
+    config.EXECUTION_ENVIRONMENT = config.REQUESTED_EXECUTION_ENVIRONMENT
     config.GAME_ONLY = options.virtual
     config.ROBOT_BACKEND = "PHYSICAL" if options.physical else "VIRTUAL"
     config.DRY_RUN = not options.physical
+    config.RECALIBRATE_CAMERA = bool(getattr(options, "recalibrate_camera", False))
     config.TELEMETRY_PORT = options.telemetry_port
+    if getattr(options, "simulation_profile", None) is not None:
+        config.SIMULATION_PROFILE = options.simulation_profile
 
 
 def check_viewer_assets(repo):
@@ -42,6 +70,8 @@ def check_viewer_assets(repo):
     root = Path(repo).resolve()
     required = (
         "robot-3d-viewer/index.html", "robot-3d-viewer/main.mjs",
+        "robot-3d-viewer/vendor/occt-import-js/occt-import-js.min.js",
+        "robot-3d-viewer/vendor/occt-import-js/occt-import-js.wasm",
         "node_modules/three/build/three.module.js",
         "node_modules/three/build/three.core.js",
         "node_modules/three/examples/jsm/controls/OrbitControls.js",
@@ -51,8 +81,8 @@ def check_viewer_assets(repo):
     if missing:
         raise FileNotFoundError(
             "Viewer thiếu tài nguyên: " + ", ".join(missing)
-            + ". Chạy SETUP_WINDOWS.bat (hoặc npm ci tại thư mục repo); "
-              "nếu thiếu index.html/main.mjs, kiểm tra lại checkout."
+            + ". Kiểm tra checkout đầy đủ (index/main/vendor occt) và chạy "
+              "SETUP_WINDOWS.bat hoặc npm ci cho node_modules/three."
         )
 
 
@@ -68,6 +98,7 @@ class ViewerServer:
                 **SimpleHTTPRequestHandler.extensions_map,
                 ".mjs": "text/javascript; charset=utf-8",
                 ".js": "text/javascript; charset=utf-8",
+                ".wasm": "application/wasm",
             }
 
             def end_headers(self):
@@ -117,9 +148,14 @@ class ViewerServer:
                     self.send_error(400)
 
             def send_head(self):
+                path = unquote(urlsplit(self.path).path)
+                if path == "/favicon.ico":
+                    self.send_response(204)
+                    self.end_headers()
+                    return None
                 target = Path(self.translate_path(self.path)).resolve()
                 allowed = [root / "robot-3d-viewer", root / "shared"]
-                if unquote(urlsplit(self.path).path).startswith("/vendor/three/"):
+                if path.startswith("/vendor/three/"):
                     allowed = [three_root / "build", three_root / "examples" / "jsm"]
                     if target.suffix != ".js":
                         self.send_error(403)
@@ -132,7 +168,7 @@ class ViewerServer:
             def log_message(self, *_):
                 pass
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(root)))
+        self.server = ViewerHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(root)))
         self.server.diagnostic_lock = threading.Lock()
         self.server.diagnostic_window = time.monotonic()
         self.server.diagnostic_count = 0

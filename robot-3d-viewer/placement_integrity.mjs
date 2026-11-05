@@ -1,6 +1,9 @@
 // A live board matrix must place the same grid origin and taught corners that
 // the backend advertises. A mismatch must not silently rotate the 3D board.
+import { inspectPhysicalBoardDisplay } from "./physical_board_display.mjs";
 export function inspectBoardPlacementPacket(packet, cellM = 0.04) {
+  const display = inspectPhysicalBoardDisplay(packet);
+  if (display) return display;
   const T = packet?.T_robot_from_board;
   if (T == null) return { ok: true };
   if (!Array.isArray(T) || T.length !== 4 ||

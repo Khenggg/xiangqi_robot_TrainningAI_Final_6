@@ -40,7 +40,11 @@ def drain(client):
 def controller(monkeypatch, client):
     monkeypatch.setattr('src.core.game_state.TuongKyDaiSuClient', lambda *a: client)
     state = GameState()
-    hw = SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND='PHYSICAL'), dry_run=False,
+    settled = threading.Event()
+    settled.set()
+    hw = SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND='PHYSICAL', GAME_MODE='ROBOT_VS_ROBOT'), dry_run=False,
+                         request_controlled_stop=lambda *a,**kw: SimpleNamespace(done=settled,result=SimpleNamespace(safe=True)),
+                         stop_coordinator=SimpleNamespace(safe_for_release=lambda **kw:True),
                          simulation_runtime=None, is_robot_ready=True, cam_monitor=object(),
                          verify_physical_board=Mock(return_value=True),
                          capture_baseline_if_needed=Mock(return_value=True),
@@ -75,16 +79,20 @@ def test_selfplay_stop_and_restart_reopens_spectator_even_while_end_pending(spec
         assert ctrl.end_match()
         assert entered.wait(1)
         assert ctrl.finish_recovery()  # GUI tick erases ENDED, so status alone is insufficient.
+        # Ending a business match requires New Game before a fresh self-play run.
+        assert not ctrl.start()
+        ctrl.hw.dry_run = True
+        ctrl.hw.simulation_runtime = object()
+        ctrl.state.reset_game(ctrl.hw)
         assert ctrl.start()
         assert api.ensure_match(initial_fen=ctrl.state.current_fen)  # outer startup path
         release.set()
         drain(api)
         assert [u.removeprefix(api.base_url) for u, _ in calls] == [
-            '/api/simulation/matches', '/api/simulation/matches/1/fen',
-            '/api/simulation/matches/1/end', '/api/simulation/matches',
-            '/api/simulation/matches/2/fen',
+            '/api/simulation/matches', '/api/simulation/matches/1/end',
+            '/api/simulation/matches',
         ]
-        assert calls[-1][1] == {'fen': ctrl.state.current_fen}
+        assert api._last_fen_ack == (str(api.room_id), ctrl.state.current_fen)
     finally:
         release.set()
 
@@ -141,6 +149,7 @@ def test_offline_selfplay_does_not_open_spectator(spectator, monkeypatch):
     api, calls = spectator
     ctrl = controller(monkeypatch, api)
     ctrl.hw.dry_run = True
+    api.token = ''
     assert ctrl.start()
     assert calls == []
 
@@ -223,7 +232,10 @@ def test_main_startup_uses_single_room_for_each_mode(spectator, monkeypatch, mod
     env['_start_selected_game']()
     drain(api)
     assert sum(u.endswith('/matches') for u, _ in calls) == 1
-    assert calls[-1][1] == {'fen': ctrl.state.current_fen}
+    # Room creation already acknowledges the standard starting FEN; resending
+    # that unchanged board is rejected by the remote server.
+    assert len(calls) == 1
+    assert api._last_fen_ack == (str(api.room_id), ctrl.state.current_fen)
     assert (ctrl.status is SelfPlayStatus.READY) == (mode == 'ROBOT_VS_ROBOT')
 
 

@@ -1,3 +1,499 @@
+## 2026-11-02 real controller main1/sub29 — OPEN
+
+At 16:30:45+07, read-only GetRobotErrorCode returned [0,1,29] while camera had
+confirmed the 32-piece opening. This correctly blocks fresh-idle/stop recovery;
+V/F12 or a new application session cannot resolve a controller fault. Specific
+hardware explanation now retained in status/log/recovery panel. 78 focused tests
+PASS, exit0; unrelated legacy emergency fixtures still FAIL. Actual controller
+recovery/root cause, loaded motion and running UI acceptance remain unverified.
+No enable/reset/motion sent. See `reports/recovery-hardware-block-20261102/REPORT.md`.
+
+## 2026-11-02 retry and physical board viewer — runtime acceptance pending
+
+V-baseline-only and compact Continue dispatch repaired with guarded pick retry.
+Nominal reversed-column physical viewer replaced by a separate read-only taught
+R1–R4 XY display path; rig/attached/released payload projections covered offline.
+86 focused tests PASS, final display8 rerun PASS, 3 Node geometry suites PASS.
+Z surface remains unmeasured/unverified; loaded grasp/release and full-game motion
+remain unverified. Running app/viewer must reload; no pending session was cleared.
+Recorded 6.7–7mm target offset is still blocked by unchanged6mm policy; FEN success
+alone does not bypass target verification. See
+`reports/retry-board-display-20261102/REPORT.md`.
+
+## 2026-11-02 short board release — physical verification OPEN
+
+User requested 0.06s opening at board release after reporting full opening hits
+neighbors. Separate release pulse/action implemented; post-release safe-gap close
+removed because its full-open starting assumption no longer holds. Initial and
+capture-bin OPEN_MAX unchanged. 29 targeted mock tests PASS, exit 0; no physical
+test. Effective jaw travel/clearance and repeat picks remain unverified; no
+position sensor. Restart required. See gripper report for command/evidence.
+
+## 2026-11-02 gripper direction after rewiring — game release verification OPEN
+
+After operator swapped control wires, separate observed pulses verify DO1 closes
+and DO0 opens. Gameplay config corrected accordingly; app restart required to
+load it. 33 focused mock tests PASS, exit 0. Isolated empty-jaw direction verified
+physically; full stroke/loaded release during play NOT RUN. Original pre-rewire
+electrical failure remains UNKNOWN. Separate legacy backend defaults unchanged.
+Evidence: `reports/gripper-release-20261102/REPORT.md`.
+
+## 2026-11-02 DO1 release produces no observed motor motion — PRE-REWIRE HISTORY
+
+Game RELEASE command was not omitted: log has DO1/open_max 0.30s, but piece is
+missing at destination. One user-authorized isolated open pulse with empty jaws
+and stationary arm also produced no motor sound/motion per operator; controller
+accepted ON/OFF and reported no fault. Driver/output electrical state is not
+measured. Preserve mapping/timings; do not assume a longer pulse or channel swap
+fixes it. No production fix or further pulse performed. Evidence:
+`reports/gripper-release-20261102/REPORT.md`.
+
+## 2026-11-02 PvP integration remains open
+
+Remote donor SHAs unchanged; functional comparison and decision matrix added in
+`reports/branch-reviews/PVP_FEATURE_COMPARISON_20261102.md`. player-vs-player tip
+reverts PvP; nguoivsnguoifinal supplies localhost two-window roles and a legacy
+two-human/one-FR3 path, with the previously reported F1–F7 still unresolved.
+Focused recheck 58 PASS (exit 0), including 11 defect-reproduction probes; no
+runtime fix or integration. Hvh remains virtual in current SessionProfile.
+
+## 2026-10-31 controller fault and active-tool discrepancy — OPEN
+
+12:04 confirmation: symptom occurs during the move. Three mock-only diagnostic
+probes demonstrate no measured-arrival check between APPROACH and LAND/GRIP;
+the trace can mark APPROACH complete solely on a fake successful return. Real
+blendT=-1 is documented blocking, so actual premature return remains UNPROVEN.
+Current controller 1/1 and tool/user 1/0 were freshly reconfirmed. No physical
+motion or production repair was performed.
+
+VERIFIED at 11:43 +07:00: controller main=1/sub=1 persists without the game app;
+200 valid state packets show active tool/user=1/0 versus fixed profile 0/0.
+Joints remain near yesterday's abnormal observation (max delta 0.001526 deg).
+F12 clears application/FEN state, not this controller fault or an arm route.
+Do not interpret the 260.649 mm change of reported TCP as arm travel:
+current flange nearly matches yesterday's TCP; active tool context differs.
+Historical collision causality and physical recovery remain UNVERIFIED. No
+motion/reset/tool change was attempted. See
+`reports/controller-check-20261031/REPORT.md` and its raw/JSON evidence.
+
+## 2026-10-30 live pose / vertical-motion primitive — OPEN / HIGH
+
+Read-only investigation after the user's new launch found current-reference IK
+returns 112 for both source approach and land, while using saved HOME as the
+reference gives endpoint solutions. Current measured pose is far from the target
+and controller reports E-Stop active. This does not authorize a HOME move or prove
+which historic IK branch caused contact. Both move_safe_pose and movel_pose use
+MoveCart(config=-1); the latter does not guarantee the advertised vertical linear
+path. No production fix or physical replay was performed. Current values, FK/IK
+results and latest-session LAND/112 evidence: `reports/live-pose-20261030/REPORT.md`.
+
+## 2026-10-30 physical collision / restart approach — OPEN / HIGH
+
+User reports physical contact after restart/F12, not merely a controller collision
+alarm. Logs show board checks passed then first AI approach failed with MoveCart
+14 at 20:03:54. F12 and activation currently verify board/idle/stop, without a
+separate verified post-interruption arm-start/route contract. move_safe_pose calls
+MoveCart(config=-1) although its comment claims straight-line motion; vendor
+defines MoveCart as point-to-point with current-joint-based solution. The exact
+collision mechanism/changed joint solution is not proven by available logs.
+No production fix, controller query or motion was performed. Preserve pending
+command/receipts and require manual mechanical/route verification before motion.
+Evidence and verification limits: `reports/powerloss-incident-20261030/REPORT.md`.
+
+## 2026-10-30 PvP donor integration — OPEN / not merged
+
+`feature/player-vs-player` tip `75c1bc9` has reverted the PvP feature.
+`feature/nguoivsnguoifinal` tip `73af0f1` retains a separate PvP controller
+with legacy auto-enable/HOME startup, direct robot dispatch with optional
+targets, board commit before camera verification, weak sample acceptance,
+synchronous UI work and room lifecycle defects. Its physical/test APIs also
+conflict with current SessionProfile/move_context contracts. These findings
+belong to donor/integration scope; they have not been applied to runtime here.
+Keep fresh-start/FEN/F2/fixed-user-0 and current authority gates when porting.
+Reports, exact refs, mock/loopback evidence and selective port recommendations:
+`reports/branch-reviews/feature-nguoivsnguoifinal_vs_need-review_REVIEW_REPORT.md`.
+
+## 2026-10-30 fixed-profile authority
+
+Physical gameplay now uses the user-selected fixed tool 0/user 0 snapshot,
+including HOMECHESS and R_Trash. The WObj selection/API compatibility requirement
+below applies only to optional live-controller diagnostics, not the default game
+path. Numeric poses/joints are preserved from the recorded snapshot; changing the
+physical setup requires updating the selected profile explicitly. Profile errors
+block activation without querying controller points as a fallback. Optional mirror
+geometry/surface Z configuration is still required independently. Related tests:
+92 passed (exit 0); physical robot/camera and full regression NOT RUN.
+
+## 2026-10-30 F2/restart fix verification boundary
+
+Follow-up logs verify that this controller rejects GetWObjCoordWithID with
+Fault -506. Compatibility fallback is now tested; on this firmware the operator
+must select User/WObj 1 for identity verification when R1–R4 contain user 0/1.
+F9/F10 can then reload metadata without repeatedly restarting. Code does not
+change the controller's active frame or infer frame 1 from frame 0. Mock-based
+focused checks: 55 passed (exit 0); physical behavior remains unverified.
+
+F2 no longer calls HighGUI destroyWindow on the device-disposal worker. Restart
+verification now reads an identity WObj by its taught ID, independently of the
+active frame; a genuinely different/unknown transform still blocks activation.
+Focused regression and a real native window/fake camera probe passed. No live
+controller query, physical enable or motion was performed; older controller API
+availability and complete hardware behavior remain unverified. Restart the app
+to load the patch. Evidence: `reports/f2-frame-restart-fix-20261030/REPORT.md`.
+
+## 2026-10-30 gameplay continuity — OPEN
+
+Physical enable does not preflight HOMECHESS/R_Trash for a complete game;
+HOMECHESS frame mismatch already appears in a historical PHYSICAL move after
+camera verification passed. Missing R_Trash can surface only on the first capture.
+The FEN retry deadline does not bound a blocked camera call. After clearing a
+pre-pick AI fault against the old board, F5 is still needed to restart the AI turn,
+despite the resumed-scanning success message. These are audit findings, not fixes.
+See `reports/physical-gameplay-audit-20261030/REPORT.md` for evidence and limits.
+
+## 2026-10-30 physical flow — OPEN / P1
+
+Mock-based audit reproduced three unresolved defects: a stop arriving during
+activation does not prevent the subsequent controller enable; telemetry can
+become moving/stale during camera verification without blocking enable; the
+center sampler can accept earlier targets after its last camera read fails,
+allowing dispatch. No production fixes were made in this audit. Hardware effects
+have not been physically verified. Focused tests: 104 passed / 3 failed (exit 1),
+with failures documented separately from the three reproduced defects.
+See `reports/physical-flow-audit-20261030/REPORT.md` for evidence and recommendations.
+
+## 2026-10-30 FEN diagnostic boundaries
+
+New logs distinguish mismatch, confidence/quality/sanity failure, rejected frames,
+exceptions and incomplete stable samples. Human text limits cell lists to 20;
+JSON `diff_cells` retains the complete list. No image/video is captured, and old
+logs are not rewritten. A model-provided `quality_ok=False` without an error
+remains `QUALITY_REJECTED`; the logger cannot infer a missing model explanation.
+Thresholds and physical gates are unchanged. Scoped tests: 114 passed (exit 0);
+physical camera/FR3 and full regression NOT RUN.
+
+## 2026-10-30 fresh-start verification boundaries
+
+The launcher now creates a fresh opening game rather than restoring the previous
+board/FEN. Prior sessions are retained in the journal's `session_archive`, with
+their original command receipts. There is no automatic archive pruning or UI
+for restoring an archived game. Invalid/corrupt saved snapshots still fail closed.
+An unresolved physical recovery latch can still require pendant inspection,
+Ctrl+F8 and V before enable; its camera target is the new opening board, not the
+old FEN. Real camera/FR3 behavior was not exercised for this change. Fresh-start,
+durability, stop-barrier and related startup tests: 102 passed (exit 0); full
+repository regression NOT RUN.
+
+## 2026-10-28 robot Ethernet cable is loose (intermittent 192.168.58.2 loss)
+
+The physical controller link is known to drop intermittently because the
+Ethernet cable/connector is loose. Expect transient `GetControllerIP: controller
+reply unavailable` / `Robot SDK not connected` messages and stale telemetry.
+This is a hardware/link condition, not automatically a software regression.
+Check/reseat the cable, then verify with:
+
+```powershell
+ping -n 2 -S 192.168.58.3 192.168.58.2
+```
+
+Do not replay motion after an unknown RPC outcome and do not enable F9/F10 while
+the link is unstable. Full checklist: [`ROBOT_CONNECTION.md`](ROBOT_CONNECTION.md).
+
+## 2026-10-28 client-control and rollback notes
+
+Mode-specific controls are driven by `SessionProfile` capabilities. Mock-based
+tests that construct partial state objects without `get_render_state` retain the
+legacy all-controls layout; they do not prove the physical UI path. Rollback
+restores the game board and starts a fresh synchronization; in physical mode it
+still requires a fresh board verification and latches the physical sync fault as
+before. No physical or browser soak was run for this UI pass.
+
+## 2026-10-26 captured tray limitations
+
+Captured bodies are removed from physics and represented only by immutable
+snapshots in `world_state.captured_pieces`. The snapshot pose is the simulated
+capture slot, not a calibrated physical tray pose. The tray list is sent with
+every world state; it is visual history, not grasp/force evidence. Reset is
+required to respawn captured bodies. Three legacy camera-pipeline tests that
+drive `HUMAN_VS_HUMAN` through `_handle_space_key` still fail because that path
+intentionally rejects camera/SPACE for two-human games; they are test-fixture
+mismatches, not captured-tray regressions.
+
+## 2026-10-26 projection and gripper visual notes
+
+The projection guard blocks stale board reconciliation during a pending semantic
+move, but a direct bridge call outside `HardwareManager.sync_committed_board`
+still bypasses that guard. Virtual jaw travel is intentionally exaggerated 12x
+and must not be read as physical stroke/force evidence; physical mode uses the
+exact CAD travel. The spectator log stops retrying archived entries when no
+`XIANGQI_SIMULATION_TOKEN` is configured, but archived projections are not sent
+later if a token is added mid-session. No physical/browser soak was run.
+
+## 2026-10-26 vendored OCCT dependency
+
+The 3D viewer now depends on the checked-in `occt-import-js` JS/WASM pair rather
+than the jsDelivr CDN. The files are LGPL-2.1; see the vendored `LICENSE.md`.
+They are not downloaded automatically. If the vendor directory is missing, the
+FR3 CAD gripper cannot load and `connectLive()` remains disabled by design; the
+viewer shows `VIEWER_FAILED` instead of connecting without a tool model. No
+physical run was performed for this change.
+
+## 2026-10-26 home mode selector limitations
+
+The three home cards choose the session environment, but they do not perform a
+preflight connection test. Selecting **Robot thật** without camera/FR3 opens the
+normal startup error path and returns to the home screen; it does not silently
+fall back to 2D. `HUMAN_VS_HUMAN` with the physical card still resolves to a
+virtual simulation by the existing game rule. No physical/browser soak was run.
+
+## 2026-10-26 replay and action-intent limitations
+
+Reconnect replay sends the last physical `gripper_command` as a historical
+animation hint; `robot_state` still arrives first and remains authoritative for
+the jaw. The packet is not a grasp proof. Safe-gap is mapped to idle in the
+twin, but the viewer jaw still follows the boolean `robot_state.gripper`, so a
+partially closed safe-gap pose is not represented. The action-aware listener
+signature is internal to the twin bridges; no physical/browser soak was run.
+
+## 2026-10-26 gripper_command packet limitations
+
+The packet is an animation command, not grasp evidence. It is physical-only and
+gated in the viewer, but a disconnected/slow client can still miss it, and a
+reconnect cannot reconstruct a grasp that happened entirely offline. Virtual
+mode does not use it. No physical run or browser soak was performed.
+
+## 2026-10-26 viewer gripper animation limitations
+
+The web attachment is a command-edge estimate (`physical_grasp_verified=false`),
+not jaw/force sensor evidence. It can show attached when the real gripper missed,
+or show nothing when the WebSocket is disconnected, the viewer is slow, the
+bridge uses `RawArmRelay` (no pieces), or the viewer rejects a stale context. A
+stale telemetry poll no longer suppresses the attachment, but complete viewer
+reconnect/slow-client/occlusion reconstruction remains unverified. No hardware
+run.
+
+## 2026-10-26 board surface Z source limitations
+
+Using `BOARD_SURFACE_Z_SOURCE="R1_R4"` assumes all four R1-R4 points were taught
+with the contact tip exactly on the board surface, not at SAFE_Z. The default
+`R1_R4_TAUGHT_AT_BOARD_SURFACE=False` therefore keeps the mirror unavailable
+until an operator confirms it. The derived Z affects only the viewer mirror;
+robot commands still use absolute `PICK_Z`/`PLACE_Z`/`SAFE_Z`. No hardware
+measurement was performed, and the current controller's R1-R4 provenance is
+UNKNOWN.
+
+## 2026-10-26 first-pick opening / pick retry limitations
+
+Opening an unknown gripper at the first pick assumes no payload is held from a
+previous session; if the gripper is known closed, the code refuses the pick but
+the operator must inspect and clear it. Pick-target retry adds up to roughly
+0.8s of extra sampling/waits before the existing pause; actual occlusion
+recovery, latency and hardware behavior were not measured. Limits (6mm,
+0.12 cell) are unchanged. No physical run.
+
+## 2026-10-26 visual-correction-v2 motion profile limitations
+
+The adopted motion profile (`SAFE_Z=220`, `ROTATION=[180,0,-73.2]`,
+`MOVE_SPEED=50`) comes from the visual-correction-v2 donor branch, not from
+measurements on this robot. The ~62° Rz change and +10 mm safe height are
+unverified; a wrong jaw yaw can collide with neighbouring pieces. Gripper pulses
+remain the project's 0.30/0.80, not the donor 0.25/0.20. `MOTION_PROFILE_VERIFIED`
+stays false until the operator measures RPY and clearance on the pendant. No
+physical run was performed. Rollback values are in
+`docs/VISUAL_V2_MOTION_PROFILE.md`.
+
+## 2026-10-26 camera recognition readiness / board retry limitations
+
+Physical startup now refuses to continue without both CChess ONNX and YOLO
+`best.pt`; a deployment that intentionally runs without one of them will fail
+until the model is installed or the profile is changed. The new board-verify
+retry waits up to 2 seconds by default and still requires exact 90-cell equality;
+actual latency, transient-occlusion behavior and hand/arm clearance were not
+measured on hardware. The known baseline test
+`test_camera_startup_and_health.py::test_old_board_confirmation_does_not_automatically_retry_physical_robot`
+remains failing because its fixture lacks `expected_board`/recovery methods; it is
+not caused by the retry change. No camera or robot run for this section.
+
+## 2026-10-26 camera calibration startup limitations
+
+A saved `perspective.npy` is accepted when its shape, rank and finiteness pass;
+it is not yet bound to camera index, resolution or a metadata hash. If the
+camera or capture resolution changes without `--recalibrate-camera`, startup
+can reuse a stale matrix. A missing file still opens the interactive window and
+an invalid file fails startup. Remote/headless operation still needs a desktop
+for Pygame; only the calibration window is skipped. No camera or hardware run
+was performed for this change. See `docs/START_PROJECT.md` and
+`docs/LOGGING.md`.
+
+## 2026-10-26 base-only robot frame policy
+
+The application now enforces robot-base teaching points (`user 0`) and one common
+tool frame. It does **not** convert `user 1` coordinates to base: a controller
+with R1-R3 user=1 or R4 user=0 will stay read-only and reject F10/motion until the
+operator re-teaches R1-R4, HOMECHESS and R_Trash in user 0. The read-only audit is
+`tools/diagnostics/read_teaching_points.py`; it never enables or moves the robot.
+No hardware or camera run was performed for this policy change, and no existing
+calibration artifact was rewritten. Pick/retry diagnostics now include measured
+centres, offsets, valid-sample counts and jitter in structured events; a rejected
+Y/Continue is logged with its mode and reason. See `docs/ROBOT_FRAME_BASE_ONLY.md`
+and `docs/LOGGING.md`.
+
+## 2026-10-19 executable QA: remaining regression and hardware gates
+
+The user has now authorized virtual/mock execution; the no-test blocker below
+is historical. Current results and source-backed fixes are recorded in
+docs/USER_FLOW_QA_20261019.md. Main user flows passed with real virtual motion
+and an independent headless viewer; the broad run still has 35 unresolved
+failures requiring contract/fixture/source triage. Do not equate the passing
+focused/serial suites with a clean full regression or physical acceptance.
+
+## 2026-10-19 verification blocker
+
+Current dirty-tree changes have whole-application syntax evidence only. The
+pending clarification about lifting the earlier no-test instruction has not been
+answered through multiple goal continuations. Integration/fault injection and
+performance remain unexecuted; physical acceptance also needs explicit separate
+authorization and measured inputs. Goal completion is unproven. Preserve this
+worktree/checkpoint and resume with isolated tests when permitted; do not infer
+approval or report the old passing tests as validation of these drafts.
+
+## 2026-10-19 virtual playback profile limitations
+
+Detailed/fast are playback presets using the same full physics/check path, not
+different accuracy or collision policies. No runtime evidence yet for CLI/capability
+combinations, speed binding invalidation, viewer controls or complete animation
+visibility in continuous play. Actual speedup/FPS/latency are unmeasured. Physical
+execution does not consume these presets. Earlier test results do not cover them.
+
+## 2026-10-19 captured tray limitations
+
+Captured-body retention, nominal rebuild and viewer rendering are implemented
+drafts, not runtime-verified. Rebuild preserves logical captured identities but
+uses labelled nominal slots when the prior simulated pose is unavailable. It does
+not recover a measured physical trash/tray pose or persist the exact former release
+pose. Captures, occupied/full tray, corrupted slots, collision behavior, reset and
+reconnect still need tests. Physical execution/calibration coordinates are unchanged.
+
+## 2026-10-19 world snapshot context limitations
+
+World snapshot/business context linkage is implemented but unverified. A context
+references the committed baseline applied to the simulated world; transient poses
+remain predicted, not proof of a physical grip. Reconnect races, manual test mode,
+scene/placement reset, captured tray and all identity/state reconstruction need
+runtime coverage. Tests remain pending the no-test clarification.
+
+## 2026-10-19 terminal commit limitations
+
+Winning-move outcome/end intent are now part of the same durable commit draft.
+No execution evidence yet for storage failure, crash/restore at the commit edge,
+mirror failure, missing-king terminal positions or duplicate terminal callbacks.
+Earlier tests predate this change. Integration verification permission is pending;
+no tests or physical hardware were run in this slice.
+
+## 2026-10-19 viewer command context limitations
+
+Managed game/scene command binding and whole-operation ownership are implemented
+but unverified. Runtime/fault injection still must cover queued commands across
+reset/mode switch, command completion during shutdown, lock contention and virtual
+continuous cadence. Standalone runtimes without a Game owner retain their legacy
+command API; scene epoch is checked when supplied. Committed FEN/session metadata
+is now carried with robot telemetry, but complete Twin reconstruction and linkage
+between transient world snapshots and committed business revisions remain open.
+
+## 2026-10-19 viewer stream ordering limitations
+
+Publisher stream sequencing and reconnect subscription are implementation drafts
+with syntax evidence only. A publisher stream is not a GameSession/scene epoch;
+same-stream game reset, complete FEN/session metadata and queued scene-command
+binding still need audit/implementation. Legacy unversioned servers remain usable
+until a versioned stream is established. Live reconnect/slow client/concurrent
+producer and stale command acceptance tests have not been run.
+
+## 2026-10-19 projection concurrency limitations
+
+Source guards now serialize local committed-board projection with reset/dispatch
+and prevent virtual AI admission before its executor's board is synchronized.
+No runtime evidence yet for lock contention, human-to-AI timing, continuous play,
+reset races or scene rebuild. Reconnect/wire session-revision ordering and complete
+Twin reconstruction still require implementation/acceptance audit under PR7.
+
+## 2026-10-19 startup ownership / cancellation limitations
+
+Startup lease ordering, stable journal root and calibration cancellation have
+static evidence only. Duplicate launch, cancelled startup, camera loss/blocked
+read and failed calibration-window close still need runtime/fault injection.
+If an older absolute --log-dir stored a journal outside this repository's runtime
+folder, startup reports both paths and refuses to ignore that session. No files
+were moved; migration must preserve SQLite state/WAL and occur with all owners
+closed. A blocked native camera read cannot be force-terminated safely here;
+cleanup retains ownership and retries after the reader exits.
+
+## 2026-10-14 physical XY / command binding limitations
+
+Physical XY registration and command fingerprints have no runtime evidence.
+Measured grid dimensions, robot-base surface Z and frame conversion provenance
+remain required external inputs; no values were invented or controller rewritten.
+Previously tolerated mixed R1–R4/HOME/Trash frames now fail explicitly.
+Pending binding guards cover normal game dispatch and physical stage transitions.
+Manual-test receipts and read-only reconciliation are implemented but unverified;
+full reset/reconnect/version coverage and controller changes outside the cached
+mapping still need work/evidence.
+
+## 2026-10-14 XY calibration worktree limitations
+
+XY simulation calibration/profile/UI have syntax evidence only. Rotation, all 90
+targets, independent Z, malformed/reflected points and collision/rollback behavior
+need runtime verification. Profile v1 is deliberately rejected for this workflow.
+Controller XY integration with verified dimensions/frame conversion and independent
+surface Z remains open, together with end-to-end transaction/version invalidation.
+
+## 2026-10-14 spectator routing worktree limitations
+
+Durable session/room routing and FEN/End acknowledgement records are implemented
+drafts. Archived updates are scoped to their server and room, preserving normal
+move order. No runtime evidence yet. A server reply lost before local recording
+still requires protocol/readback support; no success is inferred from an HTTP
+timeout. Old rows without room bindings remain pending. Archived rooms in another
+environment journal are retried when that environment is opened. Remote custom
+FEN, rollback/rescan, duplicate End and creation ambiguity remain acceptance gaps.
+
+## 2026-10-14 retirement worktree limitations
+
+Mode switch, partial-startup failure retention, shutdown retry and operator-only
+disable confirmation are implemented drafts, not runtime-proven fixes. Pending
+physical transactions prevent mode replacement. Shutdown preserves interrupted
+transactions for recovery. Stop/disable ACK-loss, failed camera/web closes and
+startup cancellation need execution/fault-injection evidence before acceptance.
+
+## 2026-10-14 mode capability worktree limitations
+
+New capability routing, PvP isolation, virtual input labels and raw-relay fallback
+have syntax evidence only. The six combinations and resource failure paths need
+runtime verification. Controlled in-app mode switching remains unfinished; restored
+mode mismatches currently pause and require pending recovery/New Game.
+
+## 2026-10-14 projection worktree limitations
+
+Async outbox/ACK/terminal queue code has no execution evidence. Archived terminal
+intents still lack durable routing to retired remote rooms after restart; queued
+delivery is best-effort. Upstream duplicate/custom-FEN behavior needs actual service
+evidence. No robot or Game command is replayed by the projection worker.
+
+## 2026-10-14 persistence worktree limitations
+
+SQLite journal/restore/command receipts and exception recovery UI are implemented
+but have no execution evidence. Durable outbox now has a draft worker/ACK adapter;
+legacy recovery consistency, three-mode routing and calibration remain open.
+No earlier test pass validates this draft; see docs/BRD_IMPLEMENTATION_PROGRESS.md.
+
+## 2026-10-14 controlled-stop worktree limitations
+
+New stop/reset/end code is syntax-checked only; runtime/fault-injection evidence is
+pending. Abrupt exceptions/KeyboardInterrupt and persistence have draft handlers
+but still need runtime/fault-injection verification.
+Pending real capture/motion is retained for operator reconciliation; unknown ACK
+does not allow replay. See docs/BRD_IMPLEMENTATION_PROGRESS.md. Not commissioned.
+
 ## 2026-10-13 Camera Monitor / GPU correction
 
 Continuous capture/inference start restored, atomic/pick snapshot APIs restored, stale boxes hidden, VISION_DEVICE=auto/cpu supported. Installed Torch2.14.1+cu126 + ORT-GPU1.20.2; actual camera2/DSHOW GPU preview retained32 named pieces through15s. Final scoped gate123passes. Full gate857passes/12baseline findings; UI accent fix resolves3,9findings remain. See docs/CAMERA_MONITOR_GPU_FIX_20261013.md. No robot actuation or calibration changes.
@@ -114,7 +610,7 @@ The seven reproduced software failures in `docs/RELIABILITY_RECHECK_20261012.md`
 ## 2026-10-05 visual donor 652af26 (not in integrated source)
 
 - OPEN P1 in new manual pick/place: legacy robot wrappers allow code 112 through, and test runner ignores execution failure. Mocked probe continues through seven failed MoveCart calls and three gripper calls.
-- OPEN P1: post-motion camera verification failure does not latch a manual-test fault; handler permits another command without reconciliation. Fix before integrating the donor's test feature.
+- The donor's post-motion verification/retry gap is addressed in the current integrated path by a durable pending-test receipt and explicit V reconciliation. The new path has only static source checks so far; runtime fault-injection acceptance remains open.
 - Do not replace integrated read-only startup or canonical frame/mapping with donor legacy startup/Tool 0 User 1 assumptions. Detailed review: `docs/VISUAL_LATEST_REVIEW_20261005.md`.
 
 ## 2026-10-05 cross-feature audit

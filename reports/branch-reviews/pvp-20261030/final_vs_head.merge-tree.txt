@@ -1,0 +1,145 @@
+774c537a1c5aafbcd171202c7aaab5b37c985af9
+100644 5608709ebf563900be3cb79dbb69bd408903e400 1	.codex/session-data/last-state.md
+100644 babd3b62f61ac3c432d9cda9701b16adfdfabc87 3	.codex/session-data/last-state.md
+100644 7038e5af16794486b78d4d75a652c6289121dbfb 1	.gitignore
+100644 eed592c1029e1e92fce317262a78ca57117413ca 2	.gitignore
+100644 ca5effe4a10151ebad7084e4e23c102e678403ee 3	.gitignore
+100644 fae391c512e93c19b83932f7ca9ed42b9e9fcb18 2	CALIBRATE_CAMERA_INTRINSICS.bat
+100644 4c5a04c56fdb0b593802a45f9e9a3a065696ec2d 3	CALIBRATE_CAMERA_INTRINSICS.bat
+100644 db9dccc820d47630c14d22c0d3d2471c0158a7ea 2	CALIBRATE_PICK_GEOMETRY.bat
+100644 b374d3abb36763e14838bde5eaae83ec67d44497 3	CALIBRATE_PICK_GEOMETRY.bat
+100644 b5c2c6225091c273e2c7c55da1e0da59cd52f8e3 1	README.md
+100644 a6ae1ac49c36b88663ec6d0344c3b88c5c137801 2	README.md
+100644 59282bff9b3a5bb476e5f3b537589b0342dda023 3	README.md
+100644 248356e96875a40643a5b274ad0a98bd63ce7e66 1	RUN.bat
+100644 fabde99908597e8209f0c9b0ca2710493e9f0ea9 2	RUN.bat
+100644 e3c4035f5711dffa23ed4cd3a2ee147d2fe00de6 3	RUN.bat
+100644 26193151ddf07cd11dcd8b89b93b222bc8056751 2	SETUP_WINDOWS.bat
+100644 510da6d85e5b3f482db2ba9a4ee42007262018c9 3	SETUP_WINDOWS.bat
+100644 ac10f85fc38d6e4c7405f955acd9dec39ad46ddd 1	config.py
+100644 685a2d0600b3bbc5cef81868ec7f7693e87ae38c 2	config.py
+100644 6abc725ead01412b3c3e977438e2eab303a3ffa1 3	config.py
+100644 a646b4ff9dac718bb37215b0233c2d78840131a7 2	docs/geometry-measurement.md
+100644 511aec53058f1042066cd9057ec0ed0c88314a9c 3	docs/geometry-measurement.md
+100644 30da94fe6a44a06e58edc4daee9d556bfc1cee6e 1	main.py
+100644 eed37b1e96dc5ce3ac3067ecdd9ad120f20c9893 2	main.py
+100644 9ccf1d4d4487f23eee302899a0d15f1a916bb739 3	main.py
+100644 9d49ea59a8c442e24c693837af8dd63a90f6f59f 1	requirements.txt
+100644 e4bbcf68f4ee08154d198e2d79defd90b55328a0 2	requirements.txt
+100644 1aa365bff1b5166f77c7ff607c879d9344feb03c 3	requirements.txt
+100644 d1946e164785d5609be4598707b2bfc91909e38a 2	scripts/calibrate_camera_intrinsics.py
+100644 56d3372b57bbd30da288434ff665fc140c66b0d8 3	scripts/calibrate_camera_intrinsics.py
+100644 bf31c56f4dfedca2064718f4353666be9af55339 2	scripts/calibrate_pick_geometry.py
+100644 353927a6e0b393bb3b9f1f9f838f35bcba7b13e8 3	scripts/calibrate_pick_geometry.py
+100644 2e9e90840c3b799ed0b24f1555a2393d0679c8b4 2	scripts/measure_geometry.py
+100644 2a18893cc3013262766886549a0f8e9292a18bc6 3	scripts/measure_geometry.py
+100644 253499f4c1bbea29ef32ac9ab4abc93b69c2e598 1	src/core/game_state.py
+100644 37077ee730d69da2f740fee5662d8a202007f76e 2	src/core/game_state.py
+100644 af430d130a30ff30d867d5701b90831ea39491db 3	src/core/game_state.py
+100644 183a2f184ad3318bcc0b9e5c346994cd77a40f44 2	src/core/visual_move_coordinator.py
+100644 717d84b45b29d36f41d9e0840c2b071c7c1f129a 3	src/core/visual_move_coordinator.py
+100644 30365f7f74c5750ae99bc39d3a58746067831828 1	src/hardware/hardware_manager.py
+100644 8e26c1e2e85c64dc48caa9ddf8bd0d7a438d817c 2	src/hardware/hardware_manager.py
+100644 caf565e4375cc2a98b98b66020219e6422164777 3	src/hardware/hardware_manager.py
+100644 f145bee578e6b6734a3016c57ba3b69b1ecad2d6 1	src/hardware/robot_VIP.py
+100644 0061181bfbbcd95f90603dcb6de3acae9c39922f 2	src/hardware/robot_VIP.py
+100644 e25a9db22aea2e0e7edb27bcf4cdc105f836f36d 3	src/hardware/robot_VIP.py
+100644 0e4977aac731a11711e17c98068234f3dafdd9c4 1	src/ui/board_renderer.py
+100644 023d30fbe06804ce6605a696b87383a2e507adbc 2	src/ui/board_renderer.py
+100644 df9484177a9c8f6c470113a90fb79880b7623b9f 3	src/ui/board_renderer.py
+100644 9fd85a3f63cbe5d6ac9cbe69f11e91769d35d73d 1	src/ui/debug_dashboard.py
+100644 2b8eaa38635e0c7bff998c34c867bf662089d6ed 2	src/ui/debug_dashboard.py
+100644 ea1630b14f543995567621f99c02d2167c6fe7e6 3	src/ui/debug_dashboard.py
+100644 f17db39c90c852072e4e841d9f17226556e0c81d 1	src/ui/input_handler.py
+100644 2fd8fe2e884d11a921e5a6ac56b49dc30dc2108f 2	src/ui/input_handler.py
+100644 212d1f7c75bc53a9b603af9503831609b9b0aab9 3	src/ui/input_handler.py
+100644 3752132fa9e2500b2de2f0b2534e1f1fe9cebef5 2	src/ui/measurement_client.py
+100644 95c6aad05f4ca340b4e892237226706e6910a17a 3	src/ui/measurement_client.py
+100644 62541686fd4097cf235cec5be2eee5668381cb74 1	src/vision/camera_monitor.py
+100644 e88327e685c60e2cac3185ccf1228ad924efae3e 2	src/vision/camera_monitor.py
+100644 99a56f51e4117228b5fcb28fa3386432c26a3a05 3	src/vision/camera_monitor.py
+100644 129bd377cd72dc4e2ac7348105ab0158bd801f48 1	src/vision/visual_pick_estimator.py
+100644 74473113533bb284fa38bf6476621fa640c8c9dd 2	src/vision/visual_pick_estimator.py
+100644 503030f0aa4f3fece23089efd0b7821d03735a7d 3	src/vision/visual_pick_estimator.py
+100644 e5c1ec97605861f9aef5a59b7cf056dccbb8cfcd 2	tests/test_camera_intrinsics_open.py
+100644 b7ce04296fd8d2699d75914f78f7745a76aad8f3 3	tests/test_camera_intrinsics_open.py
+100644 ceb140fb0850d8391eb59c9aa8e4a6f855ff1398 2	tests/test_center_pick_no_fallback.py
+100644 b89e109e1aadbf5fcde38d34c3da21aa0486a264 3	tests/test_center_pick_no_fallback.py
+100644 91c6641458e3808745490cf036125c5d9191ca4e 2	tests/test_geometry_measurement.py
+100644 2cc11dac34fdfcd05ac8ee5ab981739e8a1d46d8 3	tests/test_geometry_measurement.py
+100644 414ed9984fb4610aeb63ee2d89a4df3ea1f959d6 2	tests/test_height_pick_geometry.py
+100644 f0dc5a9a9340d209747ce021453376021593dc7f 3	tests/test_height_pick_geometry.py
+100644 99ce999bdb6359d72dc81ca517b4d21197c5b63a 2	tests/test_measurement_client.py
+100644 de289299dd5cb66735248a2bc7c681b17c3b20b7 3	tests/test_measurement_client.py
+100644 5dbdca1d9b5800ff4a22dcefd0d36eb380cc94df 2	tests/test_pick_consensus.py
+100644 653d006e44c5ac9b039d91848cfe2553dca4d2eb 3	tests/test_pick_consensus.py
+100644 4f42dcbb592cfb4e28bcf8bdbd431b03b023b89a 2	tests/test_ring_pick_estimator.py
+100644 8064c23b4621f32b82600bd9b777618fdae7019a 3	tests/test_ring_pick_estimator.py
+100644 ecfdc6c68285d0cc2f2a3da0f161e8a84f17e79f 2	tests/test_top_face_geometry.py
+100644 ef44e9a305747f73de6801a22388e7c1cf74bd50 3	tests/test_top_face_geometry.py
+
+CONFLICT (modify/delete): .codex/session-data/last-state.md deleted in HEAD and modified in origin/feature/nguoivsnguoifinal.  Version origin/feature/nguoivsnguoifinal of .codex/session-data/last-state.md left in tree.
+Auto-merging .gitignore
+CONFLICT (content): Merge conflict in .gitignore
+Auto-merging CALIBRATE_CAMERA_INTRINSICS.bat
+CONFLICT (add/add): Merge conflict in CALIBRATE_CAMERA_INTRINSICS.bat
+Auto-merging CALIBRATE_PICK_GEOMETRY.bat
+CONFLICT (add/add): Merge conflict in CALIBRATE_PICK_GEOMETRY.bat
+Auto-merging README.md
+CONFLICT (content): Merge conflict in README.md
+Auto-merging RUN.bat
+CONFLICT (content): Merge conflict in RUN.bat
+Auto-merging SETUP_WINDOWS.bat
+CONFLICT (add/add): Merge conflict in SETUP_WINDOWS.bat
+Auto-merging config.py
+CONFLICT (content): Merge conflict in config.py
+Auto-merging docs/geometry-measurement.md
+CONFLICT (add/add): Merge conflict in docs/geometry-measurement.md
+Auto-merging main.py
+CONFLICT (content): Merge conflict in main.py
+Auto-merging requirements.txt
+CONFLICT (content): Merge conflict in requirements.txt
+Auto-merging scripts/calibrate_camera_intrinsics.py
+CONFLICT (add/add): Merge conflict in scripts/calibrate_camera_intrinsics.py
+Auto-merging scripts/calibrate_pick_geometry.py
+CONFLICT (add/add): Merge conflict in scripts/calibrate_pick_geometry.py
+Auto-merging scripts/measure_geometry.py
+CONFLICT (add/add): Merge conflict in scripts/measure_geometry.py
+Auto-merging src/core/game_state.py
+CONFLICT (content): Merge conflict in src/core/game_state.py
+Auto-merging src/core/visual_move_coordinator.py
+CONFLICT (add/add): Merge conflict in src/core/visual_move_coordinator.py
+Auto-merging src/hardware/hardware_manager.py
+CONFLICT (content): Merge conflict in src/hardware/hardware_manager.py
+Auto-merging src/hardware/robot_VIP.py
+CONFLICT (content): Merge conflict in src/hardware/robot_VIP.py
+Auto-merging src/ui/board_renderer.py
+CONFLICT (content): Merge conflict in src/ui/board_renderer.py
+Auto-merging src/ui/debug_dashboard.py
+CONFLICT (content): Merge conflict in src/ui/debug_dashboard.py
+Auto-merging src/ui/input_handler.py
+CONFLICT (content): Merge conflict in src/ui/input_handler.py
+Auto-merging src/ui/measurement_client.py
+CONFLICT (add/add): Merge conflict in src/ui/measurement_client.py
+Auto-merging src/vision/camera_monitor.py
+CONFLICT (content): Merge conflict in src/vision/camera_monitor.py
+Auto-merging src/vision/visual_pick_estimator.py
+CONFLICT (content): Merge conflict in src/vision/visual_pick_estimator.py
+Auto-merging tests/test_camera_intrinsics_open.py
+CONFLICT (add/add): Merge conflict in tests/test_camera_intrinsics_open.py
+Auto-merging tests/test_center_pick_no_fallback.py
+CONFLICT (add/add): Merge conflict in tests/test_center_pick_no_fallback.py
+Auto-merging tests/test_geometry_measurement.py
+CONFLICT (add/add): Merge conflict in tests/test_geometry_measurement.py
+Auto-merging tests/test_gripper_control.py
+Auto-merging tests/test_height_pick_geometry.py
+CONFLICT (add/add): Merge conflict in tests/test_height_pick_geometry.py
+Auto-merging tests/test_measurement_client.py
+CONFLICT (add/add): Merge conflict in tests/test_measurement_client.py
+Auto-merging tests/test_pick_consensus.py
+CONFLICT (add/add): Merge conflict in tests/test_pick_consensus.py
+Auto-merging tests/test_ring_pick_estimator.py
+CONFLICT (add/add): Merge conflict in tests/test_ring_pick_estimator.py
+Auto-merging tests/test_top_face_geometry.py
+CONFLICT (add/add): Merge conflict in tests/test_top_face_geometry.py
+Auto-merging tests/test_visual_pick_estimator.py

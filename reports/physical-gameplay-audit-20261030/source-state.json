@@ -1,0 +1,16 @@
+{
+  "head": "18e67fc9006a91a2a32c4c861974760089a687de",
+  "files": {
+    "src/core/ai_execution.py": "f603152b150846820db9daa4bef2e4f2cec274d31bf298b0d28c2c3971363448",
+    "src/core/game_state.py": "f5a3c10795fc10538cf257b3a21aa87b3942523ee8fbf7ed5478a04697b48827",
+    "src/core/game_persistence.py": "cd0793c8008ec54b447165b03af9ac1987b59bc082830e2e2a930d315b0e5039",
+    "src/core/visual_move_coordinator.py": "b8b48dd53ceb5b1a3bb79493fb64436d754c2d7a5423e94d6342c6f3bf1ac0cc",
+    "src/hardware/hardware_manager.py": "d4d4cfa8e55789c082865dc1ab5826a54d06e23a17401c9ae17993e1d5dca2e7",
+    "src/hardware/robot_VIP.py": "2bd622eecec7e583bffec53744da7e03e0c888bffb9950ffc7559aa6c7d0a407",
+    "src/hardware/rpc_transport.py": "7f6346560ddcd470e3c8a992ef0da0d59a99ebdb2bc2abb0e4a81f9189c3a4ce",
+    "src/vision/camera_monitor.py": "3b749b39815ff7a8e2dd971dfa474a626aca37cf135db19e33b8bd90f55642c6",
+    "src/ui/input_handler.py": "30ac222bd5452d089ba821eb20bab81aaf0ebe75f16b74e835bef0737d6f80a1",
+    "main.py": "804cfe9cffa0d1e055dec182f8d8b1490ad4c1cc8701718816476a3dddf4a662",
+    "config.py": "ee1d4200a2b0fcf5ecb8e38e1aa95839931e24ccecd14096a665f60ab9ca9b2a"
+  }
+}

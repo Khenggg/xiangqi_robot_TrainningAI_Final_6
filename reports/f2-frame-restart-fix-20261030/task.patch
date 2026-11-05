@@ -1,0 +1,191 @@
+--- before/main.py
++++ after/main.py
+@@ -330,6 +330,9 @@
+     mode_switching = True
+     mode_switch_failed = False
+     state.set_status("Đang đóng phiên cũ; chưa mở camera/robot của chế độ mới.", duration=60)
++    camera = getattr(hw, "cam_monitor", None)
++    if callable(getattr(camera, "close_display", None)):
++        camera.close_display()
+     if not startup_worker.start(mode_disposal.run, _finish_mode_disposal):
+         mode_switching = False
+ 
+@@ -396,6 +399,9 @@
+         except Exception as exc:
+             log_event("cleanup.recovery_required", str(exc), level=logging.ERROR)
+             return False
++    camera = getattr(hw, "cam_monitor", None)
++    if callable(getattr(camera, "close_display", None)):
++        close("camera display", camera.close_display)
+     if not close("session disposal", _cleanup_disposal.run):
+         return False
+     if not close("pygame", pygame.quit):
+@@ -668,8 +674,12 @@
+                         if time.monotonic() > physical_enable_deadline:
+                             raise RuntimeError("Xác nhận hết hạn; bấm F9 để bắt đầu lại")
+                         def enabled(result, error):
++                            if error:
++                                log_event("physical.enable_failed", str(error), level=logging.ERROR,
++                                          code="PHYSICAL_ENABLE_FAILED",
++                                          exc_info=(type(error), error, error.__traceback__))
+                             state.set_status(f"Không bật được robot: {error}" if error else
+-                                             "Robot đã được bật quyền chuyển động cho game.", duration=30)
++                                             "Robot đã được bật quyền chuyển động cho game.", duration=60)
+                         hw.motion_worker.start(lambda: hw.activate_physical_game(state, commissioned=True), enabled)
+                     except Exception as exc:
+                         log_event("physical.enable_failed", str(exc), level=logging.ERROR,
+--- before/src/vision/camera_monitor.py
++++ after/src/vision/camera_monitor.py
+@@ -83,6 +83,9 @@
+         self._last_pick_diagnostic = None
+         self._pick_diagnostic_until = 0.0
+         self._cam_lock = threading.Lock()   # Bảo vệ truy cập camera (cap.read/grab)
++        self._display_thread_id = None
++        self._display_open = False
++        self._display_close_requested = threading.Event()
+         self._board_polygon = None  # Cache polygon bàn cờ trong pixel space (4 điểm)
+ 
+         if device_preference not in ("auto", "cpu", "cuda", "gpu"):
+@@ -538,13 +541,29 @@
+             except Exception as e:
+                 print(f"[CAM MONITOR] ⚠️ Camera release error: {e}")
+         
+-        # 4. Đóng cửa sổ OpenCV
++        # HighGUI windows belong to the thread that called imshow. Teardown
++        # runs on a worker during F2; calling destroyWindow there can deadlock
++        # Windows while the GUI owner is waiting for this worker to finish.
++        self.close_display()
++
++        print("[CAM MONITOR] ✅ Camera Monitor stopped.")
++
++    def close_display(self):
++        """Close HighGUI on its GUI owner; background stop only requests it."""
++        self._display_close_requested.set()
++        if not self._display_open:
++            self._display_close_requested.clear()
++            return True
++        if self._display_thread_id != threading.get_ident():
++            return False
+         try:
+             cv2.destroyWindow(self.window_name)
+         except cv2.error:
+             pass  # Window may not exist yet
+-        
+-        print("[CAM MONITOR] ✅ Camera Monitor stopped.")
++        self._display_open = False
++        self._display_thread_id = None
++        self._display_close_requested.clear()
++        return True
+ 
+     def update_display(self):
+         """Gọi mỗi frame trong game loop — hiển thị camera window.
+@@ -552,6 +571,9 @@
+         Returns:
+             key pressed in OpenCV window (or -1)
+         """
++        if self._display_close_requested.is_set() or self._stop_event.is_set():
++            self.close_display()
++            return -1
+         with self._lock:
+             frame = self._last_frame
+             detections = self._last_detections
+@@ -571,6 +593,8 @@
+                 diagnostic = diagnostic.copy() if diagnostic is not None else None
+             display = diagnostic if diagnostic is not None else self._draw_overlay(frame, detections)
+             cv2.imshow(self.window_name, display)
++            self._display_thread_id = threading.get_ident()
++            self._display_open = True
+ 
+         return cv2.waitKey(1)
+ 
+--- before/src/hardware/robot_VIP.py
++++ after/src/hardware/robot_VIP.py
+@@ -302,7 +302,7 @@
+ 
+ 
+     def _normalize_identity_wobj_frames(self, point_names, frames):
+-        """Allow mixed user IDs only when the current WObj offset is identity.
++        """Allow mixed user IDs only when the taught WObj offset is identity.
+ 
+         R1-R4 may have been recorded while a work-object was selected even
+         though its coordinate offset is exactly zero. In that case the numeric
+@@ -316,38 +316,50 @@
+                  if name in point_names}
+         if len(users) < 2:
+             return frames
++        nonbase_users = users - {0}
++        if len(nonbase_users) != 1 or None in nonbase_users:
++            return frames
++        source_user = next(iter(nonbase_users))
+         try:
+-            code, current_user = self.robot.GetActualWObjNum()
+-            if int(code) != 0:
+-                return frames
+-            current_user = int(current_user)
+-            code, wobj_offset = self.robot.GetCurWObjCoord()
+-            if int(code) != 0 or len(wobj_offset) < 6:
+-                return frames
++            by_id = getattr(self.robot, "GetWObjCoordWithID", None)
++            if callable(by_id):
++                # Motion uses user 0 and can change the controller's active
++                # selection. A restart must verify the frame named by R1-R4,
++                # independently of whichever frame happens to be active now.
++                code, wobj_offset = by_id(source_user)
++                verification_source = "GetWObjCoordWithID"
++            else:
++                code, current_user = self.robot.GetActualWObjNum()
++                if int(code) != 0 or parse_frame_identifier(current_user) != source_user:
++                    return frames
++                code, wobj_offset = self.robot.GetCurWObjCoord()
++                verification_source = "GetCurWObjCoord"
++            if code != 0:
++                raise RobotCommandError(f"WObj {source_user} query failed: {code}", code)
++            offset = np.asarray(wobj_offset, dtype=float)
++            if offset.shape != (6,) or not np.isfinite(offset).all():
++                raise RobotCommandError(f"WObj {source_user} must contain six finite offsets")
+         except Exception as exc:
+             event("robot.frame_normalization_failed",
+-                  "Không đọc được WObj hiện tại để chuẩn hóa frame",
+-                  level=logging.WARNING, reason=str(exc))
++                  f"Không xác minh được WObj {source_user} để chuẩn hóa frame",
++                  level=logging.WARNING, wobj=source_user, reason=str(exc))
+             return frames
+-        if any(user not in (0, current_user) for user in users):
+-            return frames
+-        if not np.allclose(np.asarray(wobj_offset[:6], dtype=float), 0.0,
+-                           atol=1e-6, rtol=0):
++        if not np.allclose(offset, 0.0, atol=1e-6, rtol=0):
+             event("robot.frame_normalization_refused",
+-                  "WObj hiện tại không phải identity; không thể coi là robot base",
+-                  level=logging.WARNING, wobj=current_user, offset=list(wobj_offset[:6]))
++                  f"WObj {source_user} không phải identity; không thể coi là robot base",
++                  level=logging.WARNING, wobj=source_user, offset=offset.tolist())
+             return frames
+         for name in point_names:
+             point = self.teaching_points[name]
+-            if point.get("user") == current_user:
++            if point.get("user") == source_user:
+                 point["user"] = 0
+         self.wobj_identity_as_base = True
+-        self.identity_wobj_id = current_user
++        self.identity_wobj_id = source_user
+         event("robot.frame_normalized_identity_wobj",
+               "WObj identity được chuẩn hóa thành robot base (user 0)",
+-              level=logging.WARNING, source_wobj=current_user,
+-              source_offset=list(wobj_offset[:6]), points=list(point_names))
+-        print(f"[ROBOT] WARNING: normalized identity WObj {current_user} -> user 0 for R1-R4")
++              level=logging.WARNING, source_wobj=source_user,
++              source_offset=offset.tolist(), verification_source=verification_source, points=list(point_names))
++        print(f"[ROBOT] WARNING: normalized identity WObj {source_user} -> user 0 for R1-R4")
+         return {(point['tool'], point['user']) for name, point in self.teaching_points.items()
+                 if name in point_names}
+ 
+@@ -371,6 +383,8 @@
+         self.teaching_points_error = "R1–R4 reload in progress or incomplete; command mapping unavailable"
+         self.physical_motion_authorized = False
+         self.teaching_points = {}
++        self.wobj_identity_as_base = False
++        self.identity_wobj_id = None
+         
+         # Load 4 góc bàn cờ (bắt buộc)
+         point_names = ["R1", "R2", "R3", "R4"]

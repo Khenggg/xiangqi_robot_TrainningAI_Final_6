@@ -10,6 +10,7 @@ import threading
 import time
 import logging
 from collections import deque
+from uuid import uuid4
 from src.core.project_logging import event
 from typing import List, Optional, Set
 import numpy as np
@@ -147,6 +148,10 @@ class TelemetryPublisher:
         self.clients: Set = set()
         self.clients_lock = threading.Lock()
         self._state_lock = threading.Lock()
+        self._stream_id = uuid4().hex
+        self._packet_sequence = 0
+        self.command_context_provider = None
+        self.simulation_profile = None
 
         # Default Home Pose and Joints
         if robot_model == "FR3":
@@ -187,6 +192,7 @@ class TelemetryPublisher:
         self._dispatch_scheduled = False
         self._event_overflow = False
         self._latest_operation_state = None
+        self._latest_gripper_command: Optional[dict] = None
 
     def register_command_handler(self, handler):
         """Register a callback to process incoming commands from WebSocket clients."""
@@ -251,6 +257,9 @@ class TelemetryPublisher:
             event("websocket.client_connected", "Viewer đã kết nối", clients=len(self.clients))
             sender = None
             try:
+                # Subscribe before the first await, retaining updates produced
+                # while the initial snapshots are being sent.
+                self._outboxes[websocket] = ({}, deque(), asyncio.Event())
                 # Send immediate state on connect
                 await websocket.send(self._make_packet_json())
                 with self._state_lock:
@@ -258,6 +267,7 @@ class TelemetryPublisher:
                     bp_data = self._latest_board_placement
                     pa_data = self._latest_placement_analysis
                     op_data = self._latest_operation_state
+                    gc_data = self._latest_gripper_command
                 if bp_data is not None:
                     await websocket.send(json.dumps(bp_data))
                 if pa_data is not None:
@@ -266,7 +276,8 @@ class TelemetryPublisher:
                     await websocket.send(json.dumps(ws_data))
                 if op_data is not None:
                     await websocket.send(json.dumps(op_data))
-                self._outboxes[websocket] = ({}, deque(), asyncio.Event())
+                if gc_data is not None:
+                    await websocket.send(json.dumps(gc_data))
                 sender = asyncio.create_task(self._send_client_packets(websocket))
                 # Listen for incoming client commands
                 async for raw_msg in websocket:
@@ -278,6 +289,11 @@ class TelemetryPublisher:
                             with self._state_lock:
                                 handlers = list(self._command_handlers)
                             async with command_lock:
+                                if not self._running or websocket.close_code is not None:
+                                    break
+                                if cmd_dict.get("stream_id", self._stream_id) != self._stream_id:
+                                    await websocket.close(code=1008, reason="Stale telemetry stream; reconnect")
+                                    break
                                 for ch in handlers:
                                     try:
                                         # Runtime handlers may wait for physics locks or
@@ -330,6 +346,20 @@ class TelemetryPublisher:
             self._stop_signal = None
 
     def _make_packet_json(self) -> str:
+        provider = self.command_context_provider
+        try:
+            context = provider() if callable(provider) else None
+            self._last_context_error = None
+        except Exception as exc:
+            # Command metadata is optional for read-only arm streaming. A fault
+            # must disable commands rather than disconnect valid joint telemetry.
+            context = None
+            error = str(exc)
+            if error != getattr(self, "_last_context_error", None):
+                self._last_context_error = error
+                event("websocket.command_context_unavailable",
+                      "Chưa lấy được quyền điều khiển; vẫn đồng bộ cánh tay ở chế độ chỉ đọc",
+                      level=logging.WARNING, reason=error)
         with self._state_lock:
             packet = {
                 "type": "robot_state",
@@ -351,7 +381,17 @@ class TelemetryPublisher:
                 "tcp_valid": self.tcp_valid,
                 "telemetry_error": self.telemetry_error,
             }
+            if callable(provider):
+                packet["command_context"] = context
+            if self.simulation_profile is not None:
+                packet["simulation_profile"] = dict(self.simulation_profile)
+            packet = self._stamp_packet_locked(packet)
         return json.dumps(packet)
+
+    def _stamp_packet_locked(self, packet):
+        """Caller holds _state_lock; ordering is separate from measurement age."""
+        self._packet_sequence += 1
+        return dict(packet, stream_id=self._stream_id, packet_seq=self._packet_sequence)
 
     def update_from_snapshot(self, snapshot):
         """Update telemetry state from authoritative RobotStateSnapshot."""
@@ -411,7 +451,7 @@ class TelemetryPublisher:
         else:
             data = dict(world_state)
         with self._state_lock:
-            self._latest_world_state = data
+            self._latest_world_state = self._stamp_packet_locked(data)
         self._broadcast_world_state_sync()
 
     def _broadcast_world_state_sync(self):
@@ -436,17 +476,19 @@ class TelemetryPublisher:
     def broadcast_custom(self, packet_dict: dict) -> None:
         """Broadcast an arbitrary event packet (e.g. trajectory_result) to all connected clients."""
         if isinstance(packet_dict, dict):
-            if packet_dict.get("type") == "board_placement":
-                with self._state_lock:
+            with self._state_lock:
+                packet_dict = self._stamp_packet_locked(packet_dict)
+                if packet_dict.get("type") == "board_placement":
                     self._latest_board_placement = dict(packet_dict)
                     if "placement_version" in packet_dict:
                         self.placement_version = int(packet_dict["placement_version"])
-            elif packet_dict.get("type") == "placement_analysis":
-                with self._state_lock:
+                elif packet_dict.get("type") == "placement_analysis":
                     self._latest_placement_analysis = dict(packet_dict)
-            elif packet_dict.get("type") == "operation_state":
-                with self._state_lock:
+                elif packet_dict.get("type") == "operation_state":
                     self._latest_operation_state = dict(packet_dict)
+                elif (packet_dict.get("type") == "gripper_command"
+                      and packet_dict.get("source") == "PHYSICAL"):
+                    self._latest_gripper_command = dict(packet_dict)
         if not self._loop or not self.clients:
             return
         msg = json.dumps(packet_dict)
@@ -459,6 +501,10 @@ class TelemetryPublisher:
             return
         with self._dispatch_lock:
             if state_key:
+                previous = self._pending_states.get(state_key)
+                if (previous is not None
+                        and json.loads(previous).get("packet_seq", 0) > json.loads(message).get("packet_seq", 0)):
+                    return
                 self._pending_states[state_key] = message
             else:
                 if len(self._pending_events) == self._pending_events.maxlen:

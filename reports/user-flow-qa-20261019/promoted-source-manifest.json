@@ -1,0 +1,46 @@
+[
+  {
+    "file": "src/core/game_persistence.py",
+    "sha256": "243b9ddce40810329cc448f7524062ad8722029ab2653a516d4b13f426e743f5"
+  },
+  {
+    "file": "src/core/session_journal.py",
+    "sha256": "f575041bf011bbd514fb33719727f483634b25f024aa7dae89220a2fda8872e9"
+  },
+  {
+    "file": "src/core/self_play_controller.py",
+    "sha256": "a28703a080d824a07012276907f495f4436c423bf99f3bece355a79ef2298a39"
+  },
+  {
+    "file": "main.py",
+    "sha256": "e25ae8b2c9a462a9363516be1f8ae09326dd92b7c7106dc6d54ac2597a938575"
+  },
+  {
+    "file": "src/ui/input_handler.py",
+    "sha256": "b1ddd9e472a6e3d9778352f075b0e2ba6412bd0659a67d1733c4cd66be4e3f12"
+  },
+  {
+    "file": "src/hardware/hardware_manager.py",
+    "sha256": "81e64b63dd531adede4968fce7cf4b6f897101bb2f555f03d296e9aa7fd857d3"
+  },
+  {
+    "file": "src/hardware/telemetry_publisher.py",
+    "sha256": "dfde58a6026e4656ac4d878fb1a1bab805b36b2dff01842de2db2f4c21236e01"
+  },
+  {
+    "file": "tests/unit/test_simple_launch_sync.py",
+    "sha256": "dff8aad16ab074b7d51858ec50ae13c93366b76623f4c0a0ef91a1f31a42e437"
+  },
+  {
+    "file": "tests/unit/test_game_modes_review.py",
+    "sha256": "38115d99daf2d88867ef06a5ad006d976d768af5bbd785dddd82dcf3b18d9826"
+  },
+  {
+    "file": "tests/unit/test_spectator_lifecycle.py",
+    "sha256": "5d977c120cc01de5fb2727bc5f37aa923ea47f23c74fc952f0321ef9a20fe4c7"
+  },
+  {
+    "file": "tests/unit/test_session_user_flows.py",
+    "sha256": "3cb7b4fe96dcd79b62341e5a56ce06c49bfcaaecc10860fc93ce800d5ab1b68a"
+  }
+]

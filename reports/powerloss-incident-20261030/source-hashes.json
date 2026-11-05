@@ -1,0 +1,12 @@
+{
+  "config.py": "c6f9675368efae6e991cee7465f550c2435f453a1292ed820745870f94986e64",
+  "main.py": "ca612ddbb2c466449b19a7992c89246d9bf7fe757ef1680b3056546879d2b70a",
+  "src/ui/input_handler.py": "30ac222bd5452d089ba821eb20bab81aaf0ebe75f16b74e835bef0737d6f80a1",
+  "src/core/game_persistence.py": "cd0793c8008ec54b447165b03af9ac1987b59bc082830e2e2a930d315b0e5039",
+  "src/hardware/hardware_manager.py": "3a45a69ef4091b8feb2251cabb5f7f65bfa9f29e2dff80a1fc15b0723ee9f0c1",
+  "src/hardware/robot_VIP.py": "875b807451b45d338a6d23864e3e2bf787d6aeb003ed8d4052973d6ce8123d63",
+  "src/hardware/robot_sdk_core.py": "d4278500c65736299f88044b3b8f095f2f32738962976bfc969b5f4f10b51a75",
+  "src/hardware/controlled_stop.py": "5d6f48ed5ebbc4a9b35ea5f9a0a6e052d3f0b56118a1f7524b4dfd624a66c29e",
+  "calibration/physical_teaching_points_user0.json": "fd567f6cf1a5cb2da8dcff83d9294febbaac8b1b9b61379fe7581756bc5e6144",
+  "perspective.npy": "5417d66bc23538ff450e835dae0ff784083e8a309fe459f38803a9f3cf98c257"
+}

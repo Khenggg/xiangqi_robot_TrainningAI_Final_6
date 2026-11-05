@@ -1,0 +1,119 @@
+"""Immutable game capabilities, independent of the launcher's requested hardware."""
+from dataclasses import dataclass
+
+
+GAME_MODES = {"HUMAN_VS_HUMAN", "HUMAN_VS_ROBOT", "ROBOT_VS_ROBOT"}
+
+
+@dataclass(frozen=True)
+class SessionProfile:
+    game_mode: str
+    requested_environment: str
+    execution_environment: str
+    backend: str
+    camera_enabled: bool
+    physical_robot_enabled: bool
+    robot_moves_enabled: bool
+    ai_enabled: bool
+    self_play_enabled: bool
+    simulation_enabled: bool
+    viewer_enabled: bool
+    mouse_input: str
+
+    @property
+    def dry_run(self):
+        return not self.physical_robot_enabled
+
+    @property
+    def game_only(self):
+        return self.backend == "VIRTUAL" and not self.simulation_enabled
+
+    @property
+    def match_names(self):
+        if self.game_mode == "HUMAN_VS_HUMAN":
+            return ("Người chơi Đỏ", "Người chơi Đen")
+        if self.game_mode == "ROBOT_VS_ROBOT":
+            return ("AI Đỏ (một FR3)", "AI Đen (một FR3)")
+        return ("Người chơi", "Robot AI")
+
+
+def make_profile(game_mode, requested_environment, *, simulation_enabled=True, viewer_enabled=True):
+    mode = str(game_mode).upper()
+    if mode not in GAME_MODES:
+        raise ValueError("Unsupported game mode")
+    requested = str(requested_environment).upper()
+    if requested not in {"VIRTUAL", "PHYSICAL"}:
+        raise ValueError("Unsupported execution environment")
+    pvp = mode == "HUMAN_VS_HUMAN"
+    physical = requested == "PHYSICAL" and not pvp
+    environment = "PHYSICAL" if physical else "VIRTUAL"
+    return SessionProfile(
+        game_mode=mode, requested_environment=requested, execution_environment=environment,
+        backend=environment, camera_enabled=physical, physical_robot_enabled=physical,
+        robot_moves_enabled=not pvp, ai_enabled=not pvp,
+        self_play_enabled=mode == "ROBOT_VS_ROBOT",
+        simulation_enabled=simulation_enabled,
+        viewer_enabled=simulation_enabled and viewer_enabled,
+        mouse_input="BOTH_PLAYERS" if pvp else ("VIRTUAL_TEST_ADAPTER" if not physical and mode == "HUMAN_VS_ROBOT" else "NONE"))
+
+
+def profile_from_config(config):
+    requested = ("PHYSICAL" if str(getattr(config, "ROBOT_BACKEND", "VIRTUAL")).upper() == "PHYSICAL"
+                 and not getattr(config, "DRY_RUN", True) else "VIRTUAL")
+    mode = str(getattr(config, "GAME_MODE", "HUMAN_VS_ROBOT")).upper()
+    if requested == "PHYSICAL" and getattr(config, "GAME_ONLY", False) and mode != "HUMAN_VS_HUMAN":
+        raise ValueError("Game-only cannot enable physical hardware")
+    return make_profile(mode, requested, simulation_enabled=not getattr(config, "GAME_ONLY", False))
+
+
+def configure_session(config, options, *, mode=None):
+    """Build and apply one session profile.
+
+    ``mode`` is the customer-facing preset used by the launcher:
+    ``BOARD_ONLY`` (2D game only), ``SIMULATION`` (virtual robot + 3D viewer),
+    or ``PHYSICAL`` (camera + real robot, optionally with the 3D mirror).
+    Omitting it preserves the existing CLI-derived behavior.
+    """
+    no_viewer = bool(getattr(options, "no_viewer", False))
+    if mode is not None:
+        normalized = str(mode).strip().upper()
+        if normalized == "BOARD_ONLY":
+            requested, simulation_enabled, viewer_enabled = "VIRTUAL", False, False
+        elif normalized == "SIMULATION":
+            requested, simulation_enabled, viewer_enabled = "VIRTUAL", True, not no_viewer
+        elif normalized == "PHYSICAL":
+            requested, simulation_enabled, viewer_enabled = "PHYSICAL", True, not no_viewer
+        else:
+            raise ValueError(f"Unsupported session mode: {mode!r}")
+        physical = requested == "PHYSICAL"
+    else:
+        physical_opt = getattr(options, "physical", None)
+        if physical_opt is None:
+            physical = (str(getattr(config, "ROBOT_BACKEND", "VIRTUAL")).upper() == "PHYSICAL"
+                        and not getattr(config, "DRY_RUN", True))
+        else:
+            physical = bool(physical_opt)
+        requested = "PHYSICAL" if physical else "VIRTUAL"
+        simulation_enabled = not getattr(options, "virtual", False) and not getattr(config, "GAME_ONLY", False)
+        viewer_enabled = not no_viewer
+    profile = make_profile(
+        getattr(config, "GAME_MODE", "HUMAN_VS_ROBOT"),
+        requested,
+        simulation_enabled=simulation_enabled,
+        viewer_enabled=viewer_enabled,
+    )
+    playback = getattr(options, "simulation_profile", None)
+    if playback is not None:
+        if profile.physical_robot_enabled or not profile.simulation_enabled:
+            raise ValueError("Simulation playback profile requires an active virtual executor")
+        if playback not in {"detailed", "fast"}:
+            raise ValueError("Unsupported simulation playback profile")
+        config.SIMULATION_PROFILE = playback
+    config.SESSION_PROFILE = profile
+    config.GAME_MODE = profile.game_mode
+    config.REQUESTED_EXECUTION_ENVIRONMENT = profile.requested_environment
+    config.EXECUTION_ENVIRONMENT = profile.execution_environment
+    config.ROBOT_BACKEND = profile.backend
+    config.DRY_RUN = profile.dry_run
+    config.GAME_ONLY = profile.game_only
+    return profile

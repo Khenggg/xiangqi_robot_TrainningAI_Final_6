@@ -11,7 +11,7 @@ import queue
 import config
 
 
-def calibrate_perspective_camera(cap, save_path):
+def calibrate_perspective_camera(cap, save_path, *, cancel_event=None, capture_owner=None):
     """Hiệu chỉnh perspective camera bằng cách click 4 góc bàn cờ.
     
     Args:
@@ -30,6 +30,8 @@ def calibrate_perspective_camera(cap, save_path):
     #    vì race condition trên cv2.VideoCapture gây frame đen!
     print("[CALIBRATE] ⏳ Đang chờ camera warm up...")
     for i in range(60):  # Đọc ~60 frame để camera USB ổn định (bỏ frame đen)
+        if cancel_event is not None and cancel_event.is_set():
+            return None
         ret, _ = cap.read()
         if not ret:
             time.sleep(0.05)
@@ -39,21 +41,48 @@ def calibrate_perspective_camera(cap, save_path):
 
     # --- Thread đọc camera liên tục (bắt đầu SAU warm-up) ---
     cal_q = queue.Queue(maxsize=2)
-    cal_stop = [False]
+    cal_stop = threading.Event()
 
     def _cal_capture():
-        while not cal_stop[0]:
+        while not cal_stop.is_set() and not (cancel_event is not None and cancel_event.is_set()):
             ret, frm = cap.read()
-            if ret:
+            if ret and frm is not None:
                 if not cal_q.empty():
                     try: cal_q.get_nowait()
                     except queue.Empty: pass
                 cal_q.put(frm)
             time.sleep(0.005)
 
-    cal_thread = threading.Thread(target=_cal_capture, daemon=True)
+    cal_thread = threading.Thread(target=_cal_capture, name="calibration-capture", daemon=False)
     cal_thread.start()
+    if capture_owner is not None:
+        capture_owner._calibration_capture_thread = cal_thread
+        capture_owner._calibration_capture_stop = cal_stop
+    try:
+        return _collect_manual_points(cal_q, save_path, cancel_event, cal_thread)
+    finally:
+        cal_stop.set()
+        cal_thread.join(timeout=1.0)
+        if cal_thread.is_alive():
+            raise RuntimeError("Calibration capture is still stopping; retain camera until its reader exits")
+        if capture_owner is not None:
+            capture_owner._calibration_capture_thread = None
+            capture_owner._calibration_capture_stop = None
 
+
+def _collect_manual_points(cal_q, save_path, cancel_event, cal_thread):
+    window = "CALIBRATE"
+    try:
+        return _manual_points_window(cal_q, save_path, cancel_event, cal_thread, window)
+    finally:
+        # UI errors must still stop/join the capture in the caller's finally.
+        try:
+            cv2.destroyWindow(window)
+        except cv2.error:
+            pass
+
+
+def _manual_points_window(cal_q, save_path, cancel_event, cal_thread, window):
     # --- Xử lý click chuột ---
     points = []
     def mouse_callback(event, x, y, flags, param):
@@ -61,8 +90,11 @@ def calibrate_perspective_camera(cap, save_path):
             points.append((x, y))
             print(f"  👉 Điểm {len(points)}: ({x}, {y})")
 
-    window = "CALIBRATE"
-    cv2.namedWindow(window)
+    cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+    try:
+        cv2.setWindowProperty(window, cv2.WND_PROP_TOPMOST, 1)
+    except cv2.error:
+        pass
     cv2.setMouseCallback(window, mouse_callback)
 
     print("\n=== HƯỚNG DẪN CLICK (QUAN TRỌNG) ===")
@@ -86,12 +118,32 @@ def calibrate_perspective_camera(cap, save_path):
             M = None
 
     while True:
+        if cancel_event is not None and cancel_event.is_set():
+            return None
         try:
             frame = cal_q.get(timeout=0.1)
         except queue.Empty:
+            # Keep Q/window-close responsive when the camera stops producing.
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord('q'), 27) or cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
+                return None
+            if not cal_thread.is_alive():
+                raise RuntimeError("Calibration camera reader stopped before a frame was available")
             continue
 
         display = frame.copy()
+        # Keep the click order and keys visible inside the OpenCV window.
+        cv2.rectangle(display, (0, 0), (display.shape[1], 78), (0, 0, 0), -1)
+        cv2.putText(display, "CLICK 4 GIAO DIEM: Den trai -> Den phai -> Do phai -> Do trai",
+                    (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 255, 0), 2)
+        if len(points) < 4:
+            help_text = f"Da cham {len(points)}/4 | R=lam lai | S=luu | Q/ESC=huy"
+        elif M is None:
+            help_text = "4 diem khong hop le hoac chua du | R=lam lai | Q/ESC=huy"
+        else:
+            help_text = "Kiem tra luoi vang | S=luu | R=lam lai | Q/ESC=huy"
+        cv2.putText(display, help_text, (12, 56),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 255, 255), 2)
 
         # Vẽ các điểm đã click
         for i, p in enumerate(points):
@@ -154,11 +206,10 @@ def calibrate_perspective_camera(cap, save_path):
             M = None
             print("🔄 Đã xóa điểm, hãy click lại.")
         elif key == ord('s') and M is not None:
+            if cancel_event is not None and cancel_event.is_set():
+                return None
             np.save(save_path, M)
             print(f"✅ ĐÃ LƯU THÀNH CÔNG: {save_path}")
             break
 
-    cal_stop[0] = True
-    cal_thread.join(timeout=1.0)
-    cv2.destroyWindow(window)
     return M

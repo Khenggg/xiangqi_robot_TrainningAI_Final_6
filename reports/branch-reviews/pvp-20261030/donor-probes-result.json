@@ -1,0 +1,17 @@
+{
+  "command": [
+    "powershell",
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    "tools/test_fast.ps1",
+    "-Workers",
+    "2",
+    "-Tests",
+    "reports/branch-reviews/pvp-20261030/test_donor_pvp_review.py"
+  ],
+  "exit_code": 0,
+  "environment": "Windows; Python 3.12.10; .venv312; pytest 9.1.1; xdist 3.8.0; hardware mocked",
+  "scope": "Donor source probes only; defect tests PASS when bad behavior is reproduced"
+}

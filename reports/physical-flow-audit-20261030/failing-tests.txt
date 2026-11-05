@@ -1,0 +1,228 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_TrainningAI_Final_6
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+created: 2/2 workers
+2 workers [3 items]
+
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+___ test_old_board_confirmation_does_not_automatically_retry_physical_robot ___
+[gw0] win32 -- Python 3.12.10 D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Scripts\python.exe
+
+    def test_old_board_confirmation_does_not_automatically_retry_physical_robot():
+        from src.ui.input_handler import InputHandler
+        from unittest.mock import Mock
+        state = SimpleNamespace(physical_sync_fault=True, snapshot_continue_required=True,
+                                pending_ai_move={"move": ((0, 3), (0, 4))}, board=[["."] * 9 for _ in range(10)],
+                                clear_pending_ai_move=Mock(), prepare_ai_retry_after_physical_miss=Mock(), set_status=Mock())
+        hw = SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND="PHYSICAL", DRY_RUN=False), dry_run=False,
+                             verify_physical_board=Mock(return_value=True))
+>       InputHandler(state, hw)._reconcile_physical_sync_fault()
+
+tests\unit\test_camera_startup_and_health.py:273: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <src.ui.input_handler.InputHandler object at 0x0000027A934D96A0>
+
+    def _reconcile_physical_sync_fault(self):
+        """Supervised recovery for a stopped physical-board synchronization."""
+        pending = self.state.pending_ai_move
+        if not pending and self._physical_recovery_required():
+            if not self._verify_recovery_board(self.state.board):
+                self.state.set_status("Fresh full-board verification failed; emergency correction remains paused.", color=(180, 0, 0), duration=10.0)
+                return
+            sync = getattr(self.state, "sync_current_board", None)
+            if callable(sync) and not sync():
+                return
+            if self.resume_automatic_scanning():
+                self.state.physical_sync_fault = False
+                self.state.snapshot_continue_required = False
+                self.state.snapshot_continue_can_commit_pending = False
+                clear = getattr(self.state, "clear_move_sync_error", None)
+                if callable(clear):
+                    clear()
+            return
+        if not pending or not callable(getattr(self.hw, "verify_physical_board", None)):
+            self.state.set_status("\u274c Kh\xf4ng c\xf3 tr\u1ea1ng th\xe1i \u0111\u1ed1i so\xe1t \u0111\u1ec3 kh\xf4i ph\u1ee5c.", color=(180, 0, 0), duration=8.0)
+            return
+    
+        self.state.set_status("\U0001f4f8 \u0110ang \u0111\u1ed1i so\xe1t l\u1ea1i b\xe0n th\u1eadt...", color=(0, 100, 180), duration=5.0)
+        # No robot command is issued here.  Matching the old board means the
+        # arm did not complete the move; matching expected_board means it did.
+        if self._verify_recovery_board(self.state.board):
+            self.state.clear_pending_ai_move()
+            self.state.snapshot_continue_required = False
+            if self._physical_recovery_required():
+                self.state.physical_sync_fault = True
+                self.state.manual_override_active = True
+                self.state.snapshot_continue_required = True
+                self.state.set_status("Verified old board. Physical retry remains paused; inspect the arm before restarting.", color=(180, 100, 0), duration=15.0)
+                return
+            retry = getattr(self.state, "prepare_ai_retry_after_physical_miss", None)
+            if callable(retry) and retry():
+                self.state.set_status(
+                    "\u21a9\ufe0f AI retrying after a physical board mismatch.",
+                    color=(0, 100, 180), duration=10.0,
+                )
+            else:
+                self.state.set_status(
+                    "\u21a9\ufe0f B\xe0n th\u1eadt v\u1eabn \u1edf FEN c\u0169, nh\u01b0ng kh\xf4ng th\u1ec3 kh\u1edfi \u0111\u1ed9ng l\u1ea1i l\u01b0\u1ee3t AI.",
+                    color=(180, 0, 0), duration=10.0,
+                )
+            return
+    
+>       if self._verify_recovery_board(pending["expected_board"]):
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'expected_board'
+
+src\ui\input_handler.py:918: KeyError
+---------------------------- Captured stdout call -----------------------------
+pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+[RECOVERY] Fresh board verification failed: 'types.SimpleNamespace' object has no attribute 'approve_recovery_after_verification'
+_ test_first_ai_cannon_move_routes_safely_or_leaves_board_uncommitted[False] __
+[gw1] win32 -- Python 3.12.10 D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Scripts\python.exe
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CE85E63440>
+block_service = False
+
+    @pytest.mark.parametrize("block_service", [False, True])
+    def test_first_ai_cannon_move_routes_safely_or_leaves_board_uncommitted(monkeypatch, block_service):
+        monkeypatch.setattr(config, "GAME_MODE", "HUMAN_VS_ROBOT")
+        runtime = VirtualXiangqiSimulation(auto_sync_telemetry=False)
+        runtime.connect()
+        backend = runtime.backend
+        provider = FixedBoardPoseProvider(runtime.placement_state)
+        bridge = LiveTwinBridge(backend, provider, world=runtime.world,
+                                physical=False, owns_world=False)
+        service_attempts = []
+        rejected_paths = []
+        real_move_joint = backend.move_joint
+    
+        def checked_joint(target, **kwargs):
+            if np.allclose(target, backend.SERVICE_SAFE_JOINTS_DEG, atol=0.01):
+                service_attempts.append(list(target))
+                if block_service:
+                    backend._last_error = "Test interlock: service route unavailable"
+                    backend._motion_state = "COLLISION_REJECTED"
+                    return False
+            ok = real_move_joint(target, **kwargs)
+            if not ok:
+                rejected_paths.append(backend._last_error)
+            return ok
+    
+        monkeypatch.setattr(backend, "move_joint", checked_joint)
+        state = GameState(allow_mouse_move=True)
+        state.api_client.send_move_update_board = Mock()
+        state.set_board_observer(bridge.reconcile_to_board_cells)
+        physically_placed = []
+        def execute_move(**kwargs):
+            result = execute_virtual_move(runtime, **kwargs)
+            if result.success:
+                # Inspect physics BEFORE the logical commit/board observer can
+                # reconcile positions. A post-observer check alone could hide a
+                # misplaced piece behind snapshot reconciliation.
+                physically_placed.append(runtime.find_nearest_cell(
+                    runtime.world.pieces["black_cannon_1"].get_position_robot()))
+            return result
+        hw = SimpleNamespace(is_robot_ready=True, simulation_runtime=runtime,
+                             execute_piece_move=execute_move)
+        try:
+            state.process_human_move((4, 6), (4, 5), "r_P")
+            assert state.turn == "b" and not state.move_sync_error
+            before = [row[:] for row in state.board]
+            result = execute_ai_move(state, hw, ((7, 2), (4, 2)))
+            assert service_attempts
+>           assert any("red_rook_0" in str(error) for error in rejected_paths)
+E           assert False
+E            +  where False = any(<generator object test_first_ai_cannon_move_routes_safely_or_leaves_board_uncommitted.<locals>.<genexpr> at 0x000001CE88F77220>)
+
+tests\unit\test_ai_home_approach_recovery.py:64: AssertionError
+---------------------------- Captured stdout call -----------------------------
+[HUMAN] \u2705 Moved: r_P e6 -> e5\n[SPACE] \U0001f4be State saved for rollback (Z to undo).\n[FEN] rnbakabnr/9/1c5c1/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR b - - 0 2
+__ test_first_ai_cannon_move_routes_safely_or_leaves_board_uncommitted[True] __
+[gw1] win32 -- Python 3.12.10 D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Scripts\python.exe
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CE88FE73B0>
+block_service = True
+
+    @pytest.mark.parametrize("block_service", [False, True])
+    def test_first_ai_cannon_move_routes_safely_or_leaves_board_uncommitted(monkeypatch, block_service):
+        monkeypatch.setattr(config, "GAME_MODE", "HUMAN_VS_ROBOT")
+        runtime = VirtualXiangqiSimulation(auto_sync_telemetry=False)
+        runtime.connect()
+        backend = runtime.backend
+        provider = FixedBoardPoseProvider(runtime.placement_state)
+        bridge = LiveTwinBridge(backend, provider, world=runtime.world,
+                                physical=False, owns_world=False)
+        service_attempts = []
+        rejected_paths = []
+        real_move_joint = backend.move_joint
+    
+        def checked_joint(target, **kwargs):
+            if np.allclose(target, backend.SERVICE_SAFE_JOINTS_DEG, atol=0.01):
+                service_attempts.append(list(target))
+                if block_service:
+                    backend._last_error = "Test interlock: service route unavailable"
+                    backend._motion_state = "COLLISION_REJECTED"
+                    return False
+            ok = real_move_joint(target, **kwargs)
+            if not ok:
+                rejected_paths.append(backend._last_error)
+            return ok
+    
+        monkeypatch.setattr(backend, "move_joint", checked_joint)
+        state = GameState(allow_mouse_move=True)
+        state.api_client.send_move_update_board = Mock()
+        state.set_board_observer(bridge.reconcile_to_board_cells)
+        physically_placed = []
+        def execute_move(**kwargs):
+            result = execute_virtual_move(runtime, **kwargs)
+            if result.success:
+                # Inspect physics BEFORE the logical commit/board observer can
+                # reconcile positions. A post-observer check alone could hide a
+                # misplaced piece behind snapshot reconciliation.
+                physically_placed.append(runtime.find_nearest_cell(
+                    runtime.world.pieces["black_cannon_1"].get_position_robot()))
+            return result
+        hw = SimpleNamespace(is_robot_ready=True, simulation_runtime=runtime,
+                             execute_piece_move=execute_move)
+        try:
+            state.process_human_move((4, 6), (4, 5), "r_P")
+            assert state.turn == "b" and not state.move_sync_error
+            before = [row[:] for row in state.board]
+            result = execute_ai_move(state, hw, ((7, 2), (4, 2)))
+            assert service_attempts
+>           assert any("red_rook_0" in str(error) for error in rejected_paths)
+E           assert False
+E            +  where False = any(<generator object test_first_ai_cannon_move_routes_safely_or_leaves_board_uncommitted.<locals>.<genexpr> at 0x000001CE88F76F80>)
+
+tests\unit\test_ai_home_approach_recovery.py:64: AssertionError
+---------------------------- Captured stdout call -----------------------------
+[HUMAN] \u2705 Moved: r_P e6 -> e5\n[SPACE] \U0001f4be State saved for rollback (Z to undo).\n[FEN] rnbakabnr/9/1c5c1/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR b - - 0 2\n[AI MOVE STOPPED] Retreat to SERVICE_SAFE failed: Test interlock: service route unavailable
+------------------------------ Captured log call ------------------------------
+WARNING  src.simulation.virtual_fr3_backend:virtual_fr3_backend.py:724 [COLLISION RECOVERY] Move to target from elevated pose failed.
+ERROR    xiangqi:ai_execution.py:92 Retreat to SERVICE_SAFE failed: Test interlock: service route unavailable
+Traceback (most recent call last):
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\core\ai_execution.py", line 80, in execute_ai_move
+    raise RuntimeError(getattr(result, "message", "Motion returned no verified success"))
+RuntimeError: Retreat to SERVICE_SAFE failed: Test interlock: service route unavailable
+============================== warnings summary ===============================
+src\hardware\telemetry_publisher.py:20
+src\hardware\telemetry_publisher.py:20
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_camera_startup_and_health.py::test_old_board_confirmation_does_not_automatically_retry_physical_robot
+FAILED tests/unit/test_ai_home_approach_recovery.py::test_first_ai_cannon_move_routes_safely_or_leaves_board_uncommitted[False]
+FAILED tests/unit/test_ai_home_approach_recovery.py::test_first_ai_cannon_move_routes_safely_or_leaves_board_uncommitted[True]
+======================= 3 failed, 4 warnings in 13.15s ========================

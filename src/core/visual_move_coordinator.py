@@ -2,9 +2,13 @@
 
 No direct SDK calls and no FEN commits. The caller owns the semantic move.
 """
+import logging
+import time
+
 from src.motion.result import MotionExecutionResult
 from src.vision.pick_consensus import PickTargetUnavailable, require_pick_target
 from src.core.project_logging import event
+from src.core.session_journal import dumps
 
 
 def signature(state):
@@ -19,6 +23,7 @@ def signature(state):
             pending.get("moving_color") if pending else None,
             getattr(context, "move_id", None), getattr(context, "piece_id", None),
             getattr(context, "captured_piece_id", None),
+            dumps(getattr(state, "pending_execution_binding", None)),
             tuple(sorted(getattr(state, "piece_ids", {}).items())))
 
 
@@ -29,12 +34,40 @@ def retry_is_current(state, request=None):
                 and state.pending_move is request["context"] and signature(state) == request["signature"])
 
 
+def acquire_pick_targets(hw, expected_cells, stage, cfg, *, attempts=None, interval=None):
+    """Acquire measured centres with a bounded retry for transient occlusion/lighting."""
+    if attempts is None:
+        attempts = max(1, int(getattr(cfg, "VISUAL_PICK_RETRY_ATTEMPTS", 1)))
+    if interval is None:
+        interval = max(0.0, float(getattr(cfg, "VISUAL_PICK_RETRY_INTERVAL_SEC", 0.0)))
+    last = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return hw.get_robot_center_pick_targets(dict(expected_cells))
+        except PickTargetUnavailable as exc:
+            last = exc
+            event("vision.pick_retry",
+                  f"Đo tâm quân chưa đạt, thử lại {attempt}/{attempts} ({stage})",
+                  level=logging.INFO, attempt=attempt, attempts=attempts, stage=stage,
+                  reason=str(exc), resolution=getattr(exc, "resolution", {}))
+            if attempt >= attempts:
+                break
+            if interval > 0:
+                time.sleep(interval)
+    if last is None:
+        raise PickTargetUnavailable("Pick target acquisition failed", stage)
+    raise PickTargetUnavailable(str(last), stage, resolution=getattr(last, "resolution", {}))
+
+
 def pause_visual_pick(state, exc):
+    resolution = getattr(exc, "resolution", None)
     state.visual_pick_retry = dict(pending=state.pending_ai_move, context=state.pending_move,
-                                   signature=signature(state), stage=exc.stage, reason=str(exc))
-    state.set_status(f"Camera chưa có tâm ổn định: {exc}. Y: đo lại đúng nước đang chờ.", duration=30)
-    event("vision.retry_paused", "Chờ đo lại tâm quân; chưa commit FEN",
-          stage=exc.stage, reason=str(exc), move_id=getattr(state.pending_move, "move_id", None))
+                                   signature=signature(state), stage=exc.stage, reason=str(exc),
+                                   resolution=resolution)
+    state.set_status(f"Camera chưa đủ điều kiện: {exc}. Y/V: đo lại đúng nước đang chờ.", duration=30)
+    event("vision.retry_paused", f"Chờ đo lại tâm quân ({exc.stage}): {exc}",
+          stage=exc.stage, reason=str(exc), move_id=getattr(state.pending_move, "move_id", None),
+          resolution=resolution)
 
 
 def execute_pending_ai_motion(state, hw, config=None, stage="pre_pick"):
@@ -51,6 +84,7 @@ def execute_pending_ai_motion(state, hw, config=None, stage="pre_pick"):
                 or signature(state) != token or state.turn != pending["moving_color"]
                 or state.physical_sync_fault or state.move_sync_error):
             raise RuntimeError("Stale move identity/epoch/actor; acquisition/motion blocked")
+        state.assert_execution_binding(context)
 
     ensure_current()
     capture = pending["captured_piece"] != "."
@@ -67,7 +101,11 @@ def execute_pending_ai_motion(state, hw, config=None, stage="pre_pick"):
     elif checkpoint_matches:
         raise RuntimeError("Capture already removed; replay of captured pick forbidden")
     if not hw.verify_physical_board(pre_board, **(terminal_kwargs if stage == "capture_removed" else {})):
-        raise RuntimeError("Camera did not confirm the complete pre-motion board")
+        # No new motion was dispatched: preserve this guarded checkpoint so
+        # another V/Y can reverify, rather than converting a transient camera
+        # failure into a motion fault that discards the pending retry.
+        raise PickTargetUnavailable("Camera did not confirm the complete pre-motion board", stage,
+                                    resolution={"reason": "BOARD_VERIFICATION_FAILED"})
     ensure_current()
     cfg = config or getattr(hw, "config", None)
     visual = any(bool(getattr(cfg, key, False)) for key in
@@ -75,9 +113,9 @@ def execute_pending_ai_motion(state, hw, config=None, stage="pre_pick"):
     physical_capture = capture and stage != "capture_removed"
     name, cell = ("captured", destination) if physical_capture else ("moving", source)
     try:
-        targets = hw.get_robot_center_pick_targets({name: cell}) if visual else {}
+        targets = acquire_pick_targets(hw, {name: cell}, stage, cfg) if visual else {}
     except PickTargetUnavailable as exc:
-        raise PickTargetUnavailable(str(exc), stage) from exc
+        raise PickTargetUnavailable(str(exc), stage, resolution=getattr(exc, "resolution", {})) from exc
     if visual:
         require_pick_target(hw, targets, name, stage)
     ensure_current()
@@ -90,6 +128,7 @@ def execute_pending_ai_motion(state, hw, config=None, stage="pre_pick"):
             return False
         ensure_current()
         state.visual_capture_checkpoint = dict(pending=pending, signature=token)
+        state.persist_checkpoint("CAPTURE_REMOVED")
         return True
 
     def refresh_moving():
@@ -97,10 +136,11 @@ def execute_pending_ai_motion(state, hw, config=None, stage="pre_pick"):
         if not getattr(state, "visual_capture_checkpoint", None):
             raise RuntimeError("Source refresh needs a verified capture checkpoint")
         try:
-            fresh = hw.get_robot_center_pick_targets({"moving": source})
+            fresh = acquire_pick_targets(hw, {"moving": source}, "capture_removed", cfg)
             target = require_pick_target(hw, fresh, "moving", "capture_removed")
         except PickTargetUnavailable as exc:
-            raise PickTargetUnavailable(str(exc), "capture_removed") from exc
+            raise PickTargetUnavailable(str(exc), "capture_removed",
+                                        resolution=getattr(exc, "resolution", {})) from exc
         ensure_current()
         if target is None:
             raise RuntimeError("Missing measured source after capture")
@@ -119,7 +159,8 @@ def execute_pending_ai_motion(state, hw, config=None, stage="pre_pick"):
         metadata = getattr(result, "metadata", {})
         if (metadata.get("visual_retry_stage") == "capture_removed"
                 and (getattr(state, "visual_capture_checkpoint", None) or {}).get("pending") is pending):
-            raise PickTargetUnavailable(result.message, "capture_removed")
+            raise PickTargetUnavailable(result.message, "capture_removed",
+                                        resolution=metadata.get("pick_resolution"))
         raise RuntimeError(getattr(result, "message", "No typed motion success"))
     if not hw.verify_physical_board(expected, **terminal_kwargs):
         raise RuntimeError("Camera did not confirm the complete expected board")

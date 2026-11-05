@@ -8,7 +8,8 @@ import time
 
 
 def execute_ai_move(state, hw, best_move, dry_run=False, visual_pick_enabled=False):
-    if getattr(state, "game_over", False) or getattr(state, "turn_confirmation_required", False):
+    if (getattr(state, "recovery_required", False) or getattr(state, "mode_change_pending", False) or getattr(state, "game_over", False)
+            or getattr(state, "turn_confirmation_required", False)):
         return False
     if getattr(state, "pick_test_mode", False) or getattr(state, "pick_test_resume_required", False):
         return False
@@ -37,8 +38,20 @@ def execute_ai_move(state, hw, best_move, dry_run=False, visual_pick_enabled=Fal
     try:
         if request is not None:
             if not retry_is_current(state, request) or state.pending_ai_move["move"] != best_move:
+                event("ui.retry_rejected", "Từ chối đo lại tâm quân", level=logging.WARNING,
+                      source="RETRY_WORKER", mode=getattr(getattr(state, "session_profile", None),
+                                                        "game_mode", "HUMAN_VS_ROBOT"),
+                      reason="STALE_PENDING_MOVE",
+                      move_id=getattr(state.pending_move, "move_id", None),
+                      game_epoch=getattr(state, "game_epoch", None))
                 raise RuntimeError("Stale retry; pending move cannot be replaced")
             context = state.pending_move
+            event("vision.retry_started",
+                  f"Bắt đầu đo lại tâm quân ({request.get('stage') or 'n/a'})",
+                  source="RETRY_WORKER", mode=getattr(getattr(state, "session_profile", None),
+                                                      "game_mode", "HUMAN_VS_ROBOT"),
+                  move_id=getattr(context, "move_id", None), stage=request.get("stage"),
+                  reason=request.get("reason"), resolution=request.get("resolution"))
         else:
             context = state.create_move_context(src, dst, MoveActor.ROBOT)
             state.mark_move_pending(context)

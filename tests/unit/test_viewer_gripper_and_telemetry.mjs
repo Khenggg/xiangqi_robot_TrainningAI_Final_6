@@ -16,6 +16,7 @@ import {
 } from "../../robot-3d-viewer/gripper_profile.mjs";
 import { validateWorldStatePacket } from "../../robot-3d-viewer/live_state.mjs";
 import { parseStartLayout } from "../../robot-3d-viewer/layout.mjs";
+import { updatePiecesFromWorldState } from "../../robot-3d-viewer/board.mjs";
 import { parseGripperVisualAsset, fingerOffsetCadMm } from "../../robot-3d-viewer/gripper_asset.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -28,8 +29,10 @@ const visualProfile = parseGripperVisualAsset(visualConfig);
 const collisionConfig = JSON.parse(fs.readFileSync(path.join(repoRoot, "shared/gripper_collision_asset.json"), "utf8"));
 assert.equal(fingerOffsetCadMm(visualProfile, 1, false), visualConfig.finger_open_inset_mm);
 assert.equal(fingerOffsetCadMm(visualProfile, -1, false), -visualConfig.finger_open_inset_mm);
-assert.equal(fingerOffsetCadMm(visualProfile, 1, true), 6.5, "Closed CAD position must be retained");
-assert.ok(Math.abs((fingerOffsetCadMm(visualProfile, 1, true) - fingerOffsetCadMm(visualProfile, 1, false))
+assert.equal(fingerOffsetCadMm(visualProfile, 1, true),
+  visualConfig.finger_open_inset_mm - visualConfig.finger_travel_mm,
+  "Closed visual position must move inward from the open inset");
+assert.ok(Math.abs(Math.abs(fingerOffsetCadMm(visualProfile, 1, true) - fingerOffsetCadMm(visualProfile, 1, false))
   * visualProfile.scaleToM - collisionConfig.finger_travel_m) < 1e-12);
 for (const invalid of [-1, NaN, "3.8"]) {
   assert.throws(() => parseGripperVisualAsset({ ...visualConfig, finger_open_inset_mm: invalid }), /finger_open_inset_mm/);
@@ -119,6 +122,22 @@ assert.equal(resOk.ok, true, `Canonical packet should pass: ${resOk.reason}`);
 assert.equal(resOk.gripper.closed, false);
 assert.equal(resOk.gripper.is_closed, false);
 
+const capturedPiece = {
+  ...canonicalPieces[0],
+  id: "captured_piece_for_test",
+  status: "OUT_OF_BOUNDS",
+  captured: true,
+  is_grasped: false,
+};
+const withCaptured = {
+  ...validWorldState,
+  captured_pieces: [capturedPiece],
+};
+const capturedOk = validateWorldStatePacket(withCaptured);
+assert.equal(capturedOk.ok, true, `Captured tray packet should pass: ${capturedOk.reason}`);
+assert.equal(capturedOk.capturedPieces.length, 1);
+assert.equal(capturedOk.capturedPieces[0].captured, true);
+
 // Negative cases
 function expectWorldStateRejected(modifier, expectedSubstr) {
   const clone = JSON.parse(JSON.stringify(validWorldState));
@@ -155,7 +174,12 @@ expectWorldStateRejected((p) => { p.pieces[0].orientation_quat_world = [0, 0, 0,
 // 8. Missing piece id
 expectWorldStateRejected((p) => { delete p.pieces[0].id; }, "missing non-empty id");
 
-console.log("  [PASS] All 8 negative world_state telemetry test cases correctly rejected.");
+// 9. Invalid captured-piece pose
+expectWorldStateRejected((p) => {
+  p.captured_pieces = [{ ...capturedPiece, pose_world: [0, Infinity, 0] }];
+}, "invalid or non-finite");
+
+console.log("  [PASS] All 9 negative world_state telemetry test cases correctly rejected.");
 
 // ============================================================================
 // 4. ROBOT ARM BUILDER PROFILE SCOPING INVARIANT
@@ -203,3 +227,35 @@ expectVisualAssetError((c) => { delete c.profiles.fr3; }, "profiles.fr3");
 
 console.log("  [PASS] Canonical gripper visual asset parses and validates correctly.");
 console.log("ALL VIEWER GRIPPER & TELEMETRY TESTS PASSED!\n");
+
+// Virtual mode exaggerates the CAD finger travel for visibility; physical mode
+// must keep the exact CAD travel.
+assert.equal(
+  fingerOffsetCadMm(visualProfile, 1, true, 12),
+  visualConfig.finger_open_inset_mm - visualConfig.finger_travel_mm * 12,
+  "Virtual visual travel must scale the CAD finger offset",
+);
+console.log("  [PASS] Gripper visual travel scaling is explicit");
+
+// Captured pieces are no longer physics bodies; the viewer must still draw
+// them from the explicit telemetry tray list and hide them on reset.
+const trayMesh = {
+  position: {set() {}},
+  quaternion: {set() {}},
+  userData: {id: "captured_tray_piece"},
+  visible: false,
+};
+const trayPieces = {captured_tray_piece: trayMesh};
+updatePiecesFromWorldState(null, trayPieces, [], [{
+  id: "captured_tray_piece",
+  pose_world: [-0.3, 0.02, 0.3],
+  orientation_quat_world: [0, 0, 0, 1],
+  status: "OUT_OF_BOUNDS",
+  captured: true,
+}]);
+assert.equal(trayMesh.visible, true);
+assert.equal(trayMesh.userData.captured, true);
+assert.equal(trayMesh.userData.row, null);
+updatePiecesFromWorldState(null, trayPieces, [], []);
+assert.equal(trayMesh.visible, false);
+console.log("  [PASS] Captured tray telemetry renders and clears correctly");

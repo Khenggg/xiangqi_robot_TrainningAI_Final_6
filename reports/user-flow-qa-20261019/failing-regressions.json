@@ -1,0 +1,148 @@
+{
+  "run": "broad_before_final_fixes",
+  "passed": 862,
+  "failed": 35,
+  "full_rerun_on_final_source": false,
+  "failures": [
+    {
+      "test": "tests/unit/test_ai_home_approach_recovery.py::test_first_ai_cannon_move_routes_safely_or_leaves_board_uncommitted[False]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_ai_home_approach_recovery.py::test_first_ai_cannon_move_routes_safely_or_leaves_board_uncommitted[True]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_arm_reconnect_qa.py::test_session_passes_arm_availability_to_viewer",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_board_profile_recovery.py::test_mock_physical_camera_commit_updates_actual_twin[True-True]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_camera_game_pipeline.py::test_camera_capture_either_color_removes_actual_body_and_viewer_piece[False-move0-black_knight_0]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_camera_game_pipeline.py::test_camera_capture_either_color_removes_actual_body_and_viewer_piece[True-move1-red_knight_0]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_camera_game_pipeline.py::test_camera_moves_both_colors_and_rejects_flicker_or_extra_board_changes",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_camera_game_pipeline.py::test_explicit_full_scan_recovers_moved_and_captured_board_without_arm_motion",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_camera_gpu_lifecycle.py::test_real_manager_starts_capture_and_recognition_once[auto-True]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_camera_gpu_lifecycle.py::test_real_manager_starts_capture_and_recognition_once[cpu-False]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_camera_startup_and_health.py::test_old_board_confirmation_does_not_automatically_retry_physical_robot",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_camera_twin_world.py::test_both_colors_moves_and_captures_update_real_bodies[red_cannon_0-src2-dst2-black_knight_0]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_camera_twin_world.py::test_both_colors_moves_and_captures_update_real_bodies[black_cannon_0-src3-dst3-red_knight_0]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_camera_twin_world.py::test_full_confirmed_scan_relocates_both_colors_and_restores_removed_body",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_telemetry_liveness.py::test_slow_viewer_keeps_only_latest_snapshot_and_does_not_delay_fast_viewer",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_end_to_end_game_twin_sync.py::test_human_move_and_capture_synchronization",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_end_to_end_game_twin_sync.py::test_reset_game_respawns_captured_pieces",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_end_to_end_game_twin_sync.py::test_undo_restores_pieces_in_twin",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_game_twin_integration.py::test_human_sync_failure_is_latched_and_blocks_robot",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_phase2_vision_and_carryover.py::TestCameraCalibrationFailClosed::test_calibration_cancelled_fails_closed",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_phase2_vision_and_carryover.py::TestCameraCalibrationFailClosed::test_calibration_success_authorizes_startup",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_virtual_capture_execution.py::test_capture_physics_precedes_commit_and_failed_land_retains_victim[False]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_virtual_capture_execution.py::test_elephant_capture_with_running_live_poll[False-False]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_virtual_capture_execution.py::test_elephant_capture_with_running_live_poll[True-False]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_virtual_capture_execution.py::test_adjacent_rook_capture_chooses_checked_grasp_yaw[False]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_visual_selective_integration.py::test_manual_move_updates_separate_identity_and_scene_not_game_fen",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_visual_selective_integration.py::test_manager_rejects_sdk_failure_instead_of_reporting_success_or_verifying",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_visual_selective_integration.py::test_manual_gui_move_after_taught_pose_uses_actual_pybullet_and_preserves_fen",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_visual_selective_integration.py::test_manual_fault_revocation_disables_only_previously_authorized_controller[False-0]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_visual_selective_integration.py::test_manual_fault_revocation_disables_only_previously_authorized_controller[True-0]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_visual_selective_integration.py::test_manual_fault_revocation_disables_only_previously_authorized_controller[True-112]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_visual_v2_simulation.py::test_hover_rotated_r1_r4_uses_guard_and_preserves_pieces",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_physical_ui_latency.py::test_real_entrypoint_missing_mirror_keeps_ui_and_respects_game_only[--physical-True]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_physical_ui_latency.py::test_real_entrypoint_missing_mirror_keeps_ui_and_respects_game_only[--virtual-False]",
+      "status": "requires_followup"
+    },
+    {
+      "test": "tests/unit/test_live_twin_physical_mirror.py::test_04_human_red_capture_updates_both_simulation_pieces_zero_robot_motion",
+      "status": "requires_followup"
+    }
+  ]
+}

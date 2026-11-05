@@ -129,6 +129,10 @@ class VirtualXiangqiSimulation:
         self.last_drop_event: Optional[DropEvent] = None
 
         self._command_lock = threading.RLock()
+        self._stopped = False
+        # Invalidates in-flight semantic bindings whenever a reset changes the
+        # virtual world, even when the board calibration version stays the same.
+        self.scene_epoch = 0
         self._physics_query_lock = getattr(self.world, "_physics_lock", threading.RLock())
         self._validation_in_progress = False
         self._operation_state = RuntimeOperationState.IDLE
@@ -396,6 +400,8 @@ class VirtualXiangqiSimulation:
 
     def connect(self) -> bool:
         """Connect backend and settle simulation."""
+        if self._stopped:
+            raise RuntimeError("Stopped simulation world cannot be reused; create a new runtime")
         ok = self.backend.connect()
         self.world.step_until_settled(max_steps=60)
         if self.telemetry and self.auto_sync_telemetry:
@@ -1339,11 +1345,14 @@ class VirtualXiangqiSimulation:
             "type": "board_teaching_points", "source": "SIMULATOR_BOARD_GEOMETRY",
             "placement_version": self.placement_state.placement_version,
             "frame": "robot_base", "unit": "mm",
+            "calibration_space": self.placement_state.calibration_space,
+            "surface_z_mm": self.placement_state.board_surface_z_robot_m*1000,
             "points": {name: [round(float(v) * 1000.0, 3) for v in self.placement_state.cell_to_robot_xyz(*cell)]
                        for name, cell in cells.items()},
         }
 
-    def apply_board_teaching_points(self, points: Dict[str, Any], expected_placement_version=None) -> Dict[str, Any]:
+    def apply_board_teaching_points(self, points: Dict[str, Any], expected_placement_version=None,
+                                   *, surface_z_mm=None) -> Dict[str, Any]:
         """Fit R1–R4 and atomically publish one simulated pose to motion, physics and viewer."""
         if not isinstance(points, dict):
             return {"success": False, "status": "BOARD_TEACHING_POINTS_INVALID",
@@ -1351,7 +1360,9 @@ class VirtualXiangqiSimulation:
         try:
             with self.acquire_operation_state(RuntimeOperationState.BOARD_ADJUSTMENT):
                 with self._command_lock:
-                    if expected_placement_version is not None and expected_placement_version != self.placement_state.placement_version:
+                    if expected_placement_version is not None and (
+                            type(expected_placement_version) is not int
+                            or expected_placement_version != self.placement_state.placement_version):
                         return {"success": False, "status": "BOARD_TEACHING_POINTS_STALE",
                                 "error": f"Board version changed to {self.placement_state.placement_version}; reload R1–R4 before applying."}
                     snapshot = self.backend.get_state_snapshot()
@@ -1374,12 +1385,14 @@ class VirtualXiangqiSimulation:
                         return {"success": False, "status": "BOARD_RELOCATION_REJECTED_SERVICE_UNSAFE",
                                 "error": ", ".join(service_report.reasons),
                                 "service_safety": service_report.to_dict()}
-                    result = calibrate_board_from_teaching_points(
-                        points, safe_transit_height_mm=self.placement_state.safe_transit_height_mm,
-                        calibration_profile=BoardCalibrationProfile(
-                            provenance="SIMULATOR_BOARD_SURFACE_POINT",
-                            description="Four explicit board-surface intersections in robot_base; no physical TCP inferred",
-                        ),
+                    from src.domain.board_xy_calibration import calibrate_board_xy
+                    from src.domain.board_pose_provider import CANONICAL_WIDTH_MM, CANONICAL_LENGTH_MM
+                    result = calibrate_board_xy(
+                        points, grid_dimensions_mm=(CANONICAL_WIDTH_MM, CANONICAL_LENGTH_MM),
+                        surface_z_mm=(self.placement_state.board_surface_z_robot_m*1000
+                                      if surface_z_mm is None else surface_z_mm),
+                        safe_transit_height_mm=self.placement_state.safe_transit_height_mm,
+                        previous_version=self.placement_state.placement_version,
                     )
                     if not result.success or result.state is None:
                         return {"success": False, "status": "BOARD_TEACHING_POINTS_INVALID",
@@ -1399,6 +1412,8 @@ class VirtualXiangqiSimulation:
                             "source": "SIMULATION_ONLY"}
         except RuntimeOperationBusy as exc:
             return {"success": False, "status": "BOARD_RELOCATION_REJECTED_BUSY", "error": str(exc)}
+        except (ValueError, TypeError, np.linalg.LinAlgError) as exc:
+            return {"success": False, "status": "BOARD_TEACHING_POINTS_INVALID", "error": str(exc)}
 
     def save_board_profile(self, expected_placement_version=None):
         """Persist only the applied simulation pose, never unsent viewer inputs."""
@@ -1425,7 +1440,8 @@ class VirtualXiangqiSimulation:
                     if expected_placement_version != self.placement_state.placement_version:
                         raise ValueError("Phiên bản bàn đã đổi; nạp bốn điểm hiện tại trước khi khôi phục")
                     record = self.board_profile_store.load(self.placement_state.safe_transit_height_mm)
-                    result = self.apply_board_teaching_points(record["points"], expected_placement_version)
+                    result = self.apply_board_teaching_points(record["points"], expected_placement_version,
+                                                              surface_z_mm=record["surface_z_mm"])
                     if result["success"]:
                         result["status"] = "BOARD_PROFILE_LOADED"
                         result["saved_calibration_version"] = record["calibration_version"]
@@ -1578,6 +1594,7 @@ class VirtualXiangqiSimulation:
     def reset_robot(self, speed_factor: Optional[float] = None) -> Dict[str, Any]:
         """Safely release any piece, open gripper, and reset robot to HOME pose."""
         with self._command_lock:
+            self.scene_epoch += 1
             with self.acquire_operation_state(RuntimeOperationState.RESETTING):
                 self.backend.stop()
                 if not self.backend.set_gripper(False):
@@ -1597,6 +1614,7 @@ class VirtualXiangqiSimulation:
     def reset_pieces(self) -> Dict[str, Any]:
         """Reset all 32 Xiangqi pieces to standard start layout."""
         with self._command_lock:
+            self.scene_epoch += 1
             with self.acquire_operation_state(RuntimeOperationState.RESETTING):
                 self._board_adjustment_ready = False
                 self.world.release_attached_piece()
@@ -1627,6 +1645,7 @@ class VirtualXiangqiSimulation:
         7. Broadcast updated placement and world state snapshots to 3D Viewer.
         """
         with self._command_lock:
+            self.scene_epoch += 1
             with self.acquire_operation_state(RuntimeOperationState.RESETTING):
                 self._validation_in_progress = False
                 self.backend.stop()
@@ -3078,6 +3097,25 @@ class VirtualXiangqiSimulation:
 
     def _handle_client_command(self, cmd: Dict[str, Any]) -> None:
         """Handle incoming command from viewer or external WebSocket client."""
+        # Telemetry already runs handlers outside its event loop. Keep the whole
+        # operation owned by that caller instead of spawning an untracked daemon
+        # which could start after Reset or after the session has been closed.
+        with self._command_lock:
+            if self._stopped:
+                return
+            validator = getattr(self, "client_command_validator", None)
+            if callable(validator) and not validator(cmd):
+                if self.telemetry is not None:
+                    self.telemetry.broadcast_custom({"type": "error", "message": "Viewer command belongs to an old/busy game or scene; refresh before retrying."})
+                return
+            if "scene_epoch" in cmd and (type(cmd["scene_epoch"]) is not int
+                                         or cmd["scene_epoch"] != self.scene_epoch):
+                if self.telemetry is not None:
+                    self.telemetry.broadcast_custom({"type": "error", "message": "Viewer scene changed; stale command rejected."})
+                return
+            self._dispatch_client_command(cmd)
+
+    def _dispatch_client_command(self, cmd: Dict[str, Any]) -> None:
         action = cmd.get("command") or cmd.get("action")
         if not action:
             return
@@ -3094,11 +3132,8 @@ class VirtualXiangqiSimulation:
             grasp_piece_bool = bool(grasp) if grasp is not None else False
             speed = cmd.get("speed_factor")
             if src is not None and dst is not None and len(src) == 2 and len(dst) == 2:
-                threading.Thread(
-                    target=self._run_trajectory_async,
-                    args=((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1])), p_ver, grasp_piece_bool, speed),
-                    daemon=True,
-                ).start()
+                self._run_trajectory_async((int(src[0]), int(src[1])), (int(dst[0]), int(dst[1])),
+                                           p_ver, grasp_piece_bool, speed)
         elif action == "SET_GRIPPER":
             closed = bool(cmd.get("closed", False))
             if not self.backend.set_gripper(closed) and self.telemetry is not None:
@@ -3111,7 +3146,7 @@ class VirtualXiangqiSimulation:
                 res = self.reset_robot(speed_factor=speed)
                 if not res.get("success") and self.telemetry is not None:
                     self.telemetry.broadcast_custom({"type": "error", "message": res.get("error") or res.get("status")})
-            threading.Thread(target=_task_reset, daemon=True).start()
+            _task_reset()
         elif action == "CLEAR_ERROR":
             self.clear_error()
         elif action == "RESET_ROBOT":
@@ -3120,11 +3155,11 @@ class VirtualXiangqiSimulation:
                 res = self.reset_robot(speed_factor=speed)
                 if not res.get("success") and self.telemetry is not None:
                     self.telemetry.broadcast_custom({"type": "error", "message": res.get("error") or res.get("status")})
-            threading.Thread(target=_task_reset, daemon=True).start()
+            _task_reset()
         elif action == "RESET_BOARD":
             self.reset_board()
         elif action == "RESET_PIECES":
-            threading.Thread(target=self.reset_pieces, daemon=True).start()
+            self.reset_pieces()
         elif action in ("FULL_RESET", "RESET_ALL_BACKEND_DATA", "RESET_BACKEND_DATA", "RESTART_BACKEND_DATA"):
             res = self.full_reset()
             if not res.get("success") and self.telemetry is not None:
@@ -3135,14 +3170,14 @@ class VirtualXiangqiSimulation:
                 res = self.runtime_go_service_safe(speed_factor=speed)
                 if not res.get("success") and self.telemetry and hasattr(self.telemetry, "broadcast_custom"):
                     self.telemetry.broadcast_custom({"type": "error", "message": res.get("error", "Go Service Safe rejected")})
-            threading.Thread(target=_task_safe, daemon=True).start()
+            _task_safe()
         elif action == "RETRACT_FROM_BOARD":
             speed = cmd.get("speed_factor")
             def _task_retract():
                 res = self.runtime_retract_from_board(speed_factor=speed)
                 if not res.get("success") and self.telemetry and hasattr(self.telemetry, "broadcast_custom"):
                     self.telemetry.broadcast_custom({"type": "error", "message": res.get("error", "Retract rejected")})
-            threading.Thread(target=_task_retract, daemon=True).start()
+            _task_retract()
         elif action == "PREPARE_BOARD_ADJUSTMENT":
             speed = cmd.get("speed_factor")
             def _task_prep():
@@ -3150,7 +3185,7 @@ class VirtualXiangqiSimulation:
                 if not res.get("success") and self.telemetry and hasattr(self.telemetry, "broadcast_custom"):
                     self.telemetry.broadcast_custom({"type": "board_adjustment_state", **res})
                     self.telemetry.broadcast_custom({"type": "error", "message": res.get("error", "Prepare Board Adjustment rejected")})
-            threading.Thread(target=_task_prep, daemon=True).start()
+            _task_prep()
         elif action == "JOG_TCP":
             axis = cmd.get("axis")
             delta_xyz = cmd.get("delta_xyz_mm")
@@ -3162,7 +3197,7 @@ class VirtualXiangqiSimulation:
                 res = self.runtime_jog_tcp(axis=axis, delta_xyz_mm=delta_xyz, delta_rpy_deg=delta_rpy, step_mm=step_mm, step_deg=step_deg, speed_factor=speed)
                 if not res.get("success") and self.telemetry and hasattr(self.telemetry, "broadcast_custom"):
                     self.telemetry.broadcast_custom({"type": "error", "message": res.get("error", "Jog TCP rejected")})
-            threading.Thread(target=_task_jog_tcp, daemon=True).start()
+            _task_jog_tcp()
         elif action == "JOG_JOINT":
             j_idx = int(cmd.get("joint_idx", 0))
             d_deg = float(cmd.get("delta_deg", 0.0))
@@ -3171,7 +3206,7 @@ class VirtualXiangqiSimulation:
                 res = self.runtime_jog_joint(j_idx, d_deg, speed_factor=speed)
                 if not res.get("success") and self.telemetry and hasattr(self.telemetry, "broadcast_custom"):
                     self.telemetry.broadcast_custom({"type": "error", "message": res.get("error", "Jog Joint rejected")})
-            threading.Thread(target=_task_jog_joint, daemon=True).start()
+            _task_jog_joint()
         elif action == "STOP":
             self.backend.stop()
         elif action == "SET_BOARD_PLACEMENT":
@@ -3190,7 +3225,11 @@ class VirtualXiangqiSimulation:
             if self.telemetry is not None:
                 self.telemetry.broadcast_custom(self.get_board_teaching_points())
         elif action == "APPLY_BOARD_TEACHING_POINTS":
-            res = self.apply_board_teaching_points(cmd.get("points", {}), cmd.get("expected_placement_version"))
+            res = self.apply_board_teaching_points(
+                cmd.get("points", {}),
+                cmd.get("expected_placement_version", False),
+                surface_z_mm=cmd.get("surface_z_mm"),
+            )
             if self.telemetry is not None:
                 self.telemetry.broadcast_custom({"type": "board_teaching_result", **res})
         elif action in ("SAVE_BOARD_PROFILE", "LOAD_BOARD_PROFILE"):
@@ -3201,10 +3240,10 @@ class VirtualXiangqiSimulation:
                     self.telemetry.broadcast_custom(self.get_board_teaching_points())
                 self.telemetry.broadcast_custom({"type": "board_profile_result", **res})
         elif action == "VALIDATE_BOARD_PLACEMENT":
-            threading.Thread(target=self.validate_board_placement, daemon=True).start()
+            self.validate_board_placement()
         elif action == "VALIDATE_FULL_BOARD_ROUTES":
             limit = cmd.get("sample_limit")
-            threading.Thread(target=self.validate_full_board_routes, args=(limit,), daemon=True).start()
+            self.validate_full_board_routes(limit)
         elif action == "MOVE_JOINT":
             joints_deg = cmd.get("joints_deg")
             speed = cmd.get("speed_factor", self.backend.default_speed_factor)
@@ -3217,7 +3256,7 @@ class VirtualXiangqiSimulation:
                             "message": res.get("error", "Move joint rejected"),
                             "status": res.get("status"),
                         })
-                threading.Thread(target=_task_move_joint, daemon=True).start()
+                _task_move_joint()
         elif action == "SET_COLLISION_GUARD":
             enabled = bool(cmd.get("enabled", True))
             self.backend.set_collision_guard_enabled(enabled)
@@ -3824,14 +3863,26 @@ class VirtualXiangqiSimulation:
 
     def start(self) -> None:
         """Start or initialize simulation coordinator (idempotent)."""
+        if self._stopped:
+            raise RuntimeError("Stopped simulation world cannot be reused; create a new runtime")
         if not self.backend.is_connected():
             self.backend.connect()
 
     def stop(self) -> None:
         """Stop simulation coordinator and clean up resources."""
-        if self.backend.is_connected():
-            self.backend.disconnect()
-        self.world.close()
+        if not self._command_lock.acquire(blocking=False):
+            raise RuntimeError("Virtual operation is still running; simulation resources retained")
+        try:
+            if self._stopped:
+                return
+            if self._operation_state is not RuntimeOperationState.IDLE:
+                raise RuntimeError("Finish the virtual operation before closing its world")
+            if self.backend.is_connected():
+                self.backend.disconnect()
+            self.world.close()
+            self._stopped = True
+        finally:
+            self._command_lock.release()
 
 
 # Backward-compatibility alias

@@ -1,8 +1,8 @@
 @echo off
-setlocal
-chcp 65001 > nul
+setlocal EnableExtensions
+chcp 65001 >nul
 title Xiangqi Robot
-color 0A
+cd /d "%~dp0"
 
 echo.
 echo  ======================================================
@@ -10,58 +10,31 @@ echo    *** XIANGQI ROBOT - Khởi động hệ thống... ***
 echo  ======================================================
 echo.
 
-REM Di chuyển đến thư mục chứa file RUN.bat
-cd /d "%~dp0"
+if not exist "%~dp0main.py" goto :NO_MAIN
 
-REM Kiểm tra main.py
-if not exist "%~dp0main.py" (
-    echo [LỖI] Không tìm thấy main.py tại %~dp0!
-    pause
-    exit /b 1
-)
-
-REM Tìm phiên bản Python phù hợp (ưu tiên môi trường có cài sẵn thư viện cv2, pygame, ultralytics)
 set "PYTHON="
-
-REM Combined Windows setup environment (vision + simulation).
-if exist "%~dp0.venv312\Scripts\python.exe" (
-    set "PYTHON=%~dp0.venv312\Scripts\python.exe"
-    goto :FOUND_PYTHON
+if exist "%~dp0.venv312\Scripts\python.exe" set "PYTHON=%~dp0.venv312\Scripts\python.exe"
+if not defined PYTHON if exist "%~dp0.venv\Scripts\python.exe" set "PYTHON=%~dp0.venv\Scripts\python.exe"
+if not defined PYTHON (
+    where python >nul 2>&1 && set "PYTHON=python"
 )
-
-REM 1. Kiểm tra venv nội bộ trong project nếu có (.venv)
-if exist "%~dp0.venv\Scripts\python.exe" (
-    set "PYTHON=%~dp0.venv\Scripts\python.exe"
-    goto :FOUND_PYTHON
+if not defined PYTHON (
+    where py >nul 2>&1 && set "PYTHON=py"
 )
+if not defined PYTHON goto :NO_PYTHON
 
-REM 2. Kiểm tra lệnh 'python' trong PATH
-python -c "import cv2, pygame, ultralytics" >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    set "PYTHON=python"
-    goto :FOUND_PYTHON
-)
+echo  [OK] Python: %PYTHON%
+"%PYTHON%" --version >nul 2>&1
+if errorlevel 1 goto :NO_PYTHON
 
-REM 3. Kiểm tra lệnh 'py'
-py -c "import cv2, pygame, ultralytics" >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    set "PYTHON=py"
-    goto :FOUND_PYTHON
-)
+REM Check the modules required by the game/simulation before launching. Keep
+REM this as find_spec so startup does not load torch/ultralytics.
+"%PYTHON%" -c "import importlib.util as u; mods=('pygame','numpy','cv2','pybullet','websockets'); missing=[m for m in mods if u.find_spec(m) is None]; print('Missing: '+', '.join(missing)) if missing else None; raise SystemExit(1 if missing else 0)"
+if errorlevel 1 goto :NO_DEPS
 
-REM 4. Fallback: Nếu cả 2 đều không có thư viện sẵn, chọn python rồi đến py
-where python >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    set "PYTHON=python"
-) else (
-    set "PYTHON=py"
-)
+"%PYTHON%" -c "import importlib.util as u; raise SystemExit(0 if u.find_spec('ultralytics') else 1)"
+if errorlevel 1 echo  [WARN] Thiếu ultralytics: camera/YOLO sẽ không hoạt động.
 
-:FOUND_PYTHON
-echo  [OK] Đang sử dụng Python: %PYTHON%
-"%PYTHON%" --version
-
-REM Engine local hiện dùng Python Moonfish, theo config.MOONFISH_EXE.
 if not exist "%~dp0moonfish\moonfish_ucci.py" (
     echo.
     echo  [THÔNG BÁO] Không tìm thấy moonfish\moonfish_ucci.py.
@@ -69,23 +42,42 @@ if not exist "%~dp0moonfish\moonfish_ucci.py" (
     echo.
 )
 
-echo  [OK] Đang khởi động main.py...
-echo  [OK] Để thoát: Đóng cửa sổ hoặc bấm phím Q trên cửa sổ Camera.
-echo.
-
-REM Chạy chương trình chính
-"%PYTHON%" main.py %*
-set "RUN_EXIT_CODE=%ERRORLEVEL%"
-
-REM Dừng màn hình lại để xem log lỗi (nếu có) trước khi thoát
-if %RUN_EXIT_CODE% NEQ 0 (
-    echo.
-    echo  [LỖI] Chương trình dừng lại với mã lỗi %RUN_EXIT_CODE%! Hãy kiểm tra log ở trên.
-    pause
+if not exist "%~dp0node_modules\three\build\three.module.js" (
+    echo  [WARN] Thiếu node_modules/three; viewer 3D sẽ không mở được.
+    echo         Chạy SETUP_WINDOWS.bat hoặc npm ci --include=dev.
 )
 
-REM Hiển thị khi thoát
+echo  [OK] Đang khởi động main.py...
+echo  [OK] Để thoát: đóng cửa sổ game hoặc Ctrl+C trên terminal.
+echo.
+
+"%PYTHON%" main.py %*
+set "RC=%ERRORLEVEL%"
+
+if not "%RC%"=="0" goto :RUN_FAILED
+
 echo.
 echo  *** Chương trình đã kết thúc an toàn. ***
-pause
-exit /b %RUN_EXIT_CODE%
+if "%~1"=="" if not defined XIANGQI_NO_PAUSE pause
+exit /b 0
+
+:RUN_FAILED
+echo.
+echo  [LỖI] Chương trình dừng với mã lỗi %RC%. Kiểm tra log ở trên.
+if not defined XIANGQI_NO_PAUSE pause
+exit /b %RC%
+
+:NO_MAIN
+echo [LỖI] Không tìm thấy main.py tại %~dp0
+if not defined XIANGQI_NO_PAUSE pause
+exit /b 1
+
+:NO_PYTHON
+echo [LỖI] Không tìm thấy Python. Chạy SETUP_WINDOWS.bat trước.
+if not defined XIANGQI_NO_PAUSE pause
+exit /b 1
+
+:NO_DEPS
+echo [LỖI] Môi trường Python thiếu thư viện bắt buộc. Chạy SETUP_WINDOWS.bat.
+if not defined XIANGQI_NO_PAUSE pause
+exit /b 1

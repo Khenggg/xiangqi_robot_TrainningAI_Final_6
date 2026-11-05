@@ -1,0 +1,274 @@
+{
+  "head": "18e67fc9006a91a2a32c4c861974760089a687de",
+  "verification": "STATIC_ONLY_NO_APPLICATION_EXECUTION",
+  "python_ast_errors": [],
+  "files": [
+    {
+      "path": "config.py",
+      "sha256": "ed0649013e9d7b60b4ecc58482ab9a7831076564e2d3cd93ab4b15f6fc03462b",
+      "bytes": 11331
+    },
+    {
+      "path": "main.py",
+      "sha256": "5c63d25e6a0105db1646554139c095464d37c1136a9f6e9399e5b98c4f23ecbd",
+      "bytes": 43387
+    },
+    {
+      "path": "robot-3d-viewer/board.mjs",
+      "sha256": "aa44f432e9baa5ac4c4cf249491b228d028900a85ac3b3d74a58e5bfd96a6e3b",
+      "bytes": 21772
+    },
+    {
+      "path": "robot-3d-viewer/index.html",
+      "sha256": "eb2b432aa71cd7ae5e0f3efc73f8d1bfe031f6f41e627594b59eed7ffd794a17",
+      "bytes": 31421
+    },
+    {
+      "path": "robot-3d-viewer/live_state.mjs",
+      "sha256": "0e84c81db56caa543ffef4688d61fb921a6b0179405bc7a315bb3c23c2f86ba6",
+      "bytes": 8675
+    },
+    {
+      "path": "robot-3d-viewer/main.mjs",
+      "sha256": "0af25cff2cb88ec256711e2aec55bd07331fcdfcafb056e191f13b5758c6f71f",
+      "bytes": 111708
+    },
+    {
+      "path": "src/api/simulation_client.py",
+      "sha256": "8335e20cbc99452c1ae0f1d8e8708237de3e75081ba9cc232e2d8d8092a9eb1d",
+      "bytes": 19667
+    },
+    {
+      "path": "src/core/ai_execution.py",
+      "sha256": "27902869d83737e45c4a948c9e07b76ef7c2917d385f244d65d88be5c1b76542",
+      "bytes": 5425
+    },
+    {
+      "path": "src/core/execution_binding.py",
+      "sha256": "2a846105d7d77899dadcfadc07a166062e48999ad4ea03a279b2658da95e1c40",
+      "bytes": 2326
+    },
+    {
+      "path": "src/core/game_persistence.py",
+      "sha256": "9847b0073ae85feb6879c451522d7a84f468a3af1b23cccb2152be67abf2ccf3",
+      "bytes": 32265
+    },
+    {
+      "path": "src/core/game_state.py",
+      "sha256": "6791f98f40aaaed9218f3e91f4f96e580c479640e75a914006c34892b9ab68c0",
+      "bytes": 48802
+    },
+    {
+      "path": "src/core/launch_options.py",
+      "sha256": "892cd1d1b8a72dcb5e9e14c237f682dcd32aef8d9bd6159300a207e4b513f487",
+      "bytes": 8048
+    },
+    {
+      "path": "src/core/motion_worker.py",
+      "sha256": "12f2a701c6875434e1c78d10603926dabaf140ba3f7bcfb9a5899c0f5fb6b7d2",
+      "bytes": 1997
+    },
+    {
+      "path": "src/core/project_logging.py",
+      "sha256": "c83a759be6ba48c3f5d8a4456b9030201e3a8df4f0287831cb3fb73c8a38602f",
+      "bytes": 14940
+    },
+    {
+      "path": "src/core/projection_worker.py",
+      "sha256": "4c4a22149390832f2aa77c99e450ed2f254e88abfc1fd438b6d811fc747a9cc8",
+      "bytes": 7971
+    },
+    {
+      "path": "src/core/self_play_controller.py",
+      "sha256": "f972fac6005b1fa152470449fb82e4a19210efe214e563a6ec8d4638eccc9548",
+      "bytes": 26070
+    },
+    {
+      "path": "src/core/session_control.py",
+      "sha256": "f5dac8fbfac646e892ee2e7da3b1a5f1380975e87a25cb9450e56ca88d463273",
+      "bytes": 7672
+    },
+    {
+      "path": "src/core/session_disposal.py",
+      "sha256": "46f7f45c7f623671ad841f4e7b2a4b23e4e9e7bc22228bae343129b2cfed2915",
+      "bytes": 3605
+    },
+    {
+      "path": "src/core/session_journal.py",
+      "sha256": "3f2a7faa728d1b4568bed18d11e689da1e460171f7f720ab61acc6d74b944eab",
+      "bytes": 14734
+    },
+    {
+      "path": "src/core/session_profile.py",
+      "sha256": "ac6f3f38e447185dfdbf9907e5051d8a1610ad92ce7fba4b2275fe5c06ee0bd8",
+      "bytes": 4116
+    },
+    {
+      "path": "src/core/session_startup.py",
+      "sha256": "2c90a70d8d45f28ef72199b17f477c7c945411abc2fcb01a6f3894cf969110e3",
+      "bytes": 8537
+    },
+    {
+      "path": "src/core/simulation_playback.py",
+      "sha256": "c7e616c851e4d475d0c9348956c3b86d04a0ea42ff4b4d8609398e2450bffdc3",
+      "bytes": 1235
+    },
+    {
+      "path": "src/core/visual_move_coordinator.py",
+      "sha256": "51293806d736c3747710691c97d8c7ec5be448c8fec6aa79e3a72696fbc2ddc2",
+      "bytes": 7142
+    },
+    {
+      "path": "src/digital_twin/live_twin_bridge.py",
+      "sha256": "808e55c0c0c52f439409108e679cae42b956947add0a2c5b709d58f40ee9227e",
+      "bytes": 22703
+    },
+    {
+      "path": "src/digital_twin/physical_state_relay.py",
+      "sha256": "9d44ba55e185f1bafe125972fac4f76435833b5e8ff5680d883b9ff07b3c96ef",
+      "bytes": 8530
+    },
+    {
+      "path": "src/digital_twin/raw_arm_relay.py",
+      "sha256": "15bbb990f2d4ec02a985620e8f54941f8456d702802c9c8d0cee6977e3780ae5",
+      "bytes": 2230
+    },
+    {
+      "path": "src/domain/board_pose.py",
+      "sha256": "13600a311901158738d9330a3322e6847babffbc212631b1bbde5d72f3ec03f6",
+      "bytes": 22564
+    },
+    {
+      "path": "src/domain/board_pose_provider.py",
+      "sha256": "5afeeddab53461f9e8402990900737501e8e261d68fd1cdea834948f1c8cfdb3",
+      "bytes": 43740
+    },
+    {
+      "path": "src/domain/board_xy_calibration.py",
+      "sha256": "a18939e22dd08ccc0ac2212ddc03717f363a04ffd9fcdd4800c65743044c49f5",
+      "bytes": 7976
+    },
+    {
+      "path": "src/domain/capture_layout.py",
+      "sha256": "b1960a7ba2c17db7ea7aefb7c924dc8d28be9c4a28864c3db2aa964cd087940d",
+      "bytes": 1254
+    },
+    {
+      "path": "src/domain/move_commit.py",
+      "sha256": "827675b10305215342fa2c3ea4586737756b838abfbd0577569e4159327c65e4",
+      "bytes": 395
+    },
+    {
+      "path": "src/hardware/controlled_stop.py",
+      "sha256": "c38f5146f07d2ff2b3546f259d53ceed58e62b3199d7719e34e2a6314e0bf87d",
+      "bytes": 8824
+    },
+    {
+      "path": "src/hardware/hardware_manager.py",
+      "sha256": "435e4dab96a0015ace084663ce1224b4118b7938f30b80721b4db32bebd6beef",
+      "bytes": 76080
+    },
+    {
+      "path": "src/hardware/robot_VIP.py",
+      "sha256": "b452a4730126837d7a8f147cb268010e6bdaf8bd806170e24143a621168b2335",
+      "bytes": 43664
+    },
+    {
+      "path": "src/hardware/robot_sdk_core.py",
+      "sha256": "d4278500c65736299f88044b3b8f095f2f32738962976bfc969b5f4f10b51a75",
+      "bytes": 495960
+    },
+    {
+      "path": "src/hardware/simulation_adapter.py",
+      "sha256": "ef3ef5d0374c8d54f212a0ecb7e8abce1ed4104ddfb90874b7136217916a48b7",
+      "bytes": 13896
+    },
+    {
+      "path": "src/hardware/telemetry_publisher.py",
+      "sha256": "35d3f9f19aa99e1cc0178434a8d73085614de749a6de2bfbf213e42cfd8aa02f",
+      "bytes": 27568
+    },
+    {
+      "path": "src/simulation/board_profile.py",
+      "sha256": "a3bdfea42b9f1902c7641c8e372fc3ff5d156e9782f4befc54e1815e35c1218a",
+      "bytes": 4662
+    },
+    {
+      "path": "src/simulation/physics/collision_guard.py",
+      "sha256": "58a964ce4d19460e0d5eebe241d82542bb115ccfafbe4d58f24bb994ea8be16c",
+      "bytes": 29782
+    },
+    {
+      "path": "src/simulation/physics/piece.py",
+      "sha256": "cb2c023264eda5737453d87fe718c9d1205460b2b87ad7a80b23f602514e46a2",
+      "bytes": 6186
+    },
+    {
+      "path": "src/simulation/physics/state.py",
+      "sha256": "b29235abaeb5b5a0001648bf0395373d1fa1b9a8bb7f93c627df5cdb024c60d2",
+      "bytes": 13297
+    },
+    {
+      "path": "src/simulation/physics/world.py",
+      "sha256": "d362fb0de793b71f3a3a2caba0ce74a0c0347bc4b991cf3c7b0b87d8449f7ad1",
+      "bytes": 62133
+    },
+    {
+      "path": "src/simulation/runtime.py",
+      "sha256": "9bdadd0dbec4e7dcf02c5adc9255e1747e2c240d55ee0331da80cfe6d1f14229",
+      "bytes": 213128
+    },
+    {
+      "path": "src/ui/board_renderer.py",
+      "sha256": "607071b7786ad23910f420a312c045304c0064377e5c2ee6fe27c157413bfe90",
+      "bytes": 35545
+    },
+    {
+      "path": "src/ui/input_handler.py",
+      "sha256": "d0cee4a3d3a0a78354e7829e2ac1802be40ca46af03c350793702dede933311f",
+      "bytes": 68662
+    },
+    {
+      "path": "src/vision/auto_calibrate.py",
+      "sha256": "95f13ad5abf9017d46181f465a1a365f1231b1cfe026b1858108cf473e53801e",
+      "bytes": 16740
+    },
+    {
+      "path": "src/vision/calibrate_camera.py",
+      "sha256": "7e9a5ce143393089153a813c0c771a9d5616c1fdb74501246956ee259d68d637",
+      "bytes": 8455
+    },
+    {
+      "path": "src/vision/camera_monitor.py",
+      "sha256": "3b749b39815ff7a8e2dd971dfa474a626aca37cf135db19e33b8bd90f55642c6",
+      "bytes": 30685
+    },
+    {
+      "path": "src/vision/height_pick_geometry.py",
+      "sha256": "8a3d745f8fd640a367f083a5833e9a9f9f3f68593a07174125b91269549bbf3f",
+      "bytes": 6613
+    },
+    {
+      "path": "src/vision/ring_pick_estimator.py",
+      "sha256": "b9f4d562ba4b4214c5843f52cc44ad1227f1bc61749b81092b3d22a6663b4d0e",
+      "bytes": 10511
+    },
+    {
+      "path": "src/vision/top_face_pick_estimator.py",
+      "sha256": "267d67d254d0479052a79464031b273acb013be838255eba1bff2f64ff2732be",
+      "bytes": 12702
+    },
+    {
+      "path": "src/vision/visual_pick_estimator.py",
+      "sha256": "82d677eb40d9615d4ed202197434494268ce254117e661b8a50fbf26fea91225",
+      "bytes": 11910
+    },
+    {
+      "path": "src/vision/visual_pick_modes.py",
+      "sha256": "1c1fd9d1bd55278882f7983360168cc08ccd9d5d55142d09f1b8d0c657ff6a08",
+      "bytes": 13195
+    }
+  ],
+  "runtime_tests": "NOT_RUN_USER_NO_TEST_INSTRUCTION_PENDING_CLARIFICATION",
+  "physical_operations": "NOT_RUN"
+}

@@ -1,0 +1,26 @@
+{
+  "environment": "Windows / Python 3.12.10 / .venv312",
+  "runner": "tools/test_fast.ps1 -Workers 2",
+  "tests": [
+    "tests/unit/test_fixed_user0_teaching_points.py",
+    "tests/unit/test_f2_camera_and_frame_restart.py",
+    "tests/unit/test_connection_calibration_split.py",
+    "tests/unit/test_legacy_physical_robot_gates.py",
+    "tests/unit/test_visual_simulation_adapter.py",
+    "tests/unit/test_visual_v2_adapter.py"
+  ],
+  "exit_code": 0,
+  "parallel_passed": 91,
+  "serial_passed": 1,
+  "physical_hardware": "NOT RUN",
+  "full_regression": "NOT RUN",
+  "fixed_profile": "calibration/physical_teaching_points_user0.json",
+  "source_sha256": "ce7b6eedf92c5a7ff2de0669307eaf9629e4c3de31d5c55d67872198dabc52da",
+  "changed_files_sha256": {
+    "config.py": "c6f9675368efae6e991cee7465f550c2435f453a1292ed820745870f94986e64",
+    "src/hardware/robot_VIP.py": "875b807451b45d338a6d23864e3e2bf787d6aeb003ed8d4052973d6ce8123d63",
+    "src/hardware/hardware_manager.py": "3a45a69ef4091b8feb2251cabb5f7f65bfa9f29e2dff80a1fc15b0723ee9f0c1",
+    "src/hardware/simulation_adapter.py": "fe6c318a5f7a003e5fc75c82651f8ce19a8ae15f4d1bd68dc6f06af02bc17630",
+    "tests/unit/test_fixed_user0_teaching_points.py": "2db823f619f6f9bdb459b277e0b96b6d6e76a94d471cd3d01986a3be4db93170"
+  }
+}

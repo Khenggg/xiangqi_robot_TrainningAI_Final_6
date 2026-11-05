@@ -217,6 +217,7 @@ class BoardPlacementState:
 
     placement_version: int = 1
     timestamp: float = field(default_factory=time.time)
+    calibration_space: str = "LEGACY"
 
     @property
     def board_surface_z_m(self) -> float:
@@ -272,8 +273,9 @@ class BoardPlacementState:
         u = (col - 4.0) * 0.040 m (column span: 320 mm, col 0 -> -160mm, col 8 -> +160mm)
         v = (row - 4.5) * 0.040 m (row span: 360 mm, row 0 -> -180mm, row 9 -> +180mm)
         """
-        u_m = (float(col) - 4.0) * 0.040
-        v_m = (float(row) - 4.5) * 0.040
+        geometry = get_physical_geometry()
+        u_m = (float(col) - 4.0) * geometry.grid_cell_width_mm / 1000.0
+        v_m = (float(row) - 4.5) * geometry.grid_cell_length_mm / 1000.0
         return u_m, v_m
 
     def board_local_to_cell(self, u_m: float, v_m: float) -> Tuple[float, float]:
@@ -284,8 +286,9 @@ class BoardPlacementState:
         Returns:
             (row, col) in canonical Xiangqi order.
         """
-        col = float(u_m) / 0.040 + 4.0
-        row = float(v_m) / 0.040 + 4.5
+        geometry = get_physical_geometry()
+        col = float(u_m) * 1000.0 / geometry.grid_cell_width_mm + 4.0
+        row = float(v_m) * 1000.0 / geometry.grid_cell_length_mm + 4.5
         return row, col
 
     def board_local_to_robot(
@@ -395,6 +398,7 @@ class BoardPlacementState:
             "T_robot_from_board": [[round(float(v), 5) for v in row] for row in self.T_robot_from_board.tolist()],
             "teaching_points": self.teaching_points,
             "placement_version": self.placement_version,
+            "calibration_space": self.calibration_space,
             "timestamp": self.timestamp,
         }
 
@@ -435,7 +439,7 @@ class BoardPlacementState:
 
         nom_cx, nom_cy, _ = nominal_board_center_robot_m
         nom_surface_z = float(nominal_board_surface_z_m)
-        thickness_m = 0.0105  # canonical 10.5 mm
+        thickness_m = get_physical_geometry().board_thickness_m
 
         # Forward shift follows the board's positive column axis at every yaw.
         # At yaw 0 this axis is +Y_robot; at yaw 90 it is -X_robot.

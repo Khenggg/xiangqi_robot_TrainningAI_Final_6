@@ -2,7 +2,7 @@
 Physical simulation state enums, results, and immutable snapshot models.
 """
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -280,6 +280,8 @@ class PieceSnapshot:
     nearest_col: int
     nearest_row: int
     distance_to_nearest_intersection_m: float
+    captured: bool = False
+    capture_pose_evidence: Optional[str] = None
 
     @property
     def is_grasped(self) -> bool:
@@ -325,6 +327,8 @@ class WorldStateSnapshot:
     simulation_time: float
     gripper: Dict[str, Any]
     pieces: List[PieceSnapshot]
+    captured_pieces: List[PieceSnapshot] = field(default_factory=list)
+    projection_context: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -333,6 +337,8 @@ class WorldStateSnapshot:
             "simulation_time": round(self.simulation_time, 4),
             "gripper": self.gripper,
             "pieces": [p.to_dict() for p in self.pieces],
+            "captured_pieces": [p.to_dict() for p in self.captured_pieces],
+            "projection_context": dict(self.projection_context) if self.projection_context is not None else None,
         }
 
 

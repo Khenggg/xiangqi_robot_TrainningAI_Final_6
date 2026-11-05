@@ -90,13 +90,13 @@ def test_missing_camera_sample_breaks_unified_continuous_settle_window(state,mon
 def test_unified_rearms_after_repaired_mirror_without_new_game_epoch(state,monkeypatch):
     handler,clock,result=unified(state,monkeypatch,'HUMAN_VS_HUMAN')
     state.set_board_observer(Mock(return_value=False))
-    assert not observe_move(handler,clock,result,((0,6),(0,5)))
-    assert state.turn=='b' and state.physical_sync_fault
+    assert observe_move(handler,clock,result,((0,6),(0,5)))
+    assert state.turn=='b' and not state.physical_sync_fault and state.projection_error
     epoch=state.game_epoch
     state.set_board_observer(Mock(return_value=True))
     handler.hw.verify_physical_board=Mock(return_value=True)
     handler.hw.capture_baseline_if_needed=Mock(return_value=True)
-    handler._reconcile_physical_sync_fault()
+    assert state.sync_current_board()
     assert state.game_epoch==epoch and not state.physical_sync_fault and not state.move_sync_error
     assert observe_move(handler,clock,result,((0,3),(0,4)))
     assert len(state.move_history)==2
@@ -170,12 +170,12 @@ def test_ten_plies_two_captures_surrender_and_new_game_match_pybullet_scene(stat
     opening=[((4,6),(4,5)),((4,3),(4,4)),((4,5),(4,4)),((0,3),(0,4)),((0,6),(0,5)),
              ((0,4),(0,5)),((1,7),(4,7)),((1,2),(4,2)),((7,9),(6,7)),((7,0),(6,2))]
     policy=iter(opening)
-    hw=SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND='VIRTUAL',GAME_ONLY=False),dry_run=True,
+    hw=SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND='VIRTUAL',GAME_ONLY=False,GAME_MODE=mode),dry_run=True,
         simulation_runtime=object(),is_robot_ready=True,cam_monitor=None,capture_baseline_if_needed=Mock(return_value=True),
         execute_piece_move=motion,ai_ctrl=SimpleNamespace(pick_move=lambda *a,**kw:next(policy)))
     ctrl=SelfPlayController(state,hw)
     human=HumanMoveCommitCoordinator(state)
-    if mode=='ROBOT_VS_ROBOT':assert ctrl.start()
+    if mode=='ROBOT_VS_ROBOT':assert ctrl.start(run_mode='step')
     def robot_step():
         assert ctrl.request_next_move()
         ctrl._thread.join(2);ctrl.tick()
@@ -199,12 +199,16 @@ def test_ten_plies_two_captures_surrender_and_new_game_match_pybullet_scene(stat
                 assert execute_ai_move(state,hw,move,dry_run=True)
                 assert not state.can_start_ai_turn()
             assert state.board==expected and not state.physical_sync_fault and not state.move_sync_error
-            assert set(bridge.world.pieces)==set(state.piece_ids.values())
+            active=set(bridge.world.pieces)
+            assert active==set(state.piece_ids.values())
             emitted=telemetry._latest_world_state['pieces']
             assert {p['id'] for p in emitted}==set(state.piece_ids.values())
             expected_cells={pid:(r,c) for (r,c),pid in state.piece_ids.items()}
             assert {p['id']:(p['nearest_row'],p['nearest_col']) for p in emitted}==expected_cells
+            captured=telemetry._latest_world_state.get('captured_pieces',[])
+            assert all(p['captured'] is True and p['physical_state']=='OUT_OF_BOUNDS' for p in captured)
         assert len(state.move_history)==10 and len(bridge.world.pieces)==30
+        assert len(telemetry._latest_world_state.get('captured_pieces',[]))==2
         assert len(state.r_captured)==len(state.b_captured)==1
         assert motion.call_count=={'HUMAN_VS_HUMAN':0,'HUMAN_VS_ROBOT':5,'ROBOT_VS_ROBOT':10}[mode]
         for call in motion.call_args_list:
@@ -222,7 +226,7 @@ def test_ten_plies_two_captures_surrender_and_new_game_match_pybullet_scene(stat
         assert state.board==xiangqi.get_board() and not state.game_over and not state.move_history
         assert len(bridge.world.pieces)==32 and set(bridge.world.pieces)==set(state.piece_ids.values())
         if mode=='ROBOT_VS_ROBOT':
-            assert ctrl.finish_recovery() and ctrl.start()
+            assert ctrl.finish_recovery() and ctrl.start(run_mode='step')
     finally:
         ctrl.close();bridge.close()
 
@@ -250,6 +254,15 @@ def test_continuous_selfplay_surrender_is_accepted_at_ready_boundary(state,tmp_p
     monkeypatch.setattr('src.core.session_startup.build_session',build)
     monkeypatch.setattr(BoardRenderer,'home_action_from_pixel',lambda *a:'self_play')
     phase=[0];deadline=time.monotonic()+10
+    original_tick=SelfPlayController.tick
+    def hold_ready_boundary(ctrl):
+        # Expose a completed-move boundary to the UI event driver. Default
+        # Continuous scheduling is verified separately; surrender uses the
+        # production UI branch and production accepts_surrender property.
+        if phase[0]<=2 and ctrl.status is SelfPlayStatus.READY:
+            return
+        original_tick(ctrl)
+    monkeypatch.setattr(SelfPlayController,'tick',hold_ready_boundary)
     def events():
         assert time.monotonic()<deadline,'GUI boundary stalled'
         g=inspect.currentframe().f_back.f_globals

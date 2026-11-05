@@ -1,0 +1,17 @@
+{
+  "command": [
+    "powershell",
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    "tools/test_fast.ps1",
+    "-Workers",
+    "2",
+    "-Tests",
+    "reports/powerloss-incident-20261030/test_incident_boundaries.py"
+  ],
+  "exit_code": 0,
+  "hardware": "all mocks; no SDK connection instantiated",
+  "meaning": "PASS confirms current risk boundaries; no physical collision reproduction"
+}

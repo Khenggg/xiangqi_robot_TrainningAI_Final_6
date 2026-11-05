@@ -1,0 +1,27 @@
+{
+  "at": "2026-10-31T12:13:46.596788+07:00",
+  "home": {
+    "pose": [
+      -104.274002,
+      149.610001,
+      348.188995,
+      179.860001,
+      0.554,
+      -42.0
+    ],
+    "joints": [
+      -89.467003,
+      -128.630005,
+      106.871002,
+      -68.512001,
+      -89.497002,
+      42.534
+    ],
+    "tool": 0,
+    "user": 0
+  },
+  "profile": "fr3-fixed-user0-20261028",
+  "frames": [],
+  "fault_query_error": "GetRobotErrorCode: controller reply unavailable; outcome unknown, do not resend",
+  "state_error": "[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"
+}

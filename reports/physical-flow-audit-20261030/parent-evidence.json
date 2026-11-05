@@ -1,0 +1,111 @@
+{
+  "environment": "Windows / Python 3.12.10",
+  "physical_sdk_connections": 0,
+  "real_robot_or_camera_calls": 0,
+  "enable_control": {
+    "enabled": true,
+    "final_motion_state": "IDLE",
+    "final_measurement_age_s": 0.0,
+    "snapshot_reads": 1,
+    "fake_sdk_calls": [
+      [
+        "Mode",
+        0,
+        "IDLE"
+      ],
+      [
+        "RobotEnable",
+        1,
+        "IDLE"
+      ]
+    ],
+    "error": null,
+    "final_stop_latched": false,
+    "final_authorized": true
+  },
+  "enable_after_motion_starts": {
+    "enabled": true,
+    "final_motion_state": "MOVING",
+    "final_measurement_age_s": 0.001,
+    "snapshot_reads": 1,
+    "fake_sdk_calls": [
+      [
+        "Mode",
+        0,
+        "MOVING"
+      ],
+      [
+        "RobotEnable",
+        1,
+        "MOVING"
+      ]
+    ],
+    "error": null,
+    "final_stop_latched": false,
+    "final_authorized": true
+  },
+  "enable_after_telemetry_expires": {
+    "enabled": true,
+    "final_motion_state": "IDLE",
+    "final_measurement_age_s": 3.0,
+    "snapshot_reads": 1,
+    "fake_sdk_calls": [
+      [
+        "Mode",
+        0,
+        "IDLE"
+      ],
+      [
+        "RobotEnable",
+        1,
+        "IDLE"
+      ]
+    ],
+    "error": null,
+    "final_stop_latched": false,
+    "final_authorized": true
+  },
+  "stop_during_mode_with_real_coordinator_and_manager": {
+    "enabled": false,
+    "final_motion_state": "IDLE",
+    "final_measurement_age_s": 0.027,
+    "snapshot_reads": 1,
+    "fake_sdk_calls": [
+      [
+        "Mode",
+        0,
+        "IDLE"
+      ],
+      [
+        "operator_stop_requested",
+        true
+      ],
+      [
+        "RobotEnable",
+        1,
+        "IDLE"
+      ]
+    ],
+    "error": "Enable cancelled by a newer stop request",
+    "final_stop_latched": true,
+    "final_authorized": true
+  },
+  "center_after_camera_loss": {
+    "camera_reads": 3,
+    "latest_sample": {
+      "attempt": 3,
+      "accepted": false,
+      "reason": "camera disconnected on latest sample"
+    },
+    "resolution_failure": "",
+    "target_returned": true,
+    "fake_motion_dispatches": 1,
+    "motion_reported_success": true,
+    "camera_health_checks": 0,
+    "semantic_move_guard_passed": true
+  },
+  "pre_existing_to_recent_fresh_start_and_log_work": {
+    "activate_physical_game": true,
+    "get_robot_center_pick_targets": true
+  }
+}

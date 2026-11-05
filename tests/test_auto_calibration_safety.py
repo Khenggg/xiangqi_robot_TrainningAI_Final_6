@@ -68,6 +68,22 @@ class CalibrationSafetyTests(unittest.TestCase):
             np.testing.assert_allclose(np.load(path), matrix)
             self.assertEqual(manual_calls, 0)
 
+    def test_manual_only_skips_auto_detection_and_calls_four_corner_window(self):
+        class Capture:
+            def read(self):
+                return True, np.zeros((720, 720, 3), np.uint8)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'perspective.npy'
+            with patch('src.vision.auto_calibrate.config.DRY_RUN', False),                  patch('src.vision.auto_calibrate.time.sleep'),                  patch.object(AutoCalibrator, 'predict_corners') as predict,                  patch('src.vision.auto_calibrate.calibrate_perspective_camera',
+                       return_value=np.eye(3)) as manual:
+                result = run_calibration_flow(
+                    Capture(), path, cchess_recognizer=object(), manual_only=True)
+            np.testing.assert_allclose(result, np.eye(3))
+            manual.assert_called_once()
+            predict.assert_not_called()
+
+
     def test_manual_selection_does_not_save_auto_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'perspective.npy'

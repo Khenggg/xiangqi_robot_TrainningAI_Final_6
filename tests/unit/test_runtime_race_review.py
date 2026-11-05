@@ -31,7 +31,7 @@ def state(monkeypatch):
 
 def hardware(physical=False):
     return SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND='PHYSICAL' if physical else 'VIRTUAL',
-        VISUAL_PICK_ENABLED=physical, GAME_ONLY=False), dry_run=not physical,
+        VISUAL_PICK_ENABLED=physical, GAME_ONLY=False, GAME_MODE='ROBOT_VS_ROBOT'), dry_run=not physical,
         simulation_runtime=None if physical else object(), is_robot_ready=True,
         cam_monitor=object(), yolo_detector=None,
         ai_ctrl=SimpleNamespace(pick_move=Mock(return_value=((4,6),(4,5)))),
@@ -129,6 +129,50 @@ def paused_retry(state,hw,move):
     return InputHandler(state,hw)
 
 
+def test_v_preserves_pending_on_transient_fen_failure_then_retries_once(state):
+    import pygame
+    state.turn='b'; state.update_fen_from_board(); hw=hardware(True)
+    handler=paused_retry(state,hw,((4,3),(4,4)))
+    pending, context = state.pending_ai_move, state.pending_move
+    handler._motion_busy=lambda:False
+    hw.verify_physical_board.return_value=False
+    handler.handle_keyboard(pygame.K_v)
+    assert state.pending_ai_move is pending and state.pending_move is context
+    assert state.visual_pick_retry['resolution']['reason']=='BOARD_VERIFICATION_FAILED'
+    assert not state.physical_sync_fault and not state.move_sync_error
+    hw.execute_piece_move.assert_not_called()
+    hw.capture_baseline_if_needed.assert_not_called()
+    hw.verify_physical_board.return_value=True
+    handler.handle_keyboard(pygame.K_v)
+    hw.execute_piece_move.assert_called_once()
+    assert state.pending_ai_move is None and state.visual_pick_retry is None
+    assert len(state.move_history)==1
+
+
+def test_v_fen_match_without_valid_pick_target_stays_paused(state):
+    import pygame
+    state.turn='b'; state.update_fen_from_board(); hw=hardware(True)
+    handler=paused_retry(state,hw,((4,3),(4,4)))
+    handler._motion_busy=lambda:False
+    hw.get_robot_center_pick_targets.side_effect=PickTargetUnavailable('offset 7mm > 6mm')
+    handler.handle_keyboard(pygame.K_v)
+    assert state.visual_pick_retry and not state.physical_sync_fault
+    assert not state.move_history
+    hw.execute_piece_move.assert_not_called()
+
+
+def test_post_motion_fen_failure_still_requires_recovery_not_replay(state):
+    import pygame
+    state.turn='b'; state.update_fen_from_board(); hw=hardware(True)
+    handler=paused_retry(state,hw,((4,3),(4,4)))
+    handler._motion_busy=lambda:False
+    hw.verify_physical_board.side_effect=[True,False]
+    handler.handle_keyboard(pygame.K_v)
+    hw.execute_piece_move.assert_called_once()
+    assert state.physical_sync_fault and state.move_sync_error
+    assert not state.move_history
+
+
 @pytest.mark.parametrize('failure',['false','exception'])
 def test_retry_baseline_failure_pauses_game_after_preserving_commit(state,failure):
     state.turn='b'; state.update_fen_from_board(); hw=hardware(True)
@@ -150,8 +194,9 @@ def test_retry_mirror_failure_does_not_refresh_baseline_or_replay_motion(state):
     handler=paused_retry(state,hw,((4,3),(4,4)))
     state.set_board_observer(lambda *a:False)
     handler._retry_visual_pick()
-    assert len(state.move_history)==1 and state.physical_sync_fault and state.move_sync_error
-    hw.capture_baseline_if_needed.assert_not_called()
+    assert len(state.move_history)==1 and state.projection_error
+    assert not state.physical_sync_fault and not state.move_sync_error
+    hw.capture_baseline_if_needed.assert_called_once()
     handler._retry_visual_pick()
     hw.execute_piece_move.assert_called_once()
 
@@ -191,7 +236,7 @@ def test_window_quit_stops_dispatching_remaining_events(state,tmp_path,monkeypat
     monkeypatch.setattr(sys,'argv',['main.py','--virtual','--log-dir',str(tmp_path/'logs')])
     monkeypatch.setattr(sys,'path',list(sys.path))
     callbacks=[];monkeypatch.setattr(atexit,'register',lambda f,*a,**kw:callbacks.append(f))
-    after_quit=[]; closing=[False]
+    after_quit=[]; closing=[False]; calls_at_quit=[0]
     original_start=SelfPlayController.start; original_next=SelfPlayController.request_next_move
     def start(ctrl,*args,**kw):
         if closing[0]: after_quit.append('start')
@@ -217,7 +262,8 @@ def test_window_quit_stops_dispatching_remaining_events(state,tmp_path,monkeypat
         if phase[0]==1 and g.get('difficulty_menu_active'):
             phase[0]=2;return [pygame.event.Event(pygame.KEYDOWN,key=pygame.K_1)]
         ctrl=g.get('self_play');hw=g.get('hw')
-        if phase[0]==2 and ctrl and ctrl.status is SelfPlayStatus.READY and not hw.motion_worker.busy:
+        if phase[0]==2 and ctrl and ctrl.status in {SelfPlayStatus.READY,SelfPlayStatus.THINKING} and not hw.motion_worker.busy:
+            calls_at_quit[0]=hw.execute_piece_move.call_count
             closing[0]=True;phase[0]=3
             return [pygame.event.Event(pygame.QUIT),pygame.event.Event(pygame.KEYDOWN,
                 key=pygame.K_F7 if trailing_key=='next' else pygame.K_F6)]
@@ -226,7 +272,9 @@ def test_window_quit_stops_dispatching_remaining_events(state,tmp_path,monkeypat
     try:
         app=runpy.run_path(str(Path(__file__).resolve().parents[2]/'main.py'),run_name='__main__')
         assert not after_quit, 'Commands were dispatched after receiving window QUIT'
-        app['hw'].execute_piece_move.assert_not_called()
+        # Continuous play may have completed a move before QUIT. It must not
+        # dispatch another move after the QUIT event or process trailing keys.
+        assert app['hw'].execute_piece_move.call_count == calls_at_quit[0]
     finally:
         for cb in reversed(callbacks): cb()
         pygame.quit()

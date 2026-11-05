@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from src.core import xiangqi
-from src.vision.cchess_recognizer import CChessRecognizer, check_recognition_quality
+from src.vision.cchess_recognizer import (CChessRecognizer, check_recognition_quality,
+                                             piece_confidence_ok)
 from src.vision.move_observation import derive_move_observation
 
 
@@ -43,6 +44,17 @@ def test_full_recognizer_blocks_nonfinite_corner_before_publication():
     recognizer.recognize_layout = lambda frame: (xiangqi.get_board(), [], np.ones((10, 9)))
     result = recognizer.full_recognize(np.zeros((600, 600, 3), dtype=np.uint8))
     assert not result["success"]
+
+
+def test_confidence_gate_ignores_empty_cells_but_rejects_low_piece_confidence():
+    board = [["."] * 9 for _ in range(10)]
+    board[0][1] = "r_K"
+    confidence = np.full((10, 9), 0.01)
+    confidence[0][1] = 0.9
+    assert piece_confidence_ok(board, confidence, 0.5)
+    confidence[0][1] = 0.2
+    assert not piece_confidence_ok(board, confidence, 0.5)
+    assert not piece_confidence_ok(board, np.full((9, 9), 0.9), 0.5)
 
 
 def test_quality_rejects_nonfinite_layout_confidence():

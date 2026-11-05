@@ -35,9 +35,10 @@ def test_recovery_commit_keeps_new_mirror_failure_visible(state):
     handler = InputHandler(state,hw)
     assert handler._finalize_pending_ai_move('success',(0,120,0))
     assert state.board == expected and len(state.move_history) == 1
-    assert state.physical_sync_fault and state.move_sync_error
-    assert state.snapshot_continue_required and state.manual_override_active
-    hw.capture_baseline_if_needed.assert_not_called()
+    assert not state.physical_sync_fault and not state.move_sync_error
+    assert state.projection_error and state.last_commit_result.projection_pending
+    assert not state.snapshot_continue_required and not state.manual_override_active
+    hw.capture_baseline_if_needed.assert_called_once()
 
 
 def test_recovery_commit_clears_old_failure_when_new_mirror_sync_succeeds(state):
@@ -134,12 +135,25 @@ def test_selfplay_no_legal_move_terminal_ends_spectator(state,monkeypatch):
 
 
 def test_selfplay_stop_during_motion_and_resign_publish_once(state):
+    from src.motion.result import MotionExecutionResult
+    alive = [True]
     ctrl=SelfPlayController(state,SimpleNamespace())
+    move=((0,6),(0,5))
+    after,captured=xiangqi.make_temp_move(state.board,move)
+    state.mark_move_pending(state.create_move_context(*move,MoveActor.ROBOT))
+    state.set_pending_physical_move(move,after,captured,state.turn)
     ctrl.status=SelfPlayStatus.MOVING
-    ctrl._thread=SimpleNamespace(is_alive=lambda:True)
+    ctrl._token=ctrl._current_token()
+    ctrl._moving_before_board=[row[:] for row in state.board]
+    ctrl._result=(ctrl._token,after,state.turn,MotionExecutionResult.ok(),None)
+    ctrl._thread=SimpleNamespace(is_alive=lambda:alive[0])
     assert ctrl.end_match(winner='BLACK',reason='RESIGN')
     assert ctrl.status is SelfPlayStatus.ENDING
     assert not ctrl.end_match()
+    state.api_client.end_match.assert_not_called()
+    alive[0]=False
+    ctrl.tick()
+    assert ctrl.status is SelfPlayStatus.ENDED
     state.api_client.end_match.assert_called_once_with(winner='BLACK',reason='RESIGN')
 
 

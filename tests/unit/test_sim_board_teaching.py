@@ -114,7 +114,7 @@ class SimBoardTeachingTests(unittest.TestCase):
         piece_before = piece.get_pose_robot_base()[0]
         points = self.sim.get_board_teaching_points()["points"]
         below_floor = {name: [xyz[0], xyz[1], xyz[2] - 8] for name, xyz in points.items()}
-        result = self.sim.apply_board_teaching_points(below_floor)
+        result = self.sim.apply_board_teaching_points(below_floor, surface_z_mm=points["R1"][2] - 8)
         self.assertFalse(result["success"], result)
         self.assertEqual(result["status"], "BOARD_RELOCATION_REJECTED_ARM_NOT_CLEAR")
         self.assertIs(self.sim.placement_state, old)

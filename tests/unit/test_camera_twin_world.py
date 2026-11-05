@@ -72,6 +72,10 @@ def test_both_colors_moves_and_captures_update_real_bodies(twin, piece, src, dst
     assert packets[piece]["nearest_col"] == dst[1]
     assert captured not in packets
     assert captured not in world.pieces
+    if captured:
+        captured_packet = {item["id"]: item for item in telemetry._latest_world_state["captured_pieces"]}
+        assert captured_packet[captured]["captured"] is True
+        assert captured_packet[captured]["physical_state"] == "OUT_OF_BOUNDS"
     assert world.get_robot_joint_positions() == joints_before
     forbidden.assert_not_called()
 

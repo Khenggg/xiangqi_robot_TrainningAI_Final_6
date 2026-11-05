@@ -51,6 +51,8 @@ class XiangqiPieceBody:
 
         self.physical_state = PiecePhysicalState.SETTLING
         self.attached_to_gripper = False
+        self.captured = False
+        self.capture_pose_evidence = None
 
         # In-bounds tracking
         self._consecutive_settled_steps = 0
@@ -157,4 +159,6 @@ class XiangqiPieceBody:
             nearest_col=nearest_c,
             nearest_row=nearest_r,
             distance_to_nearest_intersection_m=round(dist_m, 5),
+            captured=self.captured,
+            capture_pose_evidence=self.capture_pose_evidence,
         )

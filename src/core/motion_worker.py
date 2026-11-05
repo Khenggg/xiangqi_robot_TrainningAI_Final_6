@@ -15,6 +15,12 @@ class MotionWorker:
         with self._lock:
             return self._thread is not None
 
+    @property
+    def running(self):
+        """Physical work has ended even while its UI callback is waiting for poll."""
+        with self._lock:
+            return self._thread is not None and self._thread.is_alive()
+
     def start(self, operation, completed):
         with self._lock:
             if self._closed or self._thread is not None:

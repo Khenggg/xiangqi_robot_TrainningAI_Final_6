@@ -1,0 +1,1045 @@
+[
+  {
+    "timestamp": "2026-10-30T12:48:01.941018+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "session.started_fresh",
+    "error_code": null,
+    "message": "Đã tạo phiên mới; không nạp FEN ván trước",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\game_persistence.py:273",
+    "data": {
+      "session_id": "51965563b8664ca281e30582952d7e66",
+      "previous_session_id": "d8923d08f8fd4c02a76645935cafdd84",
+      "environment": "PHYSICAL",
+      "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+      "operator_inspection_required": false
+    },
+    "source_log_line": 10
+  },
+  {
+    "timestamp": "2026-10-30T12:48:03.081990+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "robot.fixed_profile_loaded",
+    "error_code": null,
+    "message": "Dùng tọa độ cố định đã chuẩn hóa user 0",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py:432",
+    "data": {
+      "profile_id": "fr3-fixed-user0-20261028",
+      "path": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\calibration\\physical_teaching_points_user0.json",
+      "points": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "HOMECHESS",
+        "R_Trash"
+      ],
+      "tool": 0,
+      "user": 0,
+      "coordinate_frame": "robot_base",
+      "position_unit": "mm",
+      "angle_unit": "deg"
+    },
+    "source_log_line": 19
+  },
+  {
+    "timestamp": "2026-10-30T12:48:06.588639+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "camera.calibration_loaded",
+    "error_code": null,
+    "message": "Dùng calibration camera đã lưu",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py:662",
+    "data": {
+      "path": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\perspective.npy",
+      "sha256": "5417d66bc23538ff450e835dae0ff784083e8a309fe459f38803a9f3cf98c257",
+      "camera_index": 2,
+      "recalibrate": false
+    },
+    "source_log_line": 29
+  },
+  {
+    "timestamp": "2026-10-30T12:49:27.857815+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "physical.enabled",
+    "error_code": null,
+    "message": "Người vận hành đã bật quyền chuyển động qua game",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py:563",
+    "data": {
+      "commissioned": true
+    },
+    "source_log_line": 62
+  },
+  {
+    "timestamp": "2026-10-30T12:49:37.546170+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "game.human_move",
+    "error_code": null,
+    "message": "Đã nhận nước người đi",
+    "thread": "MainThread",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\game_state.py:575",
+    "data": {
+      "move_id": "613578fd69094dfbbbd8266bee0a3df7",
+      "src": [
+        6,
+        6
+      ],
+      "dst": [
+        6,
+        5
+      ],
+      "cell_order": "col,row",
+      "captured_piece_id": null,
+      "piece_id": "red_pawn_3",
+      "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2"
+    },
+    "source_log_line": 68
+  },
+  {
+    "timestamp": "2026-10-30T12:49:38.102118+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "move.started",
+    "error_code": null,
+    "message": "Bắt đầu thực hiện nước AI",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py:58",
+    "data": {
+      "move_id": "91eb9135b3974475aa1fb2d072171118",
+      "piece_id": "black_cannon_1",
+      "captured_piece_id": null,
+      "src": [
+        7,
+        2
+      ],
+      "dst": [
+        4,
+        2
+      ],
+      "cell_order": "col,row",
+      "fen_before": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+      "backend": "PHYSICAL"
+    },
+    "source_log_line": 74
+  },
+  {
+    "timestamp": "2026-10-30T12:49:39.804818+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "vision.pick_resolved",
+    "error_code": null,
+    "message": "Đã đo tâm quân: moving=(6.983,1.977)",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py:1064",
+    "data": {
+      "mode": "center",
+      "cells": {
+        "moving": [
+          7,
+          2
+        ]
+      },
+      "targets": {
+        "moving": {
+          "col": 6.9831624031066895,
+          "row": 1.9769442081451416,
+          "offset_cells": 0.028695973212026982,
+          "confidence": 0.8520143628120422
+        }
+      }
+    },
+    "source_log_line": 85
+  },
+  {
+    "timestamp": "2026-10-30T12:49:39.820144+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "motion.visual_correction",
+    "error_code": null,
+    "message": "Bù tâm quân theo camera",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py:852",
+    "data": {
+      "correction": {
+        "dx_mm": -0.950403254867453,
+        "dy_mm": -0.6872113180972406,
+        "cell": [
+          7,
+          2
+        ],
+        "target": [
+          6.9831624031066895,
+          1.9769442081451416
+        ],
+        "visual": true,
+        "active": true
+      }
+    },
+    "source_log_line": 91
+  },
+  {
+    "timestamp": "2026-10-30T12:49:49.373449+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "move.finished",
+    "error_code": null,
+    "message": "Kết thúc thực hiện nước AI",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py:84",
+    "data": {
+      "move_id": "91eb9135b3974475aa1fb2d072171118",
+      "committed": true,
+      "fen_after": "rnbakabnr/9/1c2c4/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR w - - 0 3",
+      "duration_s": 11.281
+    },
+    "source_log_line": 131
+  },
+  {
+    "timestamp": "2026-10-30T12:49:58.054033+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "game.human_move",
+    "error_code": null,
+    "message": "Đã nhận nước người đi",
+    "thread": "MainThread",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\game_state.py:575",
+    "data": {
+      "move_id": "f1130915494f454c91909b55e1e8a150",
+      "src": [
+        8,
+        6
+      ],
+      "dst": [
+        8,
+        5
+      ],
+      "cell_order": "col,row",
+      "captured_piece_id": null,
+      "piece_id": "red_pawn_4",
+      "fen": "rnbakabnr/9/1c2c4/p1p1p1p1p/9/6P1P/P1P1P4/1C5C1/9/RNBAKABNR b - - 0 4"
+    },
+    "source_log_line": 138
+  },
+  {
+    "timestamp": "2026-10-30T12:49:58.419307+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "move.started",
+    "error_code": null,
+    "message": "Bắt đầu thực hiện nước AI",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py:58",
+    "data": {
+      "move_id": "aaf8fdde90544205b06094496fd53220",
+      "piece_id": "black_cannon_0",
+      "captured_piece_id": "red_knight_0",
+      "src": [
+        1,
+        2
+      ],
+      "dst": [
+        1,
+        9
+      ],
+      "cell_order": "col,row",
+      "fen_before": "rnbakabnr/9/1c2c4/p1p1p1p1p/9/6P1P/P1P1P4/1C5C1/9/RNBAKABNR b - - 0 4",
+      "backend": "PHYSICAL"
+    },
+    "source_log_line": 144
+  },
+  {
+    "timestamp": "2026-10-30T12:49:59.760237+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "vision.pick_resolved",
+    "error_code": null,
+    "message": "Đã đo tâm quân: captured=(0.907,8.952)",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py:1064",
+    "data": {
+      "mode": "center",
+      "cells": {
+        "captured": [
+          1,
+          9
+        ]
+      },
+      "targets": {
+        "captured": {
+          "col": 0.9069387912750244,
+          "row": 8.952417373657227,
+          "offset_cells": 0.1045337707606025,
+          "confidence": 0.8408798575401306
+        }
+      }
+    },
+    "source_log_line": 155
+  },
+  {
+    "timestamp": "2026-10-30T12:49:59.795638+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "motion.visual_correction",
+    "error_code": null,
+    "message": "Bù tâm quân theo camera",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py:852",
+    "data": {
+      "correction": {
+        "dx_mm": -1.9845868963916473,
+        "dy_mm": -3.7824423549412813,
+        "cell": [
+          1,
+          9
+        ],
+        "target": [
+          0.9069387912750244,
+          8.952417373657227
+        ],
+        "visual": true,
+        "active": true
+      }
+    },
+    "source_log_line": 161
+  },
+  {
+    "timestamp": "2026-10-30T12:50:10.683935+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "vision.pick_resolved",
+    "error_code": null,
+    "message": "Đã đo tâm quân: moving=(1.054,2.030)",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py:1064",
+    "data": {
+      "mode": "center",
+      "cells": {
+        "moving": [
+          1,
+          2
+        ]
+      },
+      "targets": {
+        "moving": {
+          "col": 1.053654670715332,
+          "row": 2.0296366214752197,
+          "offset_cells": 0.061948355426275026,
+          "confidence": 0.8719505667686462
+        }
+      }
+    },
+    "source_log_line": 206
+  },
+  {
+    "timestamp": "2026-10-30T12:50:10.693526+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "motion.visual_correction",
+    "error_code": null,
+    "message": "Bù tâm quân theo camera",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py:852",
+    "data": {
+      "correction": {
+        "dx_mm": 1.2447874245124098,
+        "dy_mm": 2.202023922816352,
+        "cell": [
+          1,
+          2
+        ],
+        "target": [
+          1.053654670715332,
+          2.0296366214752197
+        ],
+        "visual": true,
+        "active": true
+      }
+    },
+    "source_log_line": 210
+  },
+  {
+    "timestamp": "2026-10-30T12:50:19.692542+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "move.finished",
+    "error_code": null,
+    "message": "Kết thúc thực hiện nước AI",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py:84",
+    "data": {
+      "move_id": "aaf8fdde90544205b06094496fd53220",
+      "committed": true,
+      "fen_after": "rnbakabnr/9/4c4/p1p1p1p1p/9/6P1P/P1P1P4/1C5C1/9/RcBAKABNR w - - 0 5",
+      "duration_s": 21.282
+    },
+    "source_log_line": 253
+  },
+  {
+    "timestamp": "2026-10-30T12:52:53.817519+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "game.human_move",
+    "error_code": null,
+    "message": "Đã nhận nước người đi",
+    "thread": "MainThread",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\game_state.py:575",
+    "data": {
+      "move_id": "8d00ef8e8dc14637a5809186d0ae82a6",
+      "src": [
+        0,
+        9
+      ],
+      "dst": [
+        1,
+        9
+      ],
+      "cell_order": "col,row",
+      "captured_piece_id": "black_cannon_0",
+      "piece_id": "red_rook_0",
+      "fen": "rnbakabnr/9/4c4/p1p1p1p1p/9/6P1P/P1P1P4/1C5C1/9/1RBAKABNR b - - 0 6"
+    },
+    "source_log_line": 260
+  },
+  {
+    "timestamp": "2026-10-30T12:52:54.024854+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "move.started",
+    "error_code": null,
+    "message": "Bắt đầu thực hiện nước AI",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py:58",
+    "data": {
+      "move_id": "d4e965ac43ba4e0cbe5015f901e037a0",
+      "piece_id": "black_cannon_1",
+      "captured_piece_id": "red_pawn_2",
+      "src": [
+        4,
+        2
+      ],
+      "dst": [
+        4,
+        6
+      ],
+      "cell_order": "col,row",
+      "fen_before": "rnbakabnr/9/4c4/p1p1p1p1p/9/6P1P/P1P1P4/1C5C1/9/1RBAKABNR b - - 0 6",
+      "backend": "PHYSICAL"
+    },
+    "source_log_line": 266
+  },
+  {
+    "timestamp": "2026-10-30T12:52:55.526231+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "vision.pick_resolved",
+    "error_code": null,
+    "message": "Đã đo tâm quân: captured=(3.983,6.019)",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py:1064",
+    "data": {
+      "mode": "center",
+      "cells": {
+        "captured": [
+          4,
+          6
+        ]
+      },
+      "targets": {
+        "captured": {
+          "col": 3.983058452606201,
+          "row": 6.01893424987793,
+          "offset_cells": 0.025142059327490425,
+          "confidence": 0.8346770405769348
+        }
+      }
+    },
+    "source_log_line": 277
+  },
+  {
+    "timestamp": "2026-10-30T12:52:55.548539+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "motion.visual_correction",
+    "error_code": null,
+    "message": "Bù tâm quân theo camera",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py:852",
+    "data": {
+      "correction": {
+        "dx_mm": 0.7664444739946248,
+        "dy_mm": -0.6868346342785117,
+        "cell": [
+          4,
+          6
+        ],
+        "target": [
+          3.983058452606201,
+          6.01893424987793
+        ],
+        "visual": true,
+        "active": true
+      }
+    },
+    "source_log_line": 283
+  },
+  {
+    "timestamp": "2026-10-30T12:53:06.199094+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "vision.pick_resolved",
+    "error_code": null,
+    "message": "Đã đo tâm quân: moving=(3.941,2.092)",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py:1064",
+    "data": {
+      "mode": "center",
+      "cells": {
+        "moving": [
+          4,
+          2
+        ]
+      },
+      "targets": {
+        "moving": {
+          "col": 3.9405696392059326,
+          "row": 2.09187388420105,
+          "offset_cells": 0.10949781826060795,
+          "confidence": 0.8374302387237549
+        }
+      }
+    },
+    "source_log_line": 328
+  },
+  {
+    "timestamp": "2026-10-30T12:53:06.205100+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "motion.visual_correction",
+    "error_code": null,
+    "message": "Bù tâm quân theo camera",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py:852",
+    "data": {
+      "correction": {
+        "dx_mm": 3.722930423493139,
+        "dy_mm": -2.419529870996996,
+        "cell": [
+          4,
+          2
+        ],
+        "target": [
+          3.9405696392059326,
+          2.09187388420105
+        ],
+        "visual": true,
+        "active": true
+      }
+    },
+    "source_log_line": 332
+  },
+  {
+    "timestamp": "2026-10-30T12:53:14.141858+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "move.finished",
+    "error_code": null,
+    "message": "Kết thúc thực hiện nước AI",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py:84",
+    "data": {
+      "move_id": "d4e965ac43ba4e0cbe5015f901e037a0",
+      "committed": true,
+      "fen_after": "rnbakabnr/9/9/p1p1p1p1p/9/6P1P/P1P1c4/1C5C1/9/1RBAKABNR w - - 0 7",
+      "duration_s": 20.125
+    },
+    "source_log_line": 375
+  },
+  {
+    "timestamp": "2026-10-30T12:53:28.691679+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "game.human_move",
+    "error_code": null,
+    "message": "Đã nhận nước người đi",
+    "thread": "MainThread",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\game_state.py:575",
+    "data": {
+      "move_id": "062018cc4a494f1da58dfcd55d3533ab",
+      "src": [
+        8,
+        9
+      ],
+      "dst": [
+        8,
+        6
+      ],
+      "cell_order": "col,row",
+      "captured_piece_id": null,
+      "piece_id": "red_rook_1",
+      "fen": "rnbakabnr/9/9/p1p1p1p1p/9/6P1P/P1P1c3R/1C5C1/9/1RBAKABN1 b - - 0 8"
+    },
+    "source_log_line": 384
+  },
+  {
+    "timestamp": "2026-10-30T12:53:29.780527+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "move.started",
+    "error_code": null,
+    "message": "Bắt đầu thực hiện nước AI",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py:58",
+    "data": {
+      "move_id": "229b637918c44c6390e66b91a6b9923d",
+      "piece_id": "black_cannon_1",
+      "captured_piece_id": null,
+      "src": [
+        4,
+        6
+      ],
+      "dst": [
+        4,
+        5
+      ],
+      "cell_order": "col,row",
+      "fen_before": "rnbakabnr/9/9/p1p1p1p1p/9/6P1P/P1P1c3R/1C5C1/9/1RBAKABN1 b - - 0 8",
+      "backend": "PHYSICAL"
+    },
+    "source_log_line": 390
+  },
+  {
+    "timestamp": "2026-10-30T12:53:33.331260+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "vision.pick_resolved",
+    "error_code": null,
+    "message": "Đã đo tâm quân: moving=(3.995,5.997)",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py:1064",
+    "data": {
+      "mode": "center",
+      "cells": {
+        "moving": [
+          4,
+          6
+        ]
+      },
+      "targets": {
+        "moving": {
+          "col": 3.9950599670410156,
+          "row": 5.9971699714660645,
+          "offset_cells": 0.005914350443571773,
+          "confidence": 0.8388925194740295
+        }
+      }
+    },
+    "source_log_line": 401
+  },
+  {
+    "timestamp": "2026-10-30T12:53:33.338284+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "ERROR",
+    "component": "xiangqi",
+    "event": "move.failed",
+    "error_code": "MOVE_REJECTED",
+    "message": "Robot telemetry stale/faulted; no new command dispatched",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py:92",
+    "data": {
+      "move_id": "229b637918c44c6390e66b91a6b9923d",
+      "src": [
+        4,
+        6
+      ],
+      "dst": [
+        4,
+        5
+      ],
+      "duration_s": 3.594,
+      "fen": "rnbakabnr/9/9/p1p1p1p1p/9/6P1P/P1P1c3R/1C5C1/9/1RBAKABN1 b - - 0 8"
+    },
+    "problem": "Nước đi hoặc chuyển động bị từ chối",
+    "impact": "Không thể xác nhận hoàn tất nước đi",
+    "next_step": "Đọc chi tiết nguyên nhân và bước dừng; kiểm tra bàn thật trước khi tiếp tục, không tắt chống va chạm",
+    "traceback": "Traceback (most recent call last):\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py\", line 73, in execute_ai_move\n    execute_pending_ai_motion(state, hw, stage=request[\"stage\"] if request else \"pre_pick\")\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\visual_move_coordinator.py\", line 160, in execute_pending_ai_motion\n    raise RuntimeError(getattr(result, \"message\", \"No typed motion success\"))\nRuntimeError: Robot telemetry stale/faulted; no new command dispatched",
+    "source_log_line": 402
+  },
+  {
+    "timestamp": "2026-10-30T12:56:13.186999+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "ERROR",
+    "component": "xiangqi",
+    "event": "physical.enable_failed",
+    "error_code": "PHYSICAL_ENABLE_FAILED",
+    "message": "Resolve pending motion or board synchronization first",
+    "thread": "MainThread",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\main.py:678",
+    "data": {},
+    "problem": "Không bật được quyền điều khiển FR3",
+    "impact": "Robot chưa được phép chạy qua game",
+    "next_step": "Kiểm tra camera, telemetry idle, calibration và lỗi đồng bộ; xử lý nguyên nhân rồi xác nhận lại",
+    "traceback": "Traceback (most recent call last):\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\motion_worker.py\", line 33, in run\n    value, error = operation(), None\n                   ^^^^^^^^^^^\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\main.py\", line 683, in <lambda>\n    hw.motion_worker.start(lambda: hw.activate_physical_game(state, commissioned=True), enabled)\n                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py\", line 519, in activate_physical_game\n    raise RuntimeError(\"Resolve pending motion or board synchronization first\")\nRuntimeError: Resolve pending motion or board synchronization first",
+    "source_log_line": 407
+  },
+  {
+    "timestamp": "2026-10-30T12:56:14.897738+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "ERROR",
+    "component": "xiangqi",
+    "event": "physical.enable_failed",
+    "error_code": "PHYSICAL_ENABLE_FAILED",
+    "message": "Resolve pending motion or board synchronization first",
+    "thread": "MainThread",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\main.py:678",
+    "data": {},
+    "problem": "Không bật được quyền điều khiển FR3",
+    "impact": "Robot chưa được phép chạy qua game",
+    "next_step": "Kiểm tra camera, telemetry idle, calibration và lỗi đồng bộ; xử lý nguyên nhân rồi xác nhận lại",
+    "traceback": "Traceback (most recent call last):\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\motion_worker.py\", line 33, in run\n    value, error = operation(), None\n                   ^^^^^^^^^^^\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\main.py\", line 683, in <lambda>\n    hw.motion_worker.start(lambda: hw.activate_physical_game(state, commissioned=True), enabled)\n                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py\", line 519, in activate_physical_game\n    raise RuntimeError(\"Resolve pending motion or board synchronization first\")\nRuntimeError: Resolve pending motion or board synchronization first",
+    "source_log_line": 408
+  },
+  {
+    "timestamp": "2026-10-30T12:56:39.003806+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "ERROR",
+    "component": "xiangqi",
+    "event": "motion.stop_uncertain",
+    "error_code": "STOP_RECOVERY_REQUIRED",
+    "message": "StopMotion: controller reply unavailable; outcome unknown, do not resend",
+    "thread": "xiangqi-controlled-stop",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\controlled_stop.py:122",
+    "data": {
+      "acknowledged": false,
+      "reason": "reset"
+    },
+    "problem": "Chưa xác nhận được robot và kẹp đã dừng",
+    "impact": "Giữ phiên, camera và controller; không tự gửi lại lệnh",
+    "next_step": "Kiểm tra/dừng tay và kẹp trên pendant, Ctrl+F8 xác nhận rồi V đối soát bàn",
+    "source_log_line": 425
+  },
+  {
+    "timestamp": "2026-10-30T12:56:39.024966+00:00",
+    "session_id": "20261030_194752_c0bda222",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "session.control_waiting",
+    "error_code": null,
+    "message": "RECOVERY_REQUIRED: kiểm tra/dừng tay và kẹp trên pendant, Ctrl+F8 xác nhận; V đối soát bàn.",
+    "thread": "MainThread",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\session_control.py:55",
+    "data": {
+      "action": "reset"
+    },
+    "source_log_line": 426
+  },
+  {
+    "timestamp": "2026-10-30T12:59:59.349860+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "session.started_fresh",
+    "error_code": null,
+    "message": "Đã tạo phiên mới; không nạp FEN ván trước",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\game_persistence.py:273",
+    "data": {
+      "session_id": "8e88225f5f5648bd89476440e5159b40",
+      "previous_session_id": "51965563b8664ca281e30582952d7e66",
+      "environment": "PHYSICAL",
+      "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+      "operator_inspection_required": true
+    },
+    "source_log_line": 10
+  },
+  {
+    "timestamp": "2026-10-30T13:00:00.466644+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "robot.fixed_profile_loaded",
+    "error_code": null,
+    "message": "Dùng tọa độ cố định đã chuẩn hóa user 0",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py:432",
+    "data": {
+      "profile_id": "fr3-fixed-user0-20261028",
+      "path": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\calibration\\physical_teaching_points_user0.json",
+      "points": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "HOMECHESS",
+        "R_Trash"
+      ],
+      "tool": 0,
+      "user": 0,
+      "coordinate_frame": "robot_base",
+      "position_unit": "mm",
+      "angle_unit": "deg"
+    },
+    "source_log_line": 19
+  },
+  {
+    "timestamp": "2026-10-30T13:00:04.008942+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "camera.calibration_loaded",
+    "error_code": null,
+    "message": "Dùng calibration camera đã lưu",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py:662",
+    "data": {
+      "path": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\perspective.npy",
+      "sha256": "5417d66bc23538ff450e835dae0ff784083e8a309fe459f38803a9f3cf98c257",
+      "camera_index": 2,
+      "recalibrate": false
+    },
+    "source_log_line": 29
+  },
+  {
+    "timestamp": "2026-10-30T13:01:54.732754+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "ERROR",
+    "component": "xiangqi",
+    "event": "physical.enable_failed",
+    "error_code": "PHYSICAL_ENABLE_FAILED",
+    "message": "Resolve pending motion or board synchronization first",
+    "thread": "MainThread",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\main.py:678",
+    "data": {},
+    "problem": "Không bật được quyền điều khiển FR3",
+    "impact": "Robot chưa được phép chạy qua game",
+    "next_step": "Kiểm tra camera, telemetry idle, calibration và lỗi đồng bộ; xử lý nguyên nhân rồi xác nhận lại",
+    "traceback": "Traceback (most recent call last):\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\motion_worker.py\", line 33, in run\n    value, error = operation(), None\n                   ^^^^^^^^^^^\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\main.py\", line 683, in <lambda>\n    hw.motion_worker.start(lambda: hw.activate_physical_game(state, commissioned=True), enabled)\n                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py\", line 519, in activate_physical_game\n    raise RuntimeError(\"Resolve pending motion or board synchronization first\")\nRuntimeError: Resolve pending motion or board synchronization first",
+    "source_log_line": 60
+  },
+  {
+    "timestamp": "2026-10-30T13:02:30.142722+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "session.cleared_failed",
+    "error_code": null,
+    "message": "Người vận hành xóa phiên lỗi sau xác nhận FEN",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\ui\\input_handler.py:1147",
+    "data": {
+      "board_revision": 0
+    },
+    "source_log_line": 68
+  },
+  {
+    "timestamp": "2026-10-30T13:02:57.831152+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "physical.enabled",
+    "error_code": null,
+    "message": "Người vận hành đã bật quyền chuyển động qua game",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py:563",
+    "data": {
+      "commissioned": true
+    },
+    "source_log_line": 72
+  },
+  {
+    "timestamp": "2026-10-30T13:03:48.906708+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "game.human_move",
+    "error_code": null,
+    "message": "Đã nhận nước người đi",
+    "thread": "MainThread",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\game_state.py:575",
+    "data": {
+      "move_id": "c9d1fc7642c5482bbcd105b95b7c67e7",
+      "src": [
+        4,
+        6
+      ],
+      "dst": [
+        4,
+        5
+      ],
+      "cell_order": "col,row",
+      "captured_piece_id": null,
+      "piece_id": "red_pawn_2",
+      "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR b - - 0 2"
+    },
+    "source_log_line": 81
+  },
+  {
+    "timestamp": "2026-10-30T13:03:49.380505+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "move.started",
+    "error_code": null,
+    "message": "Bắt đầu thực hiện nước AI",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py:58",
+    "data": {
+      "move_id": "fedd5d75ff254759a989604abd14e12f",
+      "piece_id": "black_cannon_1",
+      "captured_piece_id": null,
+      "src": [
+        7,
+        2
+      ],
+      "dst": [
+        4,
+        2
+      ],
+      "cell_order": "col,row",
+      "fen_before": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR b - - 0 2",
+      "backend": "PHYSICAL"
+    },
+    "source_log_line": 88
+  },
+  {
+    "timestamp": "2026-10-30T13:03:50.971907+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "vision.pick_resolved",
+    "error_code": null,
+    "message": "Đã đo tâm quân: moving=(6.948,1.941)",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py:1064",
+    "data": {
+      "mode": "center",
+      "cells": {
+        "moving": [
+          7,
+          2
+        ]
+      },
+      "targets": {
+        "moving": {
+          "col": 6.947634696960449,
+          "row": 1.9409397840499878,
+          "offset_cells": 0.07889375166643399,
+          "confidence": 0.8517493605613708
+        }
+      }
+    },
+    "source_log_line": 99
+  },
+  {
+    "timestamp": "2026-10-30T13:03:51.005321+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "INFO",
+    "component": "xiangqi",
+    "event": "motion.visual_correction",
+    "error_code": null,
+    "message": "Bù tâm quân theo camera",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py:852",
+    "data": {
+      "correction": {
+        "dx_mm": -2.439889962471767,
+        "dy_mm": -2.1380497515147,
+        "cell": [
+          7,
+          2
+        ],
+        "target": [
+          6.947634696960449,
+          1.9409397840499878
+        ],
+        "visual": true,
+        "active": true
+      }
+    },
+    "source_log_line": 105
+  },
+  {
+    "timestamp": "2026-10-30T13:03:54.567734+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "ERROR",
+    "component": "xiangqi",
+    "event": "motion.stage_failed",
+    "error_code": "MOVE_REJECTED",
+    "message": "Robot MoveCart error code: 14",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py:922",
+    "data": {
+      "stage": "APPROACH",
+      "last_completed_stage": "PREPOSITION",
+      "payload_state": "NONE",
+      "backend_code": 14,
+      "pick_resolution": null
+    },
+    "problem": "Nước đi hoặc chuyển động bị từ chối",
+    "impact": "Không thể xác nhận hoàn tất nước đi",
+    "next_step": "Đọc chi tiết nguyên nhân và bước dừng; kiểm tra bàn thật trước khi tiếp tục, không tắt chống va chạm",
+    "traceback": "Traceback (most recent call last):\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py\", line 917, in move_piece\n    self._move_piece_sequence(*args, **kwargs)\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py\", line 1009, in _move_piece_sequence\n    self._run_stage(MotionStage.LIFT,self.pick_at,s_col,s_row,visual_target=moving_visual_target)\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py\", line 296, in _run_stage\n    value = operation(*args, **kwargs)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py\", line 862, in pick_at\n    self._run_stage(MotionStage.APPROACH, self.move_safe_pose, pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py\", line 296, in _run_stage\n    value = operation(*args, **kwargs)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\robot_VIP.py\", line 639, in move_safe_pose\n    raise RobotCommandError(f\"Robot MoveCart error code: {err}\", err)\nsrc.hardware.robot_VIP.RobotCommandError: Robot MoveCart error code: 14",
+    "source_log_line": 111
+  },
+  {
+    "timestamp": "2026-10-30T13:03:54.579826+00:00",
+    "session_id": "20261030_195909_fa166362",
+    "level": "ERROR",
+    "component": "xiangqi",
+    "event": "move.failed",
+    "error_code": "MOVE_REJECTED",
+    "message": "Robot MoveCart error code: 14",
+    "thread": "xiangqi-motion",
+    "source": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py:92",
+    "data": {
+      "move_id": "fedd5d75ff254759a989604abd14e12f",
+      "src": [
+        7,
+        2
+      ],
+      "dst": [
+        4,
+        2
+      ],
+      "duration_s": 5.204,
+      "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR b - - 0 2"
+    },
+    "problem": "Nước đi hoặc chuyển động bị từ chối",
+    "impact": "Không thể xác nhận hoàn tất nước đi",
+    "next_step": "Đọc chi tiết nguyên nhân và bước dừng; kiểm tra bàn thật trước khi tiếp tục, không tắt chống va chạm",
+    "traceback": "Traceback (most recent call last):\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\ai_execution.py\", line 73, in execute_ai_move\n    execute_pending_ai_motion(state, hw, stage=request[\"stage\"] if request else \"pre_pick\")\n  File \"D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\core\\visual_move_coordinator.py\", line 160, in execute_pending_ai_motion\n    raise RuntimeError(getattr(result, \"message\", \"No typed motion success\"))\nRuntimeError: Robot MoveCart error code: 14",
+    "source_log_line": 112
+  }
+]

@@ -34,6 +34,7 @@ class Recognizer:
 def test_real_manager_starts_capture_and_recognition_once(monkeypatch,tmp_path,preference,gpu):
     cfg = SimpleNamespace(**{k:getattr(config,k) for k in dir(config) if k.isupper()})
     cfg.DRY_RUN=False
+    cfg.ROBOT_BACKEND="PHYSICAL"
     cfg.VISION_DEVICE=preference
     for k in ('VISUAL_PICK_ENABLED','VISUAL_RING_PICK_ENABLED','VISUAL_HEIGHT_PICK_ENABLED',
               'VISUAL_TOP_FACE_ENABLED','VISUAL_BOARD_SYNC_REQUIRED'):

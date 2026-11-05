@@ -1,0 +1,27 @@
+{
+  "runtime_sources_unchanged": true,
+  "donor_snapshots_unchanged": true,
+  "target_sha_unchanged": true,
+  "physical_hardware": "NOT RUN",
+  "merge": "NOT RUN",
+  "current_mode_user_flow_tests": {
+    "status": "PASS",
+    "count": 45,
+    "runner_exit": 0
+  },
+  "donor_probes": {
+    "status": "PASS",
+    "count": 13,
+    "defects_reproduced": 11,
+    "positive_checks": 2,
+    "runner_exit": 0
+  },
+  "review_changes": "Reports/probes and scoped status documentation only",
+  "initial_combined_run": {
+    "exit_code": 0,
+    "parallel_passed": 55,
+    "serial_passed": 1,
+    "runner_seconds": 16.08,
+    "command": "tools/test_fast.ps1 -Workers 2 -Tests reports/branch-reviews/pvp-20261030/test_donor_pvp_review.py,tests/unit/test_session_modes.py,tests/unit/test_game_modes_review.py,tests/unit/test_session_user_flows.py"
+  }
+}

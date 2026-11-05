@@ -1,0 +1,48 @@
+{
+  "read_at": "2026-10-28T19:29:17.554421+07:00",
+  "controller_ip": "192.168.58.2",
+  "read_only": true,
+  "derived_from": "reports/r1_r4_current_20261028_192917/teaching_points.json",
+  "normalization": {
+    "source_user_frames": {
+      "R1": 1,
+      "R2": 1,
+      "R3": 1,
+      "R4": 0
+    },
+    "target_user_frame": 0,
+    "reason": "Current WObj 1 coordinate offset read as identity [0,0,0,0,0,0]; numeric XYZ equals robot base.",
+    "z_removed": true
+  },
+  "points_xy_mm": {
+    "R1": {
+      "x_mm": -207.0,
+      "y_mm": 219.0,
+      "tool_frame": 0,
+      "user_frame": 0,
+      "source_user_frame": 1
+    },
+    "R2": {
+      "x_mm": -202.0,
+      "y_mm": 547.0,
+      "tool_frame": 0,
+      "user_frame": 0,
+      "source_user_frame": 1
+    },
+    "R3": {
+      "x_mm": 165.0,
+      "y_mm": 546.0,
+      "tool_frame": 0,
+      "user_frame": 0,
+      "source_user_frame": 1
+    },
+    "R4": {
+      "x_mm": 162.0,
+      "y_mm": 222.0,
+      "tool_frame": 0,
+      "user_frame": 0,
+      "source_user_frame": 0
+    }
+  },
+  "warning": "Derived XY-only view; raw controller metadata remains in teaching_points.json. Use only after identity-WObj verification at runtime."
+}

@@ -1,0 +1,51 @@
+{
+  "at": "2026-10-31T12:18:12.802744+07:00",
+  "mode": "READ_ONLY",
+  "operator_report": "mechanical inspection complete, gripper empty, operator beside robot",
+  "queries": [
+    {
+      "name": "GetRobotErrorCode",
+      "args": [],
+      "result": [
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "GetToolCoordWithID",
+      "args": [
+        0
+      ],
+      "error": "Fault: <Fault -506: \"Method 'GetToolCoordWithID' not defined\">"
+    },
+    {
+      "name": "GetToolCoordWithID",
+      "args": [
+        1
+      ],
+      "error": "Fault: <Fault -506: \"Method 'GetToolCoordWithID' not defined\">"
+    },
+    {
+      "name": "GetJointSoftLimitDeg",
+      "args": [
+        0
+      ],
+      "result": [
+        14,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ]
+}

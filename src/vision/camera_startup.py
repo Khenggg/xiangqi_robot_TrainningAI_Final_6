@@ -1,5 +1,8 @@
 """Camera startup validation; no implicit device substitution."""
+import hashlib
 import time
+from pathlib import Path
+
 import cv2
 import numpy as np
 
@@ -10,6 +13,24 @@ def validate_perspective(matrix):
         return value.shape == (3, 3) and np.isfinite(value).all() and np.linalg.matrix_rank(value) == 3
     except (ValueError, TypeError, np.linalg.LinAlgError):
         return False
+
+
+def load_saved_perspective(path):
+    """Return (matrix, error). Missing file is reported as (None, "missing")."""
+    path = Path(path)
+    if not path.is_file():
+        return None, "missing"
+    try:
+        value = np.load(str(path), allow_pickle=False)
+    except Exception as exc:
+        return None, f"unreadable: {exc}"
+    if not validate_perspective(value):
+        return None, "invalid matrix (shape/rank/NaN)"
+    return value, None
+
+
+def perspective_sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def open_validated_camera(index, attempts=10, capture_factory=None, backend="dshow", frame_size=(1280, 720)):

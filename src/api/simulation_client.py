@@ -5,6 +5,7 @@ import queue
 import threading
 from src.core.project_logging import event
 import logging
+from urllib.parse import quote
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     try:
@@ -27,6 +28,15 @@ class TuongKyDaiSuClient:
         # None also permits legacy callers that adopt an existing room directly.
         self._match_requested = None
         self._match_generation = 0
+        self._room_generation = None
+        self._last_fen_ack = None
+        self._session_id = None
+        self._room_session_id = None
+        self._room_created = None
+        self._pending_room_binding = None
+        self._pending_end_binding = None
+        self._pending_fen_binding = None
+        self._last_end_ack = None
         
         self.headers_simulation = {
             "Authorization": f"Bearer {self.token}",
@@ -50,7 +60,7 @@ class TuongKyDaiSuClient:
             event('api.queue_full', 'Hàng đợi cập nhật spectator đầy; game tiếp tục.', level=logging.ERROR)
             return False
         if self._worker is None:
-            self._worker = threading.Thread(target=self._run, name='spectator-api', daemon=True)
+            self._worker = threading.Thread(target=self._run, name='spectator-api', daemon=False)
             self._worker.start()
         return True
 
@@ -72,12 +82,42 @@ class TuongKyDaiSuClient:
             self._closing.set()
         if self._worker is not None:
             self._worker.join(timeout)
-            if self._worker.is_alive():
-                event('api.shutdown_pending', 'Đang chờ cập nhật spectator; không giữ giao diện.', level=logging.WARNING)
+            if self._worker.is_alive() is True:
+                raise RuntimeError("Spectator callbacks still running; retain the journal and retry close")
+        self._flush_receipts()
+
+    def _flush_receipts(self):
+        if self._pending_room_binding is not None:
+            callback, args = self._pending_room_binding
+            callback(*args)
+            self._pending_room_binding = None
+        if self._pending_fen_binding is not None:
+            callback, args = self._pending_fen_binding
+            callback(*args)
+            self._pending_fen_binding = None
+        if self._pending_end_binding is not None:
+            callback, args = self._pending_end_binding
+            callback(*args)
+            self._pending_end_binding = None
+
+    def bind_session(self, session_id, room_created, *, restored_room=None):
+        """Capture local ownership separately from the currently queued remote room."""
+        with self._job_lock:
+            self._session_id, self._room_created = session_id, room_created
+            if restored_room is not None:
+                if (self._match_requested is True or self.room_id is not None
+                        or restored_room["base_url"] != self.base_url):
+                    raise RuntimeError("Cannot adopt spectator room while another room/server is active")
+                self.room_id = restored_room["room_id"]
+                self._room_session_id = session_id
+                self._room_generation = self._match_generation
+                self._last_fen_ack = (self.room_id, restored_room["acknowledged_fen"])
+                self._match_requested = True
 
     def _schedule_match_locked(self, red_name, black_name, initial_fen):
         generation = self._match_generation + 1
-        if not self._enqueue_locked(self._create_and_publish, generation, red_name, black_name, initial_fen):
+        if not self._enqueue_locked(self._create_and_publish, generation, red_name, black_name, initial_fen,
+                                    self._session_id, self._room_created):
             return False
         self._match_generation = generation
         self._match_requested = True
@@ -100,10 +140,27 @@ class TuongKyDaiSuClient:
                 return True
             return self._schedule_match_locked(red_name, black_name, initial_fen)
 
-    def _create_and_publish(self, generation, red_name, black_name, initial_fen):
+    def _create_and_publish(self, generation, red_name, black_name, initial_fen,
+                            session_id=None, room_created=None):
         opened = False
         try:
+            self._flush_receipts()
             opened = self._create_match(red_name, black_name) is not None
+            if opened:
+                self._room_generation = generation
+                self._room_session_id = session_id
+                self._last_fen_ack = None
+                from src.core.fen_utils import INITIAL_FEN
+                # Creation ACK acknowledges the API's standard initial layout.
+                # It is not a fresh read of a room restored on a later launch.
+                self._last_fen_ack = (str(self.room_id), INITIAL_FEN)
+                # Save the received room ID before any subsequent projection.
+                # This callback captures the queued session, not mutable live state.
+                if room_created is not None:
+                    args = (session_id, self.base_url, self.room_id, INITIAL_FEN)
+                    self._pending_room_binding = (room_created, args)
+                    room_created(*args)
+                    self._pending_room_binding = None
             # Remote simulation API initializes new rooms with standard Xiangqi starting FEN.
             # Only publish initial_fen if customized (differs from standard starting layout);
             # sending the unchanged starting FEN causes HTTP 400 'FEN giống cũ hoặc thay đổi bất thường'.
@@ -124,6 +181,98 @@ class TuongKyDaiSuClient:
                 return False
             return self._enqueue_locked(self._send_move_update_board, str(fen), attempts)
 
+    def submit_board_projection(self, fen, completed, *, match_end=None, session_id=None,
+                                room=None, fen_acknowledged=None, end_acknowledged=None,
+                                room_refresh=None):
+        """Queue display-only delivery; callback True requires an actual response ACK."""
+        with self._job_lock:
+            if room is not None:
+                if room["base_url"] != self.base_url or not room.get("room_id"):
+                    return False
+                return self._enqueue_locked(self._deliver_room_projection, str(fen), completed,
+                                            match_end, dict(room), fen_acknowledged, end_acknowledged,
+                                            room_refresh)
+            if (not self.token or not self.room_id and not self.pending
+                    or self._match_requested is False and match_end is None):
+                return False
+            generation = self._match_generation
+            return self._enqueue_locked(self._deliver_projection, str(fen), generation, completed,
+                                        match_end, session_id, fen_acknowledged, end_acknowledged)
+
+    def _deliver_projection(self, fen, generation, completed, match_end,
+                            session_id=None, fen_acknowledged=None, end_acknowledged=None):
+        success = False
+        reason = "Remote board acknowledgement unavailable"
+        try:
+            self._flush_receipts()
+            actual_generation = self._room_generation if self._room_generation is not None else self._match_generation
+            if (generation != actual_generation
+                    or session_id is not None and session_id != self._room_session_id):
+                reason = "Projection belongs to a retired spectator room"
+            else:
+                receipt = []
+                self._send_move_update_board(fen, attempts=1, receipt=receipt)
+                success = receipt == [True]
+                if success:
+                    self._record_fen_ack(self.room_id, fen, fen_acknowledged)
+                if success and match_end is not None:
+                    target_room = self.room_id
+                    success = self._end_match(match_end["winner"], match_end["reason"]) is True
+                    reason = "Remote end-match acknowledgement unavailable"
+                    if success:
+                        self._record_end_ack(target_room, match_end, end_acknowledged)
+                        with self._job_lock:
+                            if self._match_generation == generation:
+                                self._match_requested = False
+        except Exception as exc:
+            success, reason = False, str(exc)
+        completed(success, None if success else reason)
+
+    def _record_fen_ack(self, room_id, fen, fen_acknowledged):
+        if fen_acknowledged is not None:
+            args = (room_id, fen)
+            self._pending_fen_binding = (fen_acknowledged, args)
+            fen_acknowledged(*args)
+            self._pending_fen_binding = None
+
+    def _record_end_ack(self, room_id, match_end, end_acknowledged):
+        if end_acknowledged is not None:
+            args = (room_id, dict(match_end))
+            self._pending_end_binding = (end_acknowledged, args)
+            end_acknowledged(*args)
+            self._pending_end_binding = None
+
+    def _deliver_room_projection(self, fen, completed, match_end, room, fen_acknowledged,
+                                 end_acknowledged, room_refresh):
+        """Retry a known room without adopting it or changing the new room owner."""
+        success, reason = False, "Archived spectator acknowledgement unavailable"
+        try:
+            self._flush_receipts()
+            if room_refresh is not None:
+                refreshed = room_refresh()
+                if (refreshed is None or refreshed["base_url"] != room["base_url"]
+                        or refreshed["room_id"] != room["room_id"]):
+                    raise RuntimeError("Queued spectator route no longer matches its recorded room")
+                room = refreshed
+            receipt = []
+            if room.get("acknowledged_fen") == fen:
+                receipt.append(True)
+            else:
+                self._send_move_update_board(fen, attempts=1, receipt=receipt, room_id=room["room_id"])
+            success = receipt == [True]
+            if success:
+                self._record_fen_ack(room["room_id"], fen, fen_acknowledged)
+            if success and match_end is not None:
+                success = (room.get("acknowledged_end") == match_end or self._end_match(
+                    match_end["winner"], match_end["reason"],
+                    room_id=room["room_id"], retire_current=False) is True)
+                reason = "Archived end-match acknowledgement unavailable"
+                if success:
+                    self._record_end_ack(room["room_id"], match_end, end_acknowledged)
+        except Exception as exc:
+            success, reason = False, str(exc)
+        completed(success, None if success else reason)
+
     def end_match(self, winner="DRAW", reason="OTHER"):
         with self._job_lock:
             if self._match_requested is False or (not self.room_id and not self.pending):
@@ -137,7 +286,10 @@ class TuongKyDaiSuClient:
     def _create_match(self, red_name="Người chơi Đỏ", black_name="Robot AI"):
         """Tạo một trận đấu mới và lấy roomId."""
         if self.room_id is not None:
-            self._end_match(reason='OTHER')
+            if self._room_session_id is None:
+                self._end_match(reason='OTHER')
+            # Journal-owned old rooms retain their own terminal intent and route.
+            # Closing them here could preempt an unacknowledged final capture/FEN.
             # Never send the new game's FEN to an old room after close failure.
             self.room_id = None
         if not self.token:
@@ -165,15 +317,20 @@ class TuongKyDaiSuClient:
             print(f"[-] [API] Ngoại lệ khi tạo trận: {e}")
             return None
 
-    def _send_move_update_board(self, fen, attempts=3):
+    def _send_move_update_board(self, fen, attempts=3, receipt=None, *, room_id=None):
         """Gửi trạng thái bàn cờ (FEN) mới nhất mỗi khi CÓ MỘT NƯỚC ĐI ĐÃ HOÀN THÀNH."""
         if not self.token:
             return None
-        if not self.room_id:
+        target_room = self.room_id if room_id is None else str(room_id)
+        if not target_room:
             print("[-] [API] Không thể gửi FEN vì Room ID trống!")
             return None
+        if self._last_fen_ack == (str(target_room), fen):
+            if receipt is not None:
+                receipt.append(True)
+            return None
             
-        url = f"{self.base_url}/api/simulation/matches/{self.room_id}/fen"
+        url = f"{self.base_url}/api/simulation/matches/{quote(str(target_room), safe='')}/fen"
         payload = {
             "fen": fen
         }
@@ -189,8 +346,13 @@ class TuongKyDaiSuClient:
                 except ValueError:
                     data = {"raw_response": response.text}
                 if response.status_code == 200 and data.get("success"):
-                    move_info = data["data"].get("move")
-                    print(f"[+] [API] Đã đồng bộ FEN thành công. Phe tiếp theo: {data['data'].get('currentTurn')}")
+                    details = data.get("data") or {}
+                    move_info = details.get("move")
+                    if str(target_room) == str(self.room_id):
+                        self._last_fen_ack = (str(target_room), fen)
+                    if receipt is not None:
+                        receipt.append(True)
+                    print(f"[+] [API] Đã đồng bộ FEN thành công. Phe tiếp theo: {details.get('currentTurn')}")
                     return move_info
                 print(f"[-] [API] Lỗi gửi FEN (lần {attempt}): {data}")
                 # Invalid FEN/authentication/state-conflict responses cannot
@@ -204,12 +366,15 @@ class TuongKyDaiSuClient:
         print("[-] [API] Đồng bộ FEN thất bại sau các lần thử lại.")
         return None
 
-    def _end_match(self, winner="DRAW", reason="OTHER"):
+    def _end_match(self, winner="DRAW", reason="OTHER", *, room_id=None, retire_current=True):
         """Kết thúc trận đấu."""
-        if not self.token or not self.room_id:
+        target_room = self.room_id if room_id is None else str(room_id)
+        if not self.token or not target_room:
             return
+        if self._last_end_ack == (str(target_room), winner, reason):
+            return True
             
-        url = f"{self.base_url}/api/simulation/matches/{self.room_id}/end"
+        url = f"{self.base_url}/api/simulation/matches/{quote(str(target_room), safe='')}/end"
         payload = {
             "winner": winner, 
             "reason": reason  
@@ -218,9 +383,20 @@ class TuongKyDaiSuClient:
         try:
             response = requests.post(url, headers=self.headers_simulation, json=payload, timeout=5)
             if response.status_code == 200:
-                print(f"[+] [API] Đã kết thúc trận đấu phòng {self.room_id}. Người thắng: {winner}")
-                self.room_id = None # Reset
+                try:
+                    body = response.json()
+                except ValueError:
+                    body = None
+                if isinstance(body, dict) and body.get("success") is False:
+                    return False
+                self._last_end_ack = (str(target_room), winner, reason)
+                print(f"[+] [API] Đã kết thúc trận đấu phòng {target_room}. Người thắng: {winner}")
+                if retire_current and str(self.room_id) == str(target_room):
+                    self.room_id = None
+                    self._last_fen_ack = None
+                return True
             else:
                 print(f"[-] [API] Lỗi kết thúc trận đấu: {response.text}")
         except Exception as e:
             print(f"[-] [API] Ngoại lệ khi kết thúc trận: {e}")
+        return False

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 from datetime import datetime, timezone
+from src.domain.geometry import get_default_json_path
 
 
 class SimulationBoardProfileStore:
@@ -16,14 +17,24 @@ class SimulationBoardProfileStore:
     def _scene_digest(self):
         return hashlib.sha256(self.scene_path.read_bytes()).hexdigest()
 
+    def _geometry_digest(self):
+        return hashlib.sha256(get_default_json_path().read_bytes()).hexdigest()
+
     def save(self, teaching, safe_transit_height_mm):
+        points = teaching.get("points")
+        surface_z_mm = teaching.get("surface_z_mm")
+        if (surface_z_mm is None and isinstance(points, dict)
+                and isinstance(points.get("R1"), (list, tuple)) and len(points["R1"]) >= 3):
+            surface_z_mm = points["R1"][2]
         record = {
-            "schema_version": 1, "source": "R1_R4_SIMULATION",
+            "schema_version": 2, "source": "R1_R4_SIMULATION",
+            "calibration_space": "XY_SE2", "surface_z_mm": surface_z_mm,
             "frame": "robot_base", "unit": "mm",
             "calibration_version": teaching["placement_version"],
             "provenance": "SIMULATOR_BOARD_SURFACE_POINT",
             "saved_at": datetime.now(timezone.utc).isoformat(),
             "scene_sha256": self._scene_digest(),
+            "geometry_sha256": self._geometry_digest(),
             "safe_transit_height_mm": safe_transit_height_mm,
             "points": teaching["points"],
         }
@@ -47,12 +58,16 @@ class SimulationBoardProfileStore:
     def _validate(record):
         if not isinstance(record, dict):
             raise ValueError("Profile phải là JSON object")
-        expected = {"schema_version": 1, "source": "R1_R4_SIMULATION", "frame": "robot_base",
+        expected = {"schema_version": 2, "calibration_space": "XY_SE2",
+                    "source": "R1_R4_SIMULATION", "frame": "robot_base",
                     "unit": "mm", "provenance": "SIMULATOR_BOARD_SURFACE_POINT"}
         for key, value in expected.items():
             if type(record.get(key)) is not type(value) or record[key] != value:
                 raise ValueError(f"Profile không hợp lệ: {key}")
         version = record.get("calibration_version")
+        surface_z = record.get("surface_z_mm")
+        if type(surface_z) not in (int, float) or not math.isfinite(surface_z):
+            raise ValueError("Profile XY cần chiều cao mặt bàn riêng theo mm")
         if type(version) is not int or version < 0:
             raise ValueError("Thiếu phiên bản calibration hợp lệ")
         points = record.get("points")
@@ -71,6 +86,8 @@ class SimulationBoardProfileStore:
         self._validate(record)
         if record.get("scene_sha256") != self._scene_digest():
             raise ValueError("Cấu hình hình học đã đổi; cần nhập và kiểm định lại R1–R4")
+        if record.get("geometry_sha256") != self._geometry_digest():
+            raise ValueError("Kích thước bàn/quân/tool đã đổi; cần kiểm định lại profile XY")
         if record["safe_transit_height_mm"] != safe_transit_height_mm:
             raise ValueError("Chiều cao di chuyển đã đổi; cần kiểm định lại profile")
         return record

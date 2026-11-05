@@ -14,7 +14,7 @@ def controller(result=None, physical=False):
     state.sync_current_board=Mock(return_value=True)
     hw=SimpleNamespace(is_robot_ready=True,dry_run=False,
         simulation_runtime=None if physical else object(),cam_monitor=object(),
-        config=SimpleNamespace(ROBOT_BACKEND="PHYSICAL" if physical else "VIRTUAL",VISUAL_PICK_ENABLED=physical),
+        config=SimpleNamespace(GAME_MODE="ROBOT_VS_ROBOT",ROBOT_BACKEND="PHYSICAL" if physical else "VIRTUAL",VISUAL_PICK_ENABLED=physical),
         ai_ctrl=SimpleNamespace(pick_move=Mock(return_value=((0,6),(0,5)))),
         difficulty_availability=Mock(return_value={"easy":True,"medium":True,"hard":True}),
         execute_piece_move=Mock(return_value=result if result is not None else MotionExecutionResult.ok()),
@@ -22,7 +22,7 @@ def controller(result=None, physical=False):
         get_robot_center_pick_targets=Mock(return_value={"moving":object()}),
         is_cell_visually_clear=Mock(return_value=True))
     ctrl=SelfPlayController(state,hw)
-    assert ctrl.start("easy","hard")
+    assert ctrl.start("easy","hard",run_mode="step")
     return state,hw,ctrl
 
 

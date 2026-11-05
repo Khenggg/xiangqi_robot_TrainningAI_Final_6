@@ -1,6 +1,8 @@
 import time
 import math
+import logging
 import config
+from src.core.project_logging import event
 from src.core import xiangqi  # type: ignore
 from src.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT,
                                    BTN_CONTINUE_RECT, BTN_SCAN_FEN_RECT, BTN_CONFIRM_MOVE_RECT,
@@ -221,30 +223,57 @@ class InputHandler:
 
     def _queue_or_run(self, operation):
         worker = getattr(self.hw, "motion_worker", None)
-        if (worker is None or getattr(self.hw, "simulation_runtime", None) is not None
-                or getattr(self.hw, "dry_run", False) is True):
+        if worker is None:
             return operation()
         if not worker.start(operation, lambda value, error: self.state.set_status(
                 f"Motion worker failed: {error}", duration=30) if error else None):
             self.state.set_status("Đang có thao tác robot; chờ hoàn tất.", duration=8)
 
-    def _retry_visual_pick(self):
+    def _retry_visual_pick(self, source="UNKNOWN"):
         from src.core.visual_move_coordinator import retry_is_current
+        mode = getattr(getattr(self.state, "session_profile", None), "game_mode",
+                       getattr(config, "GAME_MODE", "UNKNOWN"))
         request = getattr(self.state, "test_pick_retry", None)
         if request is not None:
             if (request["epoch"] != self.state.game_epoch or request["ids"] != self.state.pick_test_piece_ids
                     or request["board"] != self.state.pick_test_board or not self.state.pick_test_mode):
                 self.state.test_pick_retry = None
+                event("ui.retry_rejected", f"Từ chối đo lại test gắp/thả ({source})", level=logging.WARNING,
+                      source=source, mode=mode, kind="manual_test",
+                      reason="STALE_TEST_REQUEST", game_epoch=getattr(self.state, "game_epoch", None))
                 self.state.set_status("Test retry đã hết hiệu lực; không chạy robot.", duration=20)
                 return
+            event("ui.retry_pick_requested", f"Yêu cầu đo lại test gắp/thả ({source})",
+                  source=source, mode=mode, kind="manual_test",
+                  source_cell=list(request.get("source") or []),
+                  destination=list(request.get("destination") or []),
+                  game_epoch=getattr(self.state, "game_epoch", None))
             self._queue_or_run(lambda: self._run_pick_test(request["source"], request["destination"]))
             return
         if not retry_is_current(self.state):
+            pending = getattr(self.state, "pending_ai_move", None)
+            reason = ("NO_PENDING_MOVE" if pending is None else "STALE_PENDING_MOVE")
+            event("ui.retry_rejected", f"Từ chối đo lại tâm quân ({reason})", level=logging.WARNING,
+                  source=source, mode=mode, kind="game_move", reason=reason,
+                  game_epoch=getattr(self.state, "game_epoch", None),
+                  board_revision=getattr(self.state, "board_revision", None),
+                  pending_move=pending.get("move") if isinstance(pending, dict) else None)
             self.state.set_status("Không có nước chờ hợp lệ để thử lại.", duration=10)
             return
         from src.core.ai_execution import execute_ai_move
         move = self.state.pending_ai_move["move"]
         moving_color = self.state.pending_ai_move["moving_color"]
+        retry_request = getattr(self.state, "visual_pick_retry", None) or {}
+        event("ui.retry_pick_requested",
+              f"Yêu cầu đo lại tâm quân từ {source} ({retry_request.get('stage') or 'n/a'})",
+              source=source, mode=mode, kind="game_move",
+              move_id=getattr(self.state.pending_move, "move_id", None),
+              stage=retry_request.get("stage"),
+              reason=retry_request.get("reason"),
+              move=list(move), moving_color=moving_color,
+              game_epoch=getattr(self.state, "game_epoch", None),
+              board_revision=getattr(self.state, "board_revision", None),
+              resolution=retry_request.get("resolution"))
         def retry():
             if execute_ai_move(self.state, self.hw, move, self.hw.dry_run, True):
                 terminal = (xiangqi.get_king_pos(self.state.turn, self.state.board) is None
@@ -252,9 +281,9 @@ class InputHandler:
                 if terminal:
                     self.state.handle_game_over(moving_color, reason="CHECKMATE")
                 try:
-                    self.state.api_client.send_move_update_board(self.state.current_fen)
+                    self.state.publish_committed_fen()
                     if terminal:
-                        self.state.api_client.end_match(winner="RED" if moving_color == "r" else "BLACK",
+                        self.state.publish_match_end(winner="RED" if moving_color == "r" else "BLACK",
                                                        reason="CHECKMATE")
                 except Exception as exc:
                     self.state.set_status(f"Nước đã commit; cập nhật API lỗi: {exc}", duration=30)
@@ -295,31 +324,40 @@ class InputHandler:
         self._queue_or_run(hover)
 
     def handle_mouse_down(self, mx, my):
+        if BTN_NEW_GAME_RECT.collidepoint(mx, my):
+            control = getattr(self, "session_control", None)
+            if control is not None:
+                control.request("reset")
+                return
         if self._motion_busy():
             return
+        render_state = self.state.get_render_state() if callable(
+            getattr(self.state, "get_render_state", None)) else {}
+        controls = BoardRenderer.client_action_controls(render_state)
+        continue_rect = BoardRenderer.client_continue_rect(render_state, controls)
         if (getattr(self.state, "visual_pick_retry", None)
-                and not BTN_CONTINUE_RECT.collidepoint(mx, my) and not BTN_SCAN_FEN_RECT.collidepoint(mx, my)):
+                and not continue_rect.collidepoint(mx, my) and not BTN_SCAN_FEN_RECT.collidepoint(mx, my)):
             return
-        import pygame  # type: ignore
-        client_actions = (
-            (BTN_SCAN_FEN_RECT, pygame.K_v),
-            (BTN_CONFIRM_MOVE_RECT, pygame.K_SPACE),
-            (BTN_EMERGENCY_RECT, pygame.K_m),
-            (BTN_ROLLBACK_RECT, pygame.K_z),
-            (BTN_PICK_TEST_RECT, pygame.K_t),
-            (BTN_HOVER_RECT, pygame.K_h),
-        )
-        for rect, key in client_actions:
+        for rect, key, _labels, _color in controls:
             if rect.collidepoint(mx, my) and not self.state.game_over:
                 self.handle_keyboard(key)
                 return
 
-        if BTN_CONTINUE_RECT.collidepoint(mx, my) and (getattr(self.state, "visual_pick_retry", None) or getattr(self.state, "test_pick_retry", None)):
-            self._retry_visual_pick()
-            return
-        if BTN_CONTINUE_RECT.collidepoint(mx, my):
-            if (getattr(self.state, "snapshot_continue_required", False)
-                    and not self.state.game_over):
+        can_continue = bool(
+            getattr(self.state, "visual_pick_retry", None)
+            or getattr(self.state, "test_pick_retry", None)
+            or getattr(self.state, "snapshot_continue_required", False)
+        )
+        if continue_rect.collidepoint(mx, my):
+            if not can_continue:
+                return
+            if getattr(self.state, "visual_pick_retry", None) or getattr(self.state, "test_pick_retry", None):
+                self._retry_visual_pick(source="CONTINUE")
+                return
+            control = getattr(self, "session_control", None)
+            if control is not None and control.resume_virtual():
+                return
+            if getattr(self.state, "snapshot_continue_required", False) and not self.state.game_over:
                 self._queue_or_run(self._continue_after_snapshot_pause)
             return
 
@@ -328,7 +366,7 @@ class InputHandler:
             print("[GAME] YOU SURRENDER!")
             winner = 'b' if self.state.turn == 'r' else 'r'
             self.state.handle_game_over(winner, reason='RESIGN')
-            self.state.api_client.end_match(winner="BLACK" if winner == 'b' else "RED", reason="RESIGN")
+            self.state.publish_match_end(winner="BLACK" if winner == 'b' else "RED", reason="RESIGN")
             return
 
         # New Game Button
@@ -343,7 +381,7 @@ class InputHandler:
             return
 
         # Manual Override (Mouse Drag)
-        if (self.state.allow_mouse_move or self.state.manual_override_active) and not self.state.game_over:
+        if (self.state.allow_mouse_move or getattr(self.state, "emergency_mode", False)) and not self.state.game_over:
             if self._player_turn_mode == PlayerTurnMode.UNIFIED:
                 self.state.set_status("⚠️ UNIFIED: cần xác nhận bàn cờ vật lý trước.", color=(180, 100, 0))
                 return
@@ -407,9 +445,17 @@ class InputHandler:
                         self.state.selected_pos = None
 
     def _toggle_pick_test(self):
+        profile = getattr(self.hw, "profile", None)
+        if profile is not None and not profile.robot_moves_enabled:
+            self.state.set_status("Người vs Người chỉ đi bằng chuột; không có chức năng gắp/hover.", duration=15)
+            return
+        if self.state.pending_test_motion is not None:
+            self.state.set_status("Test đang dở: Ctrl+F8 kiểm tra dừng rồi V đối soát; không bật/tắt để chạy lại.", duration=30)
+            return
         if getattr(self.state, "pick_test_mode", False):
             self.state.test_pick_retry = None
             self.state.pick_test_mode = False
+            self.state.persist_checkpoint("TEST_MODE_CLOSED")
             self.state.selected_pos = None
             self.state.set_status("Test đã tắt. Khôi phục bàn ban đầu rồi New Game để chơi; T để test tiếp.", duration=30)
             return
@@ -430,6 +476,7 @@ class InputHandler:
         self.state.emergency_mode = False
         self.state.selected_pos = None
         self._board_stability_monitor.reset()
+        self.state.persist_checkpoint("TEST_MODE_OPENED")
         self.state.set_status("TEST: chọn quân Đỏ/Đen rồi chọn ô trống. T để thoát.", duration=30)
 
 
@@ -456,6 +503,9 @@ class InputHandler:
         col, row = destination
         board = self.state.pick_test_board
         from src.vision.pick_consensus import PickTargetUnavailable
+        if self.state.pending_test_motion is not None:
+            self.state.set_status("Test đã có lệnh chưa đối soát; V kiểm tra, không gửi lại.", duration=30)
+            return
         try:
             self.state.set_status("TEST: arm đang gắp/thả...", duration=30)
             from src.domain.game_move import MoveContext, MoveActor
@@ -463,18 +513,17 @@ class InputHandler:
             src, dst = (source[1], source[0]), (row, col)
             context = MoveContext(ids[src], src, dst, MoveActor.ROBOT)
             self.hw.execute_pick_place_test(source, destination, move_context=context)
-            updated = dict(ids)
-            updated[dst] = updated.pop(src)
-            if not self.hw.sync_committed_board(updated):
-                raise RuntimeError("Không đồng bộ được simulation sau test; cần khôi phục bàn")
-            self.state.test_pick_retry = None
-            self.state.pick_test_piece_ids = updated
-            board[row][col] = board[source[1]][source[0]]
-            board[source[1]][source[0]] = "."
+            if not self.state.complete_test_motion(context):
+                raise RuntimeError("Test đã chạy nhưng chưa lưu kết quả; V đối soát, không chạy lại")
+            self._project_test_board()
             self.state.set_status(f"TEST xong: {source} → {destination}. Chọn quân để test tiếp.", duration=20)
         except PickTargetUnavailable as exc:
-            if exc.stage != "pre_pick":
+            if exc.stage != "pre_pick" or self.state.pending_test_motion is not None:
                 self.state.pick_test_fault = str(exc)
+                try:
+                    self.state.persist_checkpoint("TEST_RECOVERY_REQUIRED")
+                finally:
+                    self.hw.request_controlled_stop("Manual test outcome uncertain")
                 return
             self.state.test_pick_retry = dict(source=source, destination=destination,
                 epoch=self.state.game_epoch, ids=dict(self.state.pick_test_piece_ids),
@@ -490,62 +539,126 @@ class InputHandler:
                   exc_info=True, source_cell=source, destination_cell=destination)
             if getattr(self.hw, "simulation_runtime", None) is None and not getattr(self.hw, "dry_run", True):
                 self.state.physical_sync_fault = True
-                try:
-                    self.hw.robot.deactivate_physical_control()
-                except Exception as cleanup_error:
-                    self.state.pick_test_fault += f"; không xác nhận được disable: {cleanup_error}; kiểm tra pendant"
-                    event("manual_test.disable_failed", str(cleanup_error), level=logging.ERROR,
-                          code="CONTROLLER_DISABLE_FAILED", exc_info=True)
+            try:
+                self.state.persist_checkpoint("TEST_RECOVERY_REQUIRED")
+            finally:
+                # Return this worker before the stop coordinator can prove idle.
+                # Never disable the controller underneath an uncertain SDK move.
+                self.hw.request_controlled_stop("Manual test failed")
             print(f"[PICK TEST] {exc}")
             self.state.set_status(f"TEST dừng: {self.state.pick_test_fault}", color=(180, 0, 0), duration=30)
+
+    def _project_test_board(self):
+        """Projection failure cannot undo the verified and saved test result."""
+        try:
+            if self.hw.sync_committed_board(dict(self.state.pick_test_piece_ids)) is not True:
+                raise RuntimeError("Test viewer update pending")
+            self.state.projection_error = None
+        except Exception as exc:
+            self.state.projection_error = str(exc)
+            from src.core.project_logging import event
+            import logging
+            event("manual_test.projection_pending", str(exc), level=logging.WARNING,
+                  code="PROJECTION_FAILED")
+
+    def _reconcile_pick_test(self):
+        """Operator-requested observation only; no test command is replayed."""
+        test = self.state.pending_test_motion
+        if test is None:
+            return
+        if self.hw.dry_run:
+            self.state.set_status("Test ảo đang dở: New Game sau khi dừng để thay phiên.", duration=30)
+            return
+        if (not self.hw.physical_telemetry_ready(require_idle=True)
+                or not self.hw.stop_coordinator.safe_for_release(ignore_current_worker=True)):
+            self.state.set_status("Kiểm tra tay/kẹp trên pendant, Ctrl+F8 xác nhận dừng rồi V.", duration=30)
+            return
+        from src.core.fen_utils import INITIAL_FEN, fen_to_board_array
+        candidates = (("completed", test["expected_board"]), ("unchanged", test["before_board"]),
+                      ("restored", fen_to_board_array(INITIAL_FEN)[0]))
+        for outcome, expected in candidates:
+            if self.hw.verify_physical_board(expected):
+                self.state.note_verified_test_board(test["context"], outcome)
+                if self.state.complete_test_motion(test["context"], outcome=outcome, operator_recovery=True):
+                    self._project_test_board()
+                    self.state.set_status("Đã đối soát test. Khôi phục bàn ban đầu rồi New Game; không tự chạy lại.", duration=30)
+                return
+        self.state.set_status("Bàn chưa khớp trước/sau test hoặc bàn ban đầu. Giữ test đang dở; kiểm tra và V lại.", duration=30)
 
 
     def _fresh_confirmed_layout(self):
         """Two separately captured, identical complete board observations."""
         import numpy as np
-        from src.vision.cchess_recognizer import validate_board_sanity
+        import logging
+        from uuid import uuid4
+        from src.vision.cchess_recognizer import validate_board_sanity, piece_confidence_ok
+        from src.vision.board_diagnostics import recognition_diagnostics, diagnostic_message
+        verification_id = uuid4().hex
+        attempt = 0
+
+        def failed(reason, **details):
+            event("camera.scan_failed", diagnostic_message(reason, details), level=logging.WARNING,
+                  code="CAMERA_VERIFY_FAILED", verification_id=verification_id,
+                  operation="SCAN_FULL_BOARD", reason=reason, attempt=attempt,
+                  required=2, consecutive=0, **details)
+            return None
+
         camera = getattr(self.hw, "cam_monitor", None)
         recognizer = getattr(self.hw, "recognize_board_state", None)
         if camera is None or not callable(recognizer):
-            return None
+            return failed("CAMERA_UNAVAILABLE")
         if self._physical_recovery_required() and not getattr(self.hw, "camera_calibration_ready", False):
-            return None
+            return failed("CALIBRATION_UNAVAILABLE")
         first = None
         threshold = float(getattr(getattr(self.hw, "config", None), "CCHESS_RECOVERY_MIN_CONFIDENCE", 0.5))
         try:
             for _ in range(2):
+                attempt += 1
                 frame, _ = camera.get_fresh_snapshot()
                 result = recognizer(frame) if frame is not None else None
                 if not result or not result.get("success"):
-                    return None
+                    return failed("FRAME_UNAVAILABLE" if frame is None else "RECOGNITION_FAILED",
+                                  recognition_error=result.get("error") if result else None)
                 board = result.get("board")
                 if (not isinstance(board, (list, tuple)) or len(board) != 10
                         or any(not isinstance(row, (list, tuple)) or len(row) != 9 for row in board)):
-                    return None
-                sane, _ = validate_board_sanity(board)
+                    return failed("MALFORMED_BOARD")
+                sane, sanity_error = validate_board_sanity(board)
                 if not sane:
-                    return None
+                    return failed("BOARD_SANITY_FAILED", sanity_error=sanity_error)
                 if "quality_ok" in result:
                     quality = result["quality_ok"] is True
                 else:
-                    confidence = np.asarray(result.get("confidence", []), dtype=float)
-                    quality = (confidence.shape == (10, 9) and np.isfinite(confidence).all()
-                               and float(confidence.min()) >= threshold)
+                    quality = piece_confidence_ok(board, result.get("confidence"), threshold)
+                reason, details = recognition_diagnostics(
+                    result, threshold, sane=sane, sanity_error=sanity_error, quality=quality)
                 if not quality:
-                    return None
+                    return failed(reason, **details)
                 board = [list(row) for row in board]
                 if first is not None and board != first:
-                    return None
+                    differences = [dict(row=r, col=c, expected=first[r][c], observed=board[r][c])
+                                   for r in range(10) for c in range(9) if first[r][c] != board[r][c]]
+                    return failed("LAYOUT_UNSTABLE", comparison="FIRST_SCAN_VS_SECOND_SCAN",
+                                  board_diff_count=len(differences), diff_cells=differences,
+                                  first_board=first, observed_board=board, **details)
+                event("camera.scan_sample", "Ảnh quét toàn bàn hợp lệ", level=logging.DEBUG,
+                      verification_id=verification_id, operation="SCAN_FULL_BOARD", reason="MATCH",
+                      attempt=attempt, consecutive=attempt, required=2, **details)
                 first = board
+            event("camera.scan_verified", "Hai ảnh mới xác nhận cùng một layout bàn cờ",
+                  verification_id=verification_id, operation="SCAN_FULL_BOARD", samples=2)
             return first
         except Exception as exc:
             print(f"[FULL SCAN] Fresh board unavailable: {exc}")
-            return None
+            return failed("EXCEPTION", error=str(exc), exception_type=type(exc).__name__, exc_info=True)
 
     def _rescan_confirmed_board(self):
         """Explicit operator recovery; never sends robot or gripper commands."""
+        self.state.hardware_recovery_reason = None
         layout = self._fresh_confirmed_layout()
         apply = getattr(self.state, "apply_confirmed_board", None)
+        if layout is not None and not self.state.approve_recovery_after_verification(self.hw):
+            return False
         if layout is None or not callable(apply) or not apply(layout):
             self.state.set_status("Full scan rejected: need two matching clear, calibrated board frames.", color=(180, 0, 0), duration=12.0)
             return False
@@ -556,6 +669,7 @@ class InputHandler:
         self.state.manual_override_active = not captured
         self.state.snapshot_continue_required = not captured
         self.state.emergency_mode = False
+        self.state.persist_checkpoint("OPERATOR_RESCAN_BASELINE")
         if not getattr(self.state, "turn_confirmation_required", False):
             self.state.set_status("Full board synchronized." if captured else "Board synchronized; capture a fresh baseline before continuing.", duration=10.0)
         return True
@@ -580,6 +694,8 @@ class InputHandler:
         return str(getattr(cfg, "ROBOT_BACKEND", "VIRTUAL")).upper() == "PHYSICAL" and not getattr(self.hw, "dry_run", getattr(cfg, "DRY_RUN", True))
 
     def _verify_recovery_board(self, board):
+        self._last_recovery_board_matched = False
+        self.state.hardware_recovery_reason = None
         verifier = getattr(self.hw, "verify_physical_board", None)
         if not callable(verifier):
             return False
@@ -588,10 +704,16 @@ class InputHandler:
             if pending and board == pending.get("expected_board"):
                 missing_color = {"r_K": "r", "b_K": "b"}.get(pending.get("captured_piece"))
                 if missing_color is not None:
-                    return bool(verifier(board, missing_king_color=missing_color))
-            return bool(verifier(board))
+                    verified = bool(verifier(board, missing_king_color=missing_color))
+                    self._last_recovery_board_matched = verified
+                    return verified and self.state.approve_recovery_after_verification(self.hw)
+            verified = bool(verifier(board))
+            self._last_recovery_board_matched = verified
+            return verified and self.state.approve_recovery_after_verification(self.hw)
         except Exception as exc:
             print(f"[RECOVERY] Fresh board verification failed: {exc}")
+            if self._last_recovery_board_matched:
+                self.state.set_status(f"Camera đã xác nhận bàn; phục hồi robot chưa hoàn tất: {exc}", duration=60)
             return False
 
     def resume_automatic_scanning(self):
@@ -646,24 +768,65 @@ class InputHandler:
         self.state.set_status("✅ Đã tiếp tục tự động quét FEN.", color=(0, 120, 0), duration=6.0)
         return True
 
+    def _client_capabilities(self):
+        getter = getattr(self.state, "get_render_state", None)
+        return getter() if callable(getter) else {}
+
     def handle_keyboard(self, key):
         if self._motion_busy():
+            self.state.set_status("Đang có thao tác robot; chờ hoàn tất trước khi xóa phiên lỗi.", duration=8)
             return
         import pygame
+        if key == pygame.K_F12:
+            if not (getattr(self.state, "move_sync_error", None)
+                    or getattr(self.state, "physical_sync_fault", False)):
+                self.state.set_status("Không có phiên lỗi để xóa.", duration=8)
+                return
+            self._queue_or_run(self._clear_failed_session)
+            return
+        caps = self._client_capabilities()
+        camera = bool(caps.get("camera_enabled", True))
+        simulation = bool(caps.get("simulation_enabled", True))
+        viewer = bool(caps.get("viewer_enabled", True))
+        robot_moves = bool(caps.get("robot_moves_enabled", True))
+        if key == pygame.K_m and not camera:
+            self.state.set_status("Chế độ này không có camera/emergency mode.", duration=10)
+            return
+        if key in (pygame.K_t, pygame.K_h) and not (simulation and robot_moves):
+            self.state.set_status("Chế độ này không có robot để gắp/hover.", duration=10)
+            return
+        if key == pygame.K_v and not (camera or (simulation and viewer)):
+            self.state.set_status("Chế độ này không có camera/viewer để đồng bộ.", duration=10)
+            return
+        if key == pygame.K_v and getattr(self.state, "pending_test_motion", None) is not None:
+            self._queue_or_run(self._reconcile_pick_test)
+            return
+        if (key == pygame.K_v and getattr(self.state, "visual_pick_retry", None)
+                and not getattr(self.state, "physical_sync_fault", False)
+                and not getattr(self.state, "move_sync_error", None)):
+            # A centre-acquisition pause retains the exact pending move. A new
+            # camera baseline alone cannot resume it; use the guarded retry path,
+            # which rechecks the full board and reacquires the measured target.
+            self._retry_visual_pick(source="V")
+            return
         if key == pygame.K_y:
-            self._retry_visual_pick()
+            self._retry_visual_pick(source="Y")
             return
         if key == pygame.K_h:
             self._run_hover_test()
             return
         if getattr(self.state, "visual_pick_retry", None) and key not in (pygame.K_v,):
-            self.state.set_status("Nước robot đang chờ: Y đo lại / V đối soát bàn.", duration=15)
+            self.state.set_status("Nước robot đang chờ: Y/V đo lại và thử đúng nước đang chờ.", duration=15)
             return
         import pygame  # type: ignore
         if key != pygame.K_t and (getattr(self.state, "pick_test_mode", False) or getattr(self.state, "pick_test_resume_required", False)):
             self.state.set_status("Khôi phục bàn rồi New Game sau test trước khi thao tác game.", duration=20)
             return
         if key == pygame.K_F4:
+            profile = getattr(self.hw, "profile", None)
+            if profile is not None and not profile.camera_enabled:
+                self.state.set_status("Phiên này không dùng camera. V đồng bộ viewer, New Game tạo ván mới.", duration=15)
+                return
             self._queue_or_run(self._rescan_confirmed_board)
             return
         if key in (pygame.K_1, pygame.K_2) and getattr(self.state, "turn_confirmation_required", False):
@@ -679,6 +842,17 @@ class InputHandler:
             self.state.set_status("Test đang dừng game. Khôi phục bàn rồi New Game để chơi.", duration=20)
             return
         if key == pygame.K_v:
+            profile = getattr(self.hw, "profile", None)
+            if profile is not None and not profile.camera_enabled:
+                control = getattr(self, "session_control", None)
+                if control is not None and control.resume_virtual():
+                    return
+                if self.state.pending_move is not None or self.state.physical_sync_fault or self.state.move_sync_error:
+                    self.state.set_status("Nước ảo đang dở/lỗi. F8 dừng rồi New Game; không xác minh bằng camera thật.", duration=20)
+                else:
+                    self.state.sync_current_board()
+                    self.state.set_status("Đã yêu cầu đồng bộ Game → viewer; phiên này không dùng camera.", duration=15)
+                return
             if self.state.physical_sync_fault:
                 self._queue_or_run(self._reconcile_physical_sync_fault)
             else:
@@ -714,7 +888,8 @@ class InputHandler:
         pending = self.state.pending_ai_move
         if not pending and self._physical_recovery_required():
             if not self._verify_recovery_board(self.state.board):
-                self.state.set_status("Fresh full-board verification failed; emergency correction remains paused.", color=(180, 0, 0), duration=10.0)
+                if not self._last_recovery_board_matched:
+                    self.state.set_status("Fresh full-board verification failed; emergency correction remains paused.", color=(180, 0, 0), duration=10.0)
                 return
             sync = getattr(self.state, "sync_current_board", None)
             if callable(sync) and not sync():
@@ -756,10 +931,15 @@ class InputHandler:
                 )
             return
 
+        if self._last_recovery_board_matched:
+            return  # Board matched; hardware recovery, not camera, is blocking.
         if self._verify_recovery_board(pending["expected_board"]):
             self._finalize_pending_ai_move(
                 "✅ Đã xác nhận bàn thật — đến lượt bạn.", (0, 100, 180)
             )
+            return
+
+        if self._last_recovery_board_matched:
             return
 
         src, dst = pending["move"]
@@ -781,12 +961,12 @@ class InputHandler:
         if not self.state.commit_pending_ai_move():
             return False
         self.state.snapshot_continue_required = False
-        self.state.api_client.send_move_update_board(self.state.current_fen)
+        self.state.publish_committed_fen()
         if (xiangqi.get_king_pos(self.state.turn, self.state.board) is None
                 or not xiangqi.find_all_valid_moves(self.state.turn, self.state.board)):
             winner = "b" if self.state.turn == "r" else "r"
             self.state.handle_game_over(winner)
-            self.state.api_client.end_match(winner="BLACK" if winner == "b" else "RED", reason="CHECKMATE")
+            self.state.publish_match_end(winner="BLACK" if winner == "b" else "RED", reason="CHECKMATE")
         else:
             if self.state.physical_sync_fault or self.state.move_sync_error:
                 self.state.manual_override_active = True
@@ -823,7 +1003,8 @@ class InputHandler:
                 )
             return False
         if str(getattr(config, "GAME_MODE", "HUMAN_VS_ROBOT")).upper() == "HUMAN_VS_HUMAN":
-            return self._confirm_human_camera_move()
+            self.state.set_status("Hai người chơi đi bằng chuột; không dùng camera hoặc SPACE.", duration=10)
+            return False
         if self._player_turn_mode == PlayerTurnMode.UNIFIED:
             self.state.set_status("⚠️ UNIFIED: SPACE chỉ yêu cầu poll state-machine.", color=(180, 100, 0))
             return False
@@ -936,6 +1117,58 @@ class InputHandler:
             self.state.emergency_mode = False
             self.state.snapshot_continue_required = False
         return committed
+
+    def _clear_failed_session(self):
+        """Operator-confirmed FEN recovery without restarting the app.
+
+        This never sends robot or gripper motion. It verifies the complete
+        physical board against the current FEN first; a mismatch leaves the
+        session locked. Only then is the failed pending transaction retired.
+        """
+        if not (getattr(self.state, "move_sync_error", None)
+                or getattr(self.state, "physical_sync_fault", False)):
+            self.state.set_status("Không có phiên lỗi để xóa.", duration=8)
+            return False
+
+        if self._physical_recovery_required():
+            self.state.set_status("📸 Đang xác nhận bàn thật khớp FEN trước khi xóa lỗi...",
+                                  color=(0, 100, 180), duration=5)
+            if not self._verify_recovery_board(self.state.board):
+                if not self._last_recovery_board_matched:
+                    self.state.set_status(
+                        "❌ Chưa xóa phiên lỗi: bàn thật chưa khớp FEN. "
+                        "Chỉnh bàn rồi bấm V/F4, hoặc kiểm tra camera calibration.",
+                        color=(180, 0, 0), duration=20)
+                return False
+
+        # The operator explicitly confirmed the current FEN; retire the old
+        # failed transaction and its error latch.
+        if self.state.pending_ai_move is not None:
+            self.state.clear_pending_ai_move()
+        clear = getattr(self.state, "clear_move_sync_error", None)
+        if callable(clear):
+            clear()
+        self.state.physical_sync_fault = False
+        self.state.manual_override_active = False
+        self.state.snapshot_continue_required = False
+        self.state.snapshot_continue_can_commit_pending = False
+        self.state.emergency_mode = False
+        self.state.turn_confirmation_required = False
+        self.state.sync_current_board()
+        try:
+            self.state.persist_checkpoint("OPERATOR_CLEARED_FAILED_SESSION")
+        except Exception as exc:
+            print(f"[RECOVERY] Failed to persist cleared session: {exc}")
+        if not self.resume_automatic_scanning():
+            self.state.set_status(
+                "Đã xóa phiên lỗi; chưa lấy được baseline camera. Bấm V/F4 để tiếp tục.",
+                color=(180, 100, 0), duration=20)
+            return True
+        self.state.set_status("✅ Đã xóa phiên lỗi; bàn khớp FEN, đã tiếp tục quét.",
+                              color=(0, 120, 0), duration=10)
+        event("session.cleared_failed", "Người vận hành xóa phiên lỗi sau xác nhận FEN",
+              level=logging.INFO, board_revision=self.state.board_revision)
+        return True
 
     def _continue_after_snapshot_pause(self):
         """Apply the operator-approved recovery shown by the Continue button."""

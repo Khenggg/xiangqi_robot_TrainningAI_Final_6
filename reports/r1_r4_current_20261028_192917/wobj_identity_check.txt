@@ -1,0 +1,15 @@
+Read-only frame check (same read-only SDK session family)
+Controller: 192.168.58.2
+
+GetActualWObjNum() -> (0, 1)
+GetActualTCPNum()   -> (0, 0)
+GetCurWObjCoord()   -> (0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+GetCurToolCoord()   -> (0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+Interpretation:
+- Current WObj is ID 1.
+- Its coordinate offset is identity (zero translation and rotation).
+- Therefore R1-R3 coordinates recorded under WObj 1 are numerically equal to
+  robot-base coordinates.
+- The application may normalize those metadata labels to user frame 0 only
+  while this identity check passes. It must reject a non-identity WObj.

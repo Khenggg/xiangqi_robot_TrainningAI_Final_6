@@ -61,13 +61,14 @@ def test_capture_physics_precedes_commit_and_failed_land_retains_victim(capture_
     def execute(**kwargs):
         result = execute_virtual_move(runtime, **kwargs)
         if result.success:
-            # BEFORE commit can reconcile/remove the victim collider.
-            victim = runtime.world.pieces["red_cannon_1"]
-            victim_pos = victim.get_position_robot()
+            # The hybrid policy removes the victim body but keeps its tray snapshot.
+            victim = runtime.world.captured_pieces["red_cannon_1"]
+            victim_pos = np.array(victim.position_robot_base_m)
             physics_evidence.append(victim_pos.copy())
+            assert victim.captured is True
             assert not runtime.placement_state.is_in_bounds_robot(victim_pos)
-            assert abs(victim_pos[2] - victim.height_m / 2) < 0.001
-            assert np.linalg.norm(victim.get_velocity()[0]) < 0.01
+            assert abs(victim_pos[2] - runtime.geom.piece_height_mm / 2000.0) < 0.001
+            assert np.linalg.norm(victim.linear_velocity_m_s) < 0.01
             assert runtime.find_nearest_cell(runtime.world.pieces["black_rook_1"].get_position_robot()) == (7,7)
             assert runtime.world.get_attached_piece() is None
         return result
@@ -148,9 +149,10 @@ def test_elephant_capture_with_running_live_poll(capture_game, monkeypatch, neve
     def execute(**kwargs):
         result = execute_virtual_move(runtime, **kwargs)
         if result.success:
-            victim = runtime.world.pieces["red_elephant_1"]
-            assert not runtime.placement_state.is_in_bounds_robot(victim.get_position_robot())
-            assert abs(victim.get_position_robot()[2] - victim.height_m / 2.0) < 0.001
+            victim = runtime.world.captured_pieces["red_elephant_1"]
+            victim_pos = np.array(victim.position_robot_base_m)
+            assert not runtime.placement_state.is_in_bounds_robot(victim_pos)
+            assert abs(victim_pos[2] - runtime.geom.piece_height_mm / 2000.0) < 0.001
             assert runtime.find_nearest_cell(runtime.world.pieces["black_rook_1"].get_position_robot()) == (7,4)
             physical_evidence.append(True)
         return result
@@ -200,8 +202,8 @@ def test_adjacent_rook_capture_chooses_checked_grasp_yaw(capture_game, monkeypat
     def execute(**kwargs):
         result = execute_virtual_move(runtime, **kwargs)
         if result.success:
-            assert not runtime.placement_state.is_in_bounds_robot(
-                runtime.world.pieces["red_advisor_0"].get_position_robot())
+            victim = runtime.world.captured_pieces["red_advisor_0"]
+            assert not runtime.placement_state.is_in_bounds_robot(victim.position_robot_base_m)
             assert runtime.find_nearest_cell(runtime.world.pieces["black_rook_1"].get_position_robot()) == (8,4)
             evidence.append(True)
         return result

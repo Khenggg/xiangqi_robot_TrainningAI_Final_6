@@ -161,6 +161,7 @@ def test_confirmed_board_recovery_clears_old_retry_gating(monkeypatch):
 def test_self_play_camera_retry_preserves_actor(monkeypatch,color,move):
     from src.core.self_play_controller import SelfPlayController,SelfPlayStatus
     state,hw=fixture(monkeypatch)
+    hw.config.GAME_MODE='ROBOT_VS_ROBOT'
     state.turn=color
     hw.cam_monitor=object()
     hw.capture_baseline_if_needed=Mock(return_value=True)
@@ -194,6 +195,8 @@ def test_real_robot_stops_before_grip_when_first_sdk_motion_fails(monkeypatch):
     robot.robot=Mock()
     robot.robot.MoveCart.return_value=112
     robot.robot.GetRobotTeachingPoint.return_value=(0,[0.0]*12+[robot.tool_num,robot.user_num])
+    robot.gripper_command_known=True
+    robot.gripper_closed_estimate=False
     robot.board_to_pose=Mock(return_value=[-300,0,config.SAFE_Z,180,0,0])
     robot.gripper_ctrl=Mock()
     result=robot.move_piece(4,6,4,5,False)

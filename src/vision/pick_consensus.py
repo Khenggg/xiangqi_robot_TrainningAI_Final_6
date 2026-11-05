@@ -14,10 +14,11 @@ class FreshPickTransientError(RuntimeError):
 class PickTargetUnavailable(RuntimeError):
     """Only consensus/deadline exhaustion at a known pre-pick checkpoint."""
 
-    def __init__(self, reason, stage="pre_pick"):
+    def __init__(self, reason, stage="pre_pick", resolution=None):
         super().__init__(reason)
         self.reason = str(reason)
         self.stage = stage
+        self.resolution = dict(resolution) if resolution else {}
 
 
 @dataclass(frozen=True)
@@ -84,5 +85,5 @@ def require_pick_target(hardware, targets, name, stage="pre_pick"):
     resolution = getattr(hardware, "last_pick_resolution", {})
     reason = resolution.get("reason") or f"Missing/nonfinite {name} measured target"
     if resolution.get("failure") in {"consensus", "deadline"}:
-        raise PickTargetUnavailable(reason, stage)
+        raise PickTargetUnavailable(reason, stage, resolution=resolution)
     raise RuntimeError(reason)

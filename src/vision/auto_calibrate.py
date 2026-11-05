@@ -148,7 +148,33 @@ def stable_corner_consensus(samples, min_samples=6, max_jitter_px=3.0):
     return consensus.astype(np.float32)
 
 
-def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_model_path=None, preview_sec=2.0):
+def _choose_calibration_preview(window, preview, cancel_event):
+    cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+    try:
+        cv2.setWindowProperty(window, cv2.WND_PROP_TOPMOST, 1)
+    except cv2.error:
+        pass
+    try:
+        cv2.imshow(window, preview)
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                return "cancel"
+            key = cv2.waitKey(50) & 0xFF
+            if key in (ord('q'), ord('Q'), 27) or cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
+                return "cancel"
+            if key in (ord('s'), ord('S')):
+                return "accept"
+            if key in (ord('m'), ord('M')):
+                return "manual"
+    finally:
+        try:
+            cv2.destroyWindow(window)
+        except cv2.error:
+            pass
+
+
+def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_model_path=None, preview_sec=2.0,
+                         *, cancel_event=None, capture_owner=None, manual_only=False):
     """Quy trình hiệu chỉnh Camera tích hợp:
     
     1. Warm-up camera một lần duy nhất (tránh race condition).
@@ -167,9 +193,21 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
         print("[CALIBRATE] DRY_RUN: bo qua calibration.")
         return None
 
+    if manual_only:
+        print("[CALIBRATE] Manual four-corner calibration requested; skipping auto-detection.")
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("Camera calibration cancelled")
+        matrix = calibrate_perspective_camera(
+            cap, str(perspective_path), cancel_event=cancel_event, capture_owner=capture_owner)
+        if matrix is None:
+            raise RuntimeError("Camera calibration cancelled or failed")
+        return matrix
+
     # --- BƯỚC 1: WARM UP CAMERA (Đồng nhất, không race condition) ---
     print("\n[CALIBRATE] Dang on dinh Camera USB...")
     for _ in range(40):
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("Camera calibration cancelled")
         ret, _ = cap.read()
         if not ret:
             time.sleep(0.05)
@@ -192,6 +230,8 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
 
         # Require a stable majority rather than trusting the highest model score.
         for attempt in range(12):
+            if cancel_event is not None and cancel_event.is_set():
+                raise RuntimeError("Camera calibration cancelled")
             ret, frame = cap.read()
             if ret and frame is not None:
                 corners, score = calibrator.predict_corners(frame)
@@ -254,24 +294,12 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
                 win_name = "CALIBRATION_PREVIEW"
-                cv2.namedWindow(win_name)
-                cv2.imshow(win_name, preview)
-                accepted = False
-                cancelled = False
-                while True:
-                    key = cv2.waitKey(50) & 0xFF
-                    if key in (ord('s'), ord('S')):
-                        accepted = True
-                        break
-                    if key in (ord('m'), ord('M')):
-                        break
-                    if key in (ord('q'), ord('Q'), 27) or cv2.getWindowProperty(win_name, cv2.WND_PROP_VISIBLE) < 1:
-                        cancelled = True
-                        break
-                cv2.destroyWindow(win_name)
-                if cancelled:
+                choice = _choose_calibration_preview(win_name, preview, cancel_event)
+                if choice == "cancel":
                     raise RuntimeError("Camera calibration cancelled; previous matrix was not accepted")
-                if accepted:
+                if choice == "accept":
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise RuntimeError("Camera calibration cancelled")
                     np.save(str(perspective_path), M)
                     print(f"[CALIBRATE] Accepted and saved: {perspective_path}")
                     return M
@@ -284,7 +312,10 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
 
     # --- BƯỚC 3: FALLBACK CLICK TAY NẾU CHƯA CÓ MODEL HOẶC AUTO THẤT BẠI ---
     print("[CALIBRATE] Mo giao dien Click 4 goc thu cong...")
-    matrix = calibrate_perspective_camera(cap, str(perspective_path))
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError("Camera calibration cancelled")
+    matrix = calibrate_perspective_camera(cap, str(perspective_path),
+                                          cancel_event=cancel_event, capture_owner=capture_owner)
     if matrix is None:
         raise RuntimeError("Camera calibration cancelled or failed")
     return matrix

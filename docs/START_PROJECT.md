@@ -1,27 +1,95 @@
 # Khởi động dự án
 
+Game robot thật hiện lấy R1–R4, HOMECHESS và R_Trash từ bộ tọa độ cố định
+`calibration/physical_teaching_points_user0.json` (tool 0/user 0), không đọc lại
+teaching points/WObj trên controller. Không cần chọn frame trên pendant mỗi lần
+mở game. Sau cập nhật code, khởi động lại ứng dụng rồi xác nhận bàn và F9/F10 như
+bình thường. Telemetry robot và đối soát FEN vẫn hoạt động.
+
 Chạy lệnh tại thư mục repo bằng môi trường Python đã cài các dependencies.
+
+Mỗi lần mở game/chọn chế độ từ màn hình đầu sẽ tạo **phiên mới, FEN khai cuộc
+mới, Đỏ đi trước**. Xếp lại đủ 32 quân đúng vị trí ban đầu trước khi chơi bằng
+robot thật. Camera lấy ảnh mới để xác nhận toàn bộ bàn; ứng dụng không tự nạp
+FEN hoặc nước đi đang dở của lần chạy trước. Ván cũ được lưu trong lịch sử phiên
+(`session_archive` trong journal), không bị xóa cùng các biên nhận lệnh robot.
+Hiện không có nút tiếp tục ván cũ trong launcher.
+
+Nếu lần trước robot bị ngắt/lỗi, phiên mới vẫn giữ yêu cầu kiểm tra tay/kẹp và
+xác nhận robot đã dừng. Theo thông báo phục hồi, dùng Ctrl+F8 khi cần rồi V xác
+nhận **bàn khai cuộc mới**; sau đó mới F9/F10 để cho phép chuyển động. Khởi động
+lại không tự phát lại lệnh robot. Việc lấy ảnh mới dùng calibration camera đã
+lưu; không bắt buộc chấm lại bốn góc nếu camera/bàn vẫn ở vị trí cũ.
 
 Trong PowerShell: chạy `.\SETUP_WINDOWS.bat` một lần để cài Python dependencies và
 Three.js theo `package-lock.json` (cần Node.js LTS/npm). Sau đó dùng `.\RUN.bat`;
 tham số được chuyển nguyên vẹn vào `main.py`, ví dụ `.\RUN.bat --physical`,
-`.\RUN.bat --virtual` hoặc `.\RUN.bat --viewer-port 8090 --telemetry-port 8770`.
-Mặc định vẫn là mô phỏng; `--physical` kết nối ban đầu chỉ đọc.
+`.\RUN.bat --board-only` hoặc `.\RUN.bat --viewer-port 8090 --telemetry-port 8770`.
+Mặc định vẫn là mô phỏng; `--robot`/`--physical` kết nối ban đầu chỉ đọc.
 
-Nếu viewer trống: xem lỗi `VIEWER_FAILED` trong phiên log. Thiếu module Three.js
-thì chạy lại setup hoặc `npm ci --include=dev`. Server phục vụ `.mjs` và `.js`
-bằng MIME JavaScript cố định. Sau khi cập nhật code server, thoát phiên game cũ,
-chạy lại `RUN.bat` rồi tải lại trang bằng Ctrl+F5.
+`RUN.bat` ưu tiên `.venv312` rồi `.venv`, kiểm tra nhanh `pygame`, `numpy`, `cv2`,
+`pybullet`, `websockets` trước khi chạy, và giữ nguyên mã thoát của `main.py`.
+Đặt `XIANGQI_NO_PAUSE=1` khi chạy từ script/CI để bỏ bước chờ Enter. Nếu thiếu
+`ultralytics` hoặc `node_modules/three`, launcher chỉ cảnh báo; game vẫn có thể
+chạy ở chế độ không dùng camera/viewer.
+
+Nếu viewer trống: xem lỗi `VIEWER_FAILED` trong phiên log. Viewer dùng
+`three` từ `node_modules/three` và `occt-import-js` đã vendor tại
+`robot-3d-viewer/vendor/occt-import-js/` (JS + WASM + license), nên không cần
+Internet/jsDelivr để tải CAD gripper. Thiếu module Three.js thì chạy lại setup
+hoặc `npm ci --include=dev`. Server phục vụ `.mjs`/`.js` bằng MIME JavaScript
+và `.wasm` bằng `application/wasm`. Sau khi cập nhật code server, thoát phiên
+game cũ, chạy lại `RUN.bat` rồi tải lại trang bằng Ctrl+F5.
 
 Mỗi phiên tự ghi log vào `logs/<id-phien>/`; đường dẫn xuất hiện trên terminal. Dùng `--log-level DEBUG` để xem chi tiết hơn hoặc `--log-dir <thu-muc>` để đổi nơi lưu. Xem [LOGGING.md](LOGGING.md) để đọc mã lỗi và truy vết nước đi.
 
 | Lệnh | Chức năng |
 |---|---|
-| `python main.py` | Game + mô phỏng FR3 + viewer; không dùng camera/robot thật |
-| `python main.py --virtual` | Theo quy ước của chủ dự án: **tắt mô phỏng**, chỉ chơi game bằng chuột với AI |
-| `python main.py --physical` | Game + camera + FR3 thật + viewer đồng bộ; kết nối ban đầu chỉ đọc |
-| `python main.py --no-viewer` | Game + mô phỏng, không mở web viewer |
+| `python main.py` / `--sim` | Game + mô phỏng FR3 + viewer; không dùng camera/robot thật |
+| `python main.py --board-only` | Game-only: bàn cờ 2D, không mô phỏng/camera/robot/viewer |
+| `python main.py --robot` | Game + camera + FR3 thật + viewer đồng bộ; kết nối ban đầu chỉ đọc |
+| `python main.py --no-3d` | Vẫn mô phỏng/kết nối robot, chỉ không mở web viewer |
 | `python main.py --help` | Xem các lựa chọn, không mở thiết bị |
+
+Các alias cũ `--virtual`, `--physical`, `--no-viewer` vẫn dùng được. `--board-only`/`--robot`/`--sim` là tên dành cho người vận hành; `--no-3d` chỉ tắt cửa sổ 3D, **không** tắt robot hay mô phỏng.
+
+Màn hình chính có ba thẻ môi trường: **Chơi trên máy**, **Mô phỏng 3D**, **Robot thật**. Flag CLI chỉ chọn sẵn thẻ; người dùng vẫn có thể đổi thẻ trước khi chọn chế độ chơi. Thẻ **Robot thật** đi qua đúng luồng camera + FR3 read-only và vẫn cần F9/F10 để bật chuyển động.
+
+> **Lưu ý dây mạng robot:** cáp/đầu nối Ethernet tới `192.168.58.2` đang lỏng,
+> nên kết nối có thể mất tạm thời. Kiểm tra bằng
+> `ping -n 2 -S 192.168.58.3 192.168.58.2`, cắm lại dây nếu timeout; không bật
+> F9/F10 khi link chưa ổn định. Chi tiết: [`../ROBOT_CONNECTION.md`](../ROBOT_CONNECTION.md).
+
+### Camera Monitor khác quét FEN như thế nào
+
+- **Camera Monitor** hiển thị kết quả CChess ONNX theo từng frame và tổng số quân
+  (`Đỏ 16 / Đen 16`). Đây là hiển thị nhận diện, không phải xác nhận FEN.
+- **Quét FEN / V / F4** dùng cùng CChess nhưng yêu cầu thêm: board sanity, frame
+  mới, hai mẫu liên tiếp giống nhau, confidence trên các ô có quân, và so khớp
+  chính xác từng ô với FEN dự kiến.
+- Vì vậy Camera Monitor có thể thấy đủ 32 quân trong khi FEN sai chỉ vì một quân
+  lệch ô, sai loại, hoặc confidence thấp.
+- `CCHESS_RECOVERY_MIN_CONFIDENCE` chỉ áp dụng cho ô có quân; confidence của ô
+  trống không được dùng để chặn FEN. Log `camera.verification_failed` có
+  `diff_cells` để chỉ ô lệch.
+
+### Calibrate lại camera bằng 4 điểm bàn cờ
+
+- Mặc định `--physical` dùng `perspective.npy` đã lưu.
+- Muốn chấm lại 4 góc bàn từ camera, chọn thẻ **ROBOT THẬT**, tick **Chấm lại 4 góc bàn từ camera** rồi bấm **VS ROBOT**.
+- App mở cửa sổ **CALIBRATE** với ảnh camera. Click lần lượt 4 giao điểm ngoài cùng của lưới:
+  1. Xe Đen trái
+  2. Xe Đen phải
+  3. Xe Đỏ phải
+  4. Xe Đỏ trái
+- Bấm `S` để lưu, `R` để chấm lại, `Q`/`ESC` để hủy. Lưới vàng hiện trên ảnh để kiểm tra trước khi lưu.
+- Checkbox này bỏ qua auto-detection và mở thẳng chế độ chấm tay. Chỉ có hiệu lực cho một lần khởi động.
+- Có thể chọn sẵn bằng `python main.py --physical --recalibrate-camera`. Flag này chọn sẵn checkbox (chấm tay); nếu bỏ tick, app dùng luồng cũ: auto trước, fallback chấm tay.
+- Nếu chưa có `perspective.npy`, app tự mở calibration ở lần chạy đầu. File hỏng làm startup dừng với hướng dẫn.
+- Không có cửa sổ calibration không có nghĩa là camera không được kiểm tra: app vẫn mở camera, đọc frame và kiểm tra ma trận đã lưu.
+- Calibration này chỉ sửa phối cảnh camera → lưới bàn cờ. Nó **không** sửa R1–R4 của controller và không cấp quyền chuyển động; F9/F10 vẫn bắt buộc.
+- Physical cần **cả** model CChess ONNX và YOLO `best.pt`. Thiếu một trong hai, startup dừng với `Physical camera recognition unavailable`.
+- `verify_physical_board` vẫn đòi khớp chính xác 90 ô, nhưng có retry tối đa `VERIFY_BOARD_RETRY_TIMEOUT_SEC` (mặc định 2 giây).
 
 Chọn chế độ chơi trên màn hình đầu. Khi chọn ván, engine/backend/camera tương ứng được khởi tạo; viewer tự mở và Connect live tự kết nối sau khi tải model xong. Quân cờ được đồng bộ từ GameState, tay robot từ telemetry. Ở chế độ physical, quân simulation cập nhật sau khi camera xác nhận nước đi hoàn tất.
 
@@ -54,6 +122,16 @@ Người đi ngoài đời rồi bấm SPACE. AI chỉ cập nhật nước đi 
 ## Lưu bàn và khôi phục lỗi
 
 Trong viewer, tab **Vị Trí** có **Lưu vị trí đã áp dụng** / **Khôi phục profile đã lưu**. Profile chỉ dùng cho mô phỏng; sau restart nạp theo thao tác có giám sát qua SERVICE_SAFE. Khi game khóa, panel trái hiện lý do, nước chờ và bước khôi phục. Xem `docs/BOARD_PROFILE_AND_RECOVERY.md`.
+
+Khi physical đang khóa vì lỗi nước đi, bấm **XÓA PHIÊN LỖI** (`F12`) để app
+kiểm tra toàn bộ bàn thật khớp FEN hiện tại rồi mới xóa giao dịch lỗi và mở khóa.
+Nếu camera báo bàn chưa khớp, nút không xóa và yêu cầu dùng `V`/`F4` hoặc
+calibrate lại camera. Nút không gửi lệnh robot/gripper.
+
+Khi khởi động lại, giao dịch AI lỗi do kiểm tra **HOMECHESS trước khi gửi lệnh**
+được bỏ khỏi pending transaction thay vì nạp lại mãi. Bàn/FEN vẫn ở trạng thái
+khóa và phải xác nhận bằng `V`/`F4` hoặc **XÓA PHIÊN LỖI**; các lỗi sau khi đã
+gửi lệnh robot vẫn được giữ để điều tra, không tự động xóa.
 
 ## Cổng đang được sử dụng
 

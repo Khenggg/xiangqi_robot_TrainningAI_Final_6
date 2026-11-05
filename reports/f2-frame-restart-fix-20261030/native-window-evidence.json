@@ -1,0 +1,7 @@
+{
+  "native_highgui": true,
+  "stopped_on_worker": true,
+  "window_closed_on_gui": true,
+  "real_camera_or_robot_calls": 0,
+  "errors": []
+}

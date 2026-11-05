@@ -51,25 +51,29 @@ def test_borrowed_source_uses_existing_handle_only():
 
 def test_unknown_contact_offset_cannot_read_teaching_points():
     robot = SimpleNamespace(robot=Mock())
-    with pytest.raises(ValueError, match="contact offset"):
+    with pytest.raises(ValueError, match="surface Z|contact offset"):
         physical_board_provider(robot, SimpleNamespace())
+    with pytest.raises(ValueError, match="contact offset"):
+        physical_board_provider(robot, SimpleNamespace(BOARD_CALIBRATION_MODEL="SE3_LEGACY"))
     robot.robot.GetRobotTeachingPoint.assert_not_called()
 
 
 def test_visual_command_correction_is_diagnostic_not_a_motion_interlock():
     state = BoardPlacementState.compute(0.)
     points = {}
+    cached_teaching = {}
     for name, cell in zip(("R1", "R2", "R3", "R4"), ((0, 0), (0, 8), (9, 8), (9, 0))):
-        points[name] = list(state.cell_to_robot_xyz(*cell) * 1000.) + [180., 0., 0.] + [0.] * 6 + [2., 0.]
+        pose = list(state.cell_to_robot_xyz(*cell) * 1000.) + [180., 0., 0.]
+        points[name] = pose + [0.] * 6 + [2., 0.]
+        cached_teaching[name] = {"pose": pose, "tool": 2, "user": 0}
     rpc = Mock()
     rpc.GetRobotTeachingPoint.side_effect = lambda name: (0, points[name])
-    robot = SimpleNamespace(robot=rpc, tool_num=0, user_num=1,
+    robot = SimpleNamespace(robot=rpc, tool_num=2, user_num=0, teaching_points=cached_teaching,
         board_to_pose_bilinear=lambda col, row, z: list(state.cell_to_robot_xyz(row, col)[:2] * 1000.) + [z])
-    cfg = SimpleNamespace(BOARD_CALIBRATION_OFFSET_MM=[0., 0., 0.],
+    cfg = SimpleNamespace(BOARD_CALIBRATION_MODEL="SE3_LEGACY", BOARD_CALIBRATION_OFFSET_MM=[0., 0., 0.],
         BOARD_CALIBRATION_OFFSET_FRAME="ROBOT_BASE", BOARD_CALIBRATION_PROVENANCE="SYNTHETIC_TEST_ONLY")
     assert physical_board_provider(robot, cfg).is_calibrated
     assert (robot.tool_num, robot.user_num) == (2, 0)
-    robot.tool_num, robot.user_num = 0, 1
     robot.board_to_pose_bilinear = lambda col, row, z: list(state.cell_to_robot_xyz(row,col)[:2]*1000. + [5.,0.]) + [z]
     provider = physical_board_provider(robot, cfg)
     assert provider.visual_command_xy_difference_mm == pytest.approx(5., abs=.001)

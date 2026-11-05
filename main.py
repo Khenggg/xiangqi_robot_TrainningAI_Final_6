@@ -83,7 +83,7 @@ def _kill_zombie_processes():
 pygame.init()
 pygame.font.init()
 
-from src.ui.board_renderer import BoardRenderer, SCREEN_WIDTH, SCREEN_HEIGHT  # type: ignore
+from src.ui.board_renderer import BoardRenderer, SCREEN_WIDTH, SCREEN_HEIGHT, BTN_NEW_GAME_RECT, BTN_MODE_SELECT_RECT  # type: ignore
 from src.ui.game_window import GameWindow
 game_window = GameWindow((SCREEN_WIDTH, SCREEN_HEIGHT))
 screen = game_window.canvas
@@ -96,8 +96,20 @@ hw = None
 telemetry = None
 self_play = None
 input_mgr = None
+session_control = None
+quit_requested = False
+mode_disposal = None
+mode_switching = False
+mode_switch_failed = False
 difficulty_menu_active = False
 home_screen_active = True
+home_mode = ("PHYSICAL" if getattr(launch_options, "physical", False)
+             else "BOARD_ONLY" if getattr(launch_options, "virtual", False)
+             else "SIMULATION")
+# The checkbox requests manual four-corner camera calibration at physical
+# startup. --recalibrate-camera preselects it.
+physical_camera_recalibration_requested = bool(
+    getattr(launch_options, "recalibrate_camera", False))
 startup_message = ""
 settings_menu_active = False
 difficulty_menu_message = ""
@@ -109,6 +121,7 @@ from src.core.motion_worker import MotionWorker
 startup_worker = MotionWorker()
 startup_cancelled = threading.Event()
 _cleanup_done = False
+_cleanup_disposal = None
 
 
 def set_debug_dashboard(enabled):
@@ -126,7 +139,11 @@ def set_debug_dashboard(enabled):
 
 def _start_selected_game():
     assert hw is not None
-    captured = hw.capture_baseline_if_needed(force_delay=0.0, expected_board=state.board)
+    profile = getattr(hw, "profile", None)
+    captured = (hw.capture_baseline_if_needed(force_delay=0.0, expected_board=state.board)
+                if profile is None or profile.camera_enabled else True)
+    if profile is not None and profile.mouse_input == "VIRTUAL_TEST_ADAPTER":
+        state.set_status("HvR ẢO: bộ nhập chuột phục vụ test, không phải xác nhận camera thật.", duration=30)
     if not config.DRY_RUN and not captured:
         state.manual_override_active = True
         state.snapshot_continue_required = True
@@ -136,26 +153,79 @@ def _start_selected_game():
         state.set_status("FR3 chỉ đọc. Kiểm tra setup, bấm F9 rồi F10 để bật robot; F6 bắt đầu self-play.", duration=30)
     if config.GAME_MODE == "ROBOT_VS_ROBOT" and self_play is not None and hw.is_robot_ready:
         difficulty = getattr(config, "AI_DIFFICULTY", "medium")
-        if self_play.start(difficulty, difficulty, run_mode="step"):
-            state.set_status("Robot vs robot: F7 next move / F8 stop", duration=30)
-    if not config.DRY_RUN:
-        state.api_client.ensure_match(red_name="Người chơi Thật", black_name="Robot AI",
-                                      initial_fen=state.current_fen)
+        if self_play.start(difficulty, difficulty, run_mode="continuous"):
+            state.set_status("Robot vs robot: continuous / F8 stop", duration=30)
+    if state.api_client.token and not state.recovery_required:
+        state.ensure_spectator_match()
+
+def _retain_startup_failure(error):
+    """Do not launch a second session above resources whose close failed."""
+    global hw, telemetry, viewer_server, self_play, input_mgr, session_control
+    global mode_disposal, mode_switch_failed, home_screen_active, difficulty_menu_active
+    from src.core.session_control import SessionControl
+    from src.core.session_disposal import SessionDisposal
+    hw, telemetry, viewer_server = error.manager, error.telemetry, error.viewer
+    self_play = input_mgr = None
+    session_control = SessionControl(state, hw, None) if hw is not None else None
+    mode_disposal = SessionDisposal(state, hw, None, telemetry, viewer_server, debug_dashboard,
+                                   require_settled=False, publish_end=False)
+    # A previous cleanup may have proved stop and closed the SDK before a camera
+    # or web resource failed. Its frozen retirement proof remains valid here.
+    mode_disposal._stop_proved = bool(hw is not None and getattr(hw, "_closing", False)
+                                     and getattr(hw, "_cleanup_stop_proved", False))
+    if hw is not None and not mode_disposal._stop_proved:
+        hw.request_controlled_stop("Partial startup retirement")
+    mode_switch_failed = True
+    home_screen_active = difficulty_menu_active = False
+    state.set_status(f"Giữ phiên khởi tạo lỗi: {error}. F2 đóng lại trước khi chọn chế độ mới.", duration=60)
+
 
 def _finish_startup(result, error):
-    global hw, telemetry, viewer_server, self_play, input_mgr, home_screen_active
-    global difficulty_menu_active, startup_message, mirror_error
+    global hw, telemetry, viewer_server, self_play, input_mgr, home_screen_active, state
+    global difficulty_menu_active, startup_message, mirror_error, session_control
     if error:
-        startup_message = f"Không khởi tạo được: {error}. Khắc phục rồi chọn chế độ lại. Chi tiết STARTUP_FAILED trong logs/."
+        from src.core.session_startup import StartupRollbackError
+        if isinstance(error, StartupRollbackError):
+            _retain_startup_failure(error)
+            return
+        # Successful rollback closed its API worker/journal. A retry gets new
+        # local owners; the next attach restores saved truth through recovery.
+        state = GameState(allow_mouse_move=config.DRY_RUN)
+        error_text = str(error)
+        lower_error = error_text.lower()
+        if "calibration" in lower_error or "perspective" in lower_error:
+            calibration_hint = (
+                " Tick Chấm lại 4 góc bàn từ camera trong thẻ ROBOT THẬT rồi thử lại.")
+        elif "R1-R4" in error_text or "R1–R4" in error_text:
+            calibration_hint = (
+                " Kiểm tra/dạy lại R1–R4 trên pendant (cùng tool, user 0) trước khi thử lại.")
+        else:
+            calibration_hint = ""
+        startup_message = (f"Không khởi tạo được: {error}. Khắc phục rồi chọn chế độ lại."
+                           f"{calibration_hint} Chi tiết STARTUP_FAILED trong logs/.")
         log_event("startup.blocked", startup_message, level=logging.ERROR, code="STARTUP_FAILED")
         return
     manager, publisher, server, reason = result
+    if getattr(manager, "profile", None) is None:
+        from src.core.session_profile import profile_from_config
+        manager.profile = profile_from_config(config)
+    if getattr(manager, "stop_coordinator", None) is None:
+        from src.hardware.controlled_stop import ControlledStopCoordinator
+        manager._piece_move_lock = getattr(manager, "_piece_move_lock", None) or threading.Lock()
+        manager.robot = getattr(manager, "robot", None)
+        manager.stop_coordinator = ControlledStopCoordinator(manager)
+    if not callable(getattr(manager, "request_controlled_stop", None)):
+        manager.request_controlled_stop = manager.stop_coordinator.begin
     try:
         controller = SelfPlayController(state, manager)
         handler = InputHandler(state, manager)
     except Exception as exc:
-        from src.core.session_startup import rollback_session
-        rollback_session(manager, publisher, server, state)
+        from src.core.session_startup import rollback_session, StartupRollbackError
+        try:
+            rollback_session(manager, publisher, server, state)
+        except StartupRollbackError as cleanup_error:
+            _retain_startup_failure(cleanup_error)
+            return
         hw = telemetry = viewer_server = self_play = input_mgr = None
         home_screen_active = True
         difficulty_menu_active = False
@@ -163,6 +233,13 @@ def _finish_startup(result, error):
         return
     hw, telemetry, viewer_server, mirror_error = manager, publisher, server, reason
     self_play, input_mgr = controller, handler
+    profile = manager.profile
+    caption = ("Người vs Người — Chuột, không Camera/FR3" if profile.game_mode == "HUMAN_VS_HUMAN"
+               else ("ẢO / bộ nhập test" if profile.dry_run else "THẬT / Camera & FR3"))
+    pygame.display.set_caption(f"Xiangqi Robot — {caption}")
+    from src.core.session_control import SessionControl
+    session_control = SessionControl(state, manager, controller)
+    handler.session_control = session_control
     if mirror_error:
         state.set_status(mirror_error, duration=30)
     home_screen_active = False
@@ -207,11 +284,90 @@ def _select_difficulty(choice):
     hw.motion_worker.start(lambda: hw.select_difficulty(choice), completed)
 
 
-def _cleanup_all():
-    global _cleanup_done
-    if _cleanup_done:
+def _request_mode_menu():
+    if mode_switching:
         return
-    _cleanup_done = True
+    if mode_switch_failed and mode_disposal is not None:
+        _begin_mode_disposal()
+    elif session_control is not None:
+        session_control.request("home")
+
+
+def _launch_session_mode(selected_mode, *, camera_recalibration=False):
+    """Start one session, optionally forcing manual four-corner camera calibration."""
+    global startup_message
+    mode_label = {"BOARD_ONLY": "bàn cờ 2D", "SIMULATION": "mô phỏng 3D",
+                  "PHYSICAL": "robot thật"}.get(selected_mode, selected_mode)
+    startup_message = f"Đang khởi tạo {mode_label}… Có thể đóng cửa sổ để hủy."
+    from src.core.session_startup import build_session
+    previous_recalibrate = bool(getattr(config, "RECALIBRATE_CAMERA", False))
+    previous_manual = bool(getattr(config, "CAMERA_CALIBRATION_MANUAL_ONLY", False))
+
+    def _start_selected_session():
+        config.RECALIBRATE_CAMERA = bool(previous_recalibrate or camera_recalibration)
+        config.CAMERA_CALIBRATION_MANUAL_ONLY = bool(camera_recalibration)
+        try:
+            return build_session(config, launch_options, _BASE_DIR, state,
+                                 startup_cancelled, selected_mode)
+        finally:
+            config.RECALIBRATE_CAMERA = previous_recalibrate
+            config.CAMERA_CALIBRATION_MANUAL_ONLY = previous_manual
+
+    if camera_recalibration:
+        log_event("physical.camera_calibration_requested",
+                  "Người vận hành yêu cầu chấm lại 4 góc bàn từ camera",
+                  level=logging.INFO)
+    return startup_worker.start(_start_selected_session, _finish_startup)
+
+
+def _begin_mode_disposal():
+    global mode_disposal, mode_switching, mode_switch_failed
+    if mode_switching or startup_worker.busy or (hw is None and mode_disposal is None):
+        return
+    if mode_disposal is None:
+        from src.core.session_disposal import SessionDisposal
+        mode_disposal = SessionDisposal(state, hw, self_play, telemetry, viewer_server, debug_dashboard)
+    mode_switching = True
+    mode_switch_failed = False
+    state.set_status("Đang đóng phiên cũ; chưa mở camera/robot của chế độ mới.", duration=60)
+    camera = getattr(hw, "cam_monitor", None)
+    if callable(getattr(camera, "close_display", None)):
+        camera.close_display()
+    if not startup_worker.start(mode_disposal.run, _finish_mode_disposal):
+        mode_switching = False
+
+
+def _finish_mode_disposal(result, error):
+    global mode_disposal, mode_switching, mode_switch_failed, state, hw, telemetry, self_play
+    global viewer_server, input_mgr, session_control, debug_dashboard, home_screen_active
+    global difficulty_menu_active, settings_menu_active, startup_message, startup_cancelled
+    global physical_enable_pending, physical_camera_recalibration_requested
+    mode_switching = False
+    if error or result is not True:
+        mode_switch_failed = True
+        reason = str(error or "Teardown did not complete")
+        log_event("session.switch_failed", reason, level=logging.ERROR, code="SESSION_SWITCH_FAILED")
+        state.set_status(f"Chưa đổi chế độ: {reason}. F2 thử lại sau khi xử lý; Ctrl+F9 chỉ khi đã tắt controller trên pendant.", duration=60)
+        return
+    # All old actor/read/projection owners are closed before replacing globals.
+    hw = telemetry = self_play = viewer_server = input_mgr = session_control = debug_dashboard = None
+    mode_disposal = None
+    mode_switch_failed = False
+    physical_enable_pending = False
+    physical_camera_recalibration_requested = False
+    difficulty_menu_active = settings_menu_active = False
+    if not quit_requested:
+        state = GameState(allow_mouse_move=True)
+        startup_cancelled = threading.Event()
+        startup_message = "Phiên cũ đã đóng. Chọn chế độ để bắt đầu ván mới."
+        home_screen_active = True
+        pygame.display.set_caption("Xiangqi Robot — Chọn chế độ")
+
+
+def _cleanup_all():
+    global _cleanup_done, _cleanup_disposal
+    if _cleanup_done:
+        return True
     startup_cancelled.set()
     failures = []
     def close(name, operation):
@@ -222,25 +378,152 @@ def _cleanup_all():
             failures.append(f"{name}: {exc}")
             log_event("cleanup.failed", f"{name}: {exc}", level=logging.ERROR)
             return False
-    close("startup", startup_worker.close)
-    close("startup result", startup_worker.poll)
-    if state and state.api_client:
-        close("API end", lambda: state.api_client.end_match(reason="OTHER"))
-        if callable(getattr(state.api_client, 'close', None)):
-            close("API", state.api_client.close)
-    safe_to_close_hardware = self_play is None or close("self-play", self_play.close)
-    if hw is not None and safe_to_close_hardware:
-        close("hardware", hw.cleanup)
-    if telemetry is not None:
-        close("telemetry", telemetry.stop)
-    if debug_dashboard is not None:
-        close("dashboard", debug_dashboard.close)
-    if viewer_server is not None:
-        close("viewer", viewer_server.close)
-    close("pygame", pygame.quit)
+    if not close("startup", startup_worker.close):
+        return False
+    if not close("startup result", startup_worker.poll):
+        return False
+    if _cleanup_disposal is None:
+        from src.core.session_disposal import SessionDisposal
+        _cleanup_disposal = mode_disposal or SessionDisposal(
+            state, hw, self_play, telemetry, viewer_server, debug_dashboard, require_settled=False)
+    # Once disposal has proved stop and frozen dispatch, SDK closure must not
+    # force another telemetry read or replay controller stop/disable on retry.
+    if hw is not None and not _cleanup_disposal._stop_proved:
+        try:
+            stop = hw.request_controlled_stop("Shutdown", workers_finished=lambda:
+                (self_play is None or self_play._thread is None or not self_play._thread.is_alive())
+                and (state.ai_thread is None or not state.ai_thread.is_alive())
+                and all(not thread.is_alive() for thread in state._retired_ai_threads))
+            if not stop.done.wait(7.0) or not stop.result.safe:
+                raise RuntimeError("Chưa xác nhận robot dừng; giữ camera/controller/phiên")
+        except Exception as exc:
+            log_event("cleanup.recovery_required", str(exc), level=logging.ERROR)
+            return False
+    camera = getattr(hw, "cam_monitor", None)
+    if callable(getattr(camera, "close_display", None)):
+        close("camera display", camera.close_display)
+    if not close("session disposal", _cleanup_disposal.run):
+        return False
+    if not close("pygame", pygame.quit):
+        return False
+    _cleanup_done = True
     log_event("app.cleanup", "Đã đóng các dịch vụ; kiểm tra lỗi còn chờ nếu có.", failures=failures)
+    return True
 
 atexit.register(_cleanup_all)
+
+
+def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
+    """Keep an operator UI alive until stop is proved; do not fall into atexit."""
+    global quit_requested
+    quit_requested = True
+    startup_cancelled.set()
+    if session_control is not None and not cleanup_retry:
+        session_control.request("quit")
+    try:
+        if not cleanup_retry:
+            state.persist_checkpoint("RECOVERY_REQUIRED")
+    except Exception as persist_error:
+        log_event("session.persistence_failed", str(persist_error), level=logging.ERROR,
+                  code="SESSION_PERSISTENCE_FAILED")
+    message = f"RECOVERY REQUIRED: {type(exc).__name__}. Inspect arm/gripper on pendant, then Ctrl+F8."
+    log_event("app.recovery_wait", message, level=logging.ERROR)
+    recovery_clock = pygame.time.Clock()
+    # Startup/hardware workers may already be closed by a partial teardown.
+    # This worker performs operator-approved read-only confirmation only.
+    operator_worker = MotionWorker()
+    retry_requested = False
+    force_close_deadline = 0.0
+    while True:
+        try:
+            for item in pygame.event.get():
+                if item.type == pygame.KEYDOWN and item.key == pygame.K_F2:
+                    retry_requested = True
+                if (item.type == pygame.KEYDOWN and item.key == pygame.K_F8
+                        and getattr(item, "mod", 0) & pygame.KMOD_CTRL
+                        and hw is not None and not hw.motion_worker.running):
+                    operator_worker.start(lambda: hw.confirm_operator_stop(approved=True), _job_completed)
+                if (item.type == pygame.KEYDOWN and item.key == pygame.K_F9
+                        and getattr(item, "mod", 0) & pygame.KMOD_CTRL
+                        and hw is not None and not hw.motion_worker.running):
+                    operator_worker.start(lambda: hw.confirm_operator_controller_disabled(approved=True), _job_completed)
+            # Completed callbacks may themselves be the original failure source.
+            # Poll once to retire ownership, preserving pending state on failure.
+            for worker in (startup_worker, operator_worker, hw.motion_worker if hw is not None else None):
+                if worker is not None:
+                    try:
+                        worker.poll()
+                    except Exception as callback_error:
+                        log_event("app.recovery_callback_failed", str(callback_error), level=logging.ERROR)
+            if self_play is not None and not cleanup_retry:
+                try:
+                    self_play.tick()
+                except Exception as controller_error:
+                    self_play._fault(f"RECOVERY_REQUIRED: {controller_error}")
+            # F2 retries cleanup from either recovery phase. Cleanup itself still
+            # enforces the robot/camera stop barrier; F2 is not a force-kill.
+            if (retry_requested and not operator_worker.busy and not startup_worker.running
+                    and (hw is None or not hw.motion_worker.running)):
+                operator_worker.close()
+                return
+            if not cleanup_retry:
+                if session_control is not None:
+                    if session_control.poll() == "quit":
+                        operator_worker.close()
+                        return
+                elif not startup_worker.running:
+                    operator_worker.close()
+                    return
+            # Render independently of the regular renderer which may have failed.
+            surface = pygame.display.get_surface()
+            if surface is not None:
+                surface.fill((35, 20, 20))
+                font = pygame.font.Font(None, 24)
+                ctrl_c_hint = ("Ctrl+C again within 5s: force close (only when robot is disabled)."
+                               if force_close_deadline > time.monotonic()
+                               else "Ctrl+C twice: force close only after robot/camera is disabled.")
+                for index, line in enumerate(("RECOVERY REQUIRED - project is paused", str(exc)[:100],
+                                              "Inspect/stop the arm and gripper on the pendant.",
+                                              "Ctrl+F8: approve read-only stop verification.",
+                                              "Ctrl+F9: confirm controller disabled on pendant (lost disable ACK).",
+                                              "F2: retry closing unfinished resources.",
+                                              ctrl_c_hint,
+                                              "Camera/controller and pending transaction are retained.")):
+                    surface.blit(font.render(line, True, (255, 220, 200)), (20, 25 + index * 30))
+                pygame.display.flip()
+            recovery_clock.tick(10)
+        except KeyboardInterrupt:
+            now = time.monotonic()
+            robot = getattr(hw, "robot", None) if hw is not None else None
+            motion_owned = bool(getattr(robot, "physical_motion_authorized", False)
+                                or getattr(robot, "_activation_owned", False)
+                                or getattr(robot, "_gripper_pulse_active", False))
+            pending = bool(state is not None and (
+                state.pending_move is not None or state.pending_ai_move is not None
+                or state.pending_test_motion is not None
+                or getattr(state, "pick_test_resume_required", False)))
+            if now <= force_close_deadline:
+                if motion_owned or pending:
+                    force_close_deadline = 0.0
+                    log_event("app.force_close_refused",
+                              "Không buộc đóng khi robot còn quyền chuyển động hoặc giao dịch đang chờ; "
+                              "dùng Ctrl+F8/Ctrl+F9 rồi thử lại.", level=logging.ERROR)
+                else:
+                    log_event("app.force_close",
+                              "Người vận hành xác nhận Ctrl+C lần hai; buộc đóng tiến trình.",
+                              level=logging.ERROR)
+                    try:
+                        logging.shutdown()
+                    finally:
+                        os._exit(130)
+            else:
+                force_close_deadline = now + 5.0
+                log_event("app.force_close_armed",
+                          "Ctrl+C đã được nhận; nhấn lần nữa trong 5 giây để buộc đóng sau khi kiểm tra pendant.",
+                          level=logging.WARNING)
+        except pygame.error as display_error:
+            log_event("app.recovery_display_failed", str(display_error), level=logging.ERROR)
+            time.sleep(.1)
 
 # ==========================================
 # 2. VÒNG LẶP CHÍNH
@@ -260,6 +543,8 @@ try:
         if settings_menu_active:
             renderer.draw_settings_menu(getattr(config, "DEBUG_DASHBOARD", False))
         elif home_screen_active:
+            renderer.home_mode = home_mode
+            renderer.physical_camera_recalibration_requested = physical_camera_recalibration_requested
             renderer.draw_home_screen(startup_message)
         else:
             state.is_robot_ready = hw.is_robot_ready if hw is not None else False
@@ -278,8 +563,51 @@ try:
             if event is None:
                 continue
             if event.type == pygame.QUIT:
-                running = False
-                break
+                quit_requested = True
+                startup_cancelled.set()
+                if session_control is not None:
+                    session_control.request("quit")
+                continue
+            # Urgent controls bypass the normal busy-input filter.
+            elif (event.type == pygame.KEYDOWN and event.key == pygame.K_F9
+                  and getattr(event, "mod", 0) & pygame.KMOD_CTRL and hw is not None):
+                if not startup_worker.busy:
+                    startup_worker.start(lambda: hw.confirm_operator_controller_disabled(approved=True), _job_completed)
+                continue
+            elif (event.type == pygame.KEYDOWN and event.key == pygame.K_F2
+                  and not home_screen_active and not settings_menu_active):
+                _request_mode_menu()
+                continue
+            elif (event.type == pygame.MOUSEBUTTONDOWN and session_control is not None
+                  and not home_screen_active and not settings_menu_active
+                  and BTN_MODE_SELECT_RECT.collidepoint(event.pos)):
+                _request_mode_menu()
+                continue
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_F8 and hw is not None:
+                if getattr(event, "mod", 0) & pygame.KMOD_CTRL:
+                    verifier_worker = startup_worker if mode_switch_failed or getattr(hw, "_closing", False) else hw.motion_worker
+                    verifier_worker.start(lambda: hw.confirm_operator_stop(approved=True), _job_completed)
+                elif self_play is not None and self_play.active:
+                    self_play.end_match()
+                elif session_control is not None:
+                    session_control.request("pause")
+                continue
+            elif (event.type == pygame.MOUSEBUTTONDOWN and session_control is not None
+                  and not mode_switching and not mode_switch_failed
+                  and not home_screen_active and not settings_menu_active and not difficulty_menu_active
+                  and (input_mgr is None or (hw is not None and hw.motion_worker.busy)
+                       or (self_play is not None and self_play.human_input_disabled and not self_play.recovery_input_allowed))
+                  and BTN_NEW_GAME_RECT.collidepoint(event.pos)):
+                session_control.request("reset")
+                continue
+            elif (mode_switching or mode_switch_failed) and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                continue
+            elif quit_requested and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                if (event.type == pygame.KEYDOWN and input_mgr is not None
+                        and event.key in (pygame.K_v, pygame.K_F4, pygame.K_1, pygame.K_2)
+                        and not hw.motion_worker.busy):
+                    input_mgr.handle_keyboard(event.key)
+                continue
             elif ((startup_worker.busy or (hw is not None and hw.motion_worker.busy))
                   and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN)):
                 continue
@@ -287,14 +615,30 @@ try:
                 home_action = None
                 start_vs_robot = event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)
                 if event.type == pygame.MOUSEBUTTONDOWN:
+                    if (home_mode == "PHYSICAL"
+                            and renderer.home_physical_camera_calibration_from_pixel(
+                                event.pos[0], event.pos[1])):
+                        physical_camera_recalibration_requested = not physical_camera_recalibration_requested
+                        startup_message = ""
+                        continue
+                    selected_mode = renderer.home_mode_from_pixel(event.pos[0], event.pos[1])
+                    if selected_mode is not None:
+                        if selected_mode != home_mode:
+                            physical_camera_recalibration_requested = False
+                        home_mode = selected_mode
+                        startup_message = ""
+                        continue
                     home_action = renderer.home_action_from_pixel(event.pos[0], event.pos[1])
                     start_vs_robot = home_action in ("vs_robot", "self_play", "human_vs_human")
                 if start_vs_robot:
                     config.GAME_MODE = {"self_play": "ROBOT_VS_ROBOT", "human_vs_human": "HUMAN_VS_HUMAN"}.get(home_action, "HUMAN_VS_ROBOT")
-                    startup_message = "Đang khởi tạo camera/robot/dịch vụ… Có thể đóng cửa sổ để hủy."
-                    from src.core.session_startup import build_session
-                    startup_worker.start(lambda: build_session(config, launch_options, _BASE_DIR, state,
-                                                              startup_cancelled), _finish_startup)
+                    selected_mode = home_mode
+                    camera_recalibration = bool(
+                        selected_mode == "PHYSICAL"
+                        and config.GAME_MODE != "HUMAN_VS_HUMAN"
+                        and physical_camera_recalibration_requested)
+                    physical_camera_recalibration_requested = False
+                    _launch_session_mode(selected_mode, camera_recalibration=camera_recalibration)
                 elif event.type == pygame.MOUSEBUTTONDOWN and renderer.home_action_from_pixel(event.pos[0], event.pos[1]) == "settings":
                     home_screen_active = False
                     settings_menu_active = True
@@ -330,8 +674,12 @@ try:
                         if time.monotonic() > physical_enable_deadline:
                             raise RuntimeError("Xác nhận hết hạn; bấm F9 để bắt đầu lại")
                         def enabled(result, error):
+                            if error:
+                                log_event("physical.enable_failed", str(error), level=logging.ERROR,
+                                          code="PHYSICAL_ENABLE_FAILED",
+                                          exc_info=(type(error), error, error.__traceback__))
                             state.set_status(f"Không bật được robot: {error}" if error else
-                                             "Robot đã được bật quyền chuyển động cho game.", duration=30)
+                                             "Robot đã được bật quyền chuyển động cho game.", duration=60)
                         hw.motion_worker.start(lambda: hw.activate_physical_game(state, commissioned=True), enabled)
                     except Exception as exc:
                         log_event("physical.enable_failed", str(exc), level=logging.ERROR,
@@ -340,14 +688,17 @@ try:
                     continue
                 if hw.motion_worker.busy:
                     continue
-                if event.key == pygame.K_y and self_play is not None and self_play.status.value == "pick_paused":
-                    self_play.retry_visual_pick()
+                if (self_play is not None and config.GAME_MODE == "ROBOT_VS_ROBOT"
+                        and (event.key == pygame.K_y or
+                             (event.key == pygame.K_v and self_play.status.value == "pick_paused"))):
+                    self_play.retry_visual_pick(source="V" if event.key == pygame.K_v else "Y")
                     continue
                 if event.key == pygame.K_F5 and not state.physical_sync_fault and not state.move_sync_error:
                     state.ai_retry_requested = True
-                elif event.key == pygame.K_F6 and self_play is not None and not state.ai_thinking:
+                elif (event.key == pygame.K_F6 and config.GAME_MODE == "ROBOT_VS_ROBOT"
+                      and self_play is not None and not state.ai_thinking):
                     difficulty = getattr(config, "AI_DIFFICULTY", "medium")
-                    hw.motion_worker.start(lambda: self_play.start(difficulty, difficulty, run_mode="step"), _job_completed)
+                    hw.motion_worker.start(lambda: self_play.start(difficulty, difficulty, run_mode="continuous"), _job_completed)
                 elif event.key == pygame.K_F7 and self_play is not None:
                     self_play.request_next_move()
                 elif event.key == pygame.K_F8 and self_play is not None:
@@ -361,10 +712,13 @@ try:
                 if hw.motion_worker.busy:
                     continue
                 from src.ui.board_renderer import BTN_CONTINUE_RECT
-                if (self_play is not None and self_play.status.value == "pick_paused"
-                        and BTN_CONTINUE_RECT.collidepoint(event.pos)):
-                    self_play.retry_visual_pick()
-                    continue
+                if self_play is not None and self_play.status.value == "pick_paused":
+                    from src.ui.board_renderer import BoardRenderer, BTN_SCAN_FEN_RECT
+                    render_state = state.get_render_state()
+                    retry_rect = BoardRenderer.client_continue_rect(render_state)
+                    if retry_rect.collidepoint(event.pos) or BTN_SCAN_FEN_RECT.collidepoint(event.pos):
+                        self_play.retry_visual_pick(source=("V" if BTN_SCAN_FEN_RECT.collidepoint(event.pos) else "CONTINUE"))
+                        continue
                 if self_play is not None and self_play.recovery_input_allowed:
                     from src.ui.board_renderer import BTN_NEW_GAME_RECT, BTN_SCAN_FEN_RECT
                     if BTN_NEW_GAME_RECT.collidepoint(event.pos) or BTN_SCAN_FEN_RECT.collidepoint(event.pos) or BTN_CONTINUE_RECT.collidepoint(event.pos):
@@ -375,12 +729,11 @@ try:
                     if BTN_CONFIRM_MOVE_RECT.collidepoint(event.pos):
                         self_play.request_next_move()
                     elif BTN_SURRENDER_RECT.collidepoint(event.pos):
-                        # End only at a completed move boundary; do not invalidate
-                        # the board while a robot worker is moving a piece.
+                        # Accept the click during thinking/motion. The controller
+                        # commits an in-flight piece before recording resignation.
                         if self_play.accepts_surrender:
                             winner = 'b' if state.turn == 'r' else 'r'
-                            self_play.end_match(winner='BLACK' if winner == 'b' else 'RED', reason='RESIGN')
-                            state.handle_game_over(winner, reason='RESIGN')
+                            self_play.request_surrender(winner='BLACK' if winner == 'b' else 'RED')
                 elif input_mgr is not None:
                     input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
 
@@ -389,21 +742,32 @@ try:
         startup_worker.poll()
         if hw is not None:
             hw.motion_worker.poll()
-        if self_play is not None:
+        if self_play is not None and not mode_switching and not mode_switch_failed:
             self_play.finish_recovery()
-        if self_play is not None:
+        if self_play is not None and not mode_switching and not mode_switch_failed:
             self_play.tick()
-
-        # 2c. Camera Feed update
-        if hw is not None and hw.cam_monitor is not None:
-            key = hw.cam_monitor.update_display()
-            if key == ord("q"):
+        if session_control is not None and not mode_switching and not mode_switch_failed:
+            control_action = session_control.poll()
+            if control_action == "quit":
                 running = False
                 break
+            if control_action == "home":
+                _begin_mode_disposal()
+        if quit_requested and (session_control is None or mode_switch_failed) and not startup_worker.busy:
+            running = False
+            break
+
+        # 2c. Camera Feed update
+        if not mode_switching and not mode_switch_failed and hw is not None and hw.cam_monitor is not None:
+            key = hw.cam_monitor.update_display()
+            if key == ord("q"):
+                quit_requested = True
+                session_control.request("quit")
 
         # Inspect the board itself rather than the object moving a piece.
         # SPACE remains the safe manual fallback when camera confidence is poor.
         if (getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False)
+                and not mode_switching and not mode_switch_failed
                 and input_mgr is not None and not home_screen_active and not settings_menu_active
                 and not difficulty_menu_active and state.is_human_turn and not state.game_over
                 and (self_play is None or not self_play.human_input_disabled)):
@@ -411,6 +775,7 @@ try:
 
         # 2d. Xử lý AI Turn (Non-blocking)
         if (hw is not None and input_mgr is not None and not home_screen_active and not settings_menu_active
+                and not mode_switching and not mode_switch_failed
                 and hw.is_robot_ready
                 and not difficulty_menu_active and state.turn == "b" and not state.game_over
                 and config.GAME_MODE == "HUMAN_VS_ROBOT"
@@ -477,11 +842,11 @@ try:
                                     return
                                 if committed:
                                     try:
-                                        state.api_client.send_move_update_board(state.current_fen)
+                                        state.publish_committed_fen()
                                         if (xiangqi.get_king_pos(state.turn, state.board) is None
                                                 or not xiangqi.find_all_valid_moves(state.turn, state.board)):
                                             state.handle_game_over("b")
-                                            state.api_client.end_match(winner="BLACK", reason="CHECKMATE")
+                                            state.publish_match_end(winner="BLACK", reason="CHECKMATE")
                                         else:
                                             if not state.physical_sync_fault and not state.move_sync_error:
                                                 hw.motion_worker.start(_refresh_game_baseline, _job_completed)
@@ -495,17 +860,17 @@ try:
                             committed = execute_ai_move(state, hw, best, config.DRY_RUN,
                                                         getattr(config, "VISUAL_PICK_ENABLED", False))
                         if committed:
-                            state.api_client.send_move_update_board(state.current_fen)
+                            state.publish_committed_fen()
                             if xiangqi.get_king_pos(state.turn, state.board) is None or not xiangqi.find_all_valid_moves(state.turn, state.board):
                                 state.handle_game_over("b")
-                                state.api_client.end_match(winner="BLACK", reason="CHECKMATE")
+                                state.publish_match_end(winner="BLACK", reason="CHECKMATE")
                             else:
                                 hw.capture_baseline_if_needed(force_delay=0.0)
                                 state.set_status("Your turn! F6: self-play, F7: next, F8: stop", duration=8)
                     elif result_is_current:
                         if not xiangqi.find_all_valid_moves("b", state.board):
                             state.handle_game_over("r")
-                            state.api_client.end_match(winner="RED", reason="CHECKMATE")
+                            state.publish_match_end(winner="RED", reason="CHECKMATE")
                         else:
                             state.set_status("Engine failed; board unchanged. Check engine, then F5 to retry.", duration=30)
 
@@ -518,9 +883,13 @@ try:
                       motion_busy=hw.motion_worker.busy if hw else False)
         clock.tick(30)
 
-except (KeyboardInterrupt, SystemExit):
+except (KeyboardInterrupt, SystemExit) as exc:
     print("\n[MAIN] ⛔ Interrupted.")
+    _recover_shutdown_after_exception(exc)
 except Exception as e:
     log_event("app.unhandled", str(e), level=logging.CRITICAL, code="APP_UNHANDLED", exc_info=True)
-    if __name__ == "__main__":
-        raise SystemExit(1) from e
+    _recover_shutdown_after_exception(e)
+finally:
+    while not _cleanup_all():
+        _recover_shutdown_after_exception(
+            RuntimeError("Session resources not fully closed"), cleanup_retry=True)

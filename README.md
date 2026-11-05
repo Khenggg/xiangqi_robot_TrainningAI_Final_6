@@ -1,3 +1,9 @@
+> **Hardware connection note:** the robot Ethernet cable/connector at
+> `192.168.58.2` is loose. Intermittent `GetControllerIP: controller reply
+> unavailable` / `Robot SDK not connected` errors are expected until it is
+> re-seated. Do not enable motion while the link is unstable. See
+> [`ROBOT_CONNECTION.md`](ROBOT_CONNECTION.md).
+
 ## Camera Monitor and Windows GPU (2026-10-13)
 
 Use SETUP_WINDOWS.bat for core dependencies and CPU ONNX on a new machine; SETUP_GPU.bat switches to the verified CUDA Torch/ORT stack. Core requirements intentionally omit ONNX: install exactly one runtime (onnxruntime for CPU, onnxruntime-gpu for GPU). Normal Windows setup preserves an installed GPU runtime. VISION_DEVICE defaults to auto; set VISION_DEVICE=cpu to opt out. See docs/CAMERA_MONITOR_GPU_FIX_20261013.md for commands and verification limits.

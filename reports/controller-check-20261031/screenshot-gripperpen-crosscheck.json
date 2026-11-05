@@ -1,0 +1,40 @@
+{
+  "screenshot_tcp_name": "Gripperpen",
+  "screenshot_tool_id_field": 2,
+  "screenshot_status_active_coordinate": "Tool1",
+  "screenshot_tool_offset_mm_deg": [
+    -24.017,
+    -17.728,
+    258.918,
+    -174.568,
+    0.903,
+    133.733
+  ],
+  "recorded_at": "2026-10-31T12:16:48+07:00",
+  "recorded_flange": [
+    348.5956115722656,
+    148.428955078125,
+    395.6259765625,
+    -59.30814743041992,
+    -42.692134857177734,
+    109.98206329345703
+  ],
+  "recorded_tcp": [
+    188.0389862060547,
+    -35.08465576171875,
+    487.6819763183594,
+    177.0678253173828,
+    68.62907409667969,
+    -147.12176513671875
+  ],
+  "predicted_tcp_xyz": [
+    188.0400970755769,
+    -35.08439039682344,
+    487.6825232840439
+  ],
+  "translation_error_mm": 0.0012663416139056735,
+  "orientation_error_deg": 0.00029754470915726444,
+  "offset_length_mm": 260.6331310424674,
+  "mode": "OFFLINE_MATRIX_COMPOSITION_ONLY",
+  "conclusion": "Screenshot transform is numerically consistent with the previously measured active TCP; coordinate-number mapping not queried."
+}

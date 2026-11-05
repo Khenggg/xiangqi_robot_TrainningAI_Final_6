@@ -1,0 +1,24 @@
+{
+  "date": "2026-11-02",
+  "target_head": "18e67fc9006a91a2a32c4c861974760089a687de",
+  "donor_heads": {
+    "origin/feature/player-vs-player": "75c1bc9485eafa42aed3b04ffaf1d822b42ef757",
+    "origin/feature/nguoivsnguoifinal": "73af0f182d62f39d4e0f7ce66abe488e9b8782e8"
+  },
+  "current_critical_sources_unchanged": true,
+  "donor_snapshot_sources_verified": 8,
+  "remote_heads_verified_unchanged": true,
+  "tests": {
+    "status": "PASS",
+    "count": 58,
+    "parallel": 57,
+    "serial": 1,
+    "defect_reproduction_probes": 11,
+    "runner_exit_code": 0,
+    "runner_seconds": 24.69,
+    "output": "decision-recheck-20261102.txt"
+  },
+  "integration": "NOT RUN",
+  "production_changes": "NONE",
+  "physical_hardware": "NOT RUN"
+}

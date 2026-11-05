@@ -1,0 +1,342 @@
+[
+  {
+    "line": 10,
+    "time": "2026-10-30T20:29:06.051797+07:00",
+    "event": "session.capabilities",
+    "message": "Quyền vận hành của chế độ đã chọn",
+    "data": {
+      "game_mode": "HUMAN_VS_ROBOT",
+      "requested_environment": "PHYSICAL",
+      "environment": "PHYSICAL",
+      "camera": true,
+      "physical_robot": true,
+      "robot_moves": true,
+      "mouse_input": "NONE"
+    }
+  },
+  {
+    "line": 19,
+    "time": "2026-10-30T20:29:07.174905+07:00",
+    "event": "robot.fixed_profile_loaded",
+    "message": "Dùng tọa độ cố định đã chuẩn hóa user 0",
+    "data": {
+      "profile_id": "fr3-fixed-user0-20261028",
+      "path": "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\calibration\\physical_teaching_points_user0.json",
+      "points": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "HOMECHESS",
+        "R_Trash"
+      ],
+      "tool": 0,
+      "user": 0,
+      "coordinate_frame": "robot_base",
+      "position_unit": "mm",
+      "angle_unit": "deg"
+    }
+  },
+  {
+    "line": 134,
+    "time": "2026-10-30T20:30:37.963457+07:00",
+    "event": "camera.verified",
+    "message": "Camera xác nhận bàn dự kiến",
+    "data": {
+      "verification_id": "74df05eb60fb43319a95815e2296df9f",
+      "operation": "VERIFY_EXPECTED_BOARD",
+      "samples": 2,
+      "attempts": 2
+    }
+  },
+  {
+    "line": 138,
+    "time": "2026-10-30T20:30:46.464464+07:00",
+    "event": "camera.verified",
+    "message": "Camera xác nhận bàn dự kiến",
+    "data": {
+      "verification_id": "6c1e1bea60a84c2c929d92bfba245064",
+      "operation": "VERIFY_EXPECTED_BOARD",
+      "samples": 2,
+      "attempts": 2
+    }
+  },
+  {
+    "line": 139,
+    "time": "2026-10-30T20:30:46.500567+07:00",
+    "event": "physical.enabled",
+    "message": "Người vận hành đã bật quyền chuyển động qua game",
+    "data": {
+      "commissioned": true
+    }
+  },
+  {
+    "line": 151,
+    "time": "2026-10-30T20:30:56.758794+07:00",
+    "event": "move.started",
+    "message": "Bắt đầu thực hiện nước AI",
+    "data": {
+      "move_id": "fb3a4911c6744eb4a77445a126e9f4ff",
+      "piece_id": "black_cannon_1",
+      "captured_piece_id": null,
+      "src": [
+        7,
+        2
+      ],
+      "dst": [
+        4,
+        2
+      ],
+      "cell_order": "col,row",
+      "fen_before": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+      "backend": "PHYSICAL"
+    }
+  },
+  {
+    "line": 154,
+    "time": "2026-10-30T20:30:57.300147+07:00",
+    "event": "camera.verified",
+    "message": "Camera xác nhận bàn dự kiến",
+    "data": {
+      "verification_id": "8a2ef19ea4b9452590468057cd68a9f1",
+      "operation": "VERIFY_EXPECTED_BOARD",
+      "samples": 2,
+      "attempts": 2
+    }
+  },
+  {
+    "line": 162,
+    "time": "2026-10-30T20:30:58.079651+07:00",
+    "event": "vision.pick_resolved",
+    "message": "Đã đo tâm quân: moving=(7.025,2.013)",
+    "data": {
+      "mode": "center",
+      "cells": {
+        "moving": [
+          7,
+          2
+        ]
+      },
+      "resolution": {
+        "mode": "center",
+        "attempts": 3,
+        "attempts_detail": [
+          {
+            "attempt": 1,
+            "cell": [
+              7,
+              2
+            ],
+            "accepted": true,
+            "reason": "accepted",
+            "measurement": {
+              "col": 7.025577545166016,
+              "row": 2.0130133628845215,
+              "offset_cells": 0.028697707753125693,
+              "offset_mm": 1.1479083101250278,
+              "confidence": 0.863672137260437
+            },
+            "col": 7.025577545166016,
+            "row": 2.0130133628845215,
+            "offset_cells": 0.028697707753125693,
+            "confidence": 0.863672137260437
+          },
+          {
+            "attempt": 2,
+            "cell": [
+              7,
+              2
+            ],
+            "accepted": true,
+            "reason": "accepted",
+            "measurement": {
+              "col": 7.025177001953125,
+              "row": 2.0131421089172363,
+              "offset_cells": 0.028400641790990618,
+              "offset_mm": 1.1360256716396246,
+              "confidence": 0.8634586930274963
+            },
+            "col": 7.025177001953125,
+            "row": 2.0131421089172363,
+            "offset_cells": 0.028400641790990618,
+            "confidence": 0.8634586930274963
+          },
+          {
+            "attempt": 3,
+            "cell": [
+              7,
+              2
+            ],
+            "accepted": true,
+            "reason": "accepted",
+            "measurement": {
+              "col": 7.0253400802612305,
+              "row": 2.012364625930786,
+              "offset_cells": 0.02819580894483914,
+              "offset_mm": 1.1278323577935656,
+              "confidence": 0.8636280298233032
+            },
+            "col": 7.0253400802612305,
+            "row": 2.012364625930786,
+            "offset_cells": 0.02819580894483914,
+            "confidence": 0.8636280298233032
+          }
+        ],
+        "valid_samples": {
+          "moving": 3
+        },
+        "spread_cells": {
+          "moving": 0.0006487369537353516
+        },
+        "jitter_limit_cells": 0.12,
+        "max_offset_mm": 6.0,
+        "failure": "",
+        "reason": "Strict center consensus",
+        "targets": {
+          "moving": {
+            "col": 7.0253400802612305,
+            "row": 2.0130133628845215,
+            "offset_cells": 0.028400641790990618,
+            "confidence": 0.8636280298233032
+          }
+        }
+      },
+      "targets": {
+        "moving": {
+          "col": 7.0253400802612305,
+          "row": 2.0130133628845215,
+          "offset_cells": 0.028400641790990618,
+          "confidence": 0.8636280298233032
+        }
+      }
+    }
+  },
+  {
+    "line": 166,
+    "time": "2026-10-30T20:30:58.102416+07:00",
+    "event": "motion.stage_started",
+    "message": "Bắt đầu bước chuyển động",
+    "data": {
+      "stage": "LIFT",
+      "operation": "pick_at",
+      "move_id": "fb3a4911c6744eb4a77445a126e9f4ff",
+      "session_id": "31e809eb2960402795207b3eca6c40c4",
+      "board_revision": 1,
+      "calibration_version": 1
+    }
+  },
+  {
+    "line": 168,
+    "time": "2026-10-30T20:30:58.111448+07:00",
+    "event": "motion.visual_correction",
+    "message": "Bù tâm quân theo camera",
+    "data": {
+      "correction": {
+        "dx_mm": 0.5454381100849304,
+        "dy_mm": 1.0353864416512693,
+        "cell": [
+          7,
+          2
+        ],
+        "target": [
+          7.0253400802612305,
+          2.0130133628845215
+        ],
+        "visual": true,
+        "active": true
+      }
+    }
+  },
+  {
+    "line": 169,
+    "time": "2026-10-30T20:30:58.113461+07:00",
+    "event": "motion.stage_started",
+    "message": "Bắt đầu bước chuyển động",
+    "data": {
+      "stage": "PREPOSITION",
+      "operation": "gripper_ctrl",
+      "move_id": "fb3a4911c6744eb4a77445a126e9f4ff",
+      "session_id": "31e809eb2960402795207b3eca6c40c4",
+      "board_revision": 1,
+      "calibration_version": 1
+    }
+  },
+  {
+    "line": 172,
+    "time": "2026-10-30T20:30:58.854514+07:00",
+    "event": "motion.stage_started",
+    "message": "Bắt đầu bước chuyển động",
+    "data": {
+      "stage": "APPROACH",
+      "operation": "move_safe_pose",
+      "move_id": "fb3a4911c6744eb4a77445a126e9f4ff",
+      "session_id": "31e809eb2960402795207b3eca6c40c4",
+      "board_revision": 1,
+      "calibration_version": 1
+    }
+  },
+  {
+    "line": 174,
+    "time": "2026-10-30T20:31:01.432611+07:00",
+    "event": "motion.stage_started",
+    "message": "Bắt đầu bước chuyển động",
+    "data": {
+      "stage": "LAND",
+      "operation": "movel_pose",
+      "move_id": "fb3a4911c6744eb4a77445a126e9f4ff",
+      "session_id": "31e809eb2960402795207b3eca6c40c4",
+      "board_revision": 1,
+      "calibration_version": 1
+    }
+  },
+  {
+    "line": 175,
+    "time": "2026-10-30T20:31:01.449948+07:00",
+    "event": "console.stdout",
+    "message": "[ROBOT] ❌ Lỗi MoveCart (movel): 112",
+    "data": {
+      "component": "legacy_console"
+    }
+  },
+  {
+    "line": 176,
+    "time": "2026-10-30T20:31:01.449948+07:00",
+    "event": "motion.stage_failed",
+    "message": "Robot MoveCart error code: 112",
+    "data": {
+      "stage": "LAND",
+      "last_completed_stage": "APPROACH",
+      "payload_state": "NONE",
+      "backend_code": 112,
+      "pick_resolution": null
+    }
+  },
+  {
+    "line": 177,
+    "time": "2026-10-30T20:31:01.456954+07:00",
+    "event": "move.failed",
+    "message": "Robot MoveCart error code: 112",
+    "data": {
+      "move_id": "fb3a4911c6744eb4a77445a126e9f4ff",
+      "src": [
+        7,
+        2
+      ],
+      "dst": [
+        4,
+        2
+      ],
+      "duration_s": 4.703,
+      "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2"
+    }
+  },
+  {
+    "line": 178,
+    "time": "2026-10-30T20:31:01.461186+07:00",
+    "event": "console.stdout",
+    "message": "[AI MOVE STOPPED] Robot MoveCart error code: 112",
+    "data": {
+      "component": "legacy_console"
+    }
+  }
+]

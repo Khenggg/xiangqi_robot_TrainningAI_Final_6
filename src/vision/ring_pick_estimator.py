@@ -9,6 +9,7 @@ import numpy as np
 from src.vision.height_pick_geometry import geometry_from_board
 from src.vision.pick_consensus import FreshPickTransientError, select_consensus
 from src.vision.top_face_pick_estimator import TopFacePickEstimator
+from src.vision.visual_pick_estimator import grid_offset_mm
 
 
 def ring_pick_enabled(config):
@@ -138,6 +139,7 @@ def resolve_ring_pick_targets(hardware, expected_cells):
                     estimator = ColoredRingPickEstimator(
                         geometry, config.VISUAL_PICK_MIN_CONFIDENCE,
                         config.VISUAL_PICK_MAX_OFFSET_CELLS,
+                        max_offset_mm=getattr(config, "VISUAL_PICK_MAX_OFFSET_MM", 6.0),
                         **{name: getattr(config, setting, default) for name, setting, default in (
                             ("max_residual", "VISUAL_TOP_MAX_RESIDUAL", .045),
                             ("min_coverage", "VISUAL_TOP_MIN_COVERAGE", .83),
@@ -170,9 +172,12 @@ def resolve_ring_pick_targets(hardware, expected_cells):
                     return targets
                 if all(result.target is not None for result in results.values()):
                     selected = {name: result.target for name, result in results.items()}
-                    if any(np.hypot(t.col-expected_cells[name][0], t.row-expected_cells[name][1])
-                           > config.VISUAL_PICK_MAX_OFFSET_CELLS for name, t in selected.items()):
-                        raise ValueError("Ring consensus exceeds expected-cell correction limit")
+                    if any(grid_offset_mm(t.col-expected_cells[name][0],
+                                          t.row-expected_cells[name][1],
+                                          (estimator.geometry.width, estimator.geometry.height))
+                           > getattr(config, "VISUAL_PICK_MAX_OFFSET_MM", 6.0)
+                           for name, t in selected.items()):
+                        raise ValueError("Ring consensus exceeds physical pick correction limit")
                     if expired():
                         return targets
                     resolution.update(failure="", reason="; ".join(reasons))

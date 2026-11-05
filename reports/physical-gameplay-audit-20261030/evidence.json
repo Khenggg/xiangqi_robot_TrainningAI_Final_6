@@ -1,0 +1,60 @@
+{
+  "environment": "Windows / Python 3.12.10",
+  "actual_hardware_calls": 0,
+  "preflight": {
+    "home": {
+      "enable_accepted": true,
+      "first_move_success": false,
+      "reason": "HOMECHESS: tool/user frame differs from R1-R4 or metadata is missing",
+      "motion_calls": 0
+    },
+    "bin": {
+      "enable_accepted": true,
+      "ordinary_move_success": true,
+      "capture_success": false,
+      "reason": "Validated R_Trash teaching point unavailable",
+      "capture_motion_calls": 0
+    }
+  },
+  "recovery": {
+    "operator_clear_returned": true,
+    "status": "✅ Đã xóa phiên lỗi; bàn khớp FEN, đã tiếp tục quét.",
+    "turn": "b",
+    "pending": null,
+    "physical_fault": false,
+    "can_start_ai": false,
+    "retry_requested": false,
+    "human_generation": 1,
+    "consumed_generation": 1,
+    "dispatches": 0,
+    "explicit_F5_can_start_ai": true
+  },
+  "lost_reply": {
+    "success": false,
+    "fake_cart_attempts": 1,
+    "last_completed_stage": "PREPOSITION",
+    "reason": "Injected missing reply; command outcome unknown",
+    "no_automatic_motion_replay": true
+  },
+  "camera_deadline": {
+    "budget_sec": 0.02,
+    "wait_before_releasing_camera_sec": 0.08,
+    "finished_by_four_times_budget": false,
+    "elapsed_sec": 0.14,
+    "result": false
+  },
+  "replay": {
+    "plies": 240,
+    "robot_moves": 120,
+    "robot_captures": 12,
+    "durable_commits": 240,
+    "game_over": false,
+    "winner": null,
+    "capture_removed_retries": 1,
+    "repeated_capture_disposals": 0,
+    "fake_motion_calls": 934,
+    "camera_observations": 506,
+    "board_equals_physical_fixture": true,
+    "note": "Legal deterministic replay, ideal camera and fake SDK; not a physical full-match test"
+  }
+}

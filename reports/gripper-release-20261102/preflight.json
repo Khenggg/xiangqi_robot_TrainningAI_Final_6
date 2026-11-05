@@ -1,0 +1,145 @@
+{
+  "at": "2026-11-02T13:49:23.766902+07:00",
+  "mode": "READ_ONLY",
+  "operator_reports_empty_gripper_and_observing": true,
+  "samples": [
+    {
+      "type": "robot_state",
+      "robot_model": "FR3",
+      "timestamp": 1793602163.7004619,
+      "published_at": 1793602163.728544,
+      "measurement_timestamp": 1793602163.7004619,
+      "joints": [
+        -89.46678161621094,
+        -128.62945556640625,
+        106.87108612060547,
+        -68.51204681396484,
+        -89.4968032836914,
+        42.53427505493164
+      ],
+      "tcp": [
+        -104.27505493164062,
+        149.6094207763672,
+        348.1886291503906,
+        179.8590850830078,
+        0.5535998940467834,
+        -42.000553131103516
+      ],
+      "gripper": false,
+      "motion_state": "IDLE",
+      "trajectory_stage": "IDLE",
+      "last_error": null,
+      "placement_version": 1,
+      "source": "PHYSICAL",
+      "controller_ip": "192.168.58.2",
+      "connected": true,
+      "joints_valid": true,
+      "tcp_valid": true,
+      "telemetry_error": null,
+      "command_context": {
+        "session_id": "a55d36a4bd414519b930dd26308c67ad",
+        "board_revision": 1,
+        "game_epoch": 0,
+        "scene_id": "b53d4f3928aa49bb82997a3424992a95",
+        "scene_epoch": null,
+        "placement_version": null,
+        "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+        "commands_allowed": false
+      },
+      "stream_id": "a79f5d7258a1469aa5a582eb6593ef69",
+      "packet_seq": 23911
+    },
+    {
+      "type": "robot_state",
+      "robot_model": "FR3",
+      "timestamp": 1793602163.7004619,
+      "published_at": 1793602163.7255454,
+      "measurement_timestamp": 1793602163.7004619,
+      "joints": [
+        -89.46678161621094,
+        -128.62945556640625,
+        106.87108612060547,
+        -68.51204681396484,
+        -89.4968032836914,
+        42.53427505493164
+      ],
+      "tcp": [
+        -104.27505493164062,
+        149.6094207763672,
+        348.1886291503906,
+        179.8590850830078,
+        0.5535998940467834,
+        -42.000553131103516
+      ],
+      "gripper": false,
+      "motion_state": "IDLE",
+      "trajectory_stage": "IDLE",
+      "last_error": null,
+      "placement_version": 1,
+      "source": "PHYSICAL",
+      "controller_ip": "192.168.58.2",
+      "connected": true,
+      "joints_valid": true,
+      "tcp_valid": true,
+      "telemetry_error": null,
+      "command_context": {
+        "session_id": "a55d36a4bd414519b930dd26308c67ad",
+        "board_revision": 1,
+        "game_epoch": 0,
+        "scene_id": "b53d4f3928aa49bb82997a3424992a95",
+        "scene_epoch": null,
+        "placement_version": null,
+        "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+        "commands_allowed": false
+      },
+      "stream_id": "a79f5d7258a1469aa5a582eb6593ef69",
+      "packet_seq": 23910
+    },
+    {
+      "type": "robot_state",
+      "robot_model": "FR3",
+      "timestamp": 1793602163.7004619,
+      "published_at": 1793602163.7553473,
+      "measurement_timestamp": 1793602163.7004619,
+      "joints": [
+        -89.46678161621094,
+        -128.62945556640625,
+        106.87108612060547,
+        -68.51204681396484,
+        -89.4968032836914,
+        42.53427505493164
+      ],
+      "tcp": [
+        -104.27505493164062,
+        149.6094207763672,
+        348.1886291503906,
+        179.8590850830078,
+        0.5535998940467834,
+        -42.000553131103516
+      ],
+      "gripper": false,
+      "motion_state": "IDLE",
+      "trajectory_stage": "IDLE",
+      "last_error": null,
+      "placement_version": 1,
+      "source": "PHYSICAL",
+      "controller_ip": "192.168.58.2",
+      "connected": true,
+      "joints_valid": true,
+      "tcp_valid": true,
+      "telemetry_error": null,
+      "command_context": {
+        "session_id": "a55d36a4bd414519b930dd26308c67ad",
+        "board_revision": 1,
+        "game_epoch": 0,
+        "scene_id": "b53d4f3928aa49bb82997a3424992a95",
+        "scene_epoch": null,
+        "placement_version": null,
+        "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+        "commands_allowed": false
+      },
+      "stream_id": "a79f5d7258a1469aa5a582eb6593ef69",
+      "packet_seq": 23912
+    }
+  ]
+}

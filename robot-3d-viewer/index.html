@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
     <title>FR3/FR5 · 3D Live Mirror</title>
     <script>
       window.reportProjectDiagnostic = (error, source) => {
@@ -17,7 +18,7 @@
       window.addEventListener("unhandledrejection", (e) => window.reportProjectDiagnostic(e.reason, "promise.rejection"));
     </script>
     <link rel="stylesheet" href="./styles.css" />
-    <script src="https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/occt-import-js.min.js"></script>
+    <script src="./vendor/occt-import-js/occt-import-js.min.js"></script>
     <script type="importmap">
       {
         "imports": {
@@ -45,6 +46,7 @@
         <span id="liveState">OFFLINE</span>
         <span id="sourceBadge" class="source-badge" title="Nguồn telemetry cánh tay robot"></span>
         <span id="opStateBadge" class="state-idle" title="Trạng thái vận hành máy trạng thái runtime">IDLE</span>
+        <span id="gripperStateBadge" class="gripper-badge" title="Trạng thái kẹp từ telemetry; hành trình visual ở chế độ mô phỏng được phóng đại">KẸP: --</span>
         <label title="Tốc độ di chuyển cánh tay robot (Speed Factor - Giảm tốc để an toàn)">
           ⚡ Tốc độ:
           <select id="speedFactorSelect">
@@ -222,6 +224,7 @@
               <strong>R1–R4 · đặt bàn theo 4 điểm (robot_base, mm)</strong>
               <p style="font-size: 11px; color: #aab7c8; margin: 6px 0;">
                 R1 (0,0) → R2 (0,8) → R3 (9,8) → R4 (9,0). Điểm là giao lưới trên mặt bàn.
+                X/Y xác định vị trí và góc quay; chiều cao mặt bàn được nhập riêng.
                 Số lấy từ mô phỏng không phải số đo đầu kẹp chạm bàn thật.
                 Trước khi áp dụng, dùng tab Service để chuẩn bị dời bàn và đưa tay ảo về SERVICE_SAFE.
               </p>
@@ -232,6 +235,8 @@
                 <label for="teachR3X">R3</label><input id="teachR3X" aria-label="R3 X mm" type="number" step="0.001" /><input id="teachR3Y" aria-label="R3 Y mm" type="number" step="0.001" /><input id="teachR3Z" aria-label="R3 Z mm" type="number" step="0.001" />
                 <label for="teachR4X">R4</label><input id="teachR4X" aria-label="R4 X mm" type="number" step="0.001" /><input id="teachR4Y" aria-label="R4 Y mm" type="number" step="0.001" /><input id="teachR4Z" aria-label="R4 Z mm" type="number" step="0.001" />
               </div>
+              <label for="teachSurfaceZ" style="font-size: 11px;">Chiều cao mặt bàn Z (robot_base, mm)</label>
+              <input id="teachSurfaceZ" aria-label="Chiều cao mặt bàn Z mm" type="number" step="0.001" />
               <div class="panel-actions" style="margin-top: 8px;">
                 <button id="btnLoadSimTeachingPoints" class="action-btn">Lấy 4 điểm từ bàn mô phỏng</button>
                 <button id="btnApplyTeachingPoints" class="action-btn primary-action">Áp dụng R1–R4</button>

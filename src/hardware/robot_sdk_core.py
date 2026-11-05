@@ -1918,15 +1918,8 @@ class RPC():
     @xmlrpc_timeout
     def StopMotion(self):
         wait_for_reconnect(self)
-        flag = True
-        while flag:
-            try:
-                error = self.robot.StopMotion()
-                flag = False
-            except socket.error as e:
-                flag = True
-
-        return error
+        # A lost stop reply is uncertain, not permission to replay an RPC.
+        return self.robot.StopMotion()
 
     """   
     @brief  暂停运动

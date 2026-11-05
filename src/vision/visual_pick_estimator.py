@@ -12,6 +12,16 @@ OUTSIDE_GRID_MARGIN_CELLS = 0.0
 GRID_BOUNDARY_EPSILON_CELLS = 1e-6
 
 
+def grid_offset_mm(delta_col, delta_row, board_mm):
+    """Convert continuous board-grid displacement to physical XY millimetres."""
+    dimensions = np.asarray(board_mm, dtype=float)
+    if (dimensions.shape != (2,) or not np.isfinite(dimensions).all()
+            or np.any(dimensions <= 0)):
+        raise ValueError("Board dimensions must be finite positive width/length in mm")
+    return math.hypot(float(delta_col) * dimensions[0] / 8.0,
+                      float(delta_row) * dimensions[1] / 9.0)
+
+
 @dataclass(frozen=True)
 class GridTarget:
     """Camera-derived pick point in continuous Xiangqi grid coordinates."""
@@ -27,10 +37,23 @@ class VisualPickEstimator:
 
     def __init__(self, perspective_path, min_confidence=0.45,
                  max_offset_cells=0.25, foot_ratio=0.85, point_mode="foot",
-                 board_mm=None, outside_margin_mm=None, cell_half_width=None):
+                 board_mm=None, outside_margin_mm=None, cell_half_width=None,
+                 max_offset_mm=None):
         self.perspective_path = Path(perspective_path)
         self.min_confidence = float(min_confidence)
         self.max_offset_cells = float(max_offset_cells)
+        self.max_offset_mm = None if max_offset_mm is None else float(max_offset_mm)
+        self.board_mm = None
+        if board_mm is not None:
+            dimensions = np.asarray(board_mm, dtype=float)
+            if (dimensions.shape != (2,) or not np.isfinite(dimensions).all()
+                    or np.any(dimensions <= 0)):
+                raise ValueError("Board dimensions must be finite positive width/length in mm")
+            self.board_mm = tuple(map(float, dimensions))
+        if self.max_offset_mm is not None and (
+                self.board_mm is None or not math.isfinite(self.max_offset_mm)
+                or self.max_offset_mm <= 0):
+            raise ValueError("A positive millimetre pick limit requires calibrated board dimensions")
         self.foot_ratio = float(foot_ratio)
         self.point_mode = str(point_mode)
         self.cell_half_width = None if cell_half_width is None else float(cell_half_width)
@@ -46,6 +69,9 @@ class VisualPickEstimator:
             raise ValueError("foot_ratio must be between 0 and 1")
         if self.point_mode not in {"center", "foot"}:
             raise ValueError("point_mode must be 'center' or 'foot'")
+        # Latest per-call diagnosis; read by the pick coordinator for structured logs.
+        self.last_reason = ""
+        self.last_measurement = {}
         print(f"[VISUAL PICK] Perspective loaded: {self.perspective_path}")
 
     def _configure_outside_margin(self, board_mm, outside_margin_mm):
@@ -83,6 +109,8 @@ class VisualPickEstimator:
         nearest = None
         low_confidence = 0
         outside_board = 0
+        self.last_reason = ""
+        self.last_measurement = {}
         for _class_id, confidence, box in detections or []:
             confidence = float(confidence)
             if confidence < self.min_confidence:
@@ -94,8 +122,10 @@ class VisualPickEstimator:
                 print(f"[VISUAL PICK] Ignore invalid detection: {exc}")
                 continue
             offset = math.hypot(col - expected_col, row - expected_row)
+            offset_mm = (grid_offset_mm(col - expected_col, row - expected_row, self.board_mm)
+                         if self.board_mm is not None else None)
             if math.isfinite(offset) and (nearest is None or offset < nearest[0]):
-                nearest = (offset, col, row, confidence)
+                nearest = (offset, col, row, confidence, offset_mm)
             col_margin = self.outside_col_margin + GRID_BOUNDARY_EPSILON_CELLS
             row_margin = self.outside_row_margin + GRID_BOUNDARY_EPSILON_CELLS
             if not (-col_margin <= col <= 8.0 + col_margin
@@ -110,7 +140,16 @@ class VisualPickEstimator:
                     min(8.0, max(0.0, col)) - expected_col,
                     min(9.0, max(0.0, row)) - expected_row,
                 )
-            if self.cell_half_width is None:
+            if self.max_offset_mm is not None:
+                matches = offset_mm <= self.max_offset_mm
+                if self.cell_half_width is not None:
+                    assoc_col, assoc_row = col, row
+                    if self.metric_outside_margin:
+                        assoc_col = min(8.0, max(0.0, col))
+                        assoc_row = min(9.0, max(0.0, row))
+                    matches = (matches and abs(assoc_col - expected_col) <= self.cell_half_width
+                               and abs(assoc_row - expected_row) <= self.cell_half_width)
+            elif self.cell_half_width is None:
                 matches = association_offset <= self.max_offset_cells
             else:
                 # Associate to a unique logical square, retain the measured XY.
@@ -126,21 +165,43 @@ class VisualPickEstimator:
 
         if not candidates:
             measured = (f"nearest=({nearest[1]:.3f},{nearest[2]:.3f}), "
-                        f"offset={nearest[0]:.3f} cells, conf={nearest[3]:.2f}"
+                        f"offset={nearest[0]:.3f} cells"
+                        +(f"/{nearest[4]:.1f} mm" if nearest[4] is not None else "")
+                        +f", conf={nearest[3]:.2f}"
                         if nearest is not None else "no mapped detection above confidence threshold")
-            limit = (f"cell_half_width={self.cell_half_width:.2f}" if self.cell_half_width is not None
+            limit = (f"max_offset={self.max_offset_mm:.1f} mm" if self.max_offset_mm is not None
+                     else f"cell_half_width={self.cell_half_width:.2f}" if self.cell_half_width is not None
                      else f"radius={self.max_offset_cells:.2f}")
             print(f"[VISUAL PICK] Rejected ({expected_col},{expected_row}): {measured}; "
                   f"{limit}, low_confidence={low_confidence}, "
                   f"outside_board={outside_board}. No measured target returned.")
+            self.last_reason = "no_valid_detection"
+            self.last_measurement = dict(
+                nearest_col=nearest[1] if nearest is not None else None,
+                nearest_row=nearest[2] if nearest is not None else None,
+                nearest_offset_cells=nearest[0] if nearest is not None else None,
+                nearest_offset_mm=nearest[4] if nearest is not None else None,
+                nearest_confidence=nearest[3] if nearest is not None else None,
+                low_confidence=low_confidence,
+                outside_board=outside_board,
+            )
             return None
 
         if self.cell_half_width is not None and len(candidates) != 1:
             print(f"[VISUAL PICK] Rejected ({expected_col},{expected_row}): "
                   f"{len(candidates)} detections in the same cell; ambiguous pick.")
+            self.last_reason = "ambiguous_same_cell"
+            self.last_measurement = dict(candidates=len(candidates))
             return None
 
         offset, _neg_confidence, col, row, confidence = min(candidates)
+        offset_mm = (grid_offset_mm(col - expected_col, row - expected_row, self.board_mm)
+                     if self.board_mm is not None else None)
+        self.last_reason = "accepted"
+        self.last_measurement = dict(
+            col=col, row=row, offset_cells=offset,
+            offset_mm=offset_mm, confidence=confidence,
+        )
         target = GridTarget(col=col, row=row, confidence=confidence, offset_cells=offset)
         print(f"[VISUAL PICK] Target ({expected_col},{expected_row}) -> "
               f"({col:.3f},{row:.3f}), conf={confidence:.2f}, offset={offset:.3f} cells")

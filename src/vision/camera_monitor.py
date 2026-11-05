@@ -10,6 +10,7 @@ import time
 import threading
 import os
 import logging
+from copy import deepcopy
 from src.core.project_logging import event
 
 # Màu hiển thị
@@ -66,7 +67,9 @@ class CameraMonitor:
         self._inference_lock = threading.Lock()
         self._last_frame_at = 0.0
         self._last_inference_at = 0.0
+        self._observation_sequence = 0
         self._inference_error = None
+        self._model_errors = {"cchess": "Not sampled", "yolo": "Not sampled"}
         self._max_result_age_s = 1.5
         self._last_cchess_result = None  # Dict: {"success": True, "board": ..., "confidence": ...}
         self._recognized_frame = None
@@ -80,6 +83,9 @@ class CameraMonitor:
         self._last_pick_diagnostic = None
         self._pick_diagnostic_until = 0.0
         self._cam_lock = threading.Lock()   # Bảo vệ truy cập camera (cap.read/grab)
+        self._display_thread_id = None
+        self._display_open = False
+        self._display_close_requested = threading.Event()
         self._board_polygon = None  # Cache polygon bàn cờ trong pixel space (4 điểm)
 
         if device_preference not in ("auto", "cpu", "cuda", "gpu"):
@@ -243,8 +249,13 @@ class CameraMonitor:
     def get_health(self):
         with self._lock:
             age = time.monotonic() - self._last_inference_at
-            return {"ready": self._inference_error is None and age <= self._max_result_age_s,
-                    "error": self._inference_error, "result_age_s": age}
+            ready = self._inference_error is None and age <= self._max_result_age_s
+            errors = dict(getattr(self, "_model_errors", {}))
+            return {"ready": ready, "error": self._inference_error, "result_age_s": age,
+                    "cchess_ready": ready and self._last_cchess_result is not None,
+                    "yolo_ready": ready and getattr(self, "model", None) is not None
+                                  and errors.get("yolo") is None,
+                    "model_errors": errors}
 
     def _infer_frame(self, frame, sampled_at=None):
         sampled_at = time.monotonic() if sampled_at is None else sampled_at
@@ -255,7 +266,10 @@ class CameraMonitor:
             if self._inv_M is None:
                 self._record_inference_error("Camera perspective unavailable")
                 return None
-            detections, cchess_result, errors = [], None, []
+            detections, cchess_result = [], None
+            errors = {"cchess": "Not configured" if self.cchess_recognizer is None else None,
+                      "yolo": "Not configured" if self.model is None else None}
+            yolo_ok = False
             if self.cchess_recognizer is not None:
                 try:
                     if self._inv_M is None:
@@ -267,7 +281,7 @@ class CameraMonitor:
                     cchess_result = {"success": True, "board": board, "board_short": short,
                                      "confidence": confidence, "keypoints": kpts, "warped_image": warped}
                 except Exception as exc:
-                    errors.append(f"CChess: {exc}")
+                    errors["cchess"] = str(exc)
             if self.model is not None:
                 try:
                     # Ultralytics numpy inputs are OpenCV BGR.
@@ -277,22 +291,31 @@ class CameraMonitor:
                     for box in results[0].boxes:
                         detections.append((int(box.cls[0]), float(box.conf[0]), tuple(map(int, box.xyxy[0]))))
                     detections = self._filter_by_board(detections)
+                    yolo_ok = True
                 except Exception as exc:
-                    errors.append(f"YOLO: {exc}")
-            if self.model is None and self.cchess_recognizer is None:
-                errors.append("No recognition model available")
-            if errors:
-                self._record_inference_error("; ".join(errors))
+                    errors["yolo"] = str(exc)
+                    detections = []
+            if cchess_result is None and not yolo_ok:
+                self._record_inference_error("; ".join(f"{name}: {error}" for name, error in errors.items() if error))
                 return None
             with self._lock:
                 # Capture failure while inference ran invalidates this result.
                 if sampled_at < self._last_inference_at:
                     return None
+                self._observation_sequence = getattr(self, "_observation_sequence", 0) + 1
+                if cchess_result is not None:
+                    cchess_result["observation_id"] = self._observation_sequence
                 self._last_cchess_result = cchess_result
                 self._recognized_frame = frame
                 self._last_detections = detections
                 self._last_inference_at = sampled_at
                 self._inference_error = None
+                previous_errors = getattr(self, "_model_errors", {})
+                self._model_errors = errors
+            for name, error in errors.items():
+                if error and error != "Not configured" and error != previous_errors.get(name):
+                    event("camera.model_unavailable", f"{name}: {error}", level=logging.WARNING,
+                          model=name, other_model_usable=True)
             return detections
 
     def _detect_loop(self):
@@ -453,7 +476,20 @@ class CameraMonitor:
         with self._lock:
             if self._inference_error or time.monotonic() - self._last_inference_at > self._max_result_age_s:
                 return None
-            return self._last_cchess_result.copy() if self._last_cchess_result is not None else None
+            return deepcopy(self._last_cchess_result)
+
+    def get_fresh_observation(self):
+        """Fresh atomic frame/layout evidence, reusing the snapshot's inference."""
+        frame, _ = self.get_fresh_snapshot()
+        if frame is None:
+            return None
+        with self._lock:
+            # A concurrent capture/model update must not pair a new layout with this frame.
+            if (self._recognized_frame is not frame or self._inference_error
+                    or time.monotonic() - self._last_inference_at > self._max_result_age_s):
+                return None
+            return (self._last_inference_at, frame.copy(), list(self._last_detections),
+                    deepcopy(self._last_cchess_result))
 
     def get_latest_observation(self):
         """Atomic, non-inferencing sample for GUI polling; timestamp is monotonic.
@@ -466,10 +502,7 @@ class CameraMonitor:
             if (self._inference_error or self._recognized_frame is None
                     or time.monotonic() - self._last_inference_at > self._max_result_age_s):
                 return None
-            result = self._last_cchess_result
-            if result is not None:
-                result = result.copy()
-                result["board"] = [row[:] for row in result["board"]]
+            result = deepcopy(self._last_cchess_result)
             return (self._last_inference_at, self._recognized_frame.copy(),
                     list(self._last_detections), result)
 
@@ -508,13 +541,29 @@ class CameraMonitor:
             except Exception as e:
                 print(f"[CAM MONITOR] ⚠️ Camera release error: {e}")
         
-        # 4. Đóng cửa sổ OpenCV
+        # HighGUI windows belong to the thread that called imshow. Teardown
+        # runs on a worker during F2; calling destroyWindow there can deadlock
+        # Windows while the GUI owner is waiting for this worker to finish.
+        self.close_display()
+
+        print("[CAM MONITOR] ✅ Camera Monitor stopped.")
+
+    def close_display(self):
+        """Close HighGUI on its GUI owner; background stop only requests it."""
+        self._display_close_requested.set()
+        if not self._display_open:
+            self._display_close_requested.clear()
+            return True
+        if self._display_thread_id != threading.get_ident():
+            return False
         try:
             cv2.destroyWindow(self.window_name)
         except cv2.error:
             pass  # Window may not exist yet
-        
-        print("[CAM MONITOR] ✅ Camera Monitor stopped.")
+        self._display_open = False
+        self._display_thread_id = None
+        self._display_close_requested.clear()
+        return True
 
     def update_display(self):
         """Gọi mỗi frame trong game loop — hiển thị camera window.
@@ -522,6 +571,9 @@ class CameraMonitor:
         Returns:
             key pressed in OpenCV window (or -1)
         """
+        if self._display_close_requested.is_set() or self._stop_event.is_set():
+            self.close_display()
+            return -1
         with self._lock:
             frame = self._last_frame
             detections = self._last_detections
@@ -541,6 +593,8 @@ class CameraMonitor:
                 diagnostic = diagnostic.copy() if diagnostic is not None else None
             display = diagnostic if diagnostic is not None else self._draw_overlay(frame, detections)
             cv2.imshow(self.window_name, display)
+            self._display_thread_id = threading.get_ident()
+            self._display_open = True
 
         return cv2.waitKey(1)
 

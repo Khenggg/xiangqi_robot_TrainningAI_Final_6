@@ -46,6 +46,18 @@ class TeachingPointObservation:
     raw: Any = None
 
 
+def parse_frame_identifier(value):
+    """SDK frame IDs may be numeric strings, but never fractional or boolean."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("Frame identifier must be an explicit nonnegative integer")
+    number = float(str(value).strip())
+    if not math.isfinite(number) or not number.is_integer() or number < 0:
+        raise ValueError("Frame identifier must be an explicit nonnegative integer")
+    return int(number)
+
+
 def parse_teaching_point_observation(val: Any) -> TeachingPointObservation:
     """
     Parse arbitrary teaching point data structures into TeachingPointObservation with frame metadata.
@@ -66,10 +78,10 @@ def parse_teaching_point_observation(val: Any) -> TeachingPointObservation:
     if isinstance(val, dict):
         if "tool" in val or "tool_id" in val:
             raw_t = val.get("tool", val.get("tool_id"))
-            tool_id = int(float(str(raw_t).strip())) if raw_t is not None else None
+            tool_id = parse_frame_identifier(raw_t)
         if "wobj" in val or "user" in val or "user_or_wobj_id" in val or "user_frame_id" in val:
             raw_u = val.get("wobj", val.get("user", val.get("user_or_wobj_id", val.get("user_frame_id"))))
-            user_or_wobj_id = int(float(str(raw_u).strip())) if raw_u is not None else None
+            user_or_wobj_id = parse_frame_identifier(raw_u)
         if "pose" in val:
             val = val["pose"]
         elif "xyz" in val:
@@ -93,13 +105,10 @@ def parse_teaching_point_observation(val: Any) -> TeachingPointObservation:
 
     # Extract tool & wobj if 20-element or >=14 element SDK list
     if len(val) >= 14:
-        try:
-            if tool_id is None:
-                tool_id = int(float(str(val[12]).strip()))
-            if user_or_wobj_id is None:
-                user_or_wobj_id = int(float(str(val[13]).strip()))
-        except (ValueError, TypeError):
-            pass
+        if tool_id is None:
+            tool_id = parse_frame_identifier(val[12])
+        if user_or_wobj_id is None:
+            user_or_wobj_id = parse_frame_identifier(val[13])
 
     return TeachingPointObservation(
         xyz_mm=[x, y, z],
@@ -168,7 +177,7 @@ class BoardCalibrationTolerancePolicy:
     max_board_tilt_hard_fail_deg: float = 5.0
     min_normal_z: Optional[float] = None  # Deprecated alias; if set, acts as secondary constraint
     enforce_wobj_consistency: bool = True
-    allow_wobj_ids: Tuple[int, ...] = (0, 1)
+    allow_wobj_ids: Tuple[int, ...] = (0,)
 
     @classmethod
     def permissive_se3(cls) -> "BoardCalibrationTolerancePolicy":

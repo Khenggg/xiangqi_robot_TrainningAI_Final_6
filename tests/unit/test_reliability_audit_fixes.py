@@ -94,7 +94,8 @@ def test_commit_preserves_truth_when_viewer_fails(monkeypatch):
     state.set_board_observer(Mock(return_value=False))
     assert state.commit_pending_physical_move()
     assert state.turn == 'r' and state.board[4][0] == 'b_P'
-    assert state.physical_sync_fault and state.move_sync_error
+    assert not state.physical_sync_fault and not state.move_sync_error
+    assert state.projection_error and state.last_commit_result.projection_pending
     assert len(state.move_history) == 1 and state.last_committed_move is not None
     assert not state.commit_pending_physical_move()
 
@@ -180,23 +181,31 @@ def test_spectator_latency_does_not_block_game_or_mix_rooms(monkeypatch):
         api.close(1)
 
 
-def test_websocket_start_failure_rolls_back_entire_session(monkeypatch):
+def test_websocket_start_failure_rolls_back_entire_session(monkeypatch, tmp_path):
     from src.core import session_startup
+    from src.core.session_profile import make_profile
     state = GameState()
     manager = Mock()
+    manager.profile = make_profile('HUMAN_VS_ROBOT', 'VIRTUAL', viewer_enabled=False)
+    manager.simulation_runtime = None
     manager.initialize_all.return_value = manager
-    manager.setup_digital_twin.return_value = SimpleNamespace(board_sync_available=True)
+    bridge = SimpleNamespace(board_sync_available=True, telemetry=None)
+    manager.setup_digital_twin.return_value = bridge
     manager.sync_committed_board.return_value = True
     telemetry = Mock()
     telemetry.start.side_effect = RuntimeError('port occupied')
     monkeypatch.setattr(session_startup, 'HardwareManager', Mock(return_value=manager))
     monkeypatch.setattr(session_startup, 'TelemetryPublisher', Mock(return_value=telemetry))
-    config = SimpleNamespace(TELEMETRY_HOST='127.0.0.1', TELEMETRY_PORT=8765, GAME_ONLY=False)
-    with pytest.raises(RuntimeError, match='port occupied'):
-        session_startup.build_session(config, SimpleNamespace(no_viewer=True), '.', state)
-    manager.cleanup.assert_called_once()
-    telemetry.stop.assert_called_once()
-    assert state._board_observer is None and not state.physical_sync_fault
+    cfg = SimpleNamespace(TELEMETRY_HOST='127.0.0.1', TELEMETRY_PORT=8765, GAME_ONLY=False)
+    try:
+        out_mgr, out_tel, out_viewer, reason = session_startup.build_session(
+            cfg, SimpleNamespace(no_viewer=True), tmp_path, state)
+        assert out_mgr is manager and out_tel is None and out_viewer is None
+        assert 'WebSocket unavailable: port occupied' in reason
+        telemetry.stop.assert_called_once()
+        assert bridge.telemetry is None and not state.physical_sync_fault
+    finally:
+        state.close_journal(clean=True)
 
 
 def test_unknown_board_does_not_prevent_readonly_arm_telemetry():
@@ -205,9 +214,13 @@ def test_unknown_board_does_not_prevent_readonly_arm_telemetry():
     backend = SimpleNamespace(ip='fake', get_state_snapshot=lambda:snapshot)
     telemetry = Mock()
     relay = PhysicalStateRelay(backend, telemetry, 'contact offset not measured')
-    assert relay.poll_once() is snapshot
-    telemetry.update_from_snapshot.assert_called_once_with(snapshot)
-    assert telemetry.source == 'PHYSICAL' and not relay.board_sync_available
+    try:
+        assert relay.poll_once() is snapshot
+        telemetry.update_from_snapshot.assert_called_once_with(snapshot)
+        assert telemetry.source == 'PHYSICAL' and relay.board_sync_available
+        assert relay.uncalibrated_board  # Nominal piece projection is not measured alignment.
+    finally:
+        relay.close()
 
 
 def test_wrong_home_frame_rejects_before_motion():
@@ -217,7 +230,8 @@ def test_wrong_home_frame_rejects_before_motion():
     arm.connected = arm.physical_motion_authorized = True
     arm.robot = Mock()
     arm.robot.GetRobotTeachingPoint.return_value = (0,[0.0]*12+[arm.tool_num,arm.user_num+1])
-    arm.teaching_points = {name:dict(pose=[x,y,10,180,0,0],joints=[0]*6)
+    arm.teaching_points = {name:dict(pose=[x,y,10,180,0,0],joints=[0]*6,
+                                     tool=arm.tool_num,user=arm.user_num)
         for name,x,y in [('R1',-200,500),('R2',-200,180),('R3',160,180),('R4',160,500)]}
     result = arm.move_piece(0,0,0,1,False)
     assert not result.success and 'frame' in result.message

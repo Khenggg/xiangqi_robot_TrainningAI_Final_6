@@ -2,7 +2,10 @@
 
 
 def describe_recovery(state):
-    if state.get("pick_test_fault") or state.get("pick_test_resume_required"):
+    if state.get("hardware_recovery_reason"):
+        reason = "Camera đã xác nhận bàn; " + state["hardware_recovery_reason"]
+        action = "Xử lý trạng thái robot trên WebApp/bộ điều khiển. Khi hết lỗi và tay/kẹp đã dừng, Ctrl+F8 xác nhận rồi V đối soát."
+    elif state.get("pick_test_fault") or state.get("pick_test_resume_required"):
         reason = state.get("pick_test_fault") or "Game đã tạm dừng để test gắp/thả."
         action = "Nếu test đã dời quân, đặt lại thế khởi đầu. Bấm NEW GAME. Robot thật cần xác minh bàn và kích hoạt riêng."
     elif state.get("turn_confirmation_required"):

@@ -650,15 +650,17 @@ class TestCameraCalibrationFailClosed(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg = MockCamConfig()
+            cfg.ROBOT_BACKEND = "PHYSICAL"
+            cfg.RECALIBRATE_CAMERA = True
             hw = HardwareManager(config=cfg, project_dir=tmp_dir)
 
             stale_perspective = Path(tmp_dir) / "perspective.npy"
             np.save(stale_perspective, np.eye(3, dtype=np.float32))
+            hw.cap = mock_cap_instance
 
             with self.assertRaises(RuntimeError):
-                hw._init_camera()
+                hw._prepare_perspective_calibration(0)
             self.assertFalse(hw.camera_calibration_ready)
-            self.assertIsNone(hw.cap)
 
     @patch("cv2.VideoCapture")
     @patch("src.hardware.hardware_manager.run_calibration_flow")
@@ -673,13 +675,16 @@ class TestCameraCalibrationFailClosed(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg = MockCamConfig()
+            cfg.ROBOT_BACKEND = "PHYSICAL"
+            cfg.RECALIBRATE_CAMERA = True
             hw = HardwareManager(config=cfg, project_dir=tmp_dir)
             hw.model = None
 
             perspective = Path(tmp_dir) / "perspective.npy"
             np.save(perspective, valid_matrix)
+            hw.cap = mock_cap_instance
 
-            hw._init_camera()
+            hw._prepare_perspective_calibration(0)
             self.assertTrue(hw.camera_calibration_ready)
             self.assertIsNotNone(hw.cap)
 

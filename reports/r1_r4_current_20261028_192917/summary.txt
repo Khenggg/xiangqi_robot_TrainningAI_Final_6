@@ -1,0 +1,43 @@
+R1-R4 READ-ONLY SNAPSHOT
+========================
+Read at: 2026-10-28T19:29:17+07:00
+Controller: 192.168.58.2
+Mode: READ-ONLY (no enable, no motion, no gripper command)
+
+Point   X (mm)    Y (mm)    Z (mm)    Tool   User (raw controller metadata)
+R1     -207.0     219.0     220.0      0      1
+R2     -202.0     547.0     220.0      0      1
+R3      165.0     546.0     220.0      0      1
+R4      162.0     222.0     220.0      0      0
+
+Frame check
+-----------
+- Current WObj: 1
+- GetCurWObjCoord(): [0, 0, 0, 0, 0, 0] (identity)
+- Current Tool: 0, tool offset: [0, 0, 0, 0, 0, 0]
+- Therefore R1-R3 numeric XYZ is equal to robot base coordinates despite the
+  controller storing the metadata label as user 1.
+- Runtime now normalizes R1-R4 to user 0 ONLY while this identity check passes.
+  A non-identity WObj is still rejected.
+
+Derived file
+------------
+r1_r4_frame0_xy.json contains X/Y only, user_frame=0 for all four points.
+The raw 20-element controller rows and original user labels remain in
+teaching_points.json.
+
+Z warning
+---------
+Z = 220.0 mm for all four points, equal to SAFE_Z. Do not use this as the
+independent board-surface Z without measuring the actual surface.
+
+Measured XY edge lengths
+------------------------
+R1-R2: 328.038 mm (canonical width 320.0)
+R2-R3: 367.001 mm (canonical length 360.0)
+R3-R4: 324.014 mm (canonical width 320.0)
+R4-R1: 369.012 mm (canonical length 360.0)
+
+These edge lengths are outside the configured board-grid tolerance. The app may
+use the normalized points for command mapping, but the board mirror/XY_SE2
+calibration should reject them until the points are re-taught accurately.

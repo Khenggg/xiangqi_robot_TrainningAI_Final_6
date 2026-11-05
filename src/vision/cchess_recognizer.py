@@ -370,6 +370,35 @@ def check_recognition_quality(
     )
 
 
+def piece_confidence_ok(board, confidence, minimum):
+    """Check confidence only on occupied cells.
+
+    Empty board cells naturally have low classifier confidence. Requiring the
+    minimum over all 90 cells makes Camera Monitor look correct while every FEN
+    scan fails. Exact board equality and sanity remain separate gates.
+    """
+    try:
+        values = np.asarray(confidence, dtype=float)
+    except (TypeError, ValueError):
+        return False
+    if values.shape != (10, 9) or not np.isfinite(values).all():
+        return False
+    if (values < 0.0).any() or (values > 1.0).any():
+        return False
+    if not isinstance(board, (list, tuple)) or len(board) != 10 or any(len(row) != 9 for row in board):
+        return False
+    occupied = [values[r][c] for r in range(10) for c in range(9)
+                if board[r][c] not in (".", "x", "")]
+    if not occupied:
+        return False
+    try:
+        threshold = float(minimum)
+    except (TypeError, ValueError):
+        return False
+    return bool(np.isfinite(threshold) and threshold >= 0.0
+                and float(np.min(occupied)) >= threshold)
+
+
 def validate_recognition_result(
     result: Dict,
     img_shape: Optional[Tuple[int, int]] = None,

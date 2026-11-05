@@ -1,0 +1,6 @@
+{
+  "main.py": "ca612ddbb2c466449b19a7992c89246d9bf7fe757ef1680b3056546879d2b70a",
+  "src/vision/camera_monitor.py": "8768eb9b2fdc7d75a00ab53b8d54c672f602d20e7d23f56a7245327e082cda5f",
+  "src/hardware/robot_VIP.py": "32741090308b70df9d0b8b4c54cbc83e709a85a0b250f3e3586658ae7d6ff9bf",
+  "tests/unit/test_f2_camera_and_frame_restart.py": "9afb09f0ec7461ba1d27ee1b0e5de5be3528063cb28c732d35500f04c083c419"
+}

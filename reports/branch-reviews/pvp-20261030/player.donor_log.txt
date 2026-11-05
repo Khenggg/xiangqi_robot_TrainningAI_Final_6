@@ -1,0 +1,29 @@
+75c1bc9 Revert "feat: add local two-player Xiangqi mode"
+93fef3a feat: add local two-player Xiangqi mode
+fb0598d fix(setup): bootstrap and validate Windows runtime before launch
+fe3faa8 feat(vision): support 10mm picking margin beyond board edges
+a52c8e4 fix: changed rotation config
+0e5f911 fix(vision): allow pick centers within outer grid margin
+b98175d Merge branch 'feature/visual-correction-v2' of https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6 into feature/visual-correction-v2
+fb857d5 fix: fixed gripper behavior
+ab7afbb feat(vision): add opt-in colored-ring pick correction
+af3d544 build(windows): package pinned setup and workstation camera calibration
+12cd359 feat(vision): add continuous scan diagnostics and safe-height hover tests
+7faa730 fix(camera): share camera opening policy with intrinsics calibration
+bd1585b fix(calibration): report fit errors and preserve checkerboard samples
+c8a3d79 feat(vision): add height-aware picking with bounded async sampling
+367ac26 feat(vision): add homography-only top-rim correction
+5846ffc Merge remote-tracking branch 'origin/feature/visual-correction-v2' into feature/visual-correction-v2
+e8c0d40 docs(vision): document top-face calibration testing and retry recovery
+f0a7a48 feat(robot): integrate guarded top-face picks and same-move retry controls
+88eae34 feat(calibration): add camera-only pick geometry commissioning wizard
+da8188e config(vision): define 10mm top-face and consensus settings
+6ce81a7 feat(vision): add calibrated top-face geometry and metric consensus
+2d097a1 fix(robot): restore visual pick fallback
+652af26 feat: new debug features for visual pick
+22edd27 feat(calibration): add guided geometry measurement client
+be8dc30 feat(calibration): add separate camera-grid and grid-robot measurements
+836ed4d fix(vision): require stable box centers for robot picks
+5e516d5 feat(robot): add manual visual pick-place test mode
+0504c67 fix(vision): require stable corners and calibration approval
+36b7448 fix: slight shrunk the client window down

@@ -101,6 +101,8 @@ def test_human_move_and_capture_synchronization(twin_system):
     # Captured piece must be deleted from simulation world!
     assert "black_knight_0" not in twin.world.pieces
     assert len(twin.world.pieces) == 31
+    assert {p["id"] for p in telemetry._latest_world_state["captured_pieces"]} == {"black_knight_0"}
+    assert telemetry._latest_world_state["captured_pieces"][0]["captured"] is True
 
     # Captured piece must not be in published world state telemetry
     pieces_in_packet = {p["id"]: p for p in telemetry._latest_world_state["pieces"]}

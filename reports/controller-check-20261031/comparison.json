@@ -1,0 +1,47 @@
+{
+  "joint_delta_since_20261030_2040_deg": [
+    -0.000652313232421875,
+    0.00152587890625,
+    0.0006561279296875,
+    0.00043487548828125,
+    0.00064849853515625,
+    0.0008697509765625
+  ],
+  "new_flange_vs_old_tcp_xyz_mm": 0.01788236335666991,
+  "new_tcp_vs_old_tcp_xyz_mm": 260.64923586452096,
+  "status_values": {
+    "main_code": [
+      1
+    ],
+    "sub_code": [
+      1
+    ],
+    "tool": [
+      1
+    ],
+    "user": [
+      0
+    ],
+    "EmergencyStop": [
+      0
+    ],
+    "rbtEnableState": [
+      1
+    ],
+    "robot_state": [
+      1
+    ],
+    "robot_mode": [
+      1
+    ],
+    "motion_done": [
+      1
+    ],
+    "collisionState": [
+      0
+    ],
+    "mc_queue_len": [
+      0
+    ]
+  }
+}

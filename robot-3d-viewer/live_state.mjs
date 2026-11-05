@@ -1,3 +1,36 @@
+// Each connection pins one publisher stream; sequence numbers are per packet
+// type because initial cached world/placement snapshots can predate robot_state.
+export function createLivePacketOrderGuard() {
+  let streamId = null;
+  const latest = new Map();
+  return {
+    get streamId() { return streamId; },
+    accept(payload) {
+      if (!payload || typeof payload !== "object" || typeof payload.type !== "string") return false;
+      const stream = payload.stream_id;
+      const sequence = payload.packet_seq;
+      // Legacy servers are allowed only before a versioned stream is established.
+      if (stream === undefined && sequence === undefined) return streamId === null;
+      if (typeof stream !== "string" || !stream || !Number.isSafeInteger(sequence) || sequence < 1) return false;
+      if (streamId !== null && stream !== streamId) return false;
+      if (sequence <= (latest.get(payload.type) ?? 0)) return false;
+      streamId = stream;
+      latest.set(payload.type, sequence);
+      return true;
+    },
+  };
+}
+
+export function worldStateMatchesContext(payload, expected) {
+  if (expected === undefined) return true; // Standalone/legacy server.
+  if (!expected || typeof expected !== "object") return false;
+  const actual = payload?.projection_context;
+  if (!actual || typeof actual !== "object") return false;
+  return ["session_id", "board_revision", "game_epoch", "scene_id", "scene_epoch", "fen"]
+    .every(key => actual[key] === expected[key]) &&
+    (expected.placement_version === null || actual.placement_version === expected.placement_version);
+}
+
 export function validateLivePacket(payload, jointLimits, expectedModel = "FR5") {
   if (!payload || payload.type !== "robot_state") {
     return { ok: false, reason: "not a robot_state packet" };
@@ -44,38 +77,50 @@ export function validateWorldStatePacket(payload) {
     return { ok: false, reason: "missing pieces array" };
   }
 
-  for (const piece of payload.pieces) {
-    if (!piece || typeof piece !== "object") {
-      return { ok: false, reason: "piece must be an object" };
+  const pieceLists = [
+    ["pieces", payload.pieces],
+    ["captured_pieces", payload.captured_pieces ?? []],
+  ];
+  for (const [listName, list] of pieceLists) {
+    if (!Array.isArray(list)) {
+      return { ok: false, reason: `${listName} must be an array` };
     }
-    if (typeof piece.id !== "string" || piece.id.trim() === "") {
-      return { ok: false, reason: "invalid piece in pieces list: missing non-empty id" };
-    }
-
-    const pose = piece.pose_world || piece.pose_robot;
-    if (!Array.isArray(pose) || pose.length < 3 || pose.some((v) => typeof v !== "number" || !Number.isFinite(v))) {
-      return { ok: false, reason: `piece ${piece.id} has invalid or non-finite 3D coordinates` };
-    }
-
-    const quat = piece.orientation_quat_world || piece.orientation_quat_robot;
-    if (quat !== undefined) {
-      if (!Array.isArray(quat) || quat.length !== 4 || quat.some((v) => typeof v !== "number" || !Number.isFinite(v))) {
-        return { ok: false, reason: `piece ${piece.id} quaternion must have exactly 4 finite numbers` };
+    for (const piece of list) {
+      if (!piece || typeof piece !== "object") {
+        return { ok: false, reason: "piece must be an object" };
       }
-      const normSq = quat[0] * quat[0] + quat[1] * quat[1] + quat[2] * quat[2] + quat[3] * quat[3];
-      if (normSq < 1e-12) {
-        return { ok: false, reason: `piece ${piece.id} has zero-norm quaternion` };
+      if (typeof piece.id !== "string" || piece.id.trim() === "") {
+        return { ok: false, reason: `invalid piece in ${listName} list: missing non-empty id` };
       }
-    }
+      if (piece.captured !== undefined && typeof piece.captured !== "boolean") {
+        return { ok: false, reason: `piece ${piece.id} capture state must be boolean` };
+      }
 
-    const status = piece.status || piece.physical_state;
-    if (status !== undefined && (typeof status !== "string" || status.trim() === "")) {
-      return { ok: false, reason: `piece ${piece.id} has invalid status string` };
-    }
+      const pose = piece.pose_world || piece.pose_robot;
+      if (!Array.isArray(pose) || pose.length < 3 || pose.some((v) => typeof v !== "number" || !Number.isFinite(v))) {
+        return { ok: false, reason: `piece ${piece.id} has invalid or non-finite 3D coordinates` };
+      }
 
-    const grasped = piece.is_grasped !== undefined ? piece.is_grasped : piece.attached;
-    if (grasped !== undefined && typeof grasped !== "boolean") {
-      return { ok: false, reason: `piece ${piece.id} grasp state must be a boolean` };
+      const quat = piece.orientation_quat_world || piece.orientation_quat_robot;
+      if (quat !== undefined) {
+        if (!Array.isArray(quat) || quat.length !== 4 || quat.some((v) => typeof v !== "number" || !Number.isFinite(v))) {
+          return { ok: false, reason: `piece ${piece.id} quaternion must have exactly 4 finite numbers` };
+        }
+        const normSq = quat[0] * quat[0] + quat[1] * quat[1] + quat[2] * quat[2] + quat[3] * quat[3];
+        if (normSq < 1e-12) {
+          return { ok: false, reason: `piece ${piece.id} has zero-norm quaternion` };
+        }
+      }
+
+      const status = piece.status || piece.physical_state;
+      if (status !== undefined && (typeof status !== "string" || status.trim() === "")) {
+        return { ok: false, reason: `piece ${piece.id} has invalid status string` };
+      }
+
+      const grasped = piece.is_grasped !== undefined ? piece.is_grasped : piece.attached;
+      if (grasped !== undefined && typeof grasped !== "boolean") {
+        return { ok: false, reason: `piece ${piece.id} grasp state must be a boolean` };
+      }
     }
   }
 
@@ -134,7 +179,8 @@ export function validateWorldStatePacket(payload) {
     };
   }
 
-  return { ok: true, pieces: payload.pieces, gripper };
+  return { ok: true, pieces: payload.pieces,
+    capturedPieces: payload.captured_pieces ?? [], gripper };
 }
 
 export function liveControlsLocked({ socketOpen = false, live = false, connecting = false } = {}) {
@@ -158,4 +204,13 @@ export function stabilizeJointTarget(nextJoints, previousJoints, deadbandDeg = 0
       ? previousJoints[index]
       : value,
   );
+}
+
+export function gripperCommandApplies(packet, liveSource) {
+  return packet?.type === "gripper_command"
+    && packet.source === "PHYSICAL"
+    && liveSource === "PHYSICAL"
+    && (packet.phase === "CLOSE" || packet.phase === "OPEN")
+    && typeof packet.piece_id === "string"
+    && packet.piece_id.length > 0;
 }

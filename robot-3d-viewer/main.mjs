@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
-import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget } from "./live_state.mjs";
+import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget, createLivePacketOrderGuard, worldStateMatchesContext, gripperCommandApplies } from "./live_state.mjs";
 import { fetchPhysicalGeometry } from "./geometry.mjs";
 import { nearestBoardIntersection } from "./board_picker.mjs";
 import { fetchVirtualGripperProfile } from "./gripper_profile.mjs";
@@ -316,16 +316,31 @@ async function loadSharedGripper() {
   return gripperVisual.loadPromise;
 }
 
+const VIRTUAL_GRIPPER_VISUAL_TRAVEL_SCALE = 12.0;
+
+function updateGripperStateBadge(closed) {
+  const badge = document.getElementById("gripperStateBadge");
+  if (!badge) return;
+  badge.textContent = closed ? "KẸP: ĐÓNG" : "KẸP: MỞ";
+  badge.className = `gripper-badge ${closed ? "closed" : "open"}`;
+}
+
 async function setGripperClosed(closed) {
-  if (!gripperVisual.fingers.length || gripperVisual.closed === closed) {
+  updateGripperStateBadge(closed);
+  // The CAD asset's real travel is only ~0.34 mm; exaggerate the virtual
+  // visualization so the jaw state is visible. Physical mode stays exact.
+  const travelScale = state.liveSource === "VIRTUAL" ? VIRTUAL_GRIPPER_VISUAL_TRAVEL_SCALE : 1.0;
+  if (!gripperVisual.fingers.length
+      || (gripperVisual.closed === closed && gripperVisual.travelScale === travelScale)) {
     return;
   }
   const visualAsset = await getGripperVisualAsset();
   for (const { mesh, cadPosition, direction } of gripperVisual.fingers) {
     mesh.position.copy(cadPosition);
-    mesh.position.x += fingerOffsetCadMm(visualAsset, direction, closed);
+    mesh.position.x += fingerOffsetCadMm(visualAsset, direction, closed, travelScale);
   }
   gripperVisual.closed = closed;
+  gripperVisual.travelScale = travelScale;
 }
 
 export function buildProceduralGripper(profile) {
@@ -671,7 +686,7 @@ function initSpeedControlEvents() {
     });
   }
 
-  setActiveSpeedFactor(0.2);
+  setActiveSpeedFactor(getActiveSpeedFactor());
 }
 
 function setLiveBadge(text, kind = "") {
@@ -692,7 +707,17 @@ function sendLivePayload(payload) {
     handleBackendError("Hiệu chuẩn bàn thật không nhất quán; đã chặn lệnh gửi tới FR3.");
     return false;
   }
-  state.liveSocket.send(JSON.stringify(payload));
+  const context = state.liveCommandContext;
+  if (context !== undefined && context?.commands_allowed !== true) {
+    handleBackendError("Phiên đang bận hoặc chỉ cho phép xem; chờ dữ liệu mới trước khi thao tác.");
+    return false;
+  }
+  const command = state.liveStreamId ? { ...payload, stream_id: state.liveStreamId } : { ...payload };
+  if (context) {
+    command.command_context = context;
+    command.scene_epoch = context.scene_epoch;
+  }
+  state.liveSocket.send(JSON.stringify(command));
   return true;
 }
 
@@ -776,6 +801,11 @@ function connectLive() {
     return;
   }
   state.liveSocket = socket;
+  state.liveStreamId = null;
+  state.liveCommandContext = undefined;
+  state.liveGameContext = undefined;
+  state.liveSimulationProfileInitialized = false;
+  const packetOrder = createLivePacketOrderGuard();
   state.lastValidLiveReceipt = 0;
   const connectionDeadline = setTimeout(() => {
     if (socket.readyState === WebSocket.CONNECTING) socket.close();
@@ -794,8 +824,21 @@ function connectLive() {
     if (state.liveSocket !== socket) return;
     try {
       const data = JSON.parse(event.data);
+      if (!packetOrder.accept(data)) return;
+      state.liveStreamId = packetOrder.streamId;
       if (data.type === "robot_state") {
+        state.liveCommandContext = data.command_context;
+        if (data.command_context || state.liveGameContext === undefined) {
+          state.liveGameContext = data.command_context;
+        }
         if (!applyLiveState(data)) return;
+        if (data.source === "VIRTUAL" && !state.liveSimulationProfileInitialized && data.simulation_profile) {
+          const speed = data.simulation_profile.speed_factor;
+          if (typeof speed === "number" && Number.isFinite(speed) && speed >= .05 && speed <= 1) {
+            setActiveSpeedFactor(speed);
+            state.liveSimulationProfileInitialized = true;
+          }
+        }
         if (data.gripper !== undefined && state.currentArm?.gripper) {
           state.currentArm.gripper.setClosed(Boolean(data.gripper));
         }
@@ -804,6 +847,12 @@ function connectLive() {
           const verBadge = document.getElementById("placementVersionBadge");
           if (verBadge) verBadge.textContent = `VER: ${data.placement_version}`;
         }
+      } else if (data.type === "gripper_command") {
+        if (!gripperCommandApplies(data, state.liveSource)) return;
+        state.lastGripperCommand = data;
+        if (state.currentArm?.gripper) {
+          state.currentArm.gripper.setClosed(data.phase === "CLOSE");
+        }
       } else if (data.type === "twin_status") {
         if (data.error) {
           setLiveBadge("DỮ LIỆU CŨ/LỖI", "error");
@@ -811,9 +860,11 @@ function connectLive() {
         }
       } else if (data.type === "world_state") {
         const val = validateWorldStatePacket(data);
-        if (val.ok && !(state.liveSource === "PHYSICAL" && state.livePlacementValid === false)) {
+        if (val.ok && worldStateMatchesContext(data, state.liveGameContext)
+            && !(state.liveSource === "PHYSICAL" && state.livePlacementValid === false)) {
           if (piecesGroupRef && xiangqiPieces) {
-            updatePiecesFromWorldState(piecesGroupRef, xiangqiPieces, val.pieces);
+            updatePiecesFromWorldState(
+              piecesGroupRef, xiangqiPieces, val.pieces, val.capturedPieces);
           }
           if (val.gripper && state.currentArm?.gripper) {
             state.currentArm.gripper.setClosed(Boolean(val.gripper.closed));
@@ -829,11 +880,16 @@ function connectLive() {
           if (!Array.isArray(xyz) || xyz.length !== 3) continue;
           for (const [axis, index] of [["X", 0], ["Y", 1], ["Z", 2]]) {
             const input = document.getElementById(`teach${name}${axis}`);
-            if (input) input.value = String(xyz[index]);
+            if (input) {
+              input.value = String(xyz[index]);
+              input.readOnly = axis === "Z";
+            }
           }
         }
         const status = document.getElementById("teachingPointsStatus");
-        if (status) status.textContent = `Đã nạp R1–R4 từ hình học mô phỏng, phiên bản ${data.placement_version}. Có thể sửa XYZ rồi áp dụng.`;
+        const surfaceInput = document.getElementById("teachSurfaceZ");
+        if (surfaceInput) surfaceInput.value = String(data.surface_z_mm);
+        if (status) status.textContent = `Đã nạp R1–R4 mô phỏng, phiên bản ${data.placement_version}. Sửa X/Y và chiều cao mặt bàn riêng rồi áp dụng.`;
       } else if (data.type === "board_profile_result") {
         if (data.success && data.placement) state.teachingBaseVersion = Number(data.placement.placement_version);
         const status = document.getElementById("teachingPointsStatus");
@@ -925,6 +981,9 @@ function connectLive() {
     clearTimeout(connectionDeadline);
     clearInterval(freshnessWatchdog);
     if (state.liveSocket !== socket) return;
+    state.liveStreamId = null;
+    state.liveCommandContext = undefined;
+    state.liveGameContext = undefined;
     state.liveSocket = null;
     state.liveSource = null;
     state.livePlacementValid = null;
@@ -1233,7 +1292,14 @@ export function applyAuthoritativeBoardPlacement(packet) {
     return false;
   }
   state.livePlacementValid = true;
-  if (warning) warning.hidden = true;
+  if (warning) {
+    const nominalDisplay = packet.placement_source === "NOMINAL_UNCALIBRATED_DISPLAY";
+    warning.hidden = packet.calibration_space !== "TAUGHT_XY_DISPLAY_ONLY" && !nominalDisplay;
+    if (nominalDisplay) warning.textContent = "Chưa có ánh xạ R1–R4 hợp lệ. Bàn đang hiển thị DANH NGHĨA, không khớp bàn thật.";
+    else if (!warning.hidden) warning.textContent = packet.surface_z_verified
+      ? "R1–R4: hiển thị XY theo điểm robot, chỉ đọc; chưa kiểm định đường đi."
+      : "R1–R4: XY theo điểm robot; Z mặt bàn CHƯA HIỆU CHUẨN. Chỉ hiển thị, không xác nhận gắp thật.";
+  }
 
   // 1 & 2. Atomically update board visual root & active scene placement cache
   setScenePlacement(packet);
@@ -1261,7 +1327,7 @@ export function applyAuthoritativeBoardPlacement(packet) {
   const zOffsetNum = document.getElementById("boardZOffsetNum");
   const verBadge = document.getElementById("placementVersionBadge");
   const fourPointPose = state.placementSource === "R1_R4_SIMULATION" ||
-    state.placementSource === "R1_R4_PHYSICAL";
+    state.placementSource === "R1_R4_PHYSICAL" || state.placementSource === "R1_R4_PHYSICAL_DISPLAY";
 
   if (shiftSlider) shiftSlider.value = fourPointPose ? "0" : String(d);
   if (shiftNum) {
@@ -1608,6 +1674,11 @@ function initPlacementPanelEvents() {
   }
   document.getElementById("btnApplyTeachingPoints")?.addEventListener("click", () => {
     const points = {};
+    const height = document.getElementById("teachSurfaceZ")?.value.trim();
+    if (height === "" || height === undefined || !Number.isFinite(Number(height))) {
+      if (teachingStatus) teachingStatus.textContent = "Nhập chiều cao mặt bàn Z hữu hạn (mm).";
+      return;
+    }
     for (const name of ["R1", "R2", "R3", "R4"]) {
       const values = ["X", "Y", "Z"].map((axis) => document.getElementById(`teach${name}${axis}`)?.value.trim());
       if (values.some((value) => value === "" || value === undefined) || !values.every((value) => Number.isFinite(Number(value)))) {
@@ -1617,6 +1688,7 @@ function initPlacementPanelEvents() {
       points[name] = values.map(Number);
     }
     if (sendTeachingCommand({ command: "APPLY_BOARD_TEACHING_POINTS", points,
+      surface_z_mm: Number(height),
       expected_placement_version: state.teachingBaseVersion ?? state.placementVersion })) {
       if (teachingStatus) teachingStatus.textContent = "Đang kiểm hình học và va chạm toàn đường dời bàn…";
     }

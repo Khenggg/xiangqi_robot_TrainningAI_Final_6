@@ -1,0 +1,99 @@
+{
+  "allowlist": [
+    "GetActualJointPosDegree",
+    "GetActualTCPPose",
+    "GetActualToolFlangePose",
+    "GetActualTCPNum",
+    "GetActualWObjNum",
+    "GetRobotErrorCode"
+  ],
+  "no_actuation": true,
+  "results": [
+    {
+      "method": "GetActualJointPosDegree",
+      "args": [
+        0
+      ],
+      "read_at": "2026-10-30T20:36:15.124254+07:00",
+      "result": [
+        14,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "error": null
+    },
+    {
+      "method": "GetActualTCPPose",
+      "args": [
+        0
+      ],
+      "read_at": "2026-10-30T20:36:15.152511+07:00",
+      "result": [
+        14,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "error": null
+    },
+    {
+      "method": "GetActualToolFlangePose",
+      "args": [
+        0
+      ],
+      "read_at": "2026-10-30T20:36:15.156029+07:00",
+      "result": [
+        14,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "error": null
+    },
+    {
+      "method": "GetActualTCPNum",
+      "args": [
+        0
+      ],
+      "read_at": "2026-10-30T20:36:15.164114+07:00",
+      "result": [
+        14,
+        0
+      ],
+      "error": null
+    },
+    {
+      "method": "GetActualWObjNum",
+      "args": [
+        0
+      ],
+      "read_at": "2026-10-30T20:36:15.168725+07:00",
+      "result": [
+        14,
+        0
+      ],
+      "error": null
+    },
+    {
+      "method": "GetRobotErrorCode",
+      "args": [],
+      "read_at": "2026-10-30T20:36:15.173062+07:00",
+      "result": [
+        0,
+        5,
+        1
+      ],
+      "error": null
+    }
+  ]
+}

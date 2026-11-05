@@ -125,10 +125,10 @@ def test_emergency_black_terminal_move_publishes_once(state,capture):
 def test_emergency_scene_rejection_keeps_new_fen_and_error_without_publishing(state):
     state.turn='b'
     state.set_board_observer(Mock(return_value=False))
-    assert state.process_emergency_move((0,3),(0,4),'b_P') is False
+    assert state.process_emergency_move((0,3),(0,4),'b_P') is True
     assert state.board[4][0]=='b_P' and state.current_fen.split()[1]=='w'
-    assert state.physical_sync_fault and state.move_sync_error and state.snapshot_continue_required
-    assert not state.api_client.method_calls
+    assert not state.physical_sync_fault and state.projection_error and state.last_commit_result.projection_pending
+    state.api_client.send_move_update_board.assert_called_once()
 
 
 def test_mouse_emergency_rejection_does_not_install_camera_baseline(state,monkeypatch):

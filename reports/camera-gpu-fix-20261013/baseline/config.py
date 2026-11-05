@@ -153,7 +153,7 @@ CLOUD_TIMEOUT_SEC = 5
 
 # --- SIMULATION API CONFIGURATION ---
 SIMULATION_API_URL = "https://tuongkydaisu.com"
-SIMULATION_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzaW11bGF0aW9uMDAxIiwicm9sZSI6IlNJTVVMQVRJT04iLCJ0b2tlbklkIjoiMTlkYjRjMDEtNjk4My00MTU5LTllNzYtODk0NDU5YjJhMjM5IiwiaWF0IjoxNzczMTI3MTE5LCJleHAiOjE4MDQ2NjMxMTl9.cHQEzHS-SqrZqUZ9FRcJgUE_BzyxZ60iiy7xYzZPQOo" # Liên hệ admin để lấy Token cấp cho app. Điền vào đây.
+SIMULATION_TOKEN = ""  # Archived credential redacted; historical hashes no longer match this file.
 
 # --- MOONFISH ENGINE ---
 # Hướng dẫn cho người mới clone repo:

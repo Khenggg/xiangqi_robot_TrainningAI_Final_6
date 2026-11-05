@@ -5,6 +5,7 @@ following a successful gripper command, not evidence of a physical grasp.
 """
 
 from dataclasses import replace
+from contextlib import ExitStack
 import logging
 import math
 import threading
@@ -14,6 +15,7 @@ import numpy as np
 
 from src.domain.game_move import MoveActor
 from src.core.project_logging import event
+from src.digital_twin.gripper_events import IDLE, gripper_intent
 from src.digital_twin.world_sync import sync_world_from_robot_snapshot
 from src.simulation.physics.world import VirtualPhysicalWorld
 
@@ -221,7 +223,7 @@ class LiveTwinBridge:
         self._cells[tuple(context.dst)] = context.piece_id
         self._committed.add(context.move_id)
 
-    def _board_observation_ready(self):
+    def _board_observation_ready(self, *, blocking=True):
         """Require a fresh idle measurement before changing observed pieces.
 
         Do not trust a cached IDLE state after telemetry has disconnected. This
@@ -231,8 +233,12 @@ class LiveTwinBridge:
             if (self.board_pose_provider.get_board_placement_state() is not self.placement
                     or self.world.board_placement_state is not self.placement):
                 return self._fail("Board placement changed; restart/reconcile the twin", recovery=True)
-            with self._poll_lock:
+            if not self._poll_lock.acquire(blocking=blocking):
+                return False
+            try:
                 snapshot = self.backend.get_state_snapshot()
+            finally:
+                self._poll_lock.release()
             measured = getattr(snapshot, "measurement_timestamp", None)
             measured = snapshot.timestamp if measured is None else measured
             age = time.time() - measured
@@ -269,11 +275,15 @@ class LiveTwinBridge:
                  for p in self.world.layout_cfg["pieces"]}
         return self.reconcile_to_board_cells(cells)
 
-    def reconcile_to_board_cells(self, piece_cells: dict) -> bool:
+    def reconcile_to_board_cells(self, piece_cells: dict, *, blocking=True, projection_context=None) -> bool:
         """Apply an explicitly confirmed complete board, never during manipulation."""
-        if not self._board_observation_ready():
+        if not self._board_observation_ready(blocking=blocking):
             return False
-        with self._lock, self.world._physics_lock:
+        with ExitStack() as locks:
+            for lock in (self._lock, self.world._physics_lock):
+                if not lock.acquire(blocking=blocking):
+                    return False
+                locks.callback(lock.release)
             if self._command_animation and self.active_move is None:
                 # Camera-confirmed reconciliation supersedes a command-only
                 # animation estimate, including an interrupted grasp.
@@ -287,6 +297,7 @@ class LiveTwinBridge:
             except (KeyError, TypeError, ValueError) as exc:
                 return self._fail(f"Board reconciliation rejected: {exc}")
             self._cells = dict(piece_cells)
+            self.world.projection_context = dict(projection_context) if projection_context is not None else None
             self._committed.clear()
             self.active_move = None
             self.expected_payload_id = None
@@ -299,32 +310,61 @@ class LiveTwinBridge:
 
     def begin_command_animation(self, context):
         """Visual estimate only; never validates or commands the physical arm."""
+        if not self.physical:
+            return
         with self._lock:
             self.active_move = context
             self._command_animation = True
             self._released = []
             self._payload_sequence = ([context.captured_piece_id] if context.captured_piece_id else []) + [context.piece_id]
 
-    def animate_command_gripper(self, event_name, closed):
-        if event_name != 'gripper' or not self._command_animation:
+    def _broadcast_gripper_command(self, phase, piece, action=None):
+        if not self.physical or self.telemetry is None or piece is None:
             return
+        self.telemetry.broadcast_custom({
+            "type": "gripper_command",
+            "source": "PHYSICAL",
+            "phase": phase,
+            "action": action,
+            "piece_id": piece.piece_id,
+            "captured_piece_id": getattr(self.active_move, "captured_piece_id", None),
+            "move_id": getattr(self.active_move, "move_id", None),
+            "physical_grasp_verified": False,
+        })
+
+    def animate_command_gripper(self, event_name, closed, action=None):
+        if not self.physical or event_name != 'gripper' or not self._command_animation:
+            return
+        intent = gripper_intent(action, closed)
+        if intent == IDLE:
+            return
+        phase = changed = None
         try:
-            if not self.poll_once():
-                return
             with self._lock, self.world._physics_lock:
-                if closed and self.world.get_attached_piece() is None and len(self._released) < len(self._payload_sequence):
+                if (intent == "attach" and self.world.get_attached_piece() is None
+                        and len(self._released) < len(self._payload_sequence)):
                     piece = self.world.pieces[self._payload_sequence[len(self._released)]]
                     self.world.gripper.attach_piece(piece)
-                elif not closed:
+                    event('twin.animation_attached', 'Viewer estimate attached payload',
+                          piece_id=piece.piece_id, physical_grasp_verified=False)
+                    phase, changed = "CLOSE", piece
+                elif intent == "release":
                     piece = self.world.release_attached_piece()
                     if piece is not None:
                         self._released.append(piece.piece_id)
+                        event('twin.animation_released', 'Viewer estimate released payload',
+                              piece_id=piece.piece_id, physical_grasp_verified=False)
+                        phase, changed = "OPEN", piece
                 self._publish_world()
         except Exception as exc:
             event('twin.animation_failed', str(exc), level=logging.WARNING)
+            return
+        if phase is not None:
+            self._broadcast_gripper_command(phase, changed, action)
 
     def finish_command_animation(self):
         with self._lock:
+            self._command_animation = False
             self.active_move = None
 
     def begin_robot_move(self, context):

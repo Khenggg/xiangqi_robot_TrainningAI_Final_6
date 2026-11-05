@@ -1,0 +1,9 @@
+{
+  "runtime_calibration_unchanged": true,
+  "physical_calls": "NOT RUN",
+  "production_fixes": "NOT RUN",
+  "mock_probes_passed": 3,
+  "probe_exit_code": 0,
+  "exact_collision_mechanism": "INSUFFICIENT EVIDENCE",
+  "source_and_log_evidence": "REPORT.md and snapshots listed therein"
+}

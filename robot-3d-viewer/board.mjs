@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { settledPieceCell } from "./board_picker.mjs";
+import { displayCellWorld } from "./physical_board_display.mjs";
 import { fetchPhysicalGeometry, parsePhysicalGeometry } from "./geometry.mjs";
 import { fetchStartLayout, parseStartLayout, START_LAYOUT, LABEL_RED, LABEL_BLACK, PIECE_TYPE_NAMES } from "./layout.mjs";
 
@@ -61,6 +62,8 @@ export function setScenePlacement(placement) {
     boardOrientationQuatWorld: placement.board_orientation_quat_world || placement.quat_world || null,
     TRobotFromBoard: placement.T_robot_from_board || null,
     teachingPoints: teachingPoints,
+    displayPoints: placement.calibration_space === "TAUGHT_XY_DISPLAY_ONLY"
+      ? placement.display_teaching_points_mm : null,
   };
 
   if (_activeBoardGroup) {
@@ -75,6 +78,45 @@ export function setScenePlacement(placement) {
 
 export function applyBoardRootPlacement(group, placement) {
   group.position.set(placement.boardCenterX, placement.boardSurfaceY, placement.boardCenterZ);
+  // A taught quadrilateral can have opposite winding and small shear. Preserve
+  // its four XY corners for display instead of coercing it into a rigid quaternion.
+  group.traverse((mesh) => {
+    const geo = mesh.geometry;
+    if (!geo?.attributes?.position) return;
+    if (!geo.userData.displayOriginalPositions) {
+      geo.userData.displayOriginalPositions = geo.attributes.position.array.slice();
+      geo.userData.displayOriginalIndex = geo.index?.array.slice() ?? null;
+    }
+    const original = geo.userData.displayOriginalPositions;
+    geo.attributes.position.array.set(original);
+    if (geo.index && geo.userData.displayOriginalIndex) geo.index.array.set(geo.userData.displayOriginalIndex);
+    if (placement.displayPoints) {
+      const geometry = getActiveGeometry();
+      const center = [placement.boardCenterX, placement.boardSurfaceY, placement.boardCenterZ];
+      for (let i=0; i<original.length; i+=3) {
+        const p = displayCellWorld(placement.displayPoints, placement.boardSurfaceY,
+          original[i]/geometry.rowSpacingM+4.5, original[i+2]/geometry.cellM+4);
+        geo.attributes.position.array.set([p[0]-center[0], original[i+1], p[2]-center[2]], i);
+      }
+      const o = displayCellWorld(placement.displayPoints, 0, 0, 0);
+      const r = displayCellWorld(placement.displayPoints, 0, 9, 0);
+      const c = displayCellWorld(placement.displayPoints, 0, 0, 8);
+      if ((r[0]-o[0])*(c[2]-o[2])-(r[2]-o[2])*(c[0]-o[0]) < 0 && geo.index) {
+        for (let i=0; i<geo.index.array.length; i+=3) {
+          [geo.index.array[i+1], geo.index.array[i+2]] = [geo.index.array[i+2], geo.index.array[i+1]];
+        }
+      }
+    }
+    geo.attributes.position.needsUpdate = true;
+    if (geo.index) geo.index.needsUpdate = true;
+    geo.computeVertexNormals();
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+  });
+  if (placement.displayPoints) {
+    group.rotation.set(0, 0, 0);
+    return;
+  }
   const T = placement.TRobotFromBoard;
   if (T) {
     // Mesh axes (x,y,z) are board (v,normal,u); robot -> viewer is (-y,z,-x).
@@ -142,6 +184,11 @@ export function boardPointToXYZ(rowOrCell, colOrGeometry = null, maybeGeometry =
   const rowM = geo.rowSpacingM || 0.040;
   const u = (col - 4.0) * colM;
   const v = (row - 4.5) * rowM;
+
+  if (placement.displayPoints) {
+    return new THREE.Vector3(...displayCellWorld(
+      placement.displayPoints, placement.boardSurfaceY, row, col));
+  }
 
   // A calibrated rigid transform is the single authority for both mesh and cells.
   if (placement.TRobotFromBoard) {
@@ -549,30 +596,31 @@ export function buildPieces(geometry = null, layoutOrPieces = START_LAYOUT) {
   return { group, pieces };
 }
 
-export function updatePiecesFromWorldState(piecesGroup, piecesDict, piecesList) {
+export function updatePiecesFromWorldState(piecesGroup, piecesDict, piecesList, capturedList = []) {
   if (!piecesDict || !Array.isArray(piecesList)) return;
+  const captured = Array.isArray(capturedList) ? capturedList : [];
 
   const activeIds = new Set();
-  for (const p of piecesList) {
-    activeIds.add(p.id);
-  }
+  for (const p of piecesList) activeIds.add(p.id);
+  const capturedIds = new Set();
+  for (const p of captured) capturedIds.add(p.id);
+
   for (const [id, mesh] of Object.entries(piecesDict)) {
     const canId = mesh.userData?.id;
-    if (canId && !activeIds.has(canId)) {
+    if (canId && !activeIds.has(canId) && !capturedIds.has(canId)) {
       mesh.visible = false;
       mesh.userData.row = null;
       mesh.userData.col = null;
+      mesh.userData.captured = false;
     }
   }
 
-  for (const p of piecesList) {
+  function applyPiece(p, forceCaptured = false) {
     const mesh = piecesDict[p.id];
-    if (!mesh) continue;
-
+    if (!mesh) return;
     if (Array.isArray(p.pose_world) && p.pose_world.length >= 3) {
       mesh.position.set(p.pose_world[0], p.pose_world[1], p.pose_world[2]);
     }
-
     if (Array.isArray(p.orientation_quat_world) && p.orientation_quat_world.length >= 4) {
       mesh.quaternion.set(
         p.orientation_quat_world[0],
@@ -581,25 +629,24 @@ export function updatePiecesFromWorldState(piecesGroup, piecesDict, piecesList) 
         p.orientation_quat_world[3]
       );
     }
-
-    if (p.status === "OUT_OF_BOUNDS") {
-      mesh.visible = false;
-    } else {
-      mesh.visible = true;
-    }
-
+    const isCaptured = forceCaptured || p.captured === true;
+    mesh.visible = isCaptured || p.status !== "OUT_OF_BOUNDS";
     mesh.userData.status = p.status;
+    mesh.userData.captured = isCaptured;
     mesh.userData.is_grasped = p.is_grasped;
-    const cell = settledPieceCell(p);
+    const cell = isCaptured ? null : settledPieceCell(p);
     if (cell) {
       mesh.userData.row = cell.row;
       mesh.userData.col = cell.col;
-    } else if (p.status === "OUT_OF_BOUNDS" || p.is_grasped || p.status === "ATTACHED") {
-      // Only clear cell when piece is carried or out of bounds
+    } else if (isCaptured || p.status === "OUT_OF_BOUNDS" || p.is_grasped || p.status === "ATTACHED") {
+      // Only clear cell when piece is carried, captured, or out of bounds.
       mesh.userData.row = null;
       mesh.userData.col = null;
     }
   }
+
+  for (const p of piecesList) applyPiece(p, false);
+  for (const p of captured) applyPiece(p, true);
 }
 
 export function movePieceTo(mesh, rowOrCell, colOrGeometry = null, maybeGeometry = null) {

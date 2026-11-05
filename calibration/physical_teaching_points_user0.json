@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "profile_id": "fr3-fixed-user0-20261028",
+  "coordinate_frame": "robot_base",
+  "position_unit": "mm",
+  "orientation_unit": "deg",
+  "joint_unit": "deg",
+  "provenance": {
+    "selection": "USER_REQUESTED_FIXED_PROFILE",
+    "source": "reports/r1_r4_current_20261028_192917/teaching_points.json",
+    "source_sha256": "ce7b6eedf92c5a7ff2de0669307eaf9629e4c3de31d5c55d67872198dabc52da",
+    "recorded_at": "2026-10-28T19:29:17.554421+07:00",
+    "normalization_evidence": "reports/r1_r4_current_20261028_192917/r1_r4_frame0_xy.json",
+    "source_user_frames": {
+      "R1": 1,
+      "R2": 1,
+      "R3": 1,
+      "R4": 0,
+      "HOMECHESS": 1,
+      "R_Trash": 0
+    },
+    "source_user_1_offset_mm_deg": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "operation": "Preserve numeric pose/joints; normalize identity WObj metadata to user 0"
+  },
+  "points": {
+    "R1": {
+      "pose": [
+        -207.0,
+        219.0,
+        220.0,
+        -180.0,
+        0.0,
+        -42.307999
+      ],
+      "joints": [
+        -66.398003,
+        -97.751999,
+        121.706001,
+        -113.954002,
+        -90.0,
+        65.910004
+      ],
+      "tool": 0,
+      "user": 0
+    },
+    "R2": {
+      "pose": [
+        -202.0,
+        547.0,
+        220.0,
+        -180.0,
+        0.0,
+        -43.667999
+      ],
+      "joints": [
+        -79.806,
+        -33.507999,
+        27.427,
+        -83.918999,
+        -90.0,
+        53.862
+      ],
+      "tool": 0,
+      "user": 0
+    },
+    "R3": {
+      "pose": [
+        165.0,
+        546.0,
+        220.0,
+        -180.0,
+        0.0,
+        -43.667999
+      ],
+      "joints": [
+        -117.115997,
+        -38.456001,
+        37.056,
+        -88.599998,
+        -90.0,
+        16.552
+      ],
+      "tool": 0,
+      "user": 0
+    },
+    "R4": {
+      "pose": [
+        162.0,
+        222.0,
+        220.0,
+        -180.0,
+        0.0,
+        -43.667999
+      ],
+      "joints": [
+        -147.906006,
+        -104.204002,
+        126.598999,
+        -112.396004,
+        -90.0,
+        -14.238
+      ],
+      "tool": 0,
+      "user": 0
+    },
+    "HOMECHESS": {
+      "pose": [
+        -104.274002,
+        149.610001,
+        348.188995,
+        179.860001,
+        0.554,
+        -42.0
+      ],
+      "joints": [
+        -89.467003,
+        -128.630005,
+        106.871002,
+        -68.512001,
+        -89.497002,
+        42.534
+      ],
+      "tool": 0,
+      "user": 0
+    },
+    "R_Trash": {
+      "pose": [
+        -176.179993,
+        116.182999,
+        193.404999,
+        -178.067001,
+        2.482,
+        -14.952
+      ],
+      "joints": [
+        -62.592999,
+        -121.115997,
+        143.649994,
+        -115.635002,
+        -89.470001,
+        42.415001
+      ],
+      "tool": 0,
+      "user": 0
+    }
+  }
+}

@@ -1,0 +1,74 @@
+HOMECHESS: tool/user frame differs from R1-R4 or metadata is missing
+Traceback (most recent call last):
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 826, in move_piece
+    self._move_piece_sequence(*args, **kwargs)
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 889, in _move_piece_sequence
+    self._verify_waypoint_frame(home, 'HOMECHESS')
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 629, in _verify_waypoint_frame
+    raise RobotCommandError(f'{name}: tool/user frame differs from R1-R4 or metadata is missing')
+src.hardware.robot_VIP.RobotCommandError: HOMECHESS: tool/user frame differs from R1-R4 or metadata is missing
+Validated R_Trash teaching point unavailable
+Traceback (most recent call last):
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 826, in move_piece
+    self._move_piece_sequence(*args, **kwargs)
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 877, in _move_piece_sequence
+    raise RobotCommandError("Validated R_Trash teaching point unavailable")
+src.hardware.robot_VIP.RobotCommandError: Validated R_Trash teaching point unavailable
+Camera did not confirm the complete pre-motion board
+Traceback (most recent call last):
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\core\ai_execution.py", line 73, in execute_ai_move
+    execute_pending_ai_motion(state, hw, stage=request["stage"] if request else "pre_pick")
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\core\visual_move_coordinator.py", line 104, in execute_pending_ai_motion
+    raise RuntimeError("Camera did not confirm the complete pre-motion board")
+RuntimeError: Camera did not confirm the complete pre-motion board
+Injected missing reply; command outcome unknown
+Traceback (most recent call last):
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 826, in move_piece
+    self._move_piece_sequence(*args, **kwargs)
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 918, in _move_piece_sequence
+    self._run_stage(MotionStage.LIFT,self.pick_at,s_col,s_row,visual_target=moving_visual_target)
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 290, in _run_stage
+    value = operation(*args, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 771, in pick_at
+    self._run_stage(MotionStage.APPROACH, self.move_safe_pose, pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 290, in _run_stage
+    value = operation(*args, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 542, in move_safe_pose
+    err = self.robot.MoveCart(
+          ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ken\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ken\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ken\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1198, in _execute_mock_call
+    raise effect
+src.hardware.rpc_transport.RpcOutcomeUnknown: Injected missing reply; command outcome unknown
+FEN [INSUFFICIENT_STABLE_SAMPLES]: Chưa đủ mẫu mới hợp lệ liên tiếp. Mẫu liên tiếp=1/2.
+Không có tâm quân ổn định (moving: valid=0, spread=n/a); giới hạn lệch 6.0 mm, dao động 0.12 ô
+Không có tâm quân ổn định (moving: valid=0, spread=n/a); giới hạn lệch 6.0 mm, dao động 0.12 ô
+Không có tâm quân ổn định (moving: valid=0, spread=n/a); giới hạn lệch 6.0 mm, dao động 0.12 ô
+No stable box centre after 3 attempts for ['moving']; robot pick blocked
+Traceback (most recent call last):
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\core\visual_move_coordinator.py", line 135, in refresh_moving
+    fresh = acquire_pick_targets(hw, {"moving": source}, "capture_removed", cfg)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\core\visual_move_coordinator.py", line 59, in acquire_pick_targets
+    raise PickTargetUnavailable(str(last), stage, resolution=getattr(last, "resolution", {}))
+src.vision.pick_consensus.PickTargetUnavailable: No stable box centre after 3 attempts for ['moving']; robot pick blocked
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 826, in move_piece
+    self._move_piece_sequence(*args, **kwargs)
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\robot_VIP.py", line 912, in _move_piece_sequence
+    moving_visual_target = refresh_moving_visual_target()
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\core\visual_move_coordinator.py", line 138, in refresh_moving
+    raise PickTargetUnavailable(str(exc), "capture_removed",
+src.vision.pick_consensus.PickTargetUnavailable: No stable box centre after 3 attempts for ['moving']; robot pick blocked

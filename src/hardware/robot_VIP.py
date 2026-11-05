@@ -9,6 +9,8 @@ import os
 import json
 import threading
 import math
+import logging
+from xmlrpc.client import Fault
 import numpy as np
 import cv2
 
@@ -20,6 +22,7 @@ import config
 from src.core.project_logging import event
 from src.motion.result import MotionExecutionResult, MotionFailureCategory, PayloadState
 from src.motion.stages import MotionStage
+from src.domain.board_pose_provider import parse_frame_identifier
 
 class MotionResult(MotionExecutionResult):
     def __bool__(self):
@@ -43,12 +46,20 @@ class GripperCommandError(RuntimeError):
 
 
 class FR5Robot:
-    def __init__(self, ip=None):
+    def __init__(self, ip=None, *, dry_run=None, teaching_points_path=None):
+        if ip is not None and (not isinstance(ip, str) or not ip.strip()):
+            raise ValueError("Robot IP must be a nonempty explicit address")
         self.ip          = ip or config.ROBOT_IP
         self.robot       = None
+        self.fixed_teaching_points_path = os.fspath(teaching_points_path) if teaching_points_path is not None else None
+        self.uses_fixed_teaching_points = teaching_points_path is not None
         self.physical_motion_authorized = False
+        self._activation_owned = False
+        self._disable_outcome_unknown = False
+        self._motion_stop = threading.Event()
         self.gripper_closed_estimate = False
         self.gripper_command_known = False
+        self._gripper_pulse_active = False
         self.motion_listener = None
         self.telemetry_readiness = None
         self.last_motion_result = None
@@ -56,9 +67,19 @@ class FR5Robot:
         self._last_completed_stage = None
         self._payload_state = PayloadState.NONE
         self.connected   = False
-        self.dry         = config.DRY_RUN
-        self.tool_num    = 0
-        self.user_num    = 1
+        self.dry         = config.DRY_RUN if dry_run is None else bool(dry_run)
+        configured_tool = getattr(config, "ROBOT_TOOL_FRAME", None)
+        if configured_tool is not None:
+            configured_tool = int(configured_tool)
+            if configured_tool < 0:
+                raise ValueError("ROBOT_TOOL_FRAME must be a nonnegative integer or None")
+        configured_user = int(getattr(config, "ROBOT_USER_FRAME", 0))
+        if configured_user != 0:
+            raise ValueError("ROBOT_USER_FRAME must be 0 (robot base) for this project")
+        self.expected_tool_num = configured_tool
+        self.expected_user_num = configured_user
+        self.tool_num    = 0 if configured_tool is None else configured_tool
+        self.user_num    = configured_user
         self.default_vel = config.MOVE_SPEED
 
         # Two-direction direct-drive gripper: Tool DO1=open, Tool DO0=close.
@@ -72,6 +93,13 @@ class FR5Robot:
         # Cache teaching points để tránh Singularity
         self.teaching_points = {}  # {name: {"pose": [x,y,z,rx,ry,rz], "joints": [j1..j6]}}
         self.teaching_points_error = None
+        self.teaching_points_version = 0
+        self.wobj_identity_as_base = False
+        self.identity_wobj_id = None
+        self._wobj_by_id_unsupported = False
+        self._frame_normalization_error = None
+        self.dispatch_validity = None
+        self.motion_trace = {}
         self.use_teaching_points = True  # Luôn dùng teaching points
 
         # Kích thước ô cờ (mm), mặc định theo config, tự động cập nhật khi load teaching points
@@ -114,6 +142,9 @@ class FR5Robot:
         """Read-only connection: no servo, mode, motion or gripper command."""
         self.physical_motion_authorized = False
         self.teaching_points_error = None
+        self.wobj_identity_as_base = False
+        self.identity_wobj_id = None
+        self._wobj_by_id_unsupported = False
         if self.dry:
             self.connected = True
             return True
@@ -138,11 +169,15 @@ class FR5Robot:
             print(f"[ROBOT] Connected read-only; {self.teaching_points_error}")
         return True
 
-    def activate_physical_control(self, *, commissioned=False):
+    def activate_physical_control(self, *, commissioned=False, stop_recovered=False):
         """Explicit operator gate after calibration and commissioning review."""
         self.physical_motion_authorized = False
         if not commissioned:
             raise RobotCommandError("Physical control requires commissioned authorization")
+        if self._disable_outcome_unknown:
+            raise RobotCommandError("Controller disable outcome unknown; confirm pendant disable before enabling")
+        if self._motion_stop.is_set() and not stop_recovered:
+            raise RobotCommandError("Controlled stop latched; operator recovery required")
         if self.dry:
             return True
         if not self.connected or self.robot is None:
@@ -150,26 +185,60 @@ class FR5Robot:
         self._validated_corners()
         self._validate_gripper_config()
         for method, value in (("Mode", 0), ("RobotEnable", 1)):
+            if method == "RobotEnable":
+                # A lost enable reply may still have energized the controller.
+                self._activation_owned = True
             err = getattr(self.robot, method)(value)
             if err != 0:
                 raise RobotCommandError(f"{method} failed: {err}", err)
         self.physical_motion_authorized = True
+        self._motion_stop.clear()
         return True
+
+    def latch_motion_stop(self):
+        """Block subsequent stages immediately; preserve the held payload."""
+        self._motion_stop.set()
+
+    def send_controlled_stop(self, timeout=2.0):
+        """One stop command on an independent connection; never enable or retry."""
+        if self.dry or not (self.physical_motion_authorized or self._activation_owned):
+            raise RobotCommandError("Stop requires application-owned physical control")
+        from src.hardware.rpc_transport import BoundedRPCProxy
+        proxy = BoundedRPCProxy(f"http://{self.ip}:20003", timeout_s=timeout)
+        return proxy.StopMotion()
 
     def deactivate_physical_control(self):
         """Revoke owned activation without gripper or HOME; leave read-only sessions alone."""
-        was_authorized = self.physical_motion_authorized
+        was_authorized = self.physical_motion_authorized or self._activation_owned
         self.physical_motion_authorized = False
         if not was_authorized or self.dry:
             return True
         if not self.connected or self.robot is None:
             raise RobotCommandError("Cannot confirm controller disable: robot disconnected")
-        code = self.robot.RobotEnable(0)
+        if self._disable_outcome_unknown:
+            raise RobotCommandError("Disable reply unknown; disable on pendant and Ctrl+F9 confirm. No RPC replay.")
+        from src.hardware.rpc_transport import RpcOutcomeUnknown
+        try:
+            code = self.robot.RobotEnable(0)
+        except RpcOutcomeUnknown:
+            self._disable_outcome_unknown = True
+            raise
         if code != 0:
             raise RobotCommandError(f"RobotEnable(0) failed: {code}; verify pendant", backend_code=code)
+        self._activation_owned = False
+        return True
+
+    def confirm_operator_disabled(self, *, approved=False):
+        """Operator evidence only; no controller/gripper command is dispatched."""
+        if not approved or not self._disable_outcome_unknown or self.physical_motion_authorized:
+            raise RobotCommandError("Explicit pendant disable confirmation is required")
+        self._activation_owned = False
+        self._disable_outcome_unknown = False
         return True
 
     def _require_actuation(self):
+        if self._motion_stop.is_set():
+            raise RobotCommandError("RECOVERY_REQUIRED: controlled stop requested; no new motion")
         if not self.dry and (not self.connected or not self.physical_motion_authorized):
             raise RobotCommandError("Physical actuation is not authorized")
         if not self.dry and self.teaching_points_error:
@@ -189,6 +258,25 @@ class FR5Robot:
     def _validated_corners(self):
         if self.teaching_points_error:
             raise RobotCommandError(self.teaching_points_error)
+        if not self.dry:
+            frames = {(parse_frame_identifier(self.teaching_points[name].get("tool")),
+                       parse_frame_identifier(self.teaching_points[name].get("user")))
+                      for name in ("R1", "R2", "R3", "R4")}
+            if len(frames) != 1 or None in next(iter(frames)):
+                found = sorted(str(value) for value in frames)
+                raise RobotCommandError(
+                    f"R1–R4 must use one explicit tool/user frame; found {found}. "
+                    "Re-teach R1–R4 in robot base user 0.")
+            common_tool, common_user = next(iter(frames))
+            if common_user != self.expected_user_num:
+                raise RobotCommandError(
+                    f"R1–R4 must use user {self.expected_user_num} (robot base); found user {common_user}. "
+                    "Re-teach R1–R4 with user 0 selected on the pendant.")
+            if self.expected_tool_num is not None and common_tool != self.expected_tool_num:
+                raise RobotCommandError(
+                    f"R1–R4 must use tool {self.expected_tool_num}; found tool {common_tool}.")
+            if (common_tool, common_user) != (self.tool_num, self.user_num):
+                raise RobotCommandError("R1–R4 cached frames changed; reload and verify before motion")
         corners = np.array([self._validate_pose(self.teaching_points[name]["pose"])[:3]
                             for name in ("R1", "R2", "R3", "R4")])
         edges = np.roll(corners, -1, axis=0) - corners
@@ -199,10 +287,15 @@ class FR5Robot:
         return corners
 
     def _run_stage(self, stage, operation, *args, **kwargs):
+        self._require_actuation()
+        if self.dispatch_validity is not None:
+            self.dispatch_validity()
         self._active_stage = stage
         event("motion.stage_started", "Bắt đầu bước chuyển động", stage=stage.name,
-              operation=getattr(operation, "__name__", str(operation)))
+              operation=getattr(operation, "__name__", str(operation)), **self.motion_trace)
         value = operation(*args, **kwargs)
+        if self.dispatch_validity is not None:
+            self.dispatch_validity()
         if isinstance(value, MotionExecutionResult):
             if not value.success:
                 raise RobotCommandError(value.message, value.backend_code)
@@ -210,9 +303,147 @@ class FR5Robot:
                                and not isinstance(value, bool) and value != 0):
             raise RobotCommandError(f"{stage.name} failed: {value}", value)
         self._last_completed_stage = stage
-        event("motion.stage_completed", "Hoàn tất bước chuyển động", stage=stage.name)
+        event("motion.stage_completed", "Hoàn tất bước chuyển động", stage=stage.name, **self.motion_trace)
         return value
 
+
+    def _normalize_identity_wobj_frames(self, point_names, frames):
+        """Allow mixed user IDs only when the taught WObj offset is identity.
+
+        R1-R4 may have been recorded while a work-object was selected even
+        though its coordinate offset is exactly zero. In that case the numeric
+        XYZ values are already robot-base coordinates; normalize only the
+        metadata and keep a loud audit event. Non-identity WObj transforms are
+        never accepted.
+        """
+        if not bool(getattr(config, "ALLOW_IDENTITY_WOBJ_AS_BASE", False)):
+            return frames
+        users = {point['user'] for name, point in self.teaching_points.items()
+                 if name in point_names}
+        if len(users) < 2:
+            return frames
+        nonbase_users = users - {0}
+        if len(nonbase_users) != 1 or None in nonbase_users:
+            return frames
+        source_user = next(iter(nonbase_users))
+        try:
+            by_id = getattr(self.robot, "GetWObjCoordWithID", None)
+            use_current = not callable(by_id) or getattr(self, "_wobj_by_id_unsupported", False)
+            if not use_current:
+                # Motion uses user 0 and can change the controller's active
+                # selection. A restart must verify the frame named by R1-R4,
+                # independently of whichever frame happens to be active now.
+                try:
+                    code, wobj_offset = by_id(source_user)
+                    verification_source = "GetWObjCoordWithID"
+                except Fault as exc:
+                    if (exc.faultCode != -506 or "GetWObjCoordWithID" not in exc.faultString
+                            or "not defined" not in exc.faultString):
+                        raise
+                    self._wobj_by_id_unsupported = True
+                    use_current = True
+                    event("robot.frame_query_unsupported",
+                          "Firmware không hỗ trợ đọc WObj theo ID; chỉ đọc frame đang chọn",
+                          level=logging.WARNING, wobj=source_user, fault_code=exc.faultCode)
+            if use_current:
+                code, current_user = self.robot.GetActualWObjNum()
+                if int(code) != 0:
+                    raise RobotCommandError(f"Không đọc được WObj đang chọn: {code}", code)
+                if parse_frame_identifier(current_user) != source_user:
+                    raise RobotCommandError(
+                        f"Chọn User/WObj {source_user} trên pendant rồi F9/F10 để xác minh lại. "
+                        f"Firmware chỉ đọc được WObj đang chọn (hiện tại: {current_user}).")
+                code, wobj_offset = self.robot.GetCurWObjCoord()
+                after_code, after_user = self.robot.GetActualWObjNum()
+                if after_code != 0 or parse_frame_identifier(after_user) != source_user:
+                    raise RobotCommandError("WObj thay đổi trong lúc đọc; giữ nguyên frame rồi F9/F10 thử lại")
+                verification_source = "GetCurWObjCoord"
+            if code != 0:
+                raise RobotCommandError(f"WObj {source_user} query failed: {code}", code)
+            offset = np.asarray(wobj_offset, dtype=float)
+            if offset.shape != (6,) or not np.isfinite(offset).all():
+                raise RobotCommandError(f"WObj {source_user} must contain six finite offsets")
+        except Exception as exc:
+            self._frame_normalization_error = str(exc)
+            event("robot.frame_normalization_failed",
+                  f"Không xác minh được WObj {source_user} để chuẩn hóa frame",
+                  level=logging.WARNING, wobj=source_user, reason=str(exc))
+            return frames
+        if not np.allclose(offset, 0.0, atol=1e-6, rtol=0):
+            event("robot.frame_normalization_refused",
+                  f"WObj {source_user} không phải identity; không thể coi là robot base",
+                  level=logging.WARNING, wobj=source_user, offset=offset.tolist())
+            return frames
+        for name in point_names:
+            point = self.teaching_points[name]
+            if point.get("user") == source_user:
+                point["user"] = 0
+        self.wobj_identity_as_base = True
+        self.identity_wobj_id = source_user
+        event("robot.frame_normalized_identity_wobj",
+              "WObj identity được chuẩn hóa thành robot base (user 0)",
+              level=logging.WARNING, source_wobj=source_user,
+              source_offset=offset.tolist(), verification_source=verification_source, points=list(point_names))
+        print(f"[ROBOT] WARNING: normalized identity WObj {source_user} -> user 0 for R1-R4")
+        return {(point['tool'], point['user']) for name, point in self.teaching_points.items()
+                if name in point_names}
+
+    def normalize_board_observations(self, parsed):
+        """Return observations with an identity-WObj user label mapped to base."""
+        if not self.wobj_identity_as_base:
+            return parsed
+        from dataclasses import replace
+        return {
+            name: (replace(point, user_or_wobj_id=0)
+                   if point.user_or_wobj_id == self.identity_wobj_id else point)
+            for name, point in parsed.items()
+        }
+
+    def _load_fixed_teaching_points(self):
+        """Load the explicitly selected frozen robot-base profile; no SDK reads."""
+        with open(self.fixed_teaching_points_path, encoding="utf-8-sig") as source:
+            profile = json.load(source)
+        expected = {"schema_version": 1, "coordinate_frame": "robot_base",
+                    "position_unit": "mm", "orientation_unit": "deg", "joint_unit": "deg"}
+        if any(profile.get(key) != value for key, value in expected.items()):
+            raise RobotCommandError("Fixed teaching-point profile has invalid schema/frame/units")
+        points = {}
+        for name in ("R1", "R2", "R3", "R4", "HOMECHESS", "R_Trash"):
+            point = profile["points"][name]
+            tool = parse_frame_identifier(point.get("tool"))
+            user = parse_frame_identifier(point.get("user"))
+            joints = [float(value) for value in point["joints"]]
+            if tool is None or user != 0 or len(joints) != 6 or not all(math.isfinite(v) for v in joints):
+                raise RobotCommandError(f"{name}: fixed points require explicit tool, user 0 and six finite joints")
+            points[name] = dict(pose=self._validate_pose(point["pose"]), joints=joints, tool=tool, user=user)
+        tools = {point["tool"] for point in points.values()}
+        if len(tools) != 1 or (self.expected_tool_num is not None and tools != {self.expected_tool_num}):
+            raise RobotCommandError("Fixed points must share the configured tool frame")
+        self.tool_num, self.user_num = next(iter(tools)), 0
+        self.teaching_points = points
+        self.teaching_points_error = None
+        try:
+            self._calculate_cell_sizes_from_corners()
+        except Exception:
+            self.teaching_points = {}
+            self.teaching_points_error = "Invalid fixed board corners"
+            raise
+        self.teaching_points_version += 1
+        event("robot.fixed_profile_loaded", "Dùng tọa độ cố định đã chuẩn hóa user 0",
+              profile_id=profile.get("profile_id"), path=self.fixed_teaching_points_path,
+              points=list(points), tool=self.tool_num, user=self.user_num,
+              coordinate_frame="robot_base", position_unit="mm", angle_unit="deg")
+
+    def read_teaching_point(self, name):
+        """Resolve all game waypoints from the selected command-coordinate source."""
+        if getattr(self, "uses_fixed_teaching_points", False) is True:
+            if self.teaching_points_error:
+                raise RobotCommandError(self.teaching_points_error)
+            point = self.teaching_points.get(name)
+            if point is None:
+                return -1, []
+            return 0, list(point["pose"]) + list(point["joints"]) + [point["tool"], point["user"]]
+        return self.robot.GetRobotTeachingPoint(name)
 
     def _load_teaching_points(self):
         """Đọc teaching points R1, R2, R3, R4 để tính toán Bilinear Interpolation."""
@@ -220,6 +451,15 @@ class FR5Robot:
             return
         
         print("[ROBOT] 📍 Đang load teaching points...")
+        self.teaching_points_error = "R1–R4 reload in progress or incomplete; command mapping unavailable"
+        self.physical_motion_authorized = False
+        self.teaching_points = {}
+        self.wobj_identity_as_base = False
+        self.identity_wobj_id = None
+        self._frame_normalization_error = None
+        if getattr(self, "uses_fixed_teaching_points", False) is True:
+            self._load_fixed_teaching_points()
+            return
         
         # Load 4 góc bàn cờ (bắt buộc)
         point_names = ["R1", "R2", "R3", "R4"]
@@ -235,8 +475,8 @@ class FR5Robot:
                     self.teaching_points[name] = {
                         "pose": pose_data,
                         "joints": joint_data,
-                        "tool": int(float(data[12])) if len(data) >= 14 else None,
-                        "user": int(float(data[13])) if len(data) >= 14 else None,
+                        "tool": parse_frame_identifier(data[12]) if len(data) >= 14 else None,
+                        "user": parse_frame_identifier(data[13]) if len(data) >= 14 else None,
                     }
                     print(f"[ROBOT]   ✅ Loaded {name}: X={pose_data[0]:.1f}, Y={pose_data[1]:.1f}, Z={pose_data[2]:.1f}")
                 else:
@@ -248,16 +488,25 @@ class FR5Robot:
         frames = {(point['tool'], point['user']) for name, point in self.teaching_points.items()
                   if name in point_names}
         if len(frames) != 1 or any(value is None for value in next(iter(frames))):
-            tools = {point['tool'] for name, point in self.teaching_points.items() if name in point_names}
-            users = {point['user'] for name, point in self.teaching_points.items() if name in point_names}
-            if len(tools) == 1 and None not in tools and None not in users and users.issubset({0, 1}):
-                self.tool_num = self.teaching_points['R1']['tool']
-                self.user_num = self.teaching_points['R1']['user']
-                print(f"[ROBOT] ⚠️ Cảnh báo: R1-R4 có nhãn user frame {sorted(users)}; tự động dùng tool={self.tool_num}, user={self.user_num} của R1.")
-            else:
-                raise RobotCommandError('R1-R4 require consistent tool/user frame metadata')
-        else:
-            self.tool_num, self.user_num = next(iter(frames))
+            frames = self._normalize_identity_wobj_frames(point_names, frames)
+        if len(frames) != 1 or any(value is None for value in next(iter(frames))):
+            found = sorted(str(value) for value in frames)
+            if self._frame_normalization_error:
+                raise RobotCommandError(f"R1-R4: {self._frame_normalization_error}")
+            raise RobotCommandError(
+                f"R1-R4 require one explicit tool/user frame; found {found}. "
+                "Re-teach R1-R4 in robot base user 0 with the same tool frame.")
+        common_tool, common_user = next(iter(frames))
+        if common_user != self.expected_user_num:
+            raise RobotCommandError(
+                f"R1-R4 user frame must be {self.expected_user_num} (robot base); found {common_user}. "
+                "Re-teach R1-R4 with user 0 selected on the pendant.")
+        if self.expected_tool_num is not None and common_tool != self.expected_tool_num:
+            raise RobotCommandError(
+                f"R1-R4 tool frame must be {self.expected_tool_num}; found {common_tool}. "
+                "Re-teach R1-R4 with the configured tool frame.")
+        self.tool_num, self.user_num = common_tool, common_user
+        self.teaching_points_error = None
         # Tính CELL_SIZE tự động từ 4 góc
         self._calculate_cell_sizes_from_corners()
         
@@ -268,11 +517,16 @@ class FR5Robot:
                 pose_data = [float(str(data[i]).strip()) for i in range(6)]
                 joint_data = [float(str(data[i]).strip()) for i in range(6, 12)]
                 
+                trash_tool = parse_frame_identifier(data[12]) if len(data) >= 14 else None
+                trash_user = parse_frame_identifier(data[13]) if len(data) >= 14 else None
+                if (self.wobj_identity_as_base and trash_tool == self.tool_num
+                        and trash_user == self.identity_wobj_id):
+                    trash_user = 0
                 self.teaching_points["R_Trash"] = {
                     "pose": pose_data,
                     "joints": joint_data,
-                    "tool": int(float(data[12])) if len(data) >= 14 else None,
-                    "user": int(float(data[13])) if len(data) >= 14 else None,
+                    "tool": trash_tool,
+                    "user": trash_user,
                 }
                 print(f"[ROBOT]   ✅ Loaded R_Trash: X={pose_data[0]:.1f}, Y={pose_data[1]:.1f}, Z={pose_data[2]:.1f}")
             else:
@@ -282,6 +536,7 @@ class FR5Robot:
         
         print(f"[ROBOT] ✅ Đã load {len(self.teaching_points)} teaching points")
         print(f"[ROBOT] 🎯 Sử dụng Bilinear Interpolation cho tất cả vị trí")
+        self.teaching_points_version += 1
 
     # -------------------------------------------------------------------------
     # CHUYỂN ĐỔI TỌA ĐỘ BÀN CỜ → ROBOT
@@ -337,8 +592,8 @@ class FR5Robot:
         if not all(math.isfinite(float(v)) for v in (col, row, z_height)):
             raise ValueError("Grid target must be finite")
         margin = float(getattr(config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", 0.0))
-        if not math.isfinite(margin) or not 0 <= margin <= 10:
-            raise ValueError("Outside-grid margin must be within 0..10 mm")
+        if not math.isfinite(margin) or not 0 <= margin <= 6:
+            raise ValueError("Outside-grid margin must be within 0..6 mm")
         corners = self._validated_corners()
         width = min(np.linalg.norm(corners[1]-corners[0]), np.linalg.norm(corners[2]-corners[3]))
         height = min(np.linalg.norm(corners[3]-corners[0]), np.linalg.norm(corners[2]-corners[1]))
@@ -443,7 +698,7 @@ class FR5Robot:
         self._require_actuation()
         if self.dry:
             return 0
-        err, data = self.robot.GetRobotTeachingPoint("HOMECHESS")
+        err, data = self.read_teaching_point("HOMECHESS")
         if err != 0 or len(data) < 6:
             raise RobotCommandError("Validated HOMECHESS teaching point unavailable",err)
         self._verify_waypoint_frame(data, 'HOMECHESS')
@@ -455,10 +710,13 @@ class FR5Robot:
     def _verify_waypoint_frame(self, data, name):
         if len(data) < 14:
             raise RobotCommandError(f'{name}: tool/user frame differs from R1-R4 or metadata is missing')
-        wp_tool, wp_user = int(float(data[12])), int(float(data[13]))
+        wp_tool, wp_user = parse_frame_identifier(data[12]), parse_frame_identifier(data[13])
+        if (self.wobj_identity_as_base and wp_tool == self.tool_num
+                and wp_user == self.identity_wobj_id):
+            # HOMECHESS was recorded under the same identity WObj as R1-R3;
+            # its numeric pose is already robot-base coordinates.
+            wp_user = 0
         if (wp_tool, wp_user) != (self.tool_num, self.user_num):
-            if wp_tool == self.tool_num and {wp_user, self.user_num}.issubset({0, 1}):
-                return
             raise RobotCommandError(f'{name}: tool/user frame differs from R1-R4 or metadata is missing')
 
 
@@ -470,6 +728,7 @@ class FR5Robot:
         timing_values = (
             config.GRIPPER_DIRECTION_DEADTIME_SEC,
             config.GRIPPER_OPEN_MAX_PULSE_SEC,
+            config.GRIPPER_RELEASE_PULSE_SEC,
             config.GRIPPER_CLOSE_PULSE_SEC,
             config.GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC,
             config.GRIPPER_OPEN_SETTLE_SEC,
@@ -500,6 +759,7 @@ class FR5Robot:
                 failures.append(exc)
         if failures:
             raise GripperCommandError("Could not force both gripper outputs LOW") from failures[0]
+        self._gripper_pulse_active = False
 
     def gripper_ctrl(self, action):
         """Pulse one gripper motor direction, then leave both Tool DO outputs LOW."""
@@ -510,6 +770,11 @@ class FR5Robot:
             pulse_seconds = config.GRIPPER_OPEN_MAX_PULSE_SEC
             settle_seconds = config.GRIPPER_OPEN_SETTLE_SEC
             label = "OPEN MAX"
+        elif action == config.GRIPPER_ACTION_RELEASE:
+            target_id = self.gripper_open_do_id
+            pulse_seconds = config.GRIPPER_RELEASE_PULSE_SEC
+            settle_seconds = config.GRIPPER_OPEN_SETTLE_SEC
+            label = "RELEASE"
         elif action == config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP:
             target_id = self.gripper_close_do_id
             pulse_seconds = config.GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC
@@ -526,11 +791,14 @@ class FR5Robot:
         with self._gripper_lock:
             self._pulse_gripper_direction(target_id, pulse_seconds, label)
             time.sleep(settle_seconds)
+        if self._motion_stop.is_set():
+            self.gripper_command_known = False
+            raise GripperCommandError("Gripper interrupted by controlled stop; inspect held payload")
         self.gripper_closed_estimate = action == config.GRIPPER_ACTION_CLOSE
         self.gripper_command_known = True
         if callable(self.motion_listener):
             try:
-                self.motion_listener('gripper', self.gripper_closed_estimate)
+                self.motion_listener('gripper', self.gripper_closed_estimate, action)
             except Exception as exc:
                 import logging
                 event('twin.animation_failed', str(exc), level=logging.WARNING)
@@ -542,8 +810,10 @@ class FR5Robot:
         time.sleep(config.GRIPPER_DIRECTION_DEADTIME_SEC)
         try:
             print(f"[ROBOT] Gripper {label}: DO{target_id} ON for {pulse_seconds:.2f}s")
+            # Even a lost ON reply may have energized the motor.
+            self._gripper_pulse_active = True
             self._set_tool_do(target_id, config.GRIPPER_ACTIVE_STATUS)
-            time.sleep(pulse_seconds)
+            self._motion_stop.wait(pulse_seconds)
         finally:
             self._set_gripper_safe_idle()
 
@@ -586,9 +856,16 @@ class FR5Robot:
             cell=[col, row], target=[visual_target.col, visual_target.row] if visual_target else [col, row],
             visual=visual_target is not None, active=True)
         event("motion.visual_correction", "Bù tâm quân theo camera", correction=self.visual_pick_correction)
+        if self.gripper_command_known and self.gripper_closed_estimate:
+            raise GripperCommandError(
+                "Gripper is closed; inspect for a held payload before another pick")
+        if not self.gripper_command_known:
+            # First pick of a session: jaw state is unknown. Open before descent
+            # instead of approaching a piece with closed jaws.
+            self._run_stage(MotionStage.PREPOSITION, self.gripper_ctrl,
+                            config.GRIPPER_ACTION_OPEN_MAX)
         try:
             self._run_stage(MotionStage.APPROACH, self.move_safe_pose, pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
-            self._run_stage(MotionStage.PREPOSITION, self.gripper_ctrl, config.GRIPPER_ACTION_OPEN_MAX)
             self._run_stage(MotionStage.LAND, self.movel_pose, pose_pick)                # Hạ xuống
             self._run_stage(MotionStage.GRIP, self.gripper_ctrl, config.GRIPPER_ACTION_CLOSE)
             self._payload_state = PayloadState.EXPECTED_ATTACHED
@@ -606,10 +883,10 @@ class FR5Robot:
 
         self._run_stage(MotionStage.PLACE_APPROACH, self.move_safe_pose, pose_safe, col=col, row=row)  # Đến vị trí an toàn
         self._run_stage(MotionStage.PLACE_LAND, self.movel_pose, pose_place)               # Hạ xuống
-        self._run_stage(MotionStage.RELEASE, self.gripper_ctrl, config.GRIPPER_ACTION_OPEN_MAX)
+        self._run_stage(MotionStage.RELEASE, self.gripper_ctrl, config.GRIPPER_ACTION_RELEASE)
         self._payload_state = PayloadState.EXPECTED_RELEASED
         self._run_stage(MotionStage.POST_RELEASE_LIFT, self.movel_pose, pose_safe)                # Nhấc lên
-        self._run_stage(MotionStage.SETTLE, self.gripper_ctrl, config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
+        # Short release retains the jaw gap; safe-gap closing assumes fully open jaws.
         print(f"[ROBOT] ✅ Đặt xong ({col},{row})")
     
     def move_to_extra_safe(self, col, row, visual_target=None):
@@ -651,16 +928,21 @@ class FR5Robot:
             event("motion.stage_failed", str(exc), level=logging.ERROR, code="MOVE_REJECTED",
                   exc_info=True, stage=self._active_stage.name,
                   last_completed_stage=getattr(self._last_completed_stage, "name", None),
-                  payload_state=self._payload_state.name, backend_code=getattr(exc, "backend_code", None))
+                  payload_state=self._payload_state.name, backend_code=getattr(exc, "backend_code", None),
+                  pick_resolution=getattr(exc, "resolution", None))
             category = (MotionFailureCategory.PRECONDITION_FAILED if isinstance(exc,PickTargetUnavailable)
                         else MotionFailureCategory.GRIPPER_FAILED if isinstance(exc,GripperCommandError)
                         else MotionFailureCategory.TARGET_INVALID if isinstance(exc,(ValueError,KeyError))
                         else MotionFailureCategory.MOTION_COMMAND_FAILED)
             retry_stage = exc.stage if isinstance(exc, PickTargetUnavailable) else None
+            metadata = {}
+            if retry_stage:
+                metadata["visual_retry_stage"] = retry_stage
+                metadata["pick_resolution"] = getattr(exc, "resolution", {})
             result = MotionResult.fail(self._active_stage,category,str(exc),
                 last_completed_stage=self._last_completed_stage,payload_state=self._payload_state,
                 backend_code=getattr(exc,"backend_code",None),
-                metadata={"visual_retry_stage": retry_stage} if retry_stage else {})
+                metadata=metadata)
         self.last_motion_result = result
         return result
 
@@ -693,13 +975,12 @@ class FR5Robot:
             self._validate_pose(self.teaching_points["R_Trash"]["pose"])
             trash = self.teaching_points['R_Trash']
             if (trash.get('tool'), trash.get('user')) != (self.tool_num, self.user_num):
-                if not (trash.get('tool') == self.tool_num and {trash.get('user'), self.user_num}.issubset({0, 1})):
-                    raise RobotCommandError('R_Trash tool/user frame differs from R1-R4')
+                raise RobotCommandError('R_Trash tool/user frame differs from R1-R4')
             joints = self.teaching_points["R_Trash"]["joints"]
             if len(joints) != 6 or not all(math.isfinite(float(v)) for v in joints):
                 raise ValueError("Capture-bin joint target is invalid")
         if not self.dry:
-            code, home = self.robot.GetRobotTeachingPoint('HOMECHESS')
+            code, home = self.read_teaching_point('HOMECHESS')
             if code != 0:
                 raise RobotCommandError('HOMECHESS unavailable before motion', code)
             self._verify_waypoint_frame(home, 'HOMECHESS')

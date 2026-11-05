@@ -57,7 +57,8 @@ def test_physical_facade_commands_drive_estimated_payload_and_camera_reconciliat
     arm.robot = MagicMock()
     arm.robot.GetRobotTeachingPoint.return_value = (0, [0]*12 + [arm.tool_num,arm.user_num])
     arm.robot.MoveCart.return_value = arm.robot.MoveJ.return_value = arm.robot.SetToolDO.return_value = 0
-    arm.teaching_points = {name:dict(pose=[x,y,10,180,0,0], joints=[0]*6)
+    arm.teaching_points = {name:dict(pose=[x,y,10,180,0,0], joints=[0]*6,
+                                     tool=arm.tool_num, user=arm.user_num)
         for name,x,y in [('R1',-200,500),('R2',-200,180),('R3',160,180),('R4',160,500)]}
     hw.robot, hw.backend, hw.twin_bridge = arm, backend, bridge
     arm.motion_listener = bridge.animate_command_gripper
@@ -420,3 +421,120 @@ def test_16_physical_mirroring_does_not_use_ik_to_reproduce_real_arm_pose(bridge
     )
     # Must succeed without calling forbidden_ik
     assert bridge.sync_robot_state(snap) is True
+
+
+def test_command_animation_attaches_even_when_telemetry_poll_is_stale(bridge_setup, monkeypatch):
+    """Display attachment must follow the gripper command edge, not a fresh poll."""
+    bridge, backend, provider, world = bridge_setup
+    context = MoveContext("black_cannon_0", (2, 1), (2, 4), MoveActor.ROBOT)
+    bridge.begin_command_animation(context)
+    monkeypatch.setattr(bridge, "poll_once", lambda: False)
+
+    bridge.animate_command_gripper("gripper", True)
+    attached = world.get_attached_piece()
+    assert attached is not None and attached.piece_id == "black_cannon_0"
+    assert bridge.recovery_required is False
+
+    bridge.animate_command_gripper("gripper", False)
+    assert world.get_attached_piece() is None
+    bridge.finish_command_animation()
+    assert bridge._command_animation is False
+
+
+def test_physical_command_edges_broadcast_gripper_command(bridge_setup):
+    from unittest.mock import Mock
+    bridge, backend, provider, world = bridge_setup
+    bridge.telemetry = Mock()
+    context = MoveContext("black_cannon_0", (2, 1), (2, 4), MoveActor.ROBOT)
+    bridge.begin_command_animation(context)
+
+    bridge.animate_command_gripper("gripper", True)
+    packets = [call.args[0] for call in bridge.telemetry.broadcast_custom.call_args_list
+               if call.args and isinstance(call.args[0], dict)
+               and call.args[0].get("type") == "gripper_command"]
+    assert packets[-1]["phase"] == "CLOSE"
+    assert packets[-1]["piece_id"] == "black_cannon_0"
+    assert packets[-1]["source"] == "PHYSICAL"
+    assert packets[-1]["physical_grasp_verified"] is False
+
+    bridge.animate_command_gripper("gripper", False)
+    packets = [call.args[0] for call in bridge.telemetry.broadcast_custom.call_args_list
+               if call.args and isinstance(call.args[0], dict)
+               and call.args[0].get("type") == "gripper_command"]
+    assert packets[-1]["phase"] == "OPEN"
+    assert packets[-1]["piece_id"] == "black_cannon_0"
+
+
+def test_virtual_bridge_never_broadcasts_physical_gripper_command(bridge_setup):
+    from unittest.mock import Mock
+    bridge, backend, provider, world = bridge_setup
+    telemetry = Mock()
+    virtual = LiveTwinBridge(backend=backend, board_pose_provider=provider,
+                             telemetry=telemetry, world=world, physical=False,
+                             owns_world=False)
+    try:
+        context = MoveContext("black_cannon_0", (2, 1), (2, 4), MoveActor.ROBOT)
+        virtual.begin_command_animation(context)
+        virtual.animate_command_gripper("gripper", True)
+        virtual.animate_command_gripper("gripper", False)
+        assert not any(
+            call.args and isinstance(call.args[0], dict)
+            and call.args[0].get("type") == "gripper_command"
+            for call in telemetry.broadcast_custom.call_args_list
+        )
+    finally:
+        virtual.close()
+
+
+def test_physical_state_relay_broadcasts_gripper_command(bridge_setup):
+    from unittest.mock import Mock
+    from src.digital_twin.physical_state_relay import PhysicalStateRelay
+    bridge, backend, provider, world = bridge_setup
+    telemetry = Mock()
+    relay = PhysicalStateRelay(backend, telemetry, "test", world=world, owns_world=False)
+    try:
+        context = MoveContext("black_cannon_0", (2, 1), (2, 4), MoveActor.ROBOT)
+        relay.begin_command_animation(context)
+        relay.animate_command_gripper("gripper", True)
+        packets = [call.args[0] for call in telemetry.broadcast_custom.call_args_list
+                   if call.args and isinstance(call.args[0], dict)
+                   and call.args[0].get("type") == "gripper_command"]
+        assert packets[-1]["phase"] == "CLOSE"
+        assert packets[-1]["piece_id"] == "black_cannon_0"
+        assert packets[-1]["source"] == "PHYSICAL"
+        relay.animate_command_gripper("gripper", False)
+        packets = [call.args[0] for call in telemetry.broadcast_custom.call_args_list
+                   if call.args and isinstance(call.args[0], dict)
+                   and call.args[0].get("type") == "gripper_command"]
+        assert packets[-1]["phase"] == "OPEN"
+    finally:
+        relay.finish_command_animation()
+
+
+def test_safe_gap_keeps_attached_piece_and_emits_no_release_packet(bridge_setup):
+    from unittest.mock import Mock
+    import config
+    bridge, backend, provider, world = bridge_setup
+    bridge.telemetry = Mock()
+    context = MoveContext("black_cannon_0", (2, 1), (2, 4), MoveActor.ROBOT)
+    bridge.begin_command_animation(context)
+
+    bridge.animate_command_gripper("gripper", True, config.GRIPPER_ACTION_CLOSE)
+    assert world.get_attached_piece().piece_id == "black_cannon_0"
+    packet_count = len([c for c in bridge.telemetry.broadcast_custom.call_args_list
+                        if c.args and isinstance(c.args[0], dict)
+                        and c.args[0].get("type") == "gripper_command"])
+
+    bridge.animate_command_gripper("gripper", False, config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
+    assert world.get_attached_piece().piece_id == "black_cannon_0"
+    assert len([c for c in bridge.telemetry.broadcast_custom.call_args_list
+                if c.args and isinstance(c.args[0], dict)
+                and c.args[0].get("type") == "gripper_command"]) == packet_count
+
+    bridge.animate_command_gripper("gripper", False, config.GRIPPER_ACTION_OPEN_MAX)
+    assert world.get_attached_piece() is None
+    packets = [c.args[0] for c in bridge.telemetry.broadcast_custom.call_args_list
+               if c.args and isinstance(c.args[0], dict)
+               and c.args[0].get("type") == "gripper_command"]
+    assert packets[-1]["phase"] == "OPEN"
+    assert packets[-1]["action"] == config.GRIPPER_ACTION_OPEN_MAX

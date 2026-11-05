@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 import time
 import numpy as np
 import pytest
@@ -119,18 +120,119 @@ def test_failed_fresh_calibration_rejects_existing_saved_matrix(tmp_path, monkey
     cap = Capture(np.zeros((3, 3, 3), dtype=np.uint8))
     path = tmp_path / "perspective.npy"
     np.save(path, np.eye(3))
-    manager = SimpleNamespace(config=SimpleNamespace(CCHESS_RECOGNITION_ENABLED=False, VIDEO_SOURCE=7),
-                              project_dir=tmp_path, dry_run=False, cap=None,
-                              model=None, cchess_recognizer=None, perspective_path=path)
+    manager = hw.HardwareManager.__new__(hw.HardwareManager)
+    manager.config = SimpleNamespace(CCHESS_RECOGNITION_ENABLED=False, VIDEO_SOURCE=7,
+                                     RECALIBRATE_CAMERA=True)
+    manager.project_dir = tmp_path
+    manager.dry_run = False
+    manager.profile = None
+    manager.cap = None
+    manager.model = None
+    manager.cchess_recognizer = None
+    manager.perspective_path = path
     monkeypatch.setattr(hw, "YOLO", None)
     monkeypatch.setattr(startup, "open_validated_camera", lambda index: cap)
     monkeypatch.setattr(hw, "run_calibration_flow", lambda *args, **kwargs: None)
     with pytest.raises(RuntimeError, match="Fresh camera calibration failed/cancelled"):
-        hw.HardwareManager._init_camera(manager)
+        manager._init_camera()
     assert not manager.camera_calibration_ready
     assert manager.cap is None
     assert cap.released
     np.testing.assert_array_equal(np.load(path), np.eye(3))
+
+
+def test_restore_drops_only_pre_dispatch_homechess_ai_failure():
+    from src.core.game_state import GameState
+    state = GameState()
+    state.pending_ai_move = {"move": ((0, 3), (0, 4))}
+    state.pending_move = object()
+    state.pending_execution_binding = {"move_id": "stale"}
+    state.move_sync_error = "HOMECHESS: tool/user frame differs from R1-R4 or metadata is missing"
+    state.move_execution_error = state.move_sync_error
+    state.move_execution_status = "FAILED"
+    assert state._discard_pre_dispatch_ai_failure("RECOVERY_REQUIRED")
+    assert state.pending_ai_move is None and state.pending_move is None
+    assert state.pending_execution_binding is None
+    assert state.move_sync_error is None and state.move_execution_error is None
+    assert state.move_execution_status == "IDLE"
+
+
+def test_restore_keeps_other_failed_ai_transactions_locked():
+    from src.core.game_state import GameState
+    state = GameState()
+    state.pending_ai_move = {"move": ((0, 3), (0, 4))}
+    state.move_sync_error = "robot command failed after dispatch"
+    assert not state._discard_pre_dispatch_ai_failure("RECOVERY_REQUIRED")
+    assert state.pending_ai_move is not None
+    assert state.move_sync_error
+
+
+def test_clear_failed_session_verifies_board_then_unlocks_without_restart():
+    from src.ui.input_handler import InputHandler
+    state = SimpleNamespace(
+        move_sync_error="HOMECHESS frame mismatch",
+        physical_sync_fault=True,
+        pending_ai_move={"move": ((0, 3), (0, 4))},
+        board=[["."] * 9 for _ in range(10)],
+        snapshot_continue_required=True,
+        snapshot_continue_can_commit_pending=True,
+        manual_override_active=True,
+        emergency_mode=True,
+        turn_confirmation_required=False,
+        board_revision=7,
+        clear_pending_ai_move=Mock(),
+        clear_move_sync_error=Mock(),
+        sync_current_board=Mock(),
+        persist_checkpoint=Mock(),
+        approve_recovery_after_verification=Mock(return_value=True),
+        set_status=Mock(),
+    )
+    hw = SimpleNamespace(
+        config=SimpleNamespace(ROBOT_BACKEND="PHYSICAL", DRY_RUN=False),
+        dry_run=False,
+        verify_physical_board=Mock(return_value=True),
+        motion_worker=None,
+    )
+    handler = InputHandler(state, hw)
+    handler.resume_automatic_scanning = Mock(return_value=True)
+
+    assert handler._clear_failed_session()
+    state.clear_pending_ai_move.assert_called_once()
+    state.clear_move_sync_error.assert_called_once()
+    state.sync_current_board.assert_called_once()
+    assert not state.physical_sync_fault
+    assert not state.manual_override_active
+    assert not state.snapshot_continue_required
+
+
+def test_clear_failed_session_refuses_when_board_does_not_match_fen():
+    from src.ui.input_handler import InputHandler
+    state = SimpleNamespace(
+        move_sync_error="HOMECHESS frame mismatch",
+        physical_sync_fault=True,
+        pending_ai_move={"move": ((0, 3), (0, 4))},
+        board=[["."] * 9 for _ in range(10)],
+        snapshot_continue_required=True,
+        manual_override_active=True,
+        clear_pending_ai_move=Mock(),
+        clear_move_sync_error=Mock(),
+        approve_recovery_after_verification=Mock(return_value=True),
+        set_status=Mock(),
+    )
+    hw = SimpleNamespace(
+        config=SimpleNamespace(ROBOT_BACKEND="PHYSICAL", DRY_RUN=False),
+        dry_run=False,
+        verify_physical_board=Mock(return_value=False),
+        motion_worker=None,
+    )
+    handler = InputHandler(state, hw)
+    handler.resume_automatic_scanning = Mock(return_value=True)
+
+    assert not handler._clear_failed_session()
+    state.clear_pending_ai_move.assert_not_called()
+    state.clear_move_sync_error.assert_not_called()
+    assert state.physical_sync_fault
+    assert state.manual_override_active
 
 
 def test_old_background_sample_cannot_replace_new_snapshot(tmp_path):

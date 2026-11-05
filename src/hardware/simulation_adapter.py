@@ -3,8 +3,11 @@
 Physical telemetry borrows the application's SDK connection and exposes reads
 only. It never opens another controller connection or owns its shutdown.
 """
+import logging
+
 import numpy as np
 
+from src.core.project_logging import event
 from src.motion.result import MotionExecutionResult, MotionFailureCategory, PayloadState
 from src.motion.stages import MotionStage
 
@@ -45,35 +48,137 @@ class BorrowedPhysicalStateSource:
         return self._reader.get_state_snapshot()
 
 
+def _resolve_xy_surface_z(parsed, config):
+    """Resolve the XY mirror surface Z from an independent measurement or R1-R4."""
+    source = str(getattr(config, "BOARD_SURFACE_Z_SOURCE", "MEASURED")).upper()
+    if source == "MEASURED":
+        value = getattr(config, "BOARD_CALIBRATION_SURFACE_Z_MM", None)
+        if value is None:
+            raise ValueError(
+                "XY board mirror needs BOARD_CALIBRATION_SURFACE_Z_MM "
+                "or BOARD_SURFACE_Z_SOURCE='R1_R4'")
+        value = float(value)
+        if not np.isfinite(value):
+            raise ValueError("BOARD_CALIBRATION_SURFACE_Z_MM must be finite")
+        return value, dict(source="MEASURED", value_mm=value)
+    if source != "R1_R4":
+        raise ValueError("BOARD_SURFACE_Z_SOURCE must be MEASURED or R1_R4")
+    if not bool(getattr(config, "R1_R4_TAUGHT_AT_BOARD_SURFACE", False)):
+        raise ValueError(
+            "BOARD_SURFACE_Z_SOURCE='R1_R4' requires R1_R4_TAUGHT_AT_BOARD_SURFACE=True "
+            "after operator confirmation that all four points were taught at the board surface")
+    zs = [float(point.xyz_mm[2]) for point in parsed.values()]
+    if not np.isfinite(zs).all():
+        raise ValueError("R1-R4 contain nonfinite Z")
+    spread = float(max(zs) - min(zs))
+    tolerance = float(getattr(config, "BOARD_CALIBRATION_Z_TOLERANCE_MM", 1.0))
+    if not np.isfinite(tolerance) or tolerance <= 0:
+        raise ValueError("BOARD_CALIBRATION_Z_TOLERANCE_MM must be positive")
+    if spread > tolerance:
+        raise ValueError(
+            f"R1-R4 Z spread {spread:.2f} mm exceeds {tolerance:.2f} mm; "
+            "the four points do not describe one flat board surface")
+    value = float(np.median(zs))
+    warnings = []
+    safe_z = getattr(config, "SAFE_Z", None)
+    pick_z = getattr(config, "PICK_Z", None)
+    if safe_z is not None and abs(value - float(safe_z)) <= 5.0:
+        warnings.append("R1-R4 Z is within 5 mm of SAFE_Z; points may have been taught at hover height")
+    if pick_z is not None and abs(value - float(pick_z)) > 30.0:
+        warnings.append("R1-R4 Z differs from PICK_Z by more than 30 mm")
+    if warnings:
+        event("board.surface_z_suspicious", "R1-R4 Z may not be the board surface",
+              level=logging.WARNING, value_mm=value, warnings=warnings)
+    return value, dict(source="R1_R4", value_mm=value, z_mm=zs,
+                       spread_mm=spread, tolerance_mm=tolerance, warnings=warnings)
+
+
 def physical_board_provider(robot, config):
     """Optional measured board mirror; visual commands keep their own taught mapping."""
     from src.domain.board_pose_provider import (
-        BoardCalibrationProfile, PhysicalTeachingPointBoardPoseProvider,
+        BoardCalibrationProfile, PhysicalTeachingPointBoardPoseProvider, parse_teaching_point_observation,
     )
+    model = getattr(config, "BOARD_CALIBRATION_MODEL", "XY_SE2")
     offset = getattr(config, "BOARD_CALIBRATION_OFFSET_MM", None)
     provenance = getattr(config, "BOARD_CALIBRATION_PROVENANCE", "")
     frame = getattr(config, "BOARD_CALIBRATION_OFFSET_FRAME", "")
-    if offset is None or np.asarray(offset).shape != (3,) or not np.all(np.isfinite(offset)):
-        raise ValueError("Physical board surface contact offset has not been calibrated")
-    if not provenance or frame not in ("ROBOT_BASE", "TOOL"):
-        raise ValueError("Physical board contact calibration requires frame and provenance")
+    if model == "XY_SE2":
+        dimensions = getattr(config, "BOARD_CALIBRATION_GRID_DIMENSIONS_MM", None)
+        if dimensions is None or not provenance:
+            raise ValueError(
+                "XY board mirror needs measured grid width/length, provenance and a surface Z source")
+    elif model == "SE3_LEGACY":
+        if offset is None or np.asarray(offset).shape != (3,) or not np.all(np.isfinite(offset)):
+            raise ValueError("Physical board surface contact offset has not been calibrated")
+        if not provenance or frame not in ("ROBOT_BASE", "TOOL"):
+            raise ValueError("Physical board contact calibration requires frame and provenance")
+    else:
+        raise ValueError("Board calibration model must be XY_SE2 or SE3_LEGACY")
     observations = {}
     for name in ("R1", "R2", "R3", "R4"):
-        code, value = robot.robot.GetRobotTeachingPoint(name)
+        if getattr(robot, "uses_fixed_teaching_points", False) is True:
+            code, value = robot.read_teaching_point(name)
+        else:
+            code, value = robot.robot.GetRobotTeachingPoint(name)
         if code != 0 or len(value) < 14:
             raise ValueError(f"{name}: missing verified teaching point/frame metadata")
         observations[name] = value
-    provider = PhysicalTeachingPointBoardPoseProvider.from_teaching_points(
-        observations, calibration_profile=BoardCalibrationProfile(
-            tcp_to_board_contact_offset_mm=list(offset), offset_frame=frame,
-            provenance=provenance,
-        ),
-    )
+    parsed = {name: parse_teaching_point_observation(value) for name, value in observations.items()}
+    normalize = getattr(robot, "normalize_board_observations", None)
+    if callable(normalize):
+        parsed = normalize(parsed)
+    frames = {(point.tool_id, point.user_or_wobj_id) for point in parsed.values()}
+    if len(frames) != 1 or any(value is None for value in next(iter(frames))):
+        raise ValueError("All four mirror observations require the same explicit tool/user frame")
+    tool_id, user_id = next(iter(frames))
+    expected_user = int(getattr(config, "ROBOT_USER_FRAME", 0))
+    require_base = bool(getattr(config, "BOARD_CALIBRATION_REQUIRE_BASE_FRAME", True))
+    if require_base and user_id != 0:
+        raise ValueError(
+            f"Board mirror requires robot-base teaching points (user 0); found user {user_id}. "
+            "Re-teach R1–R4 in robot base (user 0).")
+    if user_id != expected_user:
+        raise ValueError(
+            f"Board mirror requires user {expected_user}; found user {user_id}.")
+    expected_tool = getattr(config, "ROBOT_TOOL_FRAME", None)
+    if expected_tool is not None and tool_id != int(expected_tool):
+        raise ValueError(
+            f"Board mirror requires tool {int(expected_tool)}; found tool {tool_id}.")
+    if (tool_id, user_id) != (robot.tool_num, robot.user_num):
+        raise ValueError("Controller points changed after command mapping loaded; reload R1–R4 before calibrating")
+    for name, point in parsed.items():
+        cached = robot.teaching_points.get(name, {}).get("pose")
+        observed = list(point.xyz_mm) + list(point.rpy_deg)
+        if (cached is None or len(cached) != 6
+                or not np.allclose(cached, observed, atol=1e-9, rtol=0)):
+            raise ValueError(f"{name} changed between controller reads; reload the command mapping")
+    base_xy = np.eye(3)
+    if model == "XY_SE2":
+        from src.domain.board_xy_calibration import calibrate_board_xy
+        surface_z, surface_meta = _resolve_xy_surface_z(parsed, config)
+        event("board.surface_z_resolved", "Đã xác định Z mặt bàn cho mirror",
+              source=surface_meta["source"], value_mm=surface_z, details=surface_meta)
+        conversion = getattr(config, "BOARD_CALIBRATION_USER_TO_BASE_XY", None)
+        result = calibrate_board_xy(
+            parsed, grid_dimensions_mm=dimensions, surface_z_mm=surface_z,
+            safe_transit_height_mm=getattr(config, "SAFE_TRANSIT_HEIGHT_MM", 40.0),
+            previous_version=max(0, int(getattr(robot, "teaching_points_version", 0))),
+            require_controller_metadata=True, robot_base_from_user_xy=conversion,
+            frame_provenance=getattr(config, "BOARD_CALIBRATION_FRAME_PROVENANCE", ""),
+        )
+        provider = PhysicalTeachingPointBoardPoseProvider(result)
+        if user_id != 0:
+            base_xy = np.asarray(conversion, dtype=float)
+    else:
+        if user_id != 0:
+            raise ValueError("Legacy SE3 mirror requires robot-base observations; no user-frame identity assumed")
+        provider = PhysicalTeachingPointBoardPoseProvider.from_teaching_points(
+            observations, calibration_profile=BoardCalibrationProfile(
+                tcp_to_board_contact_offset_mm=list(offset), offset_frame=frame, provenance=provenance))
     if not provider.is_calibrated:
         raise ValueError(provider.calibration_result.error_message)
-    # Command coordinates and the mirror must use the SAME verified controller
-    # frames. The visual donor used user=1 while canonical calibration requires
-    # robot base (user=0); retaining that default would offset every motion.
+    # Convert command XY to robot base before comparing the optional mirror.
+    # Loading a mirror must not alter the command mapping's chosen frame.
     # Visual correction deliberately offsets measured pick centres. A rigid
     # board mirror is a display estimate, not a motion authority. Report the
     # difference instead of blocking physical visual commands on sub-micron fit.
@@ -82,11 +187,11 @@ def physical_board_provider(robot, config):
     for row in range(10):
         for col in range(9):
             physical = robot.board_to_pose_bilinear(col, row, state.board_surface_z_m * 1000.0)
+            physical_xy = base_xy[:2, :2] @ np.asarray(physical[:2]) + base_xy[:2, 2]
             simulated = state.cell_to_robot_xyz(row, col) * 1000.0
-            discrepancies.append(float(np.linalg.norm(np.asarray(physical[:2]) - simulated[:2])))
+            discrepancies.append(float(np.linalg.norm(physical_xy - simulated[:2])))
     provider.visual_command_xy_difference_mm = max(discrepancies)
-    robot.tool_num = int(float(observations["R1"][12]))
-    robot.user_num = int(float(observations["R1"][13]))
+    # Building an optional display provider must not rewrite command tool/user IDs.
     return provider
 
 
@@ -125,12 +230,14 @@ class VirtualVisualRobot:
 
 def execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
                          moving_visual_target=None, captured_visual_target=None,
-                         piece_id=None, captured_piece_id=None, move_context=None, **kwargs):
+                         piece_id=None, captured_piece_id=None, move_context=None, validity_guard=None, **kwargs):
     from contextlib import nullcontext
     from src.simulation.runtime import RuntimeOperationState, RuntimeOperationBusy
     operation = getattr(runtime, "acquire_operation_state", None)
     try:
         with operation(RuntimeOperationState.GAME_MOVE) if callable(operation) else nullcontext():
+            if validity_guard is not None:
+                validity_guard()
             return _execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
                                          piece_id=piece_id, captured_piece_id=captured_piece_id)
     except (RuntimeOperationBusy, ValueError, TypeError) as exc:
@@ -178,9 +285,15 @@ def _execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
         if not disposed.get("success", False):
             return rejected(disposed.get("error") or disposed.get("status"),
                             MotionFailureCategory.MOTION_COMMAND_FAILED, MotionStage.RELEASE)
+        captured_body = world.pieces.get(captured_piece_id)
         if (world.get_attached_piece() is not None
-                or np.linalg.norm(world.pieces[captured_piece_id].get_position_robot()[:2] - target[:2]) < 0.015):
+                or (captured_body is not None
+                    and np.linalg.norm(captured_body.get_position_robot()[:2] - target[:2]) < 0.015)):
             return rejected("Capture square not physically cleared", MotionFailureCategory.SAFETY_INTERLOCK)
+        # Hybrid policy: keep an immutable tray snapshot for telemetry/viewer,
+        # but remove the captured rigid body from the physics world.
+        if world.capture_piece(captured_piece_id) is None:
+            return rejected("Captured piece snapshot unavailable", MotionFailureCategory.PAYLOAD_NOT_CONFIRMED)
     elif victims:
         return rejected("Destination is occupied", MotionFailureCategory.TARGET_INVALID)
     picked = runtime.pick_piece(piece_id)
@@ -201,13 +314,8 @@ def select_capture_slot(runtime):
     area = getattr(runtime, "capture_area", {})
     if area.get("support") != "SIMULATED_FLOOR":
         return None
-    for row, col in area.get("slots_in_board_grid", []):
-        if not np.all(np.isfinite([row, col])):
-            raise ValueError("Capture slot grid coordinates must be finite")
-        slot = runtime.placement_state.cell_to_robot_xyz(row, col)
-        slot[2] = 0.0
-        if runtime.placement_state.is_in_bounds_robot(slot, xy_margin_m=runtime.geom.piece_diameter_mm / 2000.0 + 0.005):
-            raise ValueError("Capture slot is inside the board")
+    from src.domain.capture_layout import capture_slots
+    for slot in capture_slots(area, runtime.placement_state, runtime.geom):
         spacing = runtime.geom.piece_diameter_mm / 1000.0 + 0.005
         if any(np.linalg.norm(piece.get_position_robot()[:2] - slot[:2]) < spacing
                for piece in runtime.world.pieces.values()):

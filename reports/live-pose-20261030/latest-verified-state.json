@@ -1,0 +1,321 @@
+{
+  "summary": {
+    "received_at": "2026-10-30T20:40:28.817537+07:00",
+    "state": {
+      "type": "robot_state",
+      "robot_model": "FR3",
+      "timestamp": 1793367628.787835,
+      "published_at": 1793367628.8154418,
+      "measurement_timestamp": 1793367628.787835,
+      "joints": [
+        39.3360595703125,
+        -193.810791015625,
+        66.30934143066406,
+        -74.55561828613281,
+        -87.61824798583984,
+        -46.04729080200195
+      ],
+      "tcp": [
+        348.6014709472656,
+        148.4423828125,
+        395.61572265625,
+        -59.30449676513672,
+        -42.6917839050293,
+        109.97952270507812
+      ],
+      "gripper": false,
+      "motion_state": "ERROR",
+      "trajectory_stage": "IDLE",
+      "last_error": "Controller E-Stop active",
+      "placement_version": 1,
+      "source": "PHYSICAL",
+      "controller_ip": "192.168.58.2",
+      "connected": true,
+      "joints_valid": true,
+      "tcp_valid": true,
+      "telemetry_error": null,
+      "command_context": {
+        "session_id": "31e809eb2960402795207b3eca6c40c4",
+        "board_revision": 1,
+        "game_epoch": 0,
+        "scene_id": "ca04957ce46643d2a94ac91246644fd8",
+        "scene_epoch": null,
+        "placement_version": null,
+        "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+        "commands_allowed": false
+      },
+      "stream_id": "72d1efd4905a4a07b635701274be74c5",
+      "packet_seq": 27738
+    },
+    "count": 5,
+    "max_age_s": 0.10629439353942871,
+    "joint_spread_deg": [
+      0.000217437744140625,
+      0.000213623046875,
+      0.00022125244140625,
+      0.0,
+      0.0,
+      0.000217437744140625
+    ],
+    "tcp_translation_to_failed_approach_mm": [
+      -464.0699217260696,
+      358.4818925180401,
+      -175.61572265625
+    ],
+    "tcp_distance_to_failed_approach_mm": 612.1364566485425,
+    "no_actuation": true,
+    "current_state_differs_from_earlier_measurement": true
+  },
+  "samples": [
+    {
+      "received_at": "2026-10-30T20:40:28.671144+07:00",
+      "age_s": 0.03458404541015625,
+      "message": {
+        "type": "robot_state",
+        "robot_model": "FR3",
+        "timestamp": 1793367628.6365604,
+        "published_at": 1793367628.6691468,
+        "measurement_timestamp": 1793367628.6365604,
+        "joints": [
+          39.33627700805664,
+          -193.810791015625,
+          66.30956268310547,
+          -74.55561828613281,
+          -87.61824798583984,
+          -46.04707336425781
+        ],
+        "tcp": [
+          348.5999450683594,
+          148.44293212890625,
+          395.6160583496094,
+          -59.30487823486328,
+          -42.69166946411133,
+          109.9800796508789
+        ],
+        "gripper": false,
+        "motion_state": "ERROR",
+        "trajectory_stage": "IDLE",
+        "last_error": "Controller E-Stop active",
+        "placement_version": 1,
+        "source": "PHYSICAL",
+        "controller_ip": "192.168.58.2",
+        "connected": true,
+        "joints_valid": true,
+        "tcp_valid": true,
+        "telemetry_error": null,
+        "command_context": {
+          "session_id": "31e809eb2960402795207b3eca6c40c4",
+          "board_revision": 1,
+          "game_epoch": 0,
+          "scene_id": "ca04957ce46643d2a94ac91246644fd8",
+          "scene_epoch": null,
+          "placement_version": null,
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+          "commands_allowed": false
+        },
+        "stream_id": "72d1efd4905a4a07b635701274be74c5",
+        "packet_seq": 27730
+      }
+    },
+    {
+      "received_at": "2026-10-30T20:40:28.685319+07:00",
+      "age_s": 0.04875898361206055,
+      "message": {
+        "type": "robot_state",
+        "robot_model": "FR3",
+        "timestamp": 1793367628.6365604,
+        "published_at": 1793367628.6838078,
+        "measurement_timestamp": 1793367628.6365604,
+        "joints": [
+          39.33627700805664,
+          -193.810791015625,
+          66.30956268310547,
+          -74.55561828613281,
+          -87.61824798583984,
+          -46.04707336425781
+        ],
+        "tcp": [
+          348.5999450683594,
+          148.44293212890625,
+          395.6160583496094,
+          -59.30487823486328,
+          -42.69166946411133,
+          109.9800796508789
+        ],
+        "gripper": false,
+        "motion_state": "ERROR",
+        "trajectory_stage": "IDLE",
+        "last_error": "Controller E-Stop active",
+        "placement_version": 1,
+        "source": "PHYSICAL",
+        "controller_ip": "192.168.58.2",
+        "connected": true,
+        "joints_valid": true,
+        "tcp_valid": true,
+        "telemetry_error": null,
+        "command_context": {
+          "session_id": "31e809eb2960402795207b3eca6c40c4",
+          "board_revision": 1,
+          "game_epoch": 0,
+          "scene_id": "ca04957ce46643d2a94ac91246644fd8",
+          "scene_epoch": null,
+          "placement_version": null,
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+          "commands_allowed": false
+        },
+        "stream_id": "72d1efd4905a4a07b635701274be74c5",
+        "packet_seq": 27731
+      }
+    },
+    {
+      "received_at": "2026-10-30T20:40:28.742854+07:00",
+      "age_s": 0.10629439353942871,
+      "message": {
+        "type": "robot_state",
+        "robot_model": "FR3",
+        "timestamp": 1793367628.6365604,
+        "published_at": 1793367628.7254577,
+        "measurement_timestamp": 1793367628.6365604,
+        "joints": [
+          39.33627700805664,
+          -193.810791015625,
+          66.30956268310547,
+          -74.55561828613281,
+          -87.61824798583984,
+          -46.04707336425781
+        ],
+        "tcp": [
+          348.5999450683594,
+          148.44293212890625,
+          395.6160583496094,
+          -59.30487823486328,
+          -42.69166946411133,
+          109.9800796508789
+        ],
+        "gripper": false,
+        "motion_state": "ERROR",
+        "trajectory_stage": "IDLE",
+        "last_error": "Controller E-Stop active",
+        "placement_version": 1,
+        "source": "PHYSICAL",
+        "controller_ip": "192.168.58.2",
+        "connected": true,
+        "joints_valid": true,
+        "tcp_valid": true,
+        "telemetry_error": null,
+        "command_context": {
+          "session_id": "31e809eb2960402795207b3eca6c40c4",
+          "board_revision": 1,
+          "game_epoch": 0,
+          "scene_id": "ca04957ce46643d2a94ac91246644fd8",
+          "scene_epoch": null,
+          "placement_version": null,
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+          "commands_allowed": false
+        },
+        "stream_id": "72d1efd4905a4a07b635701274be74c5",
+        "packet_seq": 27732
+      }
+    },
+    {
+      "received_at": "2026-10-30T20:40:28.798977+07:00",
+      "age_s": 0.08819127082824707,
+      "message": {
+        "type": "robot_state",
+        "robot_model": "FR3",
+        "timestamp": 1793367628.7107863,
+        "published_at": 1793367628.7673168,
+        "measurement_timestamp": 1793367628.7107863,
+        "joints": [
+          39.3360595703125,
+          -193.81100463867188,
+          66.30956268310547,
+          -74.55561828613281,
+          -87.61824798583984,
+          -46.04729080200195
+        ],
+        "tcp": [
+          348.60125732421875,
+          148.4422149658203,
+          395.61468505859375,
+          -59.30449676513672,
+          -42.6917839050293,
+          109.97952270507812
+        ],
+        "gripper": false,
+        "motion_state": "ERROR",
+        "trajectory_stage": "IDLE",
+        "last_error": "Controller E-Stop active",
+        "placement_version": 1,
+        "source": "PHYSICAL",
+        "controller_ip": "192.168.58.2",
+        "connected": true,
+        "joints_valid": true,
+        "tcp_valid": true,
+        "telemetry_error": null,
+        "command_context": {
+          "session_id": "31e809eb2960402795207b3eca6c40c4",
+          "board_revision": 1,
+          "game_epoch": 0,
+          "scene_id": "ca04957ce46643d2a94ac91246644fd8",
+          "scene_epoch": null,
+          "placement_version": null,
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+          "commands_allowed": false
+        },
+        "stream_id": "72d1efd4905a4a07b635701274be74c5",
+        "packet_seq": 27735
+      }
+    },
+    {
+      "received_at": "2026-10-30T20:40:28.817537+07:00",
+      "age_s": 0.02970290184020996,
+      "message": {
+        "type": "robot_state",
+        "robot_model": "FR3",
+        "timestamp": 1793367628.787835,
+        "published_at": 1793367628.8154418,
+        "measurement_timestamp": 1793367628.787835,
+        "joints": [
+          39.3360595703125,
+          -193.810791015625,
+          66.30934143066406,
+          -74.55561828613281,
+          -87.61824798583984,
+          -46.04729080200195
+        ],
+        "tcp": [
+          348.6014709472656,
+          148.4423828125,
+          395.61572265625,
+          -59.30449676513672,
+          -42.6917839050293,
+          109.97952270507812
+        ],
+        "gripper": false,
+        "motion_state": "ERROR",
+        "trajectory_stage": "IDLE",
+        "last_error": "Controller E-Stop active",
+        "placement_version": 1,
+        "source": "PHYSICAL",
+        "controller_ip": "192.168.58.2",
+        "connected": true,
+        "joints_valid": true,
+        "tcp_valid": true,
+        "telemetry_error": null,
+        "command_context": {
+          "session_id": "31e809eb2960402795207b3eca6c40c4",
+          "board_revision": 1,
+          "game_epoch": 0,
+          "scene_id": "ca04957ce46643d2a94ac91246644fd8",
+          "scene_epoch": null,
+          "placement_version": null,
+          "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/6P2/P1P1P3P/1C5C1/9/RNBAKABNR b - - 0 2",
+          "commands_allowed": false
+        },
+        "stream_id": "72d1efd4905a4a07b635701274be74c5",
+        "packet_seq": 27738
+      }
+    }
+  ]
+}

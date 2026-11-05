@@ -1,0 +1,106 @@
+{
+  "at": "2026-10-31T12:04:08.736437+07:00",
+  "mode": "READ_ONLY",
+  "packets": [
+    {
+      "frame_cnt": 104,
+      "main_code": 1,
+      "sub_code": 1,
+      "tool": 1,
+      "user": 0,
+      "EmergencyStop": 0,
+      "robot_state": 1,
+      "motion_done": 1,
+      "rbtEnableState": 1,
+      "joints": [
+        39.3349723815918,
+        -193.80926513671875,
+        66.30999755859375,
+        -74.5553970336914,
+        -87.61737823486328,
+        -46.04620361328125
+      ]
+    },
+    {
+      "frame_cnt": 106,
+      "main_code": 1,
+      "sub_code": 1,
+      "tool": 1,
+      "user": 0,
+      "EmergencyStop": 0,
+      "robot_state": 1,
+      "motion_done": 1,
+      "rbtEnableState": 1,
+      "joints": [
+        39.3349723815918,
+        -193.80926513671875,
+        66.30999755859375,
+        -74.55518341064453,
+        -87.61737823486328,
+        -46.04642105102539
+      ]
+    },
+    {
+      "frame_cnt": 108,
+      "main_code": 1,
+      "sub_code": 1,
+      "tool": 1,
+      "user": 0,
+      "EmergencyStop": 0,
+      "robot_state": 1,
+      "motion_done": 1,
+      "rbtEnableState": 1,
+      "joints": [
+        39.3349723815918,
+        -193.80926513671875,
+        66.30999755859375,
+        -74.55496215820312,
+        -87.61737823486328,
+        -46.04620361328125
+      ]
+    },
+    {
+      "frame_cnt": 109,
+      "main_code": 1,
+      "sub_code": 1,
+      "tool": 1,
+      "user": 0,
+      "EmergencyStop": 0,
+      "robot_state": 1,
+      "motion_done": 1,
+      "rbtEnableState": 1,
+      "joints": [
+        39.33518981933594,
+        -193.80926513671875,
+        66.30999755859375,
+        -74.55518341064453,
+        -87.61759948730469,
+        -46.04642105102539
+      ]
+    },
+    {
+      "frame_cnt": 111,
+      "main_code": 1,
+      "sub_code": 1,
+      "tool": 1,
+      "user": 0,
+      "EmergencyStop": 0,
+      "robot_state": 1,
+      "motion_done": 1,
+      "rbtEnableState": 1,
+      "joints": [
+        39.3349723815918,
+        -193.80926513671875,
+        66.30977630615234,
+        -74.55518341064453,
+        -87.61759948730469,
+        -46.04642105102539
+      ]
+    }
+  ],
+  "controller_fault": [
+    0,
+    1,
+    1
+  ]
+}

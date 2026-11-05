@@ -44,6 +44,7 @@ BTN_COLOR = (200, 50, 50)
 BTN_NEW_GAME_COLOR = (50, 150, 200)
 BTN_SURRENDER_RECT = pygame.Rect(540, 960, 160, 58)
 BTN_NEW_GAME_RECT = pygame.Rect(740, 960, 160, 58)
+BTN_MODE_SELECT_RECT = pygame.Rect(1098, 940, 304, 56)
 # The control panel uses the right gutter: 38 px clear of the board tray and
 # 20 px clear of the window edge.
 CLIENT_ACTION_X = 1098
@@ -55,6 +56,13 @@ BTN_ROLLBACK_RECT = pygame.Rect(CLIENT_ACTION_X, 582, CLIENT_ACTION_WIDTH, 64)
 BTN_CONTINUE_RECT = pygame.Rect(CLIENT_ACTION_X, 662, CLIENT_ACTION_WIDTH, 64)
 BTN_PICK_TEST_RECT = pygame.Rect(CLIENT_ACTION_X, 742, CLIENT_ACTION_WIDTH // 2 - 4, 64)
 BTN_HOVER_RECT = pygame.Rect(BTN_PICK_TEST_RECT.right + 8, 742, CLIENT_ACTION_WIDTH // 2 - 4, 64)
+BTN_CLEAR_ERROR_RECT = pygame.Rect(CLIENT_ACTION_X, 814, CLIENT_ACTION_WIDTH, 64)
+HOME_MODE_BOARD_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 480, 500, 300, 96)
+HOME_MODE_SIM_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 150, 500, 300, 96)
+HOME_MODE_PHYSICAL_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 180, 500, 300, 96)
+# Shown only while PHYSICAL is selected. Ticking it forces the manual
+# four-corner camera calibration window when the session starts.
+HOME_PHYSICAL_CAMERA_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 160, 600, 340, 28)
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 240, 650, 480, 104)
 HOME_SELF_PLAY_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 310, 810, 300, 58)
 HOME_HUMAN_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 10, 810, 300, 58)
@@ -119,6 +127,8 @@ class BoardRenderer:
         self.ui_font = unicode_ui_font(26, bold=True)
         self.log_font = unicode_ui_font(19, bold=True)
         self.button_font = unicode_ui_font(22, bold=True)
+        self.home_mode = "SIMULATION"
+        self.physical_camera_recalibration_requested = False
         self._landscape = self._load_landscape()
 
     @staticmethod
@@ -234,6 +244,10 @@ class BoardRenderer:
             self.draw_recent_moves(game_state.get("recent_moves", []))
         self._draw_ai_status(game_state)
         self._draw_board_backdrop()
+        self._draw_board_grid()
+        pygame.draw.rect(self.screen, JADE_COLOR, BTN_MODE_SELECT_RECT, border_radius=14)
+        mode_text = self.ui_font.render("CHỌN CHẾ ĐỘ | F2", True, (255, 255, 255))
+        self.screen.blit(mode_text, mode_text.get_rect(center=BTN_MODE_SELECT_RECT.center))
 
         if not game_state.get("game_over"):
             # Nút SURRENDER
@@ -252,29 +266,86 @@ class BoardRenderer:
             txt_new = self.ui_font.render("NEW GAME", True, (255, 255, 255))
             self.screen.blit(txt_new, txt_new.get_rect(center=BTN_NEW_GAME_RECT.center))
 
+    @staticmethod
+    def client_action_controls(game_state):
+        """Return only the controls that exist for this session mode."""
+        camera = bool(game_state.get("camera_enabled", True))
+        robot_moves = bool(game_state.get("robot_moves_enabled", True))
+        simulation = bool(game_state.get("simulation_enabled", True))
+        self_play_mode = game_state.get("game_mode") == "ROBOT_VS_ROBOT"
+        allow_mouse = bool(game_state.get("allow_mouse", False))
+        confirm_label = (("ĐI CHUỘT", "TỰ XÁC NHẬN") if allow_mouse
+                         else ("XÁC NHẬN", "NƯỚC ĐI"))
+        if self_play_mode:
+            confirm_label = ("NƯỚC TIẾP", "ROBOT VS ROBOT")
+
+        actions = []
+        if camera:
+            scan_label = (("ĐO LẠI / THỬ NƯỚC CHỜ",) if game_state.get("visual_pick_retry")
+                          else ("QUÉT / ĐỐI SOÁT FEN",))
+            actions.append((BTN_SCAN_FEN_RECT, pygame.K_v, scan_label, JADE_COLOR))
+            actions.append((BTN_CONFIRM_MOVE_RECT, pygame.K_SPACE, confirm_label, JADE_DARK))
+            actions.append((BTN_EMERGENCY_RECT, pygame.K_m, ("EMERGENCY MODE",), VERMILION_COLOR))
+        elif simulation and game_state.get("viewer_enabled", True):
+            # No camera: V re-synchronizes the game board to the viewer.
+            actions.append((BTN_SCAN_FEN_RECT, pygame.K_v, ("ĐỒNG BỘ VIEWER",), JADE_COLOR))
+        if (camera and (game_state.get("move_sync_error")
+                        or game_state.get("physical_sync_fault"))):
+            actions.append((BTN_CLEAR_ERROR_RECT, pygame.K_F12,
+                            ("XÓA PHIÊN", "LỖI"), (139, 48, 38)))
+
+        if robot_moves and simulation:
+            actions.append((BTN_PICK_TEST_RECT, pygame.K_t, ("GẮP", "THẢ"), JADE_COLOR))
+            actions.append((BTN_HOVER_RECT, pygame.K_h, ("HOVER",), JADE_DARK))
+        if game_state.get("can_rollback", True):
+            actions.append((BTN_ROLLBACK_RECT, pygame.K_z, ("ROLLBACK",), AMBER_COLOR))
+        if game_state.get("client_controls_compact", False):
+            y = BTN_SCAN_FEN_RECT.y
+            laid_out = []
+            for _rect, key_code, labels, color in actions:
+                laid_out.append((pygame.Rect(CLIENT_ACTION_X, y, CLIENT_ACTION_WIDTH, 64),
+                                 key_code, labels, color))
+                y += 72
+            return tuple(laid_out)
+        return tuple(actions)
+
+    @staticmethod
+    def client_continue_rect(game_state, actions=None):
+        """Place CONTINUE after the compact action list when one is active."""
+        if game_state.get("client_controls_compact", False):
+            controls = actions if actions is not None else BoardRenderer.client_action_controls(game_state)
+            if controls:
+                return pygame.Rect(CLIENT_ACTION_X, controls[-1][0].bottom + 14,
+                                   CLIENT_ACTION_WIDTH, 64)
+            return pygame.Rect(CLIENT_ACTION_X, BTN_SCAN_FEN_RECT.y, CLIENT_ACTION_WIDTH, 64)
+        return BTN_CONTINUE_RECT
+
     def _draw_client_actions(self, game_state):
-        """Draw the always-visible client control panel beside the board."""
-        panel = pygame.Rect(CLIENT_ACTION_X - 18, 230, CLIENT_ACTION_WIDTH + 36, 620)
+        """Draw the client control panel relevant to this session mode."""
+        actions = self.client_action_controls(game_state)
+        pick_retry = bool(game_state.get("visual_pick_retry") or game_state.get("test_pick_retry"))
+        can_continue = pick_retry or bool(game_state.get("snapshot_continue_required", False))
+        if not actions and not can_continue:
+            return
+        content_bottom = max((rect.bottom for rect, _key, _labels, _color in actions), default=0)
+        continue_rect = self.client_continue_rect(game_state, actions)
+        if can_continue:
+            content_bottom = max(content_bottom, continue_rect.bottom)
+        panel_bottom = max(410, content_bottom + 58)
+        panel = pygame.Rect(CLIENT_ACTION_X - 18, 230, CLIENT_ACTION_WIDTH + 36,
+                            max(180, panel_bottom - 230))
         self._draw_panel(panel, fill=(248, 242, 226), border=GOLD_COLOR)
         title = self.ui_font.render("CLIENT CONTROLS", True, JADE_DARK)
         self.screen.blit(title, title.get_rect(center=(panel.centerx, 274)))
 
-        confirm_label = (("ĐI CHUỘT", "TỰ XÁC NHẬN") if game_state.get("allow_mouse")
-                         else ("XÁC NHẬN", "NƯỚC ĐI"))
-        self_play_mode = game_state.get("game_mode") == "ROBOT_VS_ROBOT"
-        if self_play_mode:
-            confirm_label = ("NƯỚC TIẾP", "ROBOT VS ROBOT")
-        actions = (
-            (BTN_SCAN_FEN_RECT, "V", ("QUÉT / ĐỐI SOÁT FEN",), JADE_COLOR),
-            (BTN_CONFIRM_MOVE_RECT, "F7" if self_play_mode else "SPACE", confirm_label, JADE_DARK),
-            (BTN_EMERGENCY_RECT, "M", ("EMERGENCY MODE",), VERMILION_COLOR),
-            (BTN_ROLLBACK_RECT, "Z", ("ROLLBACK",), AMBER_COLOR),
-            (BTN_PICK_TEST_RECT, "T", ("GẮP", "THẢ"), JADE_COLOR),
-            (BTN_HOVER_RECT, "H", ("HOVER",), JADE_DARK),
-        )
         emergency_active = game_state.get("emergency_mode", False)
-        for rect, key, label_lines, color in actions:
-            button_color = (139, 48, 38) if key == "M" and emergency_active else color
+        for rect, key_code, label_lines, color in actions:
+            key = {pygame.K_v: "V", pygame.K_SPACE: "SPACE", pygame.K_m: "M",
+                   pygame.K_z: "Z", pygame.K_t: "T", pygame.K_h: "H",
+                   pygame.K_F12: "F12"}.get(key_code, "?")
+            if key_code == pygame.K_SPACE and game_state.get("game_mode") == "ROBOT_VS_ROBOT":
+                key = "F7"
+            button_color = (139, 48, 38) if key_code == pygame.K_m and emergency_active else color
             pygame.draw.rect(self.screen, button_color, rect, border_radius=12)
             key_surf = self.ui_font.render(key, True, (255, 255, 255))
             self.screen.blit(key_surf, (rect.x + 18, rect.y + 17))
@@ -287,22 +358,26 @@ class BoardRenderer:
                     label_surf = self.button_font.render(label, True, (255, 255, 255))
                     self.screen.blit(label_surf, (label_x, rect.y + 9 + line_index * 25))
 
-        pick_retry = bool(game_state.get("visual_pick_retry") or game_state.get("test_pick_retry"))
-        can_continue = pick_retry or game_state.get("snapshot_continue_required", False)
-        continue_color = JADE_COLOR if can_continue else (121, 116, 100)
-        pygame.draw.rect(self.screen, continue_color, BTN_CONTINUE_RECT, border_radius=12)
-        continue_key = self.ui_font.render("Y" if pick_retry else "▶", True, (255, 255, 255))
-        continue_label = self.ui_font.render("ĐO LẠI" if pick_retry else "CONTINUE", True, (255, 255, 255))
-        self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 18, BTN_CONTINUE_RECT.y + 17))
-        self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 66, BTN_CONTINUE_RECT.y + 17))
+        if can_continue:
+            continue_color = JADE_COLOR
+            pygame.draw.rect(self.screen, continue_color, continue_rect, border_radius=12)
+            continue_key = self.ui_font.render("Y" if pick_retry else "▶", True, (255, 255, 255))
+            continue_label = self.ui_font.render("ĐO LẠI" if pick_retry else "CONTINUE", True, (255, 255, 255))
+            self.screen.blit(continue_key, (continue_rect.x + 18, continue_rect.y + 17))
+            self.screen.blit(continue_label, (continue_rect.x + 66, continue_rect.y + 17))
 
+        camera = bool(game_state.get("camera_enabled", True))
+        simulation = bool(game_state.get("simulation_enabled", True))
         note = ("M đang bật: đi tay Đỏ / Đen" if emergency_active else
-                "Đi chuột; không cần SPACE" if game_state.get("allow_mouse") else
-                "Chọn phím hoặc bấm nút")
+                "Đi chuột; không cần SPACE" if camera and game_state.get("allow_mouse") else
+                "Chọn phím hoặc bấm nút" if camera else
+                "Mô phỏng: chuột/AI; không camera" if simulation else
+                "Game-only: chỉ bàn cờ/chuột")
         note_surf = self.log_font.render(note, True, MENU_MUTED_TEXT_COLOR)
-        self.screen.blit(note_surf, note_surf.get_rect(center=(panel.centerx, 816)))
+        self.screen.blit(note_surf, note_surf.get_rect(center=(panel.centerx, panel.bottom - 26)))
 
-        # --- Vẽ lưới bàn cờ ---
+    def _draw_board_grid(self):
+        """Draw the board grid independently of the client-control panel."""
         for r in range(NUM_ROWS):
             pygame.draw.line(self.screen, LINE_COLOR,
                              self.grid_to_pixel(0, r), self.grid_to_pixel(NUM_COLS - 1, r), 2)
@@ -364,10 +439,13 @@ class BoardRenderer:
         else:
             mode = game_state.get("game_mode", "HUMAN_VS_ROBOT")
             if mode == "ROBOT_VS_ROBOT":
-                message = "Robot vs robot — F7: nước tiếp, F8: dừng"
+                message = "Robot vs robot — Continuous, F8: dừng"
                 accent = JADE_COLOR
             elif mode == "HUMAN_VS_ROBOT" and game_state.get("turn") == "b":
-                if game_state.get("robot_backend") == "PHYSICAL" and not game_state.get("is_robot_ready", True):
+                if not game_state.get("simulation_enabled", True):
+                    message = "Lượt AI — đang xử lý trên máy"
+                    accent = JADE_COLOR
+                elif game_state.get("robot_backend") == "PHYSICAL" and not game_state.get("is_robot_ready", True):
                     if game_state.get("physical_enable_pending"):
                         message = "Bấm F10 để bật robot (F9 để hủy)"
                     else:
@@ -380,7 +458,10 @@ class BoardRenderer:
                 side = "Đỏ" if game_state.get("turn", "r") == "r" else "Đen"
                 instruction = ("chọn quân và ô đến bằng chuột" if game_state.get("allow_mouse")
                                else "đi quân rồi xác nhận bằng SPACE")
-                message = f"Lượt {side} — {instruction}"
+                adapter = ""
+                if game_state.get("simulation_enabled", True) and game_state.get("input_adapter") == "VIRTUAL_TEST_ADAPTER":
+                    adapter = " (bộ nhập test ảo)"
+                message = f"Lượt {side} — {instruction}{adapter}"
                 accent = JADE_COLOR
 
         self._draw_panel(AI_STATUS_RECT, fill=(249, 245, 232), border=accent, radius=12)
@@ -521,11 +602,33 @@ class BoardRenderer:
         subtitle = self.ui_font.render("A thoughtful match, guided by a robot", True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 430)))
 
+        mode_cards = (
+            (HOME_MODE_BOARD_RECT, "BOARD_ONLY", "CHƠI TRÊN MÁY", "Bàn cờ 2D · Không robot"),
+            (HOME_MODE_SIM_RECT, "SIMULATION", "MÔ PHỎNG 3D", "Robot ảo · Viewer 3D"),
+            (HOME_MODE_PHYSICAL_RECT, "PHYSICAL", "ROBOT THẬT", "Camera + FR3"),
+        )
+        for rect, mode, label, detail in mode_cards:
+            selected = self.home_mode == mode
+            self._draw_panel(rect, fill=(232, 245, 238) if selected else (249, 245, 232),
+                             border=JADE_COLOR if selected else GOLD_COLOR, radius=14)
+            if selected:
+                pygame.draw.rect(self.screen, JADE_COLOR, rect.inflate(-8, -8), width=2,
+                                 border_radius=11)
+            title = self.button_font.render(label, True, JADE_DARK)
+            self.screen.blit(title, title.get_rect(center=(rect.centerx, rect.y + 31)))
+            hint = self.log_font.render(detail, True, MENU_MUTED_TEXT_COLOR)
+            self.screen.blit(hint, hint.get_rect(center=(rect.centerx, rect.y + 65)))
+
+        if self.home_mode == "PHYSICAL":
+            self._draw_physical_camera_calibration()
+
         self._draw_panel(HOME_SETTINGS_RECT, fill=JADE_DARK, border=JADE_DARK, radius=8)
         settings = self.log_font.render("SETTINGS", True, (255, 255, 255))
         self.screen.blit(settings, settings.get_rect(center=HOME_SETTINGS_RECT.center))
 
-        card = HOME_VS_ROBOT_RECT.inflate(48, 68)
+        # Leave room for the camera-calibration control without covering the
+        # VS ROBOT button or the game-mode cards.
+        card = HOME_VS_ROBOT_RECT.inflate(48, 44 if self.home_mode == "PHYSICAL" else 68)
         self._draw_panel(card, fill=(249, 245, 232), border=GOLD_COLOR, radius=20)
         pygame.draw.circle(self.screen, JADE_DARK, (SCREEN_WIDTH // 2, card.y + 52), 30)
         robot_mark = self.log_font.render("AI", True, (255, 255, 255))
@@ -559,6 +662,38 @@ class BoardRenderer:
             for index, text in enumerate(lines[:4]):
                 note = self.log_font.render(text, True, VERMILION_COLOR)
                 self.screen.blit(note, note.get_rect(center=(SCREEN_WIDTH // 2, 966 + 25 * index)))
+
+    def _draw_physical_camera_calibration(self):
+        rect = HOME_PHYSICAL_CAMERA_RECT
+        self._draw_panel(rect, fill=(249, 245, 232), border=GOLD_COLOR, radius=7)
+        box = pygame.Rect(rect.x + 7, rect.y + 4, 20, 20)
+        pygame.draw.rect(self.screen, (255, 255, 255), box, border_radius=3)
+        pygame.draw.rect(self.screen, JADE_COLOR if self.physical_camera_recalibration_requested else MENU_MUTED_TEXT_COLOR,
+                         box, width=2, border_radius=3)
+        if self.physical_camera_recalibration_requested:
+            pygame.draw.line(self.screen, JADE_COLOR, (box.x + 4, box.centery),
+                             (box.x + 9, box.bottom - 5), 3)
+            pygame.draw.line(self.screen, JADE_COLOR, (box.x + 9, box.bottom - 5),
+                             (box.right - 4, box.y + 5), 3)
+        label = "Chấm lại 4 góc bàn từ camera"
+        font = self.log_font
+        if font.size(label)[0] > rect.width - 42:
+            font = unicode_ui_font(17, bold=True)
+        text = font.render(label, True, JADE_DARK if self.physical_camera_recalibration_requested else MENU_TEXT_COLOR)
+        self.screen.blit(text, (box.right + 8, rect.centery - text.get_height() // 2))
+
+    @staticmethod
+    def home_physical_camera_calibration_from_pixel(px, py):
+        return HOME_PHYSICAL_CAMERA_RECT.collidepoint(px, py)
+
+    @staticmethod
+    def home_mode_from_pixel(px, py):
+        for rect, mode in ((HOME_MODE_BOARD_RECT, "BOARD_ONLY"),
+                           (HOME_MODE_SIM_RECT, "SIMULATION"),
+                           (HOME_MODE_PHYSICAL_RECT, "PHYSICAL")):
+            if rect.collidepoint(px, py):
+                return mode
+        return None
 
     @staticmethod
     def home_action_from_pixel(px, py):

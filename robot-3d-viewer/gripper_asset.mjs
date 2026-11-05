@@ -76,6 +76,7 @@ export function parseGripperVisualAsset(data) {
   };
 }
 
-export function fingerOffsetCadMm(asset, direction, closed) {
-  return direction * (asset.fingerOpenInsetMm + (closed ? asset.fingerTravelMm : 0));
+export function fingerOffsetCadMm(asset, direction, closed, travelScale = 1) {
+  const travel = asset.fingerTravelMm * Number(travelScale || 1);
+  return direction * (asset.fingerOpenInsetMm + (closed ? -travel : 0));
 }

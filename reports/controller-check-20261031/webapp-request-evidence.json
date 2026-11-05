@@ -1,0 +1,213 @@
+{
+  "mode": "PASSIVE_INSPECTION_ONLY",
+  "note": "Requests below were already in browser history, sent through user WebApp interactions. Assistant only read page, static JavaScript and request history. No controller write or UI command replay by assistant.",
+  "records": [
+    {
+      "reqid": 1162,
+      "request": {
+        "cmd": 201,
+        "data": {
+          "joints": {
+            "j1": "-90.510",
+            "j2": "-129.327",
+            "j3": "126.022",
+            "j4": "6.754",
+            "j5": "90.688",
+            "j6": "0.003"
+          },
+          "tcf": {
+            "x": "-99.407",
+            "y": "156.719",
+            "z": "262.599",
+            "rx": "93.448",
+            "ry": "0.038",
+            "rz": "178.802"
+          },
+          "speed": "41",
+          "acc": "180",
+          "ovl": "50"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 12:49:36 2026"
+    },
+    {
+      "reqid": 1163,
+      "request": {
+        "cmd": "record_500_error",
+        "data": {
+          "error_info": "500 Error:Joint command point error"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 12:49:36 2026"
+    },
+    {
+      "reqid": 1164,
+      "request": {
+        "cmd": 107,
+        "data": {
+          "content": "ResetAllError()"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 12:53:43 2026"
+    },
+    {
+      "reqid": 1165,
+      "request": {
+        "cmd": 201,
+        "data": {
+          "joints": {
+            "j1": "-92.050",
+            "j2": "-139.217",
+            "j3": "124.945",
+            "j4": "-74.560",
+            "j5": "-89.497",
+            "j6": "42.415"
+          },
+          "tcf": {
+            "x": "-98.499",
+            "y": "124.125",
+            "z": "280.009",
+            "rx": "178.799",
+            "ry": "-0.416",
+            "rz": "-44.466"
+          },
+          "speed": "41",
+          "acc": "180",
+          "ovl": "50"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 12:53:47 2026"
+    },
+    {
+      "reqid": 1166,
+      "request": {
+        "cmd": "record_500_error",
+        "data": {
+          "error_info": "500 Error:Joint command point error"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 12:53:47 2026"
+    },
+    {
+      "reqid": 1167,
+      "request": {
+        "cmd": 201,
+        "data": {
+          "joints": {
+            "j1": "-66.398",
+            "j2": "-97.752",
+            "j3": "121.706",
+            "j4": "-113.954",
+            "j5": "-90.000",
+            "j6": "65.910"
+          },
+          "tcf": {
+            "x": "-207",
+            "y": "219",
+            "z": "220",
+            "rx": "-180",
+            "ry": "0",
+            "rz": "-42.308"
+          },
+          "speed": "41",
+          "acc": "180",
+          "ovl": "50"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 12:53:49 2026"
+    },
+    {
+      "reqid": 1168,
+      "request": {
+        "cmd": "record_500_error",
+        "data": {
+          "error_info": "500 Error:Command execution failed"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 12:53:49 2026"
+    },
+    {
+      "reqid": 1229,
+      "request": {
+        "cmd": 316,
+        "data": {
+          "content": "SetToolCoord(0,0.000,0.000,0.000,0.000,0.000,0.000,0,0,0,0)"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 13:03:51 2026"
+    },
+    {
+      "reqid": 1230,
+      "request": {
+        "cmd": "modify_load",
+        "data": {
+          "name": "load0",
+          "id": "0",
+          "x": "0",
+          "y": "0",
+          "z": "0",
+          "weight": "0"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 13:03:51 2026"
+    },
+    {
+      "reqid": 1231,
+      "request": {
+        "cmd": "record_500_error",
+        "data": {
+          "error_info": "500 Error:Command execution failed"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 13:03:52 2026"
+    },
+    {
+      "reqid": 1232,
+      "request": {
+        "cmd": 316,
+        "data": {
+          "content": "SetToolCoord(0,0.000,0.000,0.000,0.000,0.000,0.000,0,0,0,0)"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 13:03:59 2026"
+    },
+    {
+      "reqid": 1233,
+      "request": {
+        "cmd": "modify_load",
+        "data": {
+          "name": "load0",
+          "id": "0",
+          "x": "0",
+          "y": "0",
+          "z": "0",
+          "weight": "0"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 13:03:59 2026"
+    },
+    {
+      "reqid": 1234,
+      "request": {
+        "cmd": "record_500_error",
+        "data": {
+          "error_info": "500 Error:Command execution failed"
+        }
+      },
+      "http_response_body": "success",
+      "controller_date_header": "Sat Oct 31 13:03:59 2026"
+    }
+  ]
+}

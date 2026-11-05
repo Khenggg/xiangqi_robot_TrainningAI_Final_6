@@ -1,4 +1,15 @@
-# HƯỚNG DẪN DẠY TEACHING POINTS ĐỂ TRÁNH SINGULARITY
+# Quy trình R1–R4 hiện hành
+
+Cả R1, R2, R3, R4 đều bắt buộc: lần lượt `(row,col)` = `(0,0)`, `(0,8)`,
+`(9,8)`, `(9,0)`. Lấy đúng bốn giao điểm ngoài cùng của lưới, giữ cùng tool/user
+frame. Xem [hợp đồng XY và chiều cao riêng](BRD_XY_CALIBRATION.md).
+
+Nội dung bên dưới là hướng dẫn lịch sử. Không dùng mô tả “R4 tùy chọn”, fallback
+từ riêng R1 hoặc độ cao ghi sẵn trong phần lịch sử để cấu hình phiên hiện hành.
+
+---
+
+# Hướng dẫn lịch sử: teaching points để tránh singularity
 
 ## Vấn đề
 
