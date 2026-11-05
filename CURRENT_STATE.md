@@ -1101,3 +1101,10 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 
 ## DO_NOT_ADVANCE_TO
 * **PHASE 4:** Physical FAIRINO FR3 robot hardware connection, power-on, or physical actuation.
+
+
+## 2026-11-05 need-review capsule r2 (scoped)
+
+Ported portable capsule onto current origin/need-review30649c4, preserving newer two-human/robot and exit implementation. Built new NeedReview-r2 ZIP (386975679 bytes), SHA256 dc9bbc820b4e479c904c084c9619439d743dc4e8d037a0394bfd04fa327f1754. README first heading links this distinct release and describes all four modes, O/localhost Black client and main/host exit confirmation.
+
+TEST_EVIDENCE: 105 focused tests PASS (93parallel+12serial), packaged CPU model/engine/render smoke PASS, untouched ZIP Unicode relocation PASS including actual 32-piece virtual world, JS/WASM, real bundled Black child room/state/render/request and main menu/exit dialog. No physical/clean-second-PC/full-suite claim. Historical LAST_REVIEWED_HEAD unchanged; full evidence reports/need-review-capsule-20261105/REPORT.md.

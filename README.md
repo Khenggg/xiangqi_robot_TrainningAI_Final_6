@@ -1,11 +1,23 @@
+# [⬇ TẢI CAPSULE.ZIP — WINDOWS X64](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-need-review-windows-x64-20261105-r2/Xiangqi-Capsule-NeedReview-Windows-x64-20261105-r2.zip)
+
+**369,0 MiB · Giải nén toàn bộ → mở START.bat · Những lần sau chỉ mở lại START.bat.**
+
+[Xem Release và checksum](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/tag/capsule-need-review-windows-x64-20261105-r2) · [Source và hướng dẫn bản bàn giao trên nhánh need-review](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/tree/need-review)
+
+---
+
 # XIANGQI ROBOT CỜ TƯỚNG VIP — SPECIFICATION DOCUMENT
 
-> Tài liệu sử dụng và kiến trúc của nhánh **`need-review`**.
-> Đối chiếu mã nguồn tại **`57aba7d`**, ngày **05/11/2026**. Những kết quả phần cứng ghi trong báo cáo cũ chỉ có giá trị tại setup và thời điểm của báo cáo đó.
+> Bản bàn giao Windows x64 CPU — nhánh **`need-review`**, ngày **05/11/2026**.
+> Code nền `30649c4`, gồm chế độ 2 người + robot và xác nhận thoát; capsule được build riêng từ nhánh này. Những kết quả phần cứng trong báo cáo cũ chỉ có giá trị tại setup và thời điểm của báo cáo đó.
 
-**Bắt đầu:** cài Python 3.12 x64 và Node.js/npm, chạy `SETUP_WINDOWS.bat`, sau đó `RUN.bat`. Mặc định là **mô phỏng FR3**, không điều khiển robot thật. `RUN.bat --virtual` có nghĩa là **chỉ bàn cờ 2D**, còn `RUN.bat --physical` mở phiên phần cứng ban đầu chỉ đọc.
+**Mang đi sự kiện / bàn giao:** tải [Xiangqi Capsule Windows x64 — 369,0 MiB](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-need-review-windows-x64-20261105-r2/Xiangqi-Capsule-NeedReview-Windows-x64-20261105-r2.zip), giải nén toàn bộ và mở **`START.bat`**. Không cần cài Python, Node.js, Git hay CUDA; không chạy SETUP và không tải thư viện tại sự kiện. Màn hình đầu cho chọn môi trường và kiểu chơi; mặc định là mô phỏng FR3.
 
-README giữ bố cục tài liệu cũ nhưng mô tả implementation của `need-review`. Không áp dụng hướng dẫn rollback/manual-rollback hoặc bộ cài của nhánh `feat/player-vs-robot` cho nhánh này.
+[Trang Release](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/tag/capsule-need-review-windows-x64-20261105-r2) · [Checksum SHA256](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-need-review-windows-x64-20261105-r2/Xiangqi-Capsule-NeedReview-Windows-x64-20261105-r2.zip.sha256)
+
+Hướng dẫn người vận hành: [CAPSULE_OPERATOR.md](docs/CAPSULE_OPERATOR.md). Hướng dẫn team tạo ZIP: [WINDOWS_CAPSULE_BUILD.md](docs/WINDOWS_CAPSULE_BUILD.md). `SETUP_WINDOWS.bat` → `RUN.bat` bên dưới là luồng **phát triển từ source**, không phải luồng dùng capsule.
+
+README giữ bố cục tài liệu cũ và mô tả bản bàn giao trên `need-review`. Không áp dụng hướng dẫn rollback/manual-rollback hoặc bộ cài của nhánh `feat/player-vs-robot` cho nhánh này.
 
 ## 📋 TỔNG QUAN HỆ THỐNG
 
@@ -21,13 +33,14 @@ Tên lớp `FR5Robot` trong `src/hardware/robot_VIP.py` là tên tương thích 
 |---|---|
 | Người đấu AI | Nhập chuột ở virtual; camera và robot ở physical nếu đủ các gate |
 | Người đấu người | Hai bên nhập trên cùng bàn ảo; session được ép về virtual |
+| 2 người + robot | Máy chủ Đỏ và cửa sổ Đen trên cùng PC; một executor/robot thực hiện hai màu, không AI |
 | Robot đấu robot | Hai AI điều khiển hai màu, dùng một executor/robot; không phải hai cánh tay độc lập |
 | Mô phỏng 3D | FR3, bàn/quân, gắp/thả/ăn quân, physics và collision checks |
 | Viewer physical | Hiển thị trạng thái tay và bàn; căn chỉnh XY/chiều cao có trạng thái xác minh riêng |
 | Camera | YOLO occupancy + CChess ONNX, calibration phối cảnh, xác nhận bàn và hậu kiểm |
 | Phục hồi | Pending move, journal/outbox, stop barrier, quét đối soát và khởi tạo phiên mới |
 | Spectator từ xa | Tùy chọn, cần credential do chủ dịch vụ cấp; độc lập với viewer local |
-| PvP phòng mạng | Có module `pvp_room.py`, chưa được nối vào launcher/game UI; không coi là tính năng đã bàn giao |
+| Phòng người Đen | Mã 6 ký tự, cửa sổ riêng quay bàn 180°; localhost cùng máy, không LAN/Internet |
 
 Không suy ra độ chính xác gắp, khả năng chống va chạm phần cứng hay nghiệm thu một ván hoàn chỉnh chỉ từ việc unit test hoặc simulation chạy được.
 
@@ -64,7 +77,7 @@ Viewer không được tự bước physics hoặc phát lại một nước rob
 
 ## Mục lục
 
-- [Phần 0 — Cài đặt cho người mới](#phan-0)
+- [Phần 0 — Nhận capsule và setup source](#phan-0)
 - [Phần 1 — Cấu trúc thư mục](#phan-1)
 - [Phần 2 — Kiến trúc và luồng game](#phan-2)
 - [Phần 3 — Các module](#phan-3)
@@ -78,25 +91,48 @@ Viewer không được tự bước physics hoặc phát lại một nước rob
 ---
 
 <a id="phan-0"></a>
-# PHẦN 0: HƯỚNG DẪN CÀI ĐẶT DÀNH CHO NGƯỜI MỚI
+# PHẦN 0: BÀN GIAO CAPSULE & MÔI TRƯỜNG PHÁT TRIỂN
 
-### 0.1. Điều kiện trước khi chạy
+### 0.1. Bàn giao capsule — dành cho người vận hành
+
+1. Tải asset **`Xiangqi-Capsule-NeedReview-Windows-x64-20261105-r2.zip`** từ [Release capsule](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/tag/capsule-need-review-windows-x64-20261105-r2), copy sang máy Windows 10/11 x64 có trình duyệt. Không chọn `Source code (zip)` hay nút Download ZIP mã nguồn trên GitHub: chúng không có runtime/model.
+2. Giải nén toàn bộ vào thư mục local có quyền ghi, ví dụ `D:\Xiangqi`.
+3. Mở `START.bat`, chọn chế độ và chơi. Không mở trực tiếp trong ZIP, không copy riêng file START.
+
+Những lần sau chỉ mở lại `START.bat`. Đây là ứng dụng portable: giữ nguyên cả thư mục `runtime/`, `app/` và dữ liệu đi kèm; không có bước cài môi trường lặp lại trên máy sử dụng.
+
+Runtime CPU, thư viện, Moonfish, model nhận diện, Three.js/CAD và font quân cờ nằm sẵn trong bundle. Chơi local không cần Internet. Camera/controller vẫn cần kết nối và driver của bộ thiết bị; thay vị trí camera/bàn hoặc robot cần xác minh calibration. Capsule không tự cấp quyền chuyển động; luồng xác nhận physical giữ nguyên.
+
+Team chuẩn bị `settings.json` cho máy/bộ thiết bị trước sự kiện. Xem [hướng dẫn ngắn](docs/CAPSULE_OPERATOR.md) để xử lý lỗi hoặc tìm log. Không mang `.venv` của máy phát triển sang máy nhận.
+
+**Bản capsule đã kiểm chứng:** 386.975.679 byte, SHA256 `dc9bbc820b4e479c904c084c9619439d743dc4e8d037a0394bfd04fa327f1754`. Gồm CPython 3.12.10, 47 package đã pin, vision CPU, model YOLO/CChess, Moonfish, Three.js/CAD và font CJK. Runtime/DLL được nạp từ bundle; không mang journal, log hay credential của workstation.
+
+Kiểm chứng local: **105 tests đạt**; ZIP nguyên gốc được giải nén sang đường dẫn có dấu/khoảng trắng, chạy model thật, nước hợp lệ từ engine, mô phỏng 32 quân, HTTP JS/WASM và mở/đóng menu ứng dụng. Chưa nghiệm thu trên một PC Windows sạch thứ hai, cả ván UI/browser hoặc robot thật. Xem [bằng chứng đóng gói](reports/need-review-capsule-20261105/REPORT.md).
+
+### 0.2. Môi trường phát triển từ source — chỉ dành cho team
+
+Các yêu cầu và lệnh SETUP sau đây chỉ áp dụng khi **clone source để phát triển/build**, không áp dụng cho người nhận capsule.
 
 - Windows x64, Python **3.12 x64** có Python Launcher `py`, Node.js/npm trong PATH.
 - Internet cho lần cài thư viện Python và Three.js. Nhánh này không tự cài Python hay Node.js.
 - Virtual/game-only không cần camera và controller. Physical cần thiết bị, calibration và trọng số nhận diện được chuẩn bị riêng.
 - GPU không bắt buộc. CPU chạy được; hiệu năng inference tùy máy. Không có cam kết FPS chung.
 
-### 0.2. Clone đúng nhánh và cài môi trường
+#### Clone đúng nhánh và cài môi trường
 
 ```powershell
 git clone --branch need-review https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6.git
 cd xiangqi_robot_TrainningAI_Final_6
 .\SETUP_WINDOWS.bat
+if ($LASTEXITCODE -ne 0) { throw 'SETUP thất bại. Xử lý lỗi cài đặt trước khi chạy game.' }
 .\RUN.bat
 ```
 
+**Lần đầu trên máy mới: phải chạy SETUP thành công trước khi RUN.** Chờ terminal báo `Setup complete.` và kết thúc với mã `0`. Nếu SETUP báo lỗi hoặc dừng giữa chừng, xử lý lỗi rồi chạy lại SETUP; chưa chuyển sang RUN. Nếu mở file bằng chuột, hãy mở `SETUP_WINDOWS.bat` từ terminal để giữ lại log khi có lỗi.
+
 `SETUP_WINDOWS.bat` tạo `.venv312` nếu chưa có, cài `requirements.txt`, chọn CPU ONNX nếu máy chưa có GPU ONNX, kiểm tra import và chạy `npm ci --include=dev`. Bộ cài không tải checkpoint camera, không đo camera, không đổi teaching points và không vận hành arm.
+
+Sau khi setup thành công, những lần sử dụng tiếp theo chỉ cần chạy `RUN.bat` với mode mong muốn. Chạy lại SETUP khi dependency thay đổi hoặc môi trường/asset bị thiếu. `RUN.bat` chọn Python, kiểm tra một số dependency và mở game; nó không tự cài môi trường thay SETUP.
 
 Chạy SETUP lại có thể chạy lại pip/npm; nhánh này dùng requirements theo dải phiên bản, không có luồng lock/cache validation giống bộ cài của `feat/player-vs-robot`. Không sao chép `.venv312` từ máy khác.
 
@@ -128,6 +164,10 @@ git rev-parse --short HEAD
 
 Giữ lại các thay đổi calibration/config cục bộ trước khi pull. Nếu dependency thay đổi, chạy SETUP lại. Khởi động lại game; tải lại viewer bằng Ctrl+F5 để không dùng module trình duyệt cũ.
 
+### 0.5. Team tạo bản bàn giao
+
+Sau khi chuẩn bị model trên máy build, chạy `BUILD_CAPSULE.bat --models "D:\path\to\models"`. Builder đóng gói runtime/dependency CPU, model, engine, viewer và font; kiểm tra bộ đóng gói rồi xuất thư mục portable, ZIP và SHA256 trong `dist/`. Source/pipeline nằm trên nhánh `need-review`; ZIP/runtime/model phát hành qua GitHub Releases, không đưa binary nặng vào lịch sử Git. Hướng dẫn build và nghiệm thu: [WINDOWS_CAPSULE_BUILD.md](docs/WINDOWS_CAPSULE_BUILD.md).
+
 ---
 
 <a id="phan-1"></a>
@@ -138,6 +178,7 @@ xiangqi_robot_TrainningAI_Final_6/
 ├── main.py                         # Launcher, menu, lifecycle và game loop
 ├── config.py                       # Cấu hình thực thi
 ├── RUN.bat / SETUP_WINDOWS.bat      # Khởi động / cài dependency Windows
+├── BUILD_CAPSULE.bat               # Team tạo bộ portable ZIP để bàn giao
 ├── SETUP_GPU.bat                    # Chuyển sang stack GPU riêng
 ├── requirements.txt                # Dependency runtime
 ├── package.json / package-lock.json # Three.js và viewer checks
@@ -163,7 +204,8 @@ xiangqi_robot_TrainningAI_Final_6/
 │   └── ui/                         # Renderer, input và recovery status
 ├── scripts/                        # Công cụ calibration/đo geometry
 ├── tools/
-│   ├── test_fast.ps1 / test_serial.ps1
+│   ├── test_fast.ps1               # Runner tests theo subsystem/marker
+│   ├── capsule/                    # Builder, launcher và acceptance probe
 │   ├── hardware_tests/             # Chẩn đoán có thể tác động robot thật
 │   └── simulation/                 # Server, demo và công cụ virtual
 ├── tests/unit/                     # Kiểm thử tự động Python/Node
@@ -250,7 +292,19 @@ Thắng/thua dựa trên luật và bàn đã commit. Đầu hàng, hết nướ
 
 ### 4.1. Lệnh khởi động
 
-Chạy các lệnh dưới đây **tại thư mục repo**:
+**Bản bàn giao:** giải nén ZIP, mở `START.bat`. Không có bước SETUP trên máy sự kiện. Chọn **Chơi trên máy**, **Mô phỏng 3D** hoặc **Robot thật** trên màn hình đầu; xem [CAPSULE_OPERATOR.md](docs/CAPSULE_OPERATOR.md).
+
+**Chạy source để phát triển:** máy mới/clone lần đầu phải chạy `SETUP_WINDOWS.bat` trước. Tại thư mục repo, sau khi đã cài Python 3.12 và Node.js/npm:
+
+```powershell
+.\SETUP_WINDOWS.bat
+if ($LASTEXITCODE -ne 0) { throw 'SETUP thất bại. Xử lý lỗi cài đặt trước khi chạy game.' }
+.\RUN.bat
+```
+
+Chỉ chạy RUN khi SETUP báo `Setup complete.` và trả mã `0`. SETUP chuẩn bị thư viện Python và asset viewer; RUN không tự cài các thành phần này. Xem [phần cài đặt lần đầu](#phan-0) để chuẩn bị model/camera nếu dùng physical.
+
+**Các lần sau, khi môi trường đã được cài thành công**, chọn một lệnh RUN dưới đây tại thư mục repo:
 
 | Lệnh | Môi trường |
 |---|---|
@@ -276,8 +330,8 @@ Sau SETUP có thể gọi trực tiếp Python của môi trường:
 
 ### 4.2. Chơi bằng robot thật
 
-1. Chuẩn bị model, camera, kết nối controller và bộ teaching/calibration đúng setup.
-2. Xếp đủ 32 quân khai cuộc, khởi động `RUN.bat --physical` và chọn kiểu chơi hỗ trợ physical.
+1. Dùng capsule do team chuẩn bị cho bộ thiết bị, hoặc hoàn tất SETUP/model nếu chạy source. Kết nối camera/controller và xác minh bộ teaching/calibration đúng setup.
+2. Xếp đủ 32 quân khai cuộc, mở `START.bat` và chọn **Robot thật**. Với source, dùng `RUN.bat --physical`.
 3. Camera đọc frame mới và xác nhận bàn. Calibration đã lưu có thể dùng lại nếu setup không đổi; dùng `--recalibrate-camera` khi cần chấm lại.
 4. Kết nối ban đầu chỉ đọc. Sau khi người vận hành xác nhận tool/frame, khoảng hở, vùng chuyển động, tốc độ và E-stop, nhấn **F9**, rồi **F10** trong khoảng xác nhận của UI để xin bật motion.
 5. Thiếu telemetry mới/idle, board confirmation hoặc còn recovery/pending thì bị từ chối. Không đổi số calibration hoặc tắt guard để vượt gate.
@@ -297,6 +351,7 @@ Phím chỉ có tác dụng khi profile/trạng thái cho phép. Dùng nhãn và
 | F4 | Quét toàn bàn; thay đổi nhiều ô có thể yêu cầu xác nhận lượt |
 | 1 / 2 | Xác nhận Đỏ/Đen khi UI đang chờ xác nhận lượt sau rescan |
 | F2 | Xin về launcher/đổi mode; giữ stop/disposal barrier |
+| O | Mở cửa sổ người Đen trong mode 2 người + robot |
 | F5 | Yêu cầu thử AI khi phiên không có lỗi đồng bộ đang chặn |
 | F6 / F7 / F8 | Self-play liên tục / từng bước / dừng, theo mode hiện tại |
 | F9 → F10 | Xin và xác nhận bật quyền physical motion; không tự xử lý controller fault |
@@ -318,6 +373,8 @@ Không giữ mô tả E/A/X của rollback-arm cũ: nhánh này dùng session/hi
 
 Mỗi lần chạy/chọn ván là một khai cuộc mới. Journal vẫn giữ biên nhận và recovery của lệnh phần cứng chưa giải quyết; F2/New Game/restart không phải lệnh xóa hậu quả của motion đang dở.
 
+Đóng cửa sổ máy chủ/game chính hoặc Ctrl+C hiện hỏi **Thoát / Ở lại**. Xác nhận Thoát đóng phần mềm ngay theo implementation của nhánh, không phát lệnh đến robot/kẹp và không hoàn tất giao dịch đang dở; journal đã ghi được giữ nguyên. Không coi việc đóng ứng dụng là bằng chứng robot đã dừng.
+
 ---
 
 <a id="phan-5"></a>
@@ -328,16 +385,23 @@ Mỗi lần chạy/chọn ván là một khai cuộc mới. Journal vẫn giữ 
 | Mode | Người/AI | Virtual | Physical |
 |---|---|---|---|
 | `HUMAN_VS_ROBOT` | Người Đỏ, AI Đen | Chuột + adapter virtual | Camera + robot nếu được enable |
-| `HUMAN_VS_HUMAN` | Hai người, không AI | Hai bên nhập trên bàn ảo | Profile ép về virtual; chưa có đường PvP physical được bàn giao |
+| `HUMAN_VS_HUMAN` | Hai người, không AI | Hai bên nhập trên bàn ảo | Profile này ép về virtual; dùng mode riêng 2 NGƯỜI + ROBOT khi cần robot thực hiện |
 | `ROBOT_VS_ROBOT` | AI cả hai màu | Cùng executor mô phỏng | Một robot thực hiện hai màu; chỉ khi đủ quyền/gate |
+| `HUMAN_VS_HUMAN_ROBOT` | Hai người chọn nước, không AI | Một executor mô phỏng, hai cửa sổ | Một robot thực hiện hai màu; camera/stop/recovery gate giữ nguyên |
 
-### 5.2. Engine và thời gian nghĩ
+### 5.2. Hai người chọn nước, một robot thực hiện
+
+Chọn **MÔ PHỎNG 3D** hoặc **ROBOT THẬT**, rồi **2 NGƯỜI + ROBOT**. Máy chủ chơi Đỏ; nhấn **O / MỞ NGƯỜI ĐEN** để mở cửa sổ Đen hoặc chọn **VÀO PHÒNG / NGƯỜI ĐEN** và nhập mã 6 ký tự. Hai cửa sổ cùng máy, không chơi qua LAN/Internet; client không sở hữu camera/controller.
+
+Cả hai màu chọn nước bằng chuột, máy chủ thực hiện và commit sau xác minh. Mất kết nối thì khóa nước mới; không phát lại yêu cầu đã gửi. Mode này không có AI, SPACE đi tay, emergency, rollback hay test gắp. Xem [TWO_HUMAN_ROBOT_MODE.md](docs/TWO_HUMAN_ROBOT_MODE.md).
+
+### 5.3. Engine và thời gian nghĩ
 
 Đường local dùng source Moonfish. `AIController` hỗ trợ cấu hình LOCAL/CLOUD/HYBRID; lựa chọn difficulty và backend phải được đối chiếu với code/menu thực tế. Không mặc định cho rằng mọi cấp độ hay model policy đều đang được launcher dùng.
 
 Engine chạy ngoài luồng UI, kết quả gắn với phiên/lượt. Kết quả cũ sau đổi mode, rescan hoặc reset không được tự cấp quyền phát một nước mới. Lỗi engine và lỗi thực thi là hai nhóm lỗi riêng; đọc `ENGINE_FAILED`, pending move và recovery để quyết định retry.
 
-### 5.3. Playback simulation
+### 5.4. Playback simulation
 
 `detailed` mặc định phát chậm để quan sát; `fast` thay tốc độ phát nhưng giữ physics, samples và collision checks. Profile không đổi tốc độ robot thật. Tham khảo [SIMULATION_PLAYBACK.md](docs/SIMULATION_PLAYBACK.md); chưa có cam kết FPS/thời gian hoàn tất trên mọi máy.
 
@@ -434,7 +498,7 @@ Không lấy con số tests PASS trong README/báo cáo cũ làm kết quả hi�
 
 ### 8.2. Nhật ký phiên
 
-Mỗi lần chạy tạo `logs/<id-phien>/`; terminal in đường dẫn. Đọc `errors.log` trước, rồi `run.log` và dữ liệu có cấu trúc theo [LOGGING.md](docs/LOGGING.md).
+Với capsule, log game nằm ở `app/logs/<id-phien>/`, log lỗi launcher ở `state/launcher-error-*.log`. Với source, mỗi lần chạy tạo `logs/<id-phien>/` tại repo. Terminal in đường dẫn; đọc `errors.log` trước, rồi `run.log` và dữ liệu có cấu trúc theo [LOGGING.md](docs/LOGGING.md).
 
 ```powershell
 .\RUN.bat --log-level DEBUG
@@ -447,10 +511,10 @@ Khi báo lỗi, ghi lại branch/HEAD, môi trường/mode, bước vừa thao t
 
 | Hiện tượng | Kiểm tra/bước tiếp theo |
 |---|---|
-| Thiếu Python hoặc npm | Cài prerequisite, mở terminal mới, chạy SETUP lại |
-| SETUP lỗi cài PyBullet | Đọc lỗi wheel/compiler; chưa được coi là setup thành công |
+| Source thiếu Python hoặc npm | Cài prerequisite, mở terminal mới, chạy SETUP lại |
+| Source SETUP lỗi cài PyBullet | Đọc lỗi wheel/compiler; chưa được coi là setup thành công |
 | Physical không khởi tạo vision | Kiểm tra đủ `best.pt`, hai ONNX, camera, providers và calibration |
-| Viewer trống/lỗi module | `npm ci --include=dev`, kiểm tra vendor JS/WASM, xem `VIEWER_FAILED`, Ctrl+F5 |
+| Viewer trống/lỗi module | Capsule: kiểm tra/giải nén lại ZIP đầy đủ; source: `npm ci --include=dev`. Xem `VIEWER_FAILED`, Ctrl+F5 |
 | Viewer OFFLINE/board chưa khớp | Kiểm tra telemetry/bridge và trạng thái calibration; không sửa FEN để che lệch |
 | Nhận nước nhưng robot chưa chạy | Kiểm tra pending, motion enable, controller/worker/binding và mã lỗi thực tế |
 | RPC/GetControllerIP chập chờn | Kiểm tra kết nối theo [ROBOT_CONNECTION.md](ROBOT_CONNECTION.md); không bật motion khi link không ổn định |
@@ -491,7 +555,7 @@ Không. Hai màu AI được điều phối qua cùng một executor/FR3 trong p
 
 ### Q6. Có PvP qua phòng mạng hoặc hai người dùng robot thật chưa?
 
-Chưa phải tính năng đã nối đầy đủ vào UI. Session người-vs-người hiện là virtual. Không merge nguyên nhánh donor để suy ra tính năng đã được kiểm chứng.
+`HUMAN_VS_HUMAN` vẫn virtual. Chọn `2 NGƯỜI + ROBOT` để dùng mode riêng có máy chủ Đỏ/cửa sổ Đen, simulation hoặc physical; phòng chỉ localhost, không LAN/Internet.
 
 ### Q7. Z có tự trả quân thật không?
 
@@ -503,7 +567,7 @@ Không. F12 phục hồi trạng thái ứng dụng sau kiểm tra cần thiết
 
 ### Q9. Dùng được offline không?
 
-Local engine và viewer asset được đóng gói/cài local. Cài dependency cần mạng; spectator/cloud cần dịch vụ bên ngoài. Thiếu model camera vẫn không chạy được đường physical.
+Capsule dùng engine local, model và viewer asset đi kèm; không cần tải dependency khi sử dụng. Máy build cần mạng để chuẩn bị bộ phát hành. Spectator/cloud là tính năng riêng cần dịch vụ bên ngoài; launcher capsule mặc định LOCAL và không mang credential.
 
 ### Q10. Tài liệu nào cần đọc tiếp?
 

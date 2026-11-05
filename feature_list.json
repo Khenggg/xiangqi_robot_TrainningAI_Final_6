@@ -135,5 +135,35 @@
     "evidence": "",
     "notes": "",
     "priority": "P3"
+  },
+  {
+    "id": "need-review-capsule-build",
+    "title": "Portable CPU capsule for current need-review",
+    "user_visible_behavior": "Extract capsule and open START.bat with current modes, no dependency install on event PC",
+    "verification_command": "tools/test_fast.ps1 and actual packaged acceptance_probe.py",
+    "status": "passing",
+    "evidence": "105 tests; actual new ZIP Unicode relocation and bundled Black child acceptance PASS",
+    "notes": "No physical/second-PC/full-suite claim; reports/need-review-capsule-20261105/REPORT.md",
+    "priority": "P1"
+  },
+  {
+    "id": "need-review-capsule-client",
+    "title": "Packaged Black subprocess and localhost room",
+    "user_visible_behavior": "Extract capsule and open START.bat with current modes, no dependency install on event PC",
+    "verification_command": "tools/test_fast.ps1 and actual packaged acceptance_probe.py",
+    "status": "passing",
+    "evidence": "105 tests; actual new ZIP Unicode relocation and bundled Black child acceptance PASS",
+    "notes": "No physical/second-PC/full-suite claim; reports/need-review-capsule-20261105/REPORT.md",
+    "priority": "P1"
+  },
+  {
+    "id": "need-review-capsule-docs",
+    "title": "Current README with direct capsule download",
+    "user_visible_behavior": "Extract capsule and open START.bat with current modes, no dependency install on event PC",
+    "verification_command": "tools/test_fast.ps1 and actual packaged acceptance_probe.py",
+    "status": "passing",
+    "evidence": "105 tests; actual new ZIP Unicode relocation and bundled Black child acceptance PASS",
+    "notes": "No physical/second-PC/full-suite claim; reports/need-review-capsule-20261105/REPORT.md",
+    "priority": "P1"
   }
 ]

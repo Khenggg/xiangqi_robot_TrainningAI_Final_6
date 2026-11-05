@@ -971,3 +971,8 @@ The seven reproduced software failures in `docs/RELIABILITY_RECHECK_20261012.md`
 * **Evidence:** Warning during pytest: `DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated`.
 * **Action:** Low impact, server functions normally. Can be migrated to `websockets.asyncio.server.ServerConnection` in a future dependency cleanup.
 * **Last Verified HEAD:** 12ce7330393a9014b0ad5e9013e845c8a3bf525e
+
+
+## 2026-11-05 need-review capsule r2 — acceptance boundary
+
+Current need-review30649c4 mode/session/exit code is retained in the new capsule; 105 targeted tests and actual bundled models/virtual world/Black subprocess/menu checks pass after Unicode relocation. Clean second-Windows-PC, entire UI/browser game and event-kit physical motion/driver/camera calibration remain unverified. Capsule does not close prior controller or broader regression gaps. Main host exit asks consent; Black client closes directly. See reports/need-review-capsule-20261105/REPORT.md.
