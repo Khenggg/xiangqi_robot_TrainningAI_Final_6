@@ -1,3 +1,69 @@
+## 2026-11-03 one-confirmation application exit
+
+Window X, Ctrl+C and camera-q now ask once: Exit or Stay. Confirmed exit uses
+process termination without waiting for SDK/stop proof/pending transactions or
+atexit cleanup, including RECOVERY REQUIRED. Cancel leaves normal gameplay
+unchanged. Existing journal records are retained; no robot/gripper command is
+sent by this exit path.12 focused tests PASS (1 parallel +11 serial), exit0,
+9.78s. Terminal SIGINT cancellation also verified. No hardware operation/restart/
+merge. LAST_REVIEWED_HEAD unchanged.
+Graph search/detect_changes unavailable (Transport closed); scoped source review
+used instead. Report: reports/robot-pvp-20261102/EXIT_CONFIRMATION_20261103.md.
+
+## 2026-11-03 session buttons / named pick errors — scoped candidate
+
+SURRENDER accepted while busy/pick-paused, deferred until current work/stop/pending
+reconciliation settles. NEW GAME keeps stop/pending/opening-camera gates; V and
+Continue during ending do not replay a move. Successful-ACK stop timeouts can
+settle via two new idle observations after workers finish, without another stop
+command or enable; unknown/error/stale/gripper states stay blocked. Pick warning
+now names expected FEN piece/role/square (user's captured target: Red Knight b9).
+73 focused PASS; final stop39 and actual mock-UI14 PASS; no physical acceptance,
+restart, merge or original-checkout edit. LAST_REVIEWED_HEAD unchanged. Report:
+reports/robot-pvp-20261102/SESSION_BUTTONS_AND_PICK_NAMES_20261103.md.
+
+## 2026-11-02 robot PvP startup camera pause — scoped fix
+
+Runtime18:12:20 camera not yet fresh sets startup pause; later V verified32 but
+left snapshot_continue_required true, so Red remained locked even after explicit
+physical enable18:15:30. New-mode V/Continue now clears camera pause only after
+exact verification, fresh baseline, no unresolved work and existing recovery
+approval; persists checkpoint with rollback, respects newer stop requests.
+51 tests PASS, exit0,17.27s; no motion/live mutation/restart. Existing process can
+use its Continue path for this equal-board startup pause. Original checkout and
+hardware gates unchanged. LAST_REVIEWED_HEAD unchanged. Report:
+reports/robot-pvp-20261102/PVP_CAMERA_PAUSE.md.
+
+## 2026-11-02 named missing YOLO cells — scoped verification
+
+YOLO baseline diagnostic now names expected FEN piece + square + zero-based
+row/col for missing occupancy, and explicitly labels unexpected occupied cells.
+Names describe expected FEN, not proof that a physical piece is absent.30 tests
+PASS (23parallel+7serial), exit0,18.38s; no acceptance/motion changes or restart.
+See reports/robot-pvp-20261102/YOLO_BASELINE_31.md. LAST_REVIEWED_HEAD unchanged.
+
+## 2026-11-02 YOLO31 versus verified ONNX32 — diagnostic clarity
+
+Physical PvP runtime17:55:14 verifies Red16/Black16, diff0 in two fresh samples,
+then legacy T1 baseline prints31. That is YOLO occupied-cell count, not ONNX/FEN.
+Message now names source; camera.yolo_baseline logs raw boxes/occupied/expected
+counts and differing cells. No perception threshold, baseline or motion change.
+46 focused mock tests PASS, exit0,31.48s. Actual YOLO missing/mapping cause/cell
+UNKNOWN from old logs; not a recognition fix. No hardware actuation or restart.
+Report: reports/robot-pvp-20261102/YOLO_BASELINE_31.md. LAST_REVIEWED_HEAD unchanged.
+
+## 2026-11-02 isolated two-human robot candidate
+
+Separate worktree/branch codex/robot-pvp-20261102 on preserved local baseline
+8a45223. New HUMAN_VS_HUMAN_ROBOT mode: host Red, hardware-free Black client,
+localhost six-character room, both GUI moves through retained execution/journal.
+No AI/auto-enable/HOME. Existing mouse-only PvP preserved. Focused116 PASS, exit0;
+final new-mode30 PASS, exit0, in reports/robot-pvp-20261102/final-new-mode-tests.txt.
+Actual main loop + fake motion + real room sockets verifies two durable turns.
+Broad suite INTERRUPTED with failure markers; full result/causality UNKNOWN.
+Physical/full-game acceptance NOT RUN; no merge/push or original-source changes.
+LAST_REVIEWED_HEAD unchanged. Report: reports/robot-pvp-20261102/REPORT.md.
+
 ## 2026-11-02 camera confirmed / controller recovery blocker
 
 Fresh read-only controller query at 16:30:45+07 returned [0,1,29]; successful

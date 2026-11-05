@@ -1,0 +1,133 @@
+============================================================
+ Xiangqi Robot -- Fast Parallel Test Runner
+============================================================
+Mode        : Full (Workers: 2)
+Targets     : tests/unit/test_exit_confirmation.py, tests/unit/test_robot_pvp.py, tests/unit/test_robot_pvp_main_ui.py, tests/unit/test_pvp_room_and_client.py, tests/unit/test_session_buttons.py, tests/unit/test_yolo_baseline_diagnostics.py, tests/unit/test_pick_target_retry.py, tests/unit/test_session_modes.py, tests/unit/test_session_user_flows.py, tests/unit/test_home_mode_selector.py, tests/unit/test_recovery_block_diagnostics.py, tests/unit/test_startup_failure_recovery.py, tests/unit/test_physical_ui_latency.py, tests/unit/test_review_lifecycle_edges.py, tests/unit/test_game_modes_review.py, tests/unit/test_reliability_recheck.py, tests/unit/test_runtime_race_review.py
+Base Marker : not slow
+Dist Scheme : worksteal
+Thread Caps : OMP=1, MKL=1, OPENBLAS=1, NUMEXPR=1
+Repo Root   : D:\OJT\xiangqi_robot_pvp_20261102
+
+>>> Part A: Running Parallel-Safe Tests (-n 2) ...
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_pvp_20261102
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+created: 2/2 workers
+2 workers [177 items]
+
+........................................................................ [ 40%]
+........................................................................ [ 81%]
+...............................F
+================================== FAILURES ===================================
+_ test_real_entrypoint_missing_mirror_keeps_ui_and_respects_game_only[--physical-True] _
+[gw1] win32 -- Python 3.12.10 D:\OJT\xiangqi_robot_pvp_20261102\.venv312\Scripts\python.exe
+
+    def events():
+>       assert time.monotonic() < deadline, 'Viewer startup did not finish'
+E       AssertionError: Viewer startup did not finish
+E       assert 12437.531 < 12437.531
+E        +  where 12437.531 = <built-in function monotonic>()
+E        +    where <built-in function monotonic> = time.monotonic
+
+tests\unit\test_physical_ui_latency.py:143: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+tmp_path = WindowsPath('C:/Users/Ken/AppData/Local/Temp/pytest-of-Ken/pytest-8/popen-gw1/test_real_entrypoint_missing_m0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B253D65B20>
+flag = '--physical', expect_http = True, launcher_exit = None
+
+    @pytest.mark.parametrize('flag,expect_http', [('--physical',True),('--virtual',False)])
+    def test_real_entrypoint_missing_mirror_keeps_ui_and_respects_game_only(tmp_path,monkeypatch,flag,expect_http,launcher_exit):
+        import atexit, runpy,sys,os
+        from pathlib import Path
+        import pygame, config
+        from src.hardware.hardware_manager import HardwareManager
+        from src.core import launch_options
+        from src.api.simulation_client import TuongKyDaiSuClient
+        from src.hardware.telemetry_publisher import TelemetryPublisher
+        for name in ('DRY_RUN','ROBOT_BACKEND','GAME_ONLY','TELEMETRY_PORT','GAME_MODE'):
+            monkeypatch.setattr(config,name,getattr(config,name,None),raising=False)
+        monkeypatch.setenv('SDL_VIDEODRIVER','dummy')
+        monkeypatch.setenv('SDL_AUDIODRIVER','dummy')
+        monkeypatch.setattr(sys,'argv',['main.py',flag,'--log-dir',str(tmp_path/'logs')])
+        monkeypatch.setattr(sys,'path',list(sys.path))
+        callbacks=[]
+        monkeypatch.setattr(atexit,'register',lambda cb,*a,**k:callbacks.append(cb))
+        hw=SimpleNamespace(setup_digital_twin=lambda telemetry:None,simulation_error='contact offset missing',
+                            config=config,motion_worker=SimpleNamespace(busy=False,poll=lambda:None),
+                            cam_monitor=None,robot=None,backend=None,
+                            difficulty_availability=lambda:{'easy':True},cleanup=Mock(),is_robot_ready=False)
+        monkeypatch.setattr(HardwareManager,'initialize_all',lambda self:hw)
+        server=Mock()
+        factory=Mock(return_value=server)
+        monkeypatch.setattr(launch_options,'ViewerServer',factory)
+        monkeypatch.setattr(launch_options,'check_viewer_assets',lambda _:None)
+        telemetry_start=Mock(side_effect=AssertionError('Uncalibrated mirror published'))
+        monkeypatch.setattr(TelemetryPublisher,'start',telemetry_start)
+        monkeypatch.setattr(TuongKyDaiSuClient,'end_match',Mock())
+        started = [False]
+        deadline = time.monotonic() + 10
+        def events():
+            assert time.monotonic() < deadline, 'Viewer startup did not finish'
+            if not started[0]:
+                started[0] = True
+                return [pygame.event.Event(pygame.KEYDOWN,key=pygame.K_RETURN)]
+            app = sys._getframe(1).f_globals
+            if app['hw'] is hw and not app['home_screen_active']:
+                return [pygame.event.Event(pygame.QUIT)]
+            return []
+        monkeypatch.setattr(pygame.event,'get',events)
+        try:
+>           app=runpy.run_path(str(Path(__file__).resolve().parents[2]/'main.py'),run_name='__main__')
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\unit\test_physical_ui_latency.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+<frozen runpy>:287: in run_path
+    ???
+<frozen runpy>:98: in _run_module_code
+    ???
+<frozen runpy>:88: in _run_code
+    ???
+main.py:927: in <module>
+    _recover_shutdown_after_exception(e)
+main.py:466: in _recover_shutdown_after_exception
+    for item in pygame.event.get():
+                ^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def events():
+>       assert time.monotonic() < deadline, 'Viewer startup did not finish'
+E       AssertionError: Viewer startup did not finish
+E       assert 12437.562 < 12437.531
+E        +  where 12437.562 = <built-in function monotonic>()
+E        +    where <built-in function monotonic> = time.monotonic
+
+tests\unit\test_physical_ui_latency.py:143: AssertionError
+---------------------------- Captured stdout call -----------------------------
+15:05:15 INFO    [session.started] Nh\u1eadt k\xfd phi\xean: C:\\Users\\Ken\\AppData\\Local\\Temp\\pytest-of-Ken\\pytest-8\\popen-gw1\\test_real_entrypoint_missing_m0\\logs\\20261105_150515_402047a3\n15:05:15 INFO    [app.code_version] Phi\xean b\u1ea3n m\xe3 \u0111ang ch\u1ea1y\n15:05:15 INFO    [app.configuration] C\u1ea5u h\xecnh phi\xean ch\u1ea1y\n15:05:15 INFO    [console.stdout] === MODE: \U0001f916 REAL RUN (CAMERA & ROBOT) ===\n15:05:15 INFO    [console.stdout] [GAME] === GAME STARTED ===\n15:05:15 INFO    [console.stdout] [FEN] rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1\n15:05:15 INFO    [session.capabilities] Quy\u1ec1n v\u1eadn h\xe0nh c\u1ee7a ch\u1ebf \u0111\u1ed9 \u0111\xe3 ch\u1ecdn\n15:05:15 INFO    [session.started_fresh] \u0110\xe3 t\u1ea1o phi\xean m\u1edbi; kh\xf4ng n\u1ea1p FEN v\xe1n tr\u01b0\u1edbc\n15:05:15 ERROR   [STARTUP_FAILED] Kh\xf4ng kh\u1edfi t\u1ea1o \u0111\u01b0\u1ee3c: 'types.SimpleNamespace' object has no attribute 'viewer_command_context'. Kh\u1eafc ph\u1ee5c r\u1ed3i ch\u1ecdn ch\u1ebf \u0111\u1ed9 l\u1ea1i. Chi ti\u1ebft STARTUP_FAILED trong logs/.\n  V\u1ea5n \u0111\u1ec1: Kh\xf4ng kh\u1edfi t\u1ea1o \u0111\u01b0\u1ee3c m\u1ed9t th\xe0nh ph\u1ea7n\n  \u1ea2nh h\u01b0\u1edfng: Phi\xean game ch\u01b0a s\u1eb5n s\xe0ng\n  C\u1ea7n l\xe0m: \u0110\u1ecdc component v\xe0 traceback; ki\u1ec3m tra dependency, thi\u1ebft b\u1ecb ho\u1eb7c c\u1ed5ng t\u01b0\u01a1ng \u1ee9ng\n15:05:25 CRITICAL [APP_UNHANDLED] Viewer startup did not finish\nassert 12437.531 < 12437.531\n +  where 12437.531 = <built-in function monotonic>()\n +    where <built-in function monotonic> = time.monotonic\n  V\u1ea5n \u0111\u1ec1: Ch\u01b0\u01a1ng tr\xecnh g\u1eb7p l\u1ed7i ch\u01b0a \u0111\u01b0\u1ee3c x\u1eed l\xfd\n  \u1ea2nh h\u01b0\u1edfng: Phi\xean ch\u1ea1y c\xf3 th\u1ec3 \u0111\xe3 d\u1eebng\n  C\u1ea7n l\xe0m: M\u1edf errors.log, t\xecm traceback c\xf9ng m\xe3 phi\xean; kh\xf4ng ch\u1ea1y l\u1ea1i l\u1ec7nh robot khi ch\u01b0a x\xe1c \u0111\u1ecbnh tr\u1ea1ng th\xe1i\n15:05:25 ERROR   [app.recovery_wait] RECOVERY REQUIRED: AssertionError. Inspect arm/gripper on pendant, then Ctrl+F8.\n15:05:25 INFO    [app.cleanup] \u0110\xe3 \u0111\xf3ng c\xe1c d\u1ecbch v\u1ee5; ki\u1ec3m tra l\u1ed7i c\xf2n ch\u1edd n\u1ebfu c\xf3.\n15:05:25 INFO    [session.ended] K\u1ebft th\xfac ghi log phi\xean
+------------------------------ Captured log call ------------------------------
+INFO     xiangqi:project_logging.py:232 Nh\u1eadt k\xfd phi\xean: C:\\Users\\Ken\\AppData\\Local\\Temp\\pytest-of-Ken\\pytest-8\\popen-gw1\\test_real_entrypoint_missing_m0\\logs\\20261105_150515_402047a3\nINFO     xiangqi:project_logging.py:273 Phi\xean b\u1ea3n m\xe3 \u0111ang ch\u1ea1y\nINFO     xiangqi:main.py:44 C\u1ea5u h\xecnh phi\xean ch\u1ea1y\nINFO     xiangqi:project_logging.py:121 === MODE: \U0001f916 REAL RUN (CAMERA & ROBOT) ===\nINFO     xiangqi:project_logging.py:121 [GAME] === GAME STARTED ===\nINFO     xiangqi:project_logging.py:121 [FEN] rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1\nINFO     xiangqi:session_startup.py:48 Quy\u1ec1n v\u1eadn h\xe0nh c\u1ee7a ch\u1ebf \u0111\u1ed9 \u0111\xe3 ch\u1ecdn\nINFO     xiangqi:game_persistence.py:273 \u0110\xe3 t\u1ea1o phi\xean m\u1edbi; kh\xf4ng n\u1ea1p FEN v\xe1n tr\u01b0\u1edbc\nERROR    xiangqi:main.py:210 Kh\xf4ng kh\u1edfi t\u1ea1o \u0111\u01b0\u1ee3c: 'types.SimpleNamespace' object has no attribute 'viewer_command_context'. Kh\u1eafc ph\u1ee5c r\u1ed3i ch\u1ecdn ch\u1ebf \u0111\u1ed9 l\u1ea1i. Chi ti\u1ebft STARTUP_FAILED trong logs/.\nCRITICAL xiangqi:main.py:926 Viewer startup did not finish\nassert 12437.531 < 12437.531\n +  where 12437.531 = <built-in function monotonic>()\n +    where <built-in function monotonic> = time.monotonic\nTraceback (most recent call last):\n  File "D:\\OJT\\xiangqi_robot_pvp_20261102\\main.py", line 572, in <module>\n    for event in pygame.event.get():\n                 ^^^^^^^^^^^^^^^^^^\n  File "D:\\OJT\\xiangqi_robot_pvp_20261102\\tests\\unit\\test_physical_ui_latency.py", line 143, in events\n    assert time.monotonic() < deadline, 'Viewer startup did not finish'\nAssertionError: Viewer startup did not finish\nassert 12437.531 < 12437.531\n +  where 12437.531 = <built-in function monotonic>()\n +    where <built-in function monotonic> = time.monotonic\nERROR    xiangqi:main.py:452 RECOVERY REQUIRED: AssertionError. Inspect arm/gripper on pendant, then Ctrl+F8.\nINFO     xiangqi:main.py:419 \u0110\xe3 \u0111\xf3ng c\xe1c d\u1ecbch v\u1ee5; ki\u1ec3m tra l\u1ed7i c\xf2n ch\u1edd n\u1ebfu c\xf3.\nINFO     xiangqi:project_logging.py:242 K\u1ebft th\xfac ghi log phi\xean
+============================== warnings summary ===============================
+src\hardware\telemetry_publisher.py:20
+src\hardware\telemetry_publisher.py:20
+  D:\OJT\xiangqi_robot_pvp_20261102\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+  D:\OJT\xiangqi_robot_pvp_20261102\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_physical_ui_latency.py::test_real_entrypoint_missing_mirror_keeps_ui_and_respects_game_only[--physical-True]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!! xdist.dsession.Interrupted: stopping after 1 failures !!!!!!!!!!!!
+================= 1 failed, 175 passed, 4 warnings in 26.56s ==================
+Part A FAILED with exit code 2
+
+=== TEST SUITE FAILED (exit code 2) in 28.17s ===

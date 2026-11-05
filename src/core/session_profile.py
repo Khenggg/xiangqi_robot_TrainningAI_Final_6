@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 
 
-GAME_MODES = {"HUMAN_VS_HUMAN", "HUMAN_VS_ROBOT", "ROBOT_VS_ROBOT"}
+GAME_MODES = {"HUMAN_VS_HUMAN", "HUMAN_VS_ROBOT", "ROBOT_VS_ROBOT", "HUMAN_VS_HUMAN_ROBOT"}
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class SessionProfile:
 
     @property
     def match_names(self):
-        if self.game_mode == "HUMAN_VS_HUMAN":
+        if self.game_mode in {"HUMAN_VS_HUMAN", "HUMAN_VS_HUMAN_ROBOT"}:
             return ("Người chơi Đỏ", "Người chơi Đen")
         if self.game_mode == "ROBOT_VS_ROBOT":
             return ("AI Đỏ (một FR3)", "AI Đen (một FR3)")
@@ -45,16 +45,19 @@ def make_profile(game_mode, requested_environment, *, simulation_enabled=True, v
     if requested not in {"VIRTUAL", "PHYSICAL"}:
         raise ValueError("Unsupported execution environment")
     pvp = mode == "HUMAN_VS_HUMAN"
+    robot_pvp = mode == "HUMAN_VS_HUMAN_ROBOT"
+    if robot_pvp and not simulation_enabled:
+        raise ValueError("Two-human robot mode requires simulation or physical robot mode")
     physical = requested == "PHYSICAL" and not pvp
     environment = "PHYSICAL" if physical else "VIRTUAL"
     return SessionProfile(
         game_mode=mode, requested_environment=requested, execution_environment=environment,
         backend=environment, camera_enabled=physical, physical_robot_enabled=physical,
-        robot_moves_enabled=not pvp, ai_enabled=not pvp,
+        robot_moves_enabled=not pvp, ai_enabled=not (pvp or robot_pvp),
         self_play_enabled=mode == "ROBOT_VS_ROBOT",
         simulation_enabled=simulation_enabled,
         viewer_enabled=simulation_enabled and viewer_enabled,
-        mouse_input="BOTH_PLAYERS" if pvp else ("VIRTUAL_TEST_ADAPTER" if not physical and mode == "HUMAN_VS_ROBOT" else "NONE"))
+        mouse_input="ROBOT_COMMANDS" if robot_pvp else ("BOTH_PLAYERS" if pvp else ("VIRTUAL_TEST_ADAPTER" if not physical and mode == "HUMAN_VS_ROBOT" else "NONE")))
 
 
 def profile_from_config(config):

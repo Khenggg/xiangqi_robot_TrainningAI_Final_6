@@ -61,13 +61,21 @@ def acquire_pick_targets(hw, expected_cells, stage, cfg, *, attempts=None, inter
 
 def pause_visual_pick(state, exc):
     resolution = getattr(exc, "resolution", None)
+    from src.vision.board_diagnostics import pick_cells_description
+    pending = state.pending_ai_move
+    cells = {}
+    if pending is not None:
+        source, destination = pending['move']
+        role = ('captured' if pending['captured_piece'] != '.' and exc.stage != 'capture_removed' else 'moving')
+        cells[role] = destination if role == 'captured' else source
+    named_target = pick_cells_description(cells, state.board)
     state.visual_pick_retry = dict(pending=state.pending_ai_move, context=state.pending_move,
                                    signature=signature(state), stage=exc.stage, reason=str(exc),
                                    resolution=resolution)
-    state.set_status(f"Camera chưa đủ điều kiện: {exc}. Y/V: đo lại đúng nước đang chờ.", duration=30)
-    event("vision.retry_paused", f"Chờ đo lại tâm quân ({exc.stage}): {exc}",
+    state.set_status(f"{named_target}. Camera chưa đủ điều kiện: {exc}. Y/V: đo lại đúng nước đang chờ.", duration=60)
+    event("vision.retry_paused", f"{named_target}. Chờ đo lại tâm quân ({exc.stage}): {exc}",
           stage=exc.stage, reason=str(exc), move_id=getattr(state.pending_move, "move_id", None),
-          resolution=resolution)
+          resolution=resolution, expected_pick_cells=cells, expected_pick_description=named_target)
 
 
 def execute_pending_ai_motion(state, hw, config=None, stage="pre_pick"):

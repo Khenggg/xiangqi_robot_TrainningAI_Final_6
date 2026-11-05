@@ -951,6 +951,9 @@ class HardwareManager(VisualPickModes):
         worker = getattr(self, 'motion_worker', None)
         motion_stopped = worker is None or close('motion worker', worker.close)
         if motion_stopped:
+            pvp = getattr(self, 'pvp_controller', None)
+            if pvp is not None:
+                close('two-player room', pvp.close)
             mirror_stopped = close('mirror', self.close_simulation)
             camera = getattr(self, 'cam_monitor', None)
             camera_stopped = camera is None or close('camera', camera.stop)
@@ -1112,8 +1115,11 @@ class HardwareManager(VisualPickModes):
             for name in missing
         )
         limit = max_offset_mm if max_offset_mm is not None else "n/a"
+        from src.vision.board_diagnostics import pick_cells_description
+        board = getattr(getattr(self, 'game_state', None), 'board', None)
+        named_targets = pick_cells_description({name: expected_cells[name] for name in missing}, board)
         event("vision.pick_failed",
-              f"Không có tâm quân ổn định ({summary}); giới hạn lệch {limit} mm, "
+              f"{named_targets}. Không có tâm quân ổn định ({summary}); giới hạn lệch {limit} mm, "
               f"dao động {max_jitter} ô",
               level=logging.WARNING, mode="center", cells=expected_cells, resolution=resolution)
         raise PickTargetUnavailable(
@@ -1532,6 +1538,25 @@ class HardwareManager(VisualPickModes):
                 return False
             frame, detections = self.cam_monitor.get_fresh_snapshot()
             success = self.yolo_detector.capture_baseline(frame, detections)
+            occ = getattr(self.yolo_detector, '_baseline_occ', None)
+            reference = expected_board if expected_board is not None else getattr(getattr(self, 'game_state', None), 'board', None)
+            grid_types = (list, tuple, np.ndarray)
+            valid_grid = lambda grid: (isinstance(grid, grid_types) and len(grid) == 10
+                                      and all(isinstance(row, grid_types) and len(row) == 9 for row in grid))
+            if success and valid_grid(occ) and valid_grid(reference):
+                from src.vision.board_diagnostics import yolo_baseline_message
+                occupied_count = sum(bool(cell) for row in occ for cell in row)
+                expected_count = sum(piece != '.' for row in reference for piece in row)
+                differences = [dict(row=r, col=c, expected_piece=reference[r][c], yolo_occupied=bool(occ[r][c]))
+                               for r in range(10) for c in range(9)
+                               if bool(occ[r][c]) != (reference[r][c] != '.')]
+                event('camera.yolo_baseline',
+                      yolo_baseline_message(occupied_count, expected_count, differences),
+                      level=logging.WARNING if differences else logging.INFO,
+                      source='YOLO_OCCUPANCY', raw_detection_count=len(detections),
+                      yolo_occupied_count=occupied_count, expected_piece_count=expected_count,
+                      occupancy_diff_count=len(differences), occupancy_diff_cells=differences,
+                      cell_order='row,col', cell_index_base=0)
             return success
         return False
 

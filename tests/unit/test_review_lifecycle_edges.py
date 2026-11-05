@@ -146,7 +146,7 @@ def test_mouse_emergency_rejection_does_not_install_camera_baseline(state,monkey
     hw.capture_baseline_if_needed.assert_not_called()
 
 
-def test_camera_quit_cannot_dispatch_ready_ai_move_in_same_frame(tmp_path,monkeypatch):
+def test_camera_quit_cannot_dispatch_ready_ai_move_in_same_frame(tmp_path,monkeypatch,launcher_exit):
     os.environ.setdefault('SDL_VIDEODRIVER','dummy');os.environ.setdefault('SDL_AUDIODRIVER','dummy')
     import pygame
     from src.core.motion_worker import MotionWorker

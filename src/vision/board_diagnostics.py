@@ -48,6 +48,42 @@ def board_position_fen(board):
         return None
 
 
+def yolo_baseline_message(occupied_count, expected_count, differences):
+    """Name expected pieces at unmatched occupancy cells, without asserting absence."""
+    message = (f'Baseline YOLO: {occupied_count} ô có detection; bàn dự kiến: {expected_count} quân. '
+               'Đây là occupancy YOLO, không phải kết quả xác thực ONNX/FEN.')
+    if differences:
+        message += '\n  Đối chiếu theo FEN dự kiến; hàng/cột tính từ 0.'
+    for cell in differences[:20]:
+        row, col = cell['row'], cell['col']
+        square = f'{chr(ord("a")+col)}{row}'
+        if cell['yolo_occupied']:
+            message += (f'\n  Ô {square} (hàng={row}, cột={col}): YOLO báo có quân; '
+                        f'FEN dự kiến {piece_name(cell["expected_piece"])}.')
+        else:
+            message += (f'\n  Ô {square} (hàng={row}, cột={col}): YOLO chưa thấy '
+                        f'{piece_name(cell["expected_piece"])} theo FEN dự kiến.')
+    if len(differences) > 20:
+        message += f'\n  Còn {len(differences)-20} ô; xem data.occupancy_diff_cells.'
+    if differences:
+        message += '\n  Chưa kết luận quân thật bị thiếu; kiểm tra ảnh và bố trí quân.'
+    return message
+
+
+def pick_cells_description(cells, board=None):
+    """Describe logical col,row pick targets using expected game identities."""
+    labels = {'moving': 'Quân di chuyển', 'captured': 'Quân bị ăn cần lấy ra'}
+    details = []
+    for role, (col, row) in cells.items():
+        symbol = None
+        if board is not None:
+            symbol = board[row][col]
+        square = f'{chr(ord("a")+col)}{row}'
+        name = piece_name(symbol) if symbol is not None else 'quân dự kiến'
+        details.append(f'{labels.get(role, role)}: {name} tại ô {square} (cột={col}, hàng={row})')
+    return '; '.join(details)
+
+
 def confidence_details(board, confidence, minimum):
     details = {"confidence_threshold": minimum}
     if not np.isfinite(minimum) or minimum < 0:

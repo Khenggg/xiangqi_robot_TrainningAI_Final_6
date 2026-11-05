@@ -226,7 +226,7 @@ def test_terminal_retry_publishes_fen_then_end_once(state,color):
 
 
 @pytest.mark.parametrize('trailing_key',['next','start'])
-def test_window_quit_stops_dispatching_remaining_events(state,tmp_path,monkeypatch,trailing_key):
+def test_window_quit_stops_dispatching_remaining_events(state,tmp_path,monkeypatch,trailing_key,launcher_exit):
     os.environ.setdefault('SDL_VIDEODRIVER','dummy'); os.environ.setdefault('SDL_AUDIODRIVER','dummy')
     import pygame
     from src.ui.board_renderer import BoardRenderer

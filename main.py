@@ -25,6 +25,7 @@ import threading
 import atexit
 import subprocess
 import traceback
+import signal
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _BASE_DIR)
@@ -83,8 +84,9 @@ def _kill_zombie_processes():
 pygame.init()
 pygame.font.init()
 
-from src.ui.board_renderer import BoardRenderer, SCREEN_WIDTH, SCREEN_HEIGHT, BTN_NEW_GAME_RECT, BTN_MODE_SELECT_RECT  # type: ignore
+from src.ui.board_renderer import BoardRenderer, SCREEN_WIDTH, SCREEN_HEIGHT, BTN_NEW_GAME_RECT, BTN_MODE_SELECT_RECT, BTN_SURRENDER_RECT  # type: ignore
 from src.ui.game_window import GameWindow
+from src.ui.exit_confirmation import confirm_exit, exit_application
 game_window = GameWindow((SCREEN_WIDTH, SCREEN_HEIGHT))
 screen = game_window.canvas
 pygame.display.set_caption(f"Xiangqi Robot VIP - { _mode_label }")
@@ -150,7 +152,9 @@ def _start_selected_game():
         state.set_status("Camera chưa xác nhận bàn ban đầu. Sắp xếp quân rồi bấm V để đối soát.", duration=30)
         return
     if config.ROBOT_BACKEND == "PHYSICAL" and not hw.is_robot_ready:
-        state.set_status("FR3 chỉ đọc. Kiểm tra setup, bấm F9 rồi F10 để bật robot; F6 bắt đầu self-play.", duration=30)
+        hint = ("O mở người Đen; hai bên chọn nước bằng chuột." if config.GAME_MODE == "HUMAN_VS_HUMAN_ROBOT"
+                else "F6 bắt đầu self-play.")
+        state.set_status("FR3 chỉ đọc. Kiểm tra setup, bấm F9 rồi F10 để bật robot; " + hint, duration=30)
     if config.GAME_MODE == "ROBOT_VS_ROBOT" and self_play is not None and hw.is_robot_ready:
         difficulty = getattr(config, "AI_DIFFICULTY", "medium")
         if self_play.start(difficulty, difficulty, run_mode="continuous"):
@@ -219,6 +223,9 @@ def _finish_startup(result, error):
     try:
         controller = SelfPlayController(state, manager)
         handler = InputHandler(state, manager)
+        if manager.profile.game_mode == "HUMAN_VS_HUMAN_ROBOT":
+            from src.core.robot_pvp import RobotPvPController
+            manager.pvp_controller = RobotPvPController(state, manager)
     except Exception as exc:
         from src.core.session_startup import rollback_session, StartupRollbackError
         try:
@@ -236,6 +243,8 @@ def _finish_startup(result, error):
     profile = manager.profile
     caption = ("Người vs Người — Chuột, không Camera/FR3" if profile.game_mode == "HUMAN_VS_HUMAN"
                else ("ẢO / bộ nhập test" if profile.dry_run else "THẬT / Camera & FR3"))
+    if profile.game_mode == "HUMAN_VS_HUMAN_ROBOT":
+        caption = "2 người + robot — " + ("Mô phỏng" if profile.dry_run else "Camera & FR3 thật")
     pygame.display.set_caption(f"Xiangqi Robot — {caption}")
     from src.core.session_control import SessionControl
     session_control = SessionControl(state, manager, controller)
@@ -244,7 +253,7 @@ def _finish_startup(result, error):
         state.set_status(mirror_error, duration=30)
     home_screen_active = False
     startup_message = ""
-    difficulty_menu_active = config.GAME_MODE != "HUMAN_VS_HUMAN"
+    difficulty_menu_active = config.GAME_MODE not in {"HUMAN_VS_HUMAN", "HUMAN_VS_HUMAN_ROBOT"}
     if debug_dashboard is not None:
         debug_dashboard.robot, debug_dashboard.backend = hw.robot, hw.backend
     if not difficulty_menu_active:
@@ -413,8 +422,21 @@ def _cleanup_all():
 atexit.register(_cleanup_all)
 
 
+# Defer terminal Ctrl+C to the event loop. Cancelling its confirmation must not
+# enter the exception-recovery path or request a session shutdown.
+_interrupt_requested = False
+
+
+def _queue_interrupt(signum, frame):
+    global _interrupt_requested
+    _interrupt_requested = True
+
+
+_previous_sigint_handler = signal.signal(signal.SIGINT, _queue_interrupt)
+
+
 def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
-    """Keep an operator UI alive until stop is proved; do not fall into atexit."""
+    """Keep recovery visible; confirmed application exit never waits on hardware."""
     global quit_requested
     quit_requested = True
     startup_cancelled.set()
@@ -433,10 +455,21 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
     # This worker performs operator-approved read-only confirmation only.
     operator_worker = MotionWorker()
     retry_requested = False
-    force_close_deadline = 0.0
     while True:
         try:
+            global _interrupt_requested
+            if _interrupt_requested:
+                _interrupt_requested = False
+                if confirm_exit():
+                    exit_application()
+                    return
             for item in pygame.event.get():
+                if (item.type == pygame.QUIT or
+                        (item.type == pygame.KEYDOWN and item.key == pygame.K_c
+                         and getattr(item, "mod", 0) & pygame.KMOD_CTRL)):
+                    if confirm_exit():
+                        exit_application()
+                        return
                 if item.type == pygame.KEYDOWN and item.key == pygame.K_F2:
                     retry_requested = True
                 if (item.type == pygame.KEYDOWN and item.key == pygame.K_F8
@@ -479,48 +512,20 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
             if surface is not None:
                 surface.fill((35, 20, 20))
                 font = pygame.font.Font(None, 24)
-                ctrl_c_hint = ("Ctrl+C again within 5s: force close (only when robot is disabled)."
-                               if force_close_deadline > time.monotonic()
-                               else "Ctrl+C twice: force close only after robot/camera is disabled.")
                 for index, line in enumerate(("RECOVERY REQUIRED - project is paused", str(exc)[:100],
                                               "Inspect/stop the arm and gripper on the pendant.",
                                               "Ctrl+F8: approve read-only stop verification.",
                                               "Ctrl+F9: confirm controller disabled on pendant (lost disable ACK).",
                                               "F2: retry closing unfinished resources.",
-                                              ctrl_c_hint,
+                                              "Close window / Ctrl+C: confirm once to exit immediately.",
                                               "Camera/controller and pending transaction are retained.")):
                     surface.blit(font.render(line, True, (255, 220, 200)), (20, 25 + index * 30))
                 pygame.display.flip()
             recovery_clock.tick(10)
         except KeyboardInterrupt:
-            now = time.monotonic()
-            robot = getattr(hw, "robot", None) if hw is not None else None
-            motion_owned = bool(getattr(robot, "physical_motion_authorized", False)
-                                or getattr(robot, "_activation_owned", False)
-                                or getattr(robot, "_gripper_pulse_active", False))
-            pending = bool(state is not None and (
-                state.pending_move is not None or state.pending_ai_move is not None
-                or state.pending_test_motion is not None
-                or getattr(state, "pick_test_resume_required", False)))
-            if now <= force_close_deadline:
-                if motion_owned or pending:
-                    force_close_deadline = 0.0
-                    log_event("app.force_close_refused",
-                              "Không buộc đóng khi robot còn quyền chuyển động hoặc giao dịch đang chờ; "
-                              "dùng Ctrl+F8/Ctrl+F9 rồi thử lại.", level=logging.ERROR)
-                else:
-                    log_event("app.force_close",
-                              "Người vận hành xác nhận Ctrl+C lần hai; buộc đóng tiến trình.",
-                              level=logging.ERROR)
-                    try:
-                        logging.shutdown()
-                    finally:
-                        os._exit(130)
-            else:
-                force_close_deadline = now + 5.0
-                log_event("app.force_close_armed",
-                          "Ctrl+C đã được nhận; nhấn lần nữa trong 5 giây để buộc đóng sau khi kiểm tra pendant.",
-                          level=logging.WARNING)
+            if confirm_exit():
+                exit_application()
+                return
         except pygame.error as display_error:
             log_event("app.recovery_display_failed", str(display_error), level=logging.ERROR)
             time.sleep(.1)
@@ -538,6 +543,12 @@ print(f"[FEN] {state.current_fen}")
 try:
     last_ui_lag_warning = 0.0
     while running:
+        if _interrupt_requested:
+            _interrupt_requested = False
+            if confirm_exit():
+                exit_application()
+                running = False
+                break
         frame_started = time.monotonic()
         # 2a. Vẽ khung hình
         if settings_menu_active:
@@ -562,11 +573,13 @@ try:
             event = game_window.map_event(event)
             if event is None:
                 continue
-            if event.type == pygame.QUIT:
-                quit_requested = True
-                startup_cancelled.set()
-                if session_control is not None:
-                    session_control.request("quit")
+            if (event.type == pygame.QUIT or
+                    (event.type == pygame.KEYDOWN and event.key == pygame.K_c
+                     and getattr(event, "mod", 0) & pygame.KMOD_CTRL)):
+                if confirm_exit():
+                    exit_application()
+                    running = False
+                    break
                 continue
             # Urgent controls bypass the normal busy-input filter.
             elif (event.type == pygame.KEYDOWN and event.key == pygame.K_F9
@@ -577,6 +590,13 @@ try:
             elif (event.type == pygame.KEYDOWN and event.key == pygame.K_F2
                   and not home_screen_active and not settings_menu_active):
                 _request_mode_menu()
+                continue
+            elif (event.type == pygame.MOUSEBUTTONDOWN and session_control is not None
+                  and not mode_switching and not mode_switch_failed
+                  and not home_screen_active and not settings_menu_active and not difficulty_menu_active
+                  and BTN_SURRENDER_RECT.collidepoint(event.pos)
+                  and not state.game_over and not (self_play is not None and self_play.active)):
+                input_mgr.handle_mouse_down(*event.pos)
                 continue
             elif (event.type == pygame.MOUSEBUTTONDOWN and session_control is not None
                   and not home_screen_active and not settings_menu_active
@@ -629,9 +649,17 @@ try:
                         startup_message = ""
                         continue
                     home_action = renderer.home_action_from_pixel(event.pos[0], event.pos[1])
-                    start_vs_robot = home_action in ("vs_robot", "self_play", "human_vs_human")
+                    start_vs_robot = home_action in ("vs_robot", "self_play", "human_vs_human", "robot_pvp")
+                    if home_action == "join_pvp":
+                        from src.core.robot_pvp import launch_client
+                        launch_client()
+                        continue
                 if start_vs_robot:
-                    config.GAME_MODE = {"self_play": "ROBOT_VS_ROBOT", "human_vs_human": "HUMAN_VS_HUMAN"}.get(home_action, "HUMAN_VS_ROBOT")
+                    config.GAME_MODE = {"self_play": "ROBOT_VS_ROBOT", "human_vs_human": "HUMAN_VS_HUMAN",
+                                        "robot_pvp": "HUMAN_VS_HUMAN_ROBOT"}.get(home_action, "HUMAN_VS_ROBOT")
+                    if home_action == "robot_pvp" and home_mode == "BOARD_ONLY":
+                        startup_message = "Hai người + robot cần chọn MÔ PHỎNG 3D hoặc ROBOT THẬT trước."
+                        continue
                     selected_mode = home_mode
                     camera_recalibration = bool(
                         selected_mode == "PHYSICAL"
@@ -742,6 +770,9 @@ try:
         startup_worker.poll()
         if hw is not None:
             hw.motion_worker.poll()
+            pvp = getattr(hw, "pvp_controller", None)
+            if pvp is not None:
+                pvp.tick()
         if self_play is not None and not mode_switching and not mode_switch_failed:
             self_play.finish_recovery()
         if self_play is not None and not mode_switching and not mode_switch_failed:
@@ -761,8 +792,10 @@ try:
         if not mode_switching and not mode_switch_failed and hw is not None and hw.cam_monitor is not None:
             key = hw.cam_monitor.update_display()
             if key == ord("q"):
-                quit_requested = True
-                session_control.request("quit")
+                if confirm_exit():
+                    exit_application()
+                    running = False
+                    break
 
         # Inspect the board itself rather than the object moving a piece.
         # SPACE remains the safe manual fallback when camera confidence is poor.
@@ -885,11 +918,15 @@ try:
 
 except (KeyboardInterrupt, SystemExit) as exc:
     print("\n[MAIN] ⛔ Interrupted.")
-    _recover_shutdown_after_exception(exc)
+    if confirm_exit():
+        exit_application()
+    else:
+        _recover_shutdown_after_exception(exc)
 except Exception as e:
     log_event("app.unhandled", str(e), level=logging.CRITICAL, code="APP_UNHANDLED", exc_info=True)
     _recover_shutdown_after_exception(e)
 finally:
+    signal.signal(signal.SIGINT, _previous_sigint_handler)
     while not _cleanup_all():
         _recover_shutdown_after_exception(
             RuntimeError("Session resources not fully closed"), cleanup_retry=True)

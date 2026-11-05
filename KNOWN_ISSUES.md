@@ -1,3 +1,51 @@
+## 2026-11-03 disconnected shutdown refusal — explicit exit replaced
+
+The old recovery loop refused exit with cached motion ownership/pending work
+after disconnection, even after operator confirmation. User-requested behavior:
+one Exit/Stay prompt, Yes terminates immediately without device prerequisites.
+12 focused mock/UI/subprocess tests PASS. Saved journal remains unfinished if
+appropriate; exit is not a transaction commit or a controller reset. This change
+is in the isolated worktree, with no hardware operation or automatic restart.
+
+## 2026-11-03 session button fixes — physical acceptance OPEN
+
+Busy/pick-paused surrender and cached ACKed-stop timeout cases repaired with
+deferred end and read-only settling. Unknown stop/controller error remains gated;
+pending physical moves must still be reconciled before new game/end. User's
+specific real-world wait cause not fully established by logs. Mock/UI checks
+PASS (73 scoped; final39 stop +14 UI), no physical operation or restart performed.
+Captured pick context now names Red Knight b9; actual6.1–6.3mm offset remains
+above unchanged6.0mm limit. See session-buttons/pick report dated20261103.
+
+## 2026-11-02 robot PvP stale startup-pause flag — fixed in worktree, live pending
+
+V resumed camera/baseline but failed to clear snapshot_continue_required after
+an initial NO_FRESH_OBSERVATION; strict new-mode admission correctly stayed
+locked. New-mode V/Continue now clears/persists pause with existing board/hardware
+checks, unresolved-work and newer-stop guards.51 focused tests PASS. Running
+process not changed/restarted; equal-board startup pause can use old CONTINUE.
+Physical acceptance/full regression not claimed. See
+reports/robot-pvp-20261102/PVP_CAMERA_PAUSE.md.
+
+## 2026-11-02 YOLO baseline31 — detection/mapping cause OPEN
+
+Current physical PvP log verifies ONNX opening32 (diff0) while YOLO T1 occupancy
+has31 cells. Legacy message conflated counters; labels/structured missing-cell
+diagnostics corrected in worktree, now with readable expected piece names and
+square/row/col. Follow-up30 tests PASS, exit0. Actual dropped/filtered/
+duplicate detection and which live cell remain UNKNOWN; no threshold/calibration
+change or forced count32. No robot/camera command or process restart performed.
+See reports/robot-pvp-20261102/YOLO_BASELINE_31.md.
+
+## 2026-11-02 isolated robot PvP — acceptance and broad regression OPEN
+
+New mode implemented only in sibling worktree codex/robot-pvp-20261102. Host Red,
+client Black over localhost (same PC); no LAN/Internet room service. Physical
+camera/FR3/full-game acceptance NOT RUN. Broad non-slow regression interrupted
+after failure markers; failure origin UNKNOWN, no whole-suite PASS/merge-ready
+claim. Focused116 PASS with final new-mode rerun documented separately. Physical
+controller faults remain independent of room/FEN. See reports/robot-pvp-20261102.
+
 ## 2026-11-02 real controller main1/sub29 — OPEN
 
 At 16:30:45+07, read-only GetRobotErrorCode returned [0,1,29] while camera had

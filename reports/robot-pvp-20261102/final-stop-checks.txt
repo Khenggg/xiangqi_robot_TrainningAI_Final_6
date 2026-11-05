@@ -1,0 +1,28 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_pvp_20261102
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+created: 2/2 workers
+2 workers [39 items]
+
+.......................................                                  [100%]
+============================== warnings summary ===============================
+tests/unit/test_fresh_session_startup.py::test_launcher_requests_fresh_journal_before_opening_devices
+  D:\OJT\xiangqi_robot_pvp_20261102\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+tests/unit/test_fresh_session_startup.py::test_launcher_requests_fresh_journal_before_opening_devices
+  D:\OJT\xiangqi_robot_pvp_20261102\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 39 passed, 2 warnings in 11.30s =======================
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_pvp_20261102
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+collected 39 items / 39 deselected / 0 selected
+
+=========================== 39 deselected in 6.46s ============================

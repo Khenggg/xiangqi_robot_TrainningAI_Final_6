@@ -31,6 +31,9 @@ class ControlledStopCoordinator:
         self.request = None
         self._worker_checks = []
         self.generation = 0
+        self._settle_probe = None
+        self._next_settle_probe = 0.0
+        self.last_settle_diagnostic = None
 
     @property
     def blocked(self):
@@ -121,6 +124,58 @@ class ControlledStopCoordinator:
             import logging
             event("motion.stop_uncertain", str(exc), level=logging.ERROR,
                   code="STOP_RECOVERY_REQUIRED", acknowledged=acknowledged, reason=request.reason)
+
+    def refresh_acknowledged_stop(self):
+        """Read-only settling after a worker outlasts the initial stop wait.
+
+        Never resend StopMotion or recover an unknown/unacknowledged outcome.
+        Two distinct fresh idle samples must follow worker/gripper quiescence.
+        """
+        with self._lock:
+            request = self.request
+            if (request is None or not request.done.is_set() or request.result.safe
+                    or not request.result.acknowledged):
+                return False
+            if time.monotonic() < self._next_settle_probe:
+                return False
+            self._next_settle_probe = time.monotonic()+.1
+            try:
+                workers_ready = self.workers_idle() and self._all_workers_finished()
+            except Exception as exc:
+                self.last_settle_diagnostic = f'Chưa xác định được trạng thái worker: {exc}'
+                self._settle_probe = None
+                return False
+            if (not workers_ready or getattr(self.hardware.robot, '_gripper_pulse_active', False) is True):
+                self.last_settle_diagnostic = 'Worker hoặc xung kẹp chưa kết thúc'
+                self._settle_probe = None
+                return False
+            probe = self._settle_probe
+            if probe is None or probe['request'] is not request:
+                probe = self._settle_probe = dict(request=request, since=time.time(), last=None, count=0)
+            try:
+                snapshot = self.hardware.backend.get_state_snapshot()
+                measured = snapshot.measurement_timestamp
+                fresh = (snapshot.connected and snapshot.joints_valid and measured is not None
+                         and measured > probe['since'] and 0 <= time.time()-measured <= .5
+                         and snapshot.motion_state in {'IDLE','READY'})
+                self.last_settle_diagnostic = (None if fresh else
+                    f'Telemetry dừng chưa hợp lệ: {snapshot.motion_state}; {getattr(snapshot, "last_error", None) or "ảnh đo cũ/thiếu dữ liệu"}')
+            except Exception as exc:
+                self.last_settle_diagnostic = f'Không đọc được trạng thái robot: {exc}'
+                fresh = False
+            if not fresh:
+                probe['count'] = 0
+            elif probe['last'] is None or measured > probe['last']:
+                probe['last'] = measured
+                probe['count'] += 1
+            if probe['count'] < 2:
+                return False
+            request.finish(StopResult(True, True, 'Acknowledged stop; workers and fresh idle telemetry settled'))
+            self._settle_probe = None
+            self.last_settle_diagnostic = None
+            from src.core.project_logging import event
+            event('motion.stop_settled', 'Đã xác nhận dừng sau khi worker hoàn tất; không gửi lại lệnh dừng')
+            return True
 
     def _wait_idle(self, timeout, require_measurements, workers_finished=None, *, ignore_current_worker=False):
         deadline = time.monotonic() + timeout

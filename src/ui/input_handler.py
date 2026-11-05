@@ -324,6 +324,14 @@ class InputHandler:
         self._queue_or_run(hover)
 
     def handle_mouse_down(self, mx, my):
+        if BTN_SURRENDER_RECT.collidepoint(mx, my) and not self.state.game_over:
+            control = getattr(self, 'session_control', None)
+            if control is not None:
+                mode = getattr(getattr(self.hw, 'profile', None), 'game_mode', None)
+                winner = ('b' if mode in {'HUMAN_VS_HUMAN_ROBOT','HUMAN_VS_ROBOT'}
+                          else ('b' if self.state.turn == 'r' else 'r'))
+                control.request_surrender(winner)
+                return
         if BTN_NEW_GAME_RECT.collidepoint(mx, my):
             control = getattr(self, "session_control", None)
             if control is not None:
@@ -351,6 +359,11 @@ class InputHandler:
         if continue_rect.collidepoint(mx, my):
             if not can_continue:
                 return
+            control = getattr(self, 'session_control', None)
+            if control is not None and control.action in {'reset','surrender'}:
+                import pygame
+                self.handle_keyboard(pygame.K_v)
+                return
             if getattr(self.state, "visual_pick_retry", None) or getattr(self.state, "test_pick_retry", None):
                 self._retry_visual_pick(source="CONTINUE")
                 return
@@ -365,6 +378,8 @@ class InputHandler:
         if BTN_SURRENDER_RECT.collidepoint(mx, my) and not self.state.game_over:
             print("[GAME] YOU SURRENDER!")
             winner = 'b' if self.state.turn == 'r' else 'r'
+            if getattr(self.hw, "pvp_controller", None) is not None:
+                winner = 'b'  # This window belongs to Red, regardless of whose turn it is.
             self.state.handle_game_over(winner, reason='RESIGN')
             self.state.publish_match_end(winner="BLACK" if winner == 'b' else "RED", reason="RESIGN")
             return
@@ -381,6 +396,11 @@ class InputHandler:
             return
 
         # Manual Override (Mouse Drag)
+        pvp = getattr(self.hw, "pvp_controller", None)
+        if pvp is not None:
+            c, r = BoardRenderer.pixel_to_grid(mx, my)
+            pvp.handle_click(c, r)
+            return
         if (self.state.allow_mouse_move or getattr(self.state, "emergency_mode", False)) and not self.state.game_over:
             if self._player_turn_mode == PlayerTurnMode.UNIFIED:
                 self.state.set_status("⚠️ UNIFIED: cần xác nhận bàn cờ vật lý trước.", color=(180, 100, 0))
@@ -754,6 +774,22 @@ class InputHandler:
                 )
                 return False
 
+        robot_pvp = getattr(getattr(self.hw, "profile", None), "game_mode", None) == "HUMAN_VS_HUMAN_ROBOT"
+        if robot_pvp:
+            stop = getattr(self.hw, "stop_coordinator", None)
+            stop_generation = getattr(stop, "generation", None)
+            # GUI moves must never be replaced by a camera baseline or retired
+            # to clear a startup-only pause. Hardware recovery retains its gate.
+            blockers = ("pending_move", "pending_ai_move", "pending_test_motion", "visual_pick_retry",
+                        "visual_capture_checkpoint", "pick_test_mode", "pick_test_resume_required",
+                        "mode_change_pending", "turn_confirmation_required")
+            if (any(getattr(self.state, name, None) for name in blockers)
+                    or (self.state.move_sync_error and not self.state.physical_sync_fault)):
+                self.state.set_status("Camera đã khớp; còn nước/test/đổi phiên đang dở. Giữ khóa để phục hồi đúng trạng thái.", duration=30)
+                return False
+            if not self.state.approve_recovery_after_verification(self.hw):
+                return False
+
         self.state.set_status("📸 Đang lấy baseline mới để tiếp tục quét...", color=(0, 100, 180), duration=4.0)
         self._board_stability_monitor.reset()
         self._observed_baseline_time = None
@@ -762,8 +798,31 @@ class InputHandler:
             self.state.set_status("❌ Không lấy được baseline; quét vẫn đang tạm dừng.", color=(180, 0, 0), duration=8.0)
             return False
 
-        self.state.manual_override_active = False
-        self.state.emergency_mode = False
+        if robot_pvp:
+            control = getattr(self.hw, "session_control", None)
+            if (getattr(stop, "generation", None) != stop_generation
+                    or (control is not None and control.action is not None)):
+                self.state.set_status("Đã có yêu cầu dừng/đổi phiên; giữ tạm dừng camera.", duration=30)
+                return False
+
+        updates = {"manual_override_active": False, "emergency_mode": False}
+        if robot_pvp:
+            updates.update(snapshot_continue_required=False, snapshot_continue_can_commit_pending=False,
+                           physical_sync_fault=False)
+        before = {name: getattr(self.state, name) for name in updates} if robot_pvp else {}
+        for name, value in updates.items():
+            setattr(self.state, name, value)
+        if robot_pvp:
+            try:
+                self.state.persist_checkpoint("OPERATOR_RESUMED_ROBOT_PVP_CAMERA")
+            except Exception as exc:
+                for name, value in before.items():
+                    setattr(self.state, name, value)
+                event("pvp.camera_resume_failed", str(exc), level=logging.ERROR, code="SESSION_PERSISTENCE_FAILED")
+                self.state.set_status(f"Chưa lưu được việc tiếp tục phiên; giữ khóa: {exc}", duration=30)
+                return False
+            event("pvp.camera_resumed", "Đã đối soát bàn và xóa tạm dừng camera cho hai người + robot",
+                  board_revision=self.state.board_revision)
         self._last_move_confirmation_failure = None
         self.state.set_status("✅ Đã tiếp tục tự động quét FEN.", color=(0, 120, 0), duration=6.0)
         return True
@@ -777,6 +836,25 @@ class InputHandler:
             self.state.set_status("Đang có thao tác robot; chờ hoàn tất trước khi xóa phiên lỗi.", duration=8)
             return
         import pygame
+        control = getattr(self, 'session_control', None)
+        if (key == pygame.K_v and control is not None and control.action in {'reset','surrender'}
+                and (self.state.pending_move is not None or self.state.pending_ai_move is not None)):
+            if not self.hw.stop_coordinator.safe_for_release():
+                self.state.set_status('Chờ xác nhận robot dừng trước khi đối soát nước đang dở.', duration=20)
+                return
+            self._queue_or_run(self._reconcile_physical_sync_fault)
+            return
+        if control is not None and control.action in {'reset','surrender'}:
+            self.state.set_status('Đang đầu hàng/đổi ván. V đối soát nước đang dở; không chạy lại nước.', duration=20)
+            return
+        pvp = getattr(self.hw, "pvp_controller", None)
+        if pvp is not None:
+            if key == pygame.K_o:
+                pvp.open_client()
+                return
+            if key in (pygame.K_SPACE, pygame.K_m, pygame.K_t, pygame.K_h, pygame.K_z):
+                self.state.set_status("Hai người + robot: chọn nước bằng chuột; O mở người Đen, V đối soát/thử lại.", duration=15)
+                return
         if key == pygame.K_F12:
             if not (getattr(self.state, "move_sync_error", None)
                     or getattr(self.state, "physical_sync_fault", False)):
@@ -1172,6 +1250,9 @@ class InputHandler:
 
     def _continue_after_snapshot_pause(self):
         """Apply the operator-approved recovery shown by the Continue button."""
+        if (getattr(getattr(self.hw, "profile", None), "game_mode", None) == "HUMAN_VS_HUMAN_ROBOT"
+                and not getattr(self.state, "physical_sync_fault", False)):
+            return self.resume_automatic_scanning()
         if getattr(self.state, "physical_sync_fault", False):
             self._reconcile_physical_sync_fault()
             return

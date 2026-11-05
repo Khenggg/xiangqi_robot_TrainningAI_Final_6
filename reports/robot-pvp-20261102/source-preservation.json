@@ -1,0 +1,30 @@
+[
+  {
+    "file": "main.py",
+    "matches_preserved_baseline": true
+  },
+  {
+    "file": "src/core/game_state.py",
+    "matches_preserved_baseline": true
+  },
+  {
+    "file": "src/core/session_profile.py",
+    "matches_preserved_baseline": true
+  },
+  {
+    "file": "src/core/pvp_room.py",
+    "matches_preserved_baseline": true
+  },
+  {
+    "file": "src/hardware/hardware_manager.py",
+    "matches_preserved_baseline": true
+  },
+  {
+    "file": "src/ui/input_handler.py",
+    "matches_preserved_baseline": true
+  },
+  {
+    "file": "src/ui/board_renderer.py",
+    "matches_preserved_baseline": true
+  }
+]
