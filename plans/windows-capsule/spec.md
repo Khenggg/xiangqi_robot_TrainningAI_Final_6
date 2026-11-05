@@ -1,6 +1,6 @@
 # Windows portable capsule
 Date: 2026-11-05
-Status: Ready
+Status: current need-review integration
 
 ## Scope
 User explicitly requests a complete capsule copyable to another Windows machine. Keep current game/robot execution and safety gates; add a portable release build and isolated launcher, not another install-on-first-run wrapper.
@@ -14,3 +14,5 @@ User explicitly requests a complete capsule copyable to another Windows machine.
 
 ## Boundary
 Windows 10/11 x64 desktop, sufficient memory/storage and browser. CPU baseline; no CUDA requirement. Device drivers, robot/camera physical setup, Ethernet and recalibration after moving equipment are hardware commissioning, not solved by bundling software. Fresh second-PC and loaded robot acceptance must be explicitly distinguished from isolated/relocated checks on this PC.
+
+Current mode acceptance: preserve HUMAN_VS_HUMAN_ROBOT host + localhost Black client using packaged Python; actual dialog path retains operator consent and no hardware calls. Publish separate need-review capsule rather than reusing final ZIP.

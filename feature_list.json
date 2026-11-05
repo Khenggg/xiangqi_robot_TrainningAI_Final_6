@@ -137,6 +137,36 @@
     "priority": "P3"
   },
   {
+    "id": "need-review-capsule-build",
+    "title": "Portable CPU capsule for current need-review",
+    "user_visible_behavior": "Extract capsule and open START.bat with current modes, no dependency install on event PC",
+    "verification_command": "tools/test_fast.ps1 and actual packaged acceptance_probe.py",
+    "status": "passing",
+    "evidence": "105 tests; actual new ZIP Unicode relocation and bundled Black child acceptance PASS",
+    "notes": "No physical/second-PC/full-suite claim; reports/need-review-capsule-20261105/REPORT.md",
+    "priority": "P1"
+  },
+  {
+    "id": "need-review-capsule-client",
+    "title": "Packaged Black subprocess and localhost room",
+    "user_visible_behavior": "Extract capsule and open START.bat with current modes, no dependency install on event PC",
+    "verification_command": "tools/test_fast.ps1 and actual packaged acceptance_probe.py",
+    "status": "passing",
+    "evidence": "105 tests; actual new ZIP Unicode relocation and bundled Black child acceptance PASS",
+    "notes": "No physical/second-PC/full-suite claim; reports/need-review-capsule-20261105/REPORT.md",
+    "priority": "P1"
+  },
+  {
+    "id": "need-review-capsule-docs",
+    "title": "Current README with direct capsule download",
+    "user_visible_behavior": "Extract capsule and open START.bat with current modes, no dependency install on event PC",
+    "verification_command": "tools/test_fast.ps1 and actual packaged acceptance_probe.py",
+    "status": "passing",
+    "evidence": "105 tests; actual new ZIP Unicode relocation and bundled Black child acceptance PASS",
+    "notes": "No physical/second-PC/full-suite claim; reports/need-review-capsule-20261105/REPORT.md",
+    "priority": "P1"
+  },
+  {
     "id": "windows-capsule-build",
     "title": "Complete portable Windows release",
     "user_visible_behavior": "Extract a release containing runtime, local models, engine and viewer without installing dependencies",
@@ -164,6 +194,16 @@
     "status": "passing",
     "evidence": "66 focused tests; actual bundle smoke and untouched ZIP Unicode relocation acceptance PASS; final ZIP SHA256 c5d1a6570d41954ffbeb0dbc0fb7451b275fa943f2bc09fbd1f61606f1120f5e",
     "notes": "Software-local verification; separate clean Windows PC and physical event-kit acceptance unverified. See reports/windows-capsule-20261105/REPORT.md",
+    "priority": "P1"
+  },
+  {
+    "id": "final-capsule-r2-delivery",
+    "title": "Current four-mode portable capsule on final",
+    "user_visible_behavior": "Download final-r2 ZIP from top README and run START",
+    "verification_command": "105 targeted tests and bundled acceptance_probe.py after Unicode relocation",
+    "status": "passing",
+    "evidence": "Final ZIP c0616011ef822978d269744516d1f99c0796e76419bb28cdab49374d4c227e15; all six real packaged probes true",
+    "notes": "No physical/clean-second-PC/full-suite claim",
     "priority": "P1"
   }
 ]

@@ -20,3 +20,11 @@ Camera và controller vẫn cần driver/kết nối phần cứng hoạt độn
 - Không xóa `app/data/runtime/` để bỏ recovery sau lỗi robot. Giữ nguyên journal và xử lý theo thông báo trong game.
 
 `settings.json` chọn sẵn môi trường (`SIMULATION`, `BOARD_ONLY`, `PHYSICAL`), số camera và IP controller. Người vận hành vẫn đổi môi trường trên màn hình chính được. Team chuẩn bị file này trước sự kiện; người dùng thường chỉ cần START.
+
+## Hai người + một robot
+
+Chọn MÔ PHỎNG 3D hoặc ROBOT THẬT → 2 NGƯỜI + ROBOT. Đỏ dùng máy chủ; nhấn O / MỞ NGƯỜI ĐEN để mở cửa sổ Đen, hoặc VÀO PHÒNG và nhập mã 6 ký tự. Hai cửa sổ chỉ kết nối localhost trên cùng máy, không LAN/Internet. Không có AI trong mode này; một robot/executor thực hiện cả hai màu. Không chạy thêm host physical.
+
+Đóng cửa sổ máy chủ/game chính hoặc Ctrl+C sẽ hỏi Thoát / Ở lại. Xác nhận Thoát đóng phần mềm ngay, không gửi lệnh robot/kẹp và không chứng minh robot đã dừng. Giữ journal nếu còn nước đang dở; xử lý thiết bị theo quy trình của team.
+
+Cửa sổ người Đen đóng trực tiếp khi bấm X; máy chủ giữ ván/trạng thái và khóa nhận nước mới khi mất client.

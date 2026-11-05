@@ -26,7 +26,7 @@ from src.ui.board_renderer import BoardRenderer
     ("robot", "Controller startup failed"),
     ("camera", "Camera startup blocked: Cannot read camera index 1. Close Windows Camera."),
 ])
-def test_failed_startup_keeps_gui_open_and_allows_explicit_retry(tmp_path, monkeypatch, component, reason):
+def test_failed_startup_keeps_gui_open_and_allows_explicit_retry(tmp_path, monkeypatch, component, reason, launcher_exit):
     # Register old values for restoration after configure_runtime changes them.
     for name in ("DRY_RUN", "ROBOT_BACKEND", "GAME_ONLY", "TELEMETRY_PORT", "GAME_MODE"):
         monkeypatch.setattr(config, name, getattr(config, name, None), raising=False)
@@ -84,7 +84,7 @@ def test_failed_startup_keeps_gui_open_and_allows_explicit_retry(tmp_path, monke
     assert sum(record['event'] == 'startup.blocked' for record in events) == 2
 
 
-def test_real_entrypoint_routes_recovery_controls_after_selfplay_fault(tmp_path, monkeypatch):
+def test_real_entrypoint_routes_recovery_controls_after_selfplay_fault(tmp_path, monkeypatch, launcher_exit):
     from src.core.motion_worker import MotionWorker
     from src.core.self_play_controller import SelfPlayStatus
     from src.ui.input_handler import InputHandler

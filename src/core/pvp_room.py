@@ -71,6 +71,8 @@ class LocalRoomHost:
         self._latest = None
         self._out = queue.Queue(maxsize=32)
         self._threads = []
+        self._sockets = set()
+        self._slots = threading.BoundedSemaphore(2)
         self.listener = socket.socket()
         self.listener.bind(('127.0.0.1', 0))
         self.listener.listen(2)
@@ -111,6 +113,12 @@ class LocalRoomHost:
                 continue
             except OSError:
                 break
+            if not self._slots.acquire(blocking=False):
+                _shutdown(sock)
+                continue
+            with self._lock:
+                self._sockets.add(sock)
+                self._threads = [t for t in self._threads if t.is_alive()]
             thread = threading.Thread(target=self._serve, args=(sock,), name='pvp-room-peer', daemon=True)
             self._threads.append(thread)
             thread.start()
@@ -156,10 +164,12 @@ class LocalRoomHost:
         finally:
             _shutdown(sock)
             with self._lock:
+                self._sockets.discard(sock)
                 if generation is not None and self._generation == generation:
                     self._peer = self._generation = None
                     try: self._event(dict(type='disconnected', generation=generation))
                     except queue.Full: pass
+            self._slots.release()
 
     def send(self, packet):
         generation = self.generation
@@ -185,7 +195,8 @@ class LocalRoomHost:
         self._closed.set()
         self.listener.close()
         with self._lock:
-            _shutdown(self._peer)
+            for sock in tuple(self._sockets):
+                _shutdown(sock)
             self._peer = self._generation = None
         self._acceptor.join(1)
         for thread in self._threads:
@@ -240,12 +251,12 @@ class LocalRoomClient:
             try: self.events.put_nowait(dict(type='disconnected'))
             except queue.Full: pass
 
-    def send_move(self, src, dst, revision):
+    def send_move(self, src, dst, revision, epoch):
         if not self.connected or self._closed.is_set():
             return None
         request_id = uuid4().hex
         packet = dict(type='move', session=self.session, generation=self.generation,
-                      request_id=request_id, revision=revision, src=list(src),dst=list(dst))
+                      request_id=request_id, revision=revision, epoch=epoch, src=list(src),dst=list(dst))
         try: self._out.put_nowait(packet)
         except queue.Full: return None
         return request_id

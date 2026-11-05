@@ -168,8 +168,10 @@ def install_vc_runtime(runtime):
                "[PSCustomObject]@{File=$file;Signer=$s.SignerCertificate.Subject} }; "
                "ConvertTo-Json -InputObject @($result) -Compress")
     environment = dict(os.environ)
-    environment.pop('PSModulePath', None)  # pwsh's module path can break Windows PowerShell 5 autoload.
-    powershell = shutil.which('pwsh.exe') or system / 'WindowsPowerShell/v1.0/powershell.exe'
+    # A tool-provided pwsh can lack bundled modules; use Windows' own signature
+    # verifier and its native module tree rather than inherit developer paths.
+    environment['PSModulePath'] = str(system / 'WindowsPowerShell/v1.0/Modules')
+    powershell = system / 'WindowsPowerShell/v1.0/powershell.exe'
     provenance = subprocess.check_output(
         [str(powershell), '-NoProfile', '-NonInteractive', '-Command', command],
         text=True, env=environment, creationflags=subprocess.CREATE_NO_WINDOW)

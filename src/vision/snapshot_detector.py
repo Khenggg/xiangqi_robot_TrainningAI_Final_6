@@ -80,7 +80,8 @@ class SnapshotDetector:
 
         # Debug: đếm quân detect được
         n_occupied = sum(1 for r in occ for cell in r if cell)
-        print(f"[SNAPSHOT] 📸 T1 Baseline captured: {n_occupied} quân detected by camera")
+        print(f"[SNAPSHOT] 📸 T1 baseline YOLO: {n_occupied} ô có detection "
+              "(occupancy; không phải số quân ONNX/FEN).")
         return True
 
     def detect_move(self, frame, detections, board, cchess_result=None):

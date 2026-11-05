@@ -1,19 +1,19 @@
-# [⬇ TẢI CAPSULE.ZIP — WINDOWS X64](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-windows-x64-20261105/Xiangqi-Capsule-Windows-x64-20261105.zip)
+# [⬇ TẢI CAPSULE.ZIP — WINDOWS X64](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-windows-x64-20261105-r2/Xiangqi-Capsule-Windows-x64-20261105-r2.zip)
 
 **368,8 MiB · Giải nén toàn bộ → mở START.bat · Những lần sau chỉ mở lại START.bat.**
 
-[Xem Release và checksum](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/tag/capsule-windows-x64-20261105) · [Source và hướng dẫn bản bàn giao trên nhánh final](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/tree/final)
+[Xem Release và checksum](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/tag/capsule-windows-x64-20261105-r2) · [Source và hướng dẫn bản bàn giao trên nhánh final](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/tree/final)
 
 ---
 
 # XIANGQI ROBOT CỜ TƯỚNG VIP — SPECIFICATION DOCUMENT
 
 > Bản bàn giao Windows x64 CPU — nhánh **`final`**, ngày **05/11/2026**.
-> Kế thừa runtime từ `need-review`, bổ sung capsule portable và kiểm chứng đóng gói. Những kết quả phần cứng trong báo cáo cũ chỉ có giá trị tại setup và thời điểm của báo cáo đó.
+> Code nền `need-review@30649c4`, gồm chế độ 2 người + robot và xác nhận thoát; capsule được build riêng từ nhánh này. Những kết quả phần cứng trong báo cáo cũ chỉ có giá trị tại setup và thời điểm của báo cáo đó.
 
-**Mang đi sự kiện / bàn giao:** tải [Xiangqi Capsule Windows x64 — 368,8 MiB](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-windows-x64-20261105/Xiangqi-Capsule-Windows-x64-20261105.zip), giải nén toàn bộ và mở **`START.bat`**. Không cần cài Python, Node.js, Git hay CUDA; không chạy SETUP và không tải thư viện tại sự kiện. Màn hình đầu cho chọn môi trường và kiểu chơi; mặc định là mô phỏng FR3.
+**Mang đi sự kiện / bàn giao:** tải [Xiangqi Capsule Windows x64 — 368,8 MiB](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-windows-x64-20261105-r2/Xiangqi-Capsule-Windows-x64-20261105-r2.zip), giải nén toàn bộ và mở **`START.bat`**. Không cần cài Python, Node.js, Git hay CUDA; không chạy SETUP và không tải thư viện tại sự kiện. Màn hình đầu cho chọn môi trường và kiểu chơi; mặc định là mô phỏng FR3.
 
-[Trang Release](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/tag/capsule-windows-x64-20261105) · [Checksum SHA256](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-windows-x64-20261105/Xiangqi-Capsule-Windows-x64-20261105.zip.sha256)
+[Trang Release](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/tag/capsule-windows-x64-20261105-r2) · [Checksum SHA256](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-windows-x64-20261105-r2/Xiangqi-Capsule-Windows-x64-20261105-r2.zip.sha256)
 
 Hướng dẫn người vận hành: [CAPSULE_OPERATOR.md](docs/CAPSULE_OPERATOR.md). Hướng dẫn team tạo ZIP: [WINDOWS_CAPSULE_BUILD.md](docs/WINDOWS_CAPSULE_BUILD.md). `SETUP_WINDOWS.bat` → `RUN.bat` bên dưới là luồng **phát triển từ source**, không phải luồng dùng capsule.
 
@@ -33,13 +33,14 @@ Tên lớp `FR5Robot` trong `src/hardware/robot_VIP.py` là tên tương thích 
 |---|---|
 | Người đấu AI | Nhập chuột ở virtual; camera và robot ở physical nếu đủ các gate |
 | Người đấu người | Hai bên nhập trên cùng bàn ảo; session được ép về virtual |
+| 2 người + robot | Máy chủ Đỏ và cửa sổ Đen trên cùng PC; một executor/robot thực hiện hai màu, không AI |
 | Robot đấu robot | Hai AI điều khiển hai màu, dùng một executor/robot; không phải hai cánh tay độc lập |
 | Mô phỏng 3D | FR3, bàn/quân, gắp/thả/ăn quân, physics và collision checks |
 | Viewer physical | Hiển thị trạng thái tay và bàn; căn chỉnh XY/chiều cao có trạng thái xác minh riêng |
 | Camera | YOLO occupancy + CChess ONNX, calibration phối cảnh, xác nhận bàn và hậu kiểm |
 | Phục hồi | Pending move, journal/outbox, stop barrier, quét đối soát và khởi tạo phiên mới |
 | Spectator từ xa | Tùy chọn, cần credential do chủ dịch vụ cấp; độc lập với viewer local |
-| PvP phòng mạng | Có module `pvp_room.py`, chưa được nối vào launcher/game UI; không coi là tính năng đã bàn giao |
+| Phòng người Đen | Mã 6 ký tự, cửa sổ riêng quay bàn 180°; localhost cùng máy, không LAN/Internet |
 
 Không suy ra độ chính xác gắp, khả năng chống va chạm phần cứng hay nghiệm thu một ván hoàn chỉnh chỉ từ việc unit test hoặc simulation chạy được.
 
@@ -94,7 +95,7 @@ Viewer không được tự bước physics hoặc phát lại một nước rob
 
 ### 0.1. Bàn giao capsule — dành cho người vận hành
 
-1. Tải asset **`Xiangqi-Capsule-Windows-x64-20261105.zip`** từ [Release capsule](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/tag/capsule-windows-x64-20261105), copy sang máy Windows 10/11 x64 có trình duyệt. Không chọn `Source code (zip)` hay nút Download ZIP mã nguồn trên GitHub: chúng không có runtime/model.
+1. Tải asset **`Xiangqi-Capsule-Windows-x64-20261105-r2.zip`** từ [Release capsule](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/tag/capsule-windows-x64-20261105-r2), copy sang máy Windows 10/11 x64 có trình duyệt. Không chọn `Source code (zip)` hay nút Download ZIP mã nguồn trên GitHub: chúng không có runtime/model.
 2. Giải nén toàn bộ vào thư mục local có quyền ghi, ví dụ `D:\Xiangqi`.
 3. Mở `START.bat`, chọn chế độ và chơi. Không mở trực tiếp trong ZIP, không copy riêng file START.
 
@@ -104,9 +105,9 @@ Runtime CPU, thư viện, Moonfish, model nhận diện, Three.js/CAD và font q
 
 Team chuẩn bị `settings.json` cho máy/bộ thiết bị trước sự kiện. Xem [hướng dẫn ngắn](docs/CAPSULE_OPERATOR.md) để xử lý lỗi hoặc tìm log. Không mang `.venv` của máy phát triển sang máy nhận.
 
-**Bản capsule đã kiểm chứng:** 386.706.814 byte, SHA256 `c5d1a6570d41954ffbeb0dbc0fb7451b275fa943f2bc09fbd1f61606f1120f5e`. Gồm CPython 3.12.10, 47 package đã pin, vision CPU, model YOLO/CChess, Moonfish, Three.js/CAD và font CJK. Runtime/DLL được nạp từ bundle; không mang journal, log hay credential của workstation.
+**Bản capsule đã kiểm chứng:** 386.748.507 byte, SHA256 `c0616011ef822978d269744516d1f99c0796e76419bb28cdab49374d4c227e15`. Gồm CPython 3.12.10, 47 package đã pin, vision CPU, model YOLO/CChess, Moonfish, Three.js/CAD và font CJK. Runtime/DLL được nạp từ bundle; không mang journal, log hay credential của workstation.
 
-Kiểm chứng local: **66 tests đạt**; ZIP nguyên gốc được giải nén sang đường dẫn có dấu/khoảng trắng, chạy model thật, nước hợp lệ từ engine, mô phỏng 32 quân, HTTP JS/WASM và mở/đóng menu ứng dụng. Chưa nghiệm thu trên một PC Windows sạch thứ hai, cả ván UI/browser hoặc robot thật. Xem [bằng chứng đóng gói](reports/windows-capsule-20261105/REPORT.md).
+Kiểm chứng local: **105 tests đạt**; ZIP nguyên gốc được giải nén sang đường dẫn có dấu/khoảng trắng, chạy model thật, nước hợp lệ từ engine, mô phỏng 32 quân, HTTP JS/WASM và mở/đóng menu ứng dụng. Chưa nghiệm thu trên một PC Windows sạch thứ hai, cả ván UI/browser hoặc robot thật. Xem [bằng chứng đóng gói](reports/final-capsule-r2-20261105/REPORT.md).
 
 ### 0.2. Môi trường phát triển từ source — chỉ dành cho team
 
@@ -350,6 +351,7 @@ Phím chỉ có tác dụng khi profile/trạng thái cho phép. Dùng nhãn và
 | F4 | Quét toàn bàn; thay đổi nhiều ô có thể yêu cầu xác nhận lượt |
 | 1 / 2 | Xác nhận Đỏ/Đen khi UI đang chờ xác nhận lượt sau rescan |
 | F2 | Xin về launcher/đổi mode; giữ stop/disposal barrier |
+| O | Mở cửa sổ người Đen trong mode 2 người + robot |
 | F5 | Yêu cầu thử AI khi phiên không có lỗi đồng bộ đang chặn |
 | F6 / F7 / F8 | Self-play liên tục / từng bước / dừng, theo mode hiện tại |
 | F9 → F10 | Xin và xác nhận bật quyền physical motion; không tự xử lý controller fault |
@@ -371,6 +373,8 @@ Không giữ mô tả E/A/X của rollback-arm cũ: nhánh này dùng session/hi
 
 Mỗi lần chạy/chọn ván là một khai cuộc mới. Journal vẫn giữ biên nhận và recovery của lệnh phần cứng chưa giải quyết; F2/New Game/restart không phải lệnh xóa hậu quả của motion đang dở.
 
+Đóng cửa sổ máy chủ/game chính hoặc Ctrl+C hiện hỏi **Thoát / Ở lại**. Xác nhận Thoát đóng phần mềm ngay theo implementation của nhánh, không phát lệnh đến robot/kẹp và không hoàn tất giao dịch đang dở; journal đã ghi được giữ nguyên. Không coi việc đóng ứng dụng là bằng chứng robot đã dừng.
+
 ---
 
 <a id="phan-5"></a>
@@ -381,16 +385,23 @@ Mỗi lần chạy/chọn ván là một khai cuộc mới. Journal vẫn giữ 
 | Mode | Người/AI | Virtual | Physical |
 |---|---|---|---|
 | `HUMAN_VS_ROBOT` | Người Đỏ, AI Đen | Chuột + adapter virtual | Camera + robot nếu được enable |
-| `HUMAN_VS_HUMAN` | Hai người, không AI | Hai bên nhập trên bàn ảo | Profile ép về virtual; chưa có đường PvP physical được bàn giao |
+| `HUMAN_VS_HUMAN` | Hai người, không AI | Hai bên nhập trên bàn ảo | Profile này ép về virtual; dùng mode riêng 2 NGƯỜI + ROBOT khi cần robot thực hiện |
 | `ROBOT_VS_ROBOT` | AI cả hai màu | Cùng executor mô phỏng | Một robot thực hiện hai màu; chỉ khi đủ quyền/gate |
+| `HUMAN_VS_HUMAN_ROBOT` | Hai người chọn nước, không AI | Một executor mô phỏng, hai cửa sổ | Một robot thực hiện hai màu; camera/stop/recovery gate giữ nguyên |
 
-### 5.2. Engine và thời gian nghĩ
+### 5.2. Hai người chọn nước, một robot thực hiện
+
+Chọn **MÔ PHỎNG 3D** hoặc **ROBOT THẬT**, rồi **2 NGƯỜI + ROBOT**. Máy chủ chơi Đỏ; nhấn **O / MỞ NGƯỜI ĐEN** để mở cửa sổ Đen hoặc chọn **VÀO PHÒNG / NGƯỜI ĐEN** và nhập mã 6 ký tự. Hai cửa sổ cùng máy, không chơi qua LAN/Internet; client không sở hữu camera/controller.
+
+Cả hai màu chọn nước bằng chuột, máy chủ thực hiện và commit sau xác minh. Mất kết nối thì khóa nước mới; không phát lại yêu cầu đã gửi. Mode này không có AI, SPACE đi tay, emergency, rollback hay test gắp. Xem [TWO_HUMAN_ROBOT_MODE.md](docs/TWO_HUMAN_ROBOT_MODE.md).
+
+### 5.3. Engine và thời gian nghĩ
 
 Đường local dùng source Moonfish. `AIController` hỗ trợ cấu hình LOCAL/CLOUD/HYBRID; lựa chọn difficulty và backend phải được đối chiếu với code/menu thực tế. Không mặc định cho rằng mọi cấp độ hay model policy đều đang được launcher dùng.
 
 Engine chạy ngoài luồng UI, kết quả gắn với phiên/lượt. Kết quả cũ sau đổi mode, rescan hoặc reset không được tự cấp quyền phát một nước mới. Lỗi engine và lỗi thực thi là hai nhóm lỗi riêng; đọc `ENGINE_FAILED`, pending move và recovery để quyết định retry.
 
-### 5.3. Playback simulation
+### 5.4. Playback simulation
 
 `detailed` mặc định phát chậm để quan sát; `fast` thay tốc độ phát nhưng giữ physics, samples và collision checks. Profile không đổi tốc độ robot thật. Tham khảo [SIMULATION_PLAYBACK.md](docs/SIMULATION_PLAYBACK.md); chưa có cam kết FPS/thời gian hoàn tất trên mọi máy.
 
@@ -544,7 +555,7 @@ Không. Hai màu AI được điều phối qua cùng một executor/FR3 trong p
 
 ### Q6. Có PvP qua phòng mạng hoặc hai người dùng robot thật chưa?
 
-Chưa phải tính năng đã nối đầy đủ vào UI. Session người-vs-người hiện là virtual. Không merge nguyên nhánh donor để suy ra tính năng đã được kiểm chứng.
+`HUMAN_VS_HUMAN` vẫn virtual. Chọn `2 NGƯỜI + ROBOT` để dùng mode riêng có máy chủ Đỏ/cửa sổ Đen, simulation hoặc physical; phòng chỉ localhost, không LAN/Internet.
 
 ### Q7. Z có tự trả quân thật không?
 

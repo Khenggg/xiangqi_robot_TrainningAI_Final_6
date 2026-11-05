@@ -6,6 +6,68 @@ from pathlib import Path
 import runpy
 import sys
 import urllib.request
+import subprocess
+import time
+import queue
+
+
+def check_packaged_black_client(root):
+    """Real room + bundled child GUI, no executor/camera/controller ownership."""
+    from src.core.pvp_room import LocalRoomHost
+    from src.core import xiangqi
+    environment = dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy')
+    subprocess.run([sys.executable, '-B', '-m', 'src.ui.pvp_client', '--help'],
+                   cwd=root / 'app', env=environment, check=True, timeout=15)
+    child_code = '''
+import sys,time,pygame
+from src.ui.pvp_client import ClientApp
+app=ClientApp(sys.argv[1])
+try:
+    deadline=time.monotonic()+15
+    while time.monotonic()<deadline:
+        app.poll()
+        if app.client.connected and app.model.snapshot:
+            assert app.model.board[0][0]=='b_R'
+            app.draw();pygame.display.flip()
+            token=app.client.send_move((0,3),(0,4),app.model.snapshot['revision'],app.model.snapshot['epoch'])
+            assert token
+            time.sleep(.5)
+            print('PACKAGED BLACK CLIENT HANDSHAKE/STATE/GUI/REQUEST PASS',flush=True)
+            break
+        time.sleep(.02)
+    else:raise RuntimeError('Black client did not receive host board')
+finally:
+    if app.client:app.client.close()
+    pygame.quit()
+'''
+    room = LocalRoomHost()
+    child = None
+    try:
+        room.publish(dict(board=xiangqi.get_board(),turn='b',revision=0,epoch=1,
+                          busy=False,blocked=None,game_over=False,winner=None,status='capsule acceptance'))
+        child = subprocess.Popen([sys.executable, '-u', '-B', '-c', child_code, room.code],
+                                 cwd=root / 'app', env=environment)
+        deadline = time.monotonic() + 25
+        request = None
+        while time.monotonic() < deadline:
+            try:
+                message = room.events.get(timeout=.2)
+            except queue.Empty:
+                if child.poll() is not None:
+                    break
+                continue
+            if message.get('type') == 'request':
+                request = message['packet']
+                break
+        assert request and request['src'] == [0,3] and request['dst'] == [0,4], request
+        assert request['session'] == room.session and request['revision'] == 0
+        assert child.wait(timeout=10) == 0
+    finally:
+        if child is not None and child.poll() is None:
+            child.terminate()
+            child.wait(timeout=5)
+        room.close()
+    print('[OK] actual packaged Black subprocess / localhost state and request', flush=True)
 
 
 def main():
@@ -58,22 +120,36 @@ def main():
     finally:
         viewer.close()
     results['loopback_viewer_js_wasm'] = True
+    check_packaged_black_client(root)
+    results['packaged_black_subprocess_room_gui_request'] = True
 
     # Real application boot/menu/shutdown without a camera, robot or visible window.
     import pygame
     os.environ['SDL_VIDEODRIVER'] = 'dummy'
     os.environ['SDL_AUDIODRIVER'] = 'dummy'
     original_get = pygame.event.get
+    from src.ui import exit_confirmation
+    original_confirm = exit_confirmation.confirm_exit
+    original_exit = exit_confirmation.exit_application
+    # Exercise the current real dialog with Enter, but keep the probe process
+    # alive to record evidence instead of calling the production os._exit.
+    def record_confirmed_exit():
+        raise SystemExit(0)
+    exit_confirmation.exit_application = record_confirmed_exit
     frames = 0
+    quit_sent = False
 
     def events(*args, **kwargs):
-        nonlocal frames
+        nonlocal frames, quit_sent
         frames += 1
         if frames > 20:
             raise RuntimeError('Application did not close after QUIT')
         if frames >= 3:
             pygame.image.save(pygame.display.get_surface(), str(root / 'state/main-home-window.png'))
-            return [pygame.event.Event(pygame.QUIT)]
+            if not quit_sent:
+                quit_sent = True
+                return [pygame.event.Event(pygame.QUIT)]
+            return [pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN)]
         return original_get(*args, **kwargs)
 
     pygame.event.get = events
@@ -86,6 +162,8 @@ def main():
                 assert result.code in (None, 0), result.code
     finally:
         pygame.event.get = original_get
+        exit_confirmation.confirm_exit = original_confirm
+        exit_confirmation.exit_application = original_exit
     assert frames >= 3
     results['actual_app_menu_shutdown'] = True
     (root / 'state/acceptance.json').write_text(json.dumps(results, indent=2), encoding='utf-8')

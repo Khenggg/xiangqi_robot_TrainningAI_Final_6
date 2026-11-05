@@ -1,3 +1,82 @@
+## 2026-11-05 need-review publication checks
+
+Robot PvP and the subsequent camera/stop/pick/exit fixes prepared on top of
+origin/need-review@eb69457; current remote README and four redacted donor-report
+files preserved. Only the feature delta is replayed, not the local snapshot
+commit.115 focused tests PASS (103 parallel +12 serial), exit0,27.89s. Expanded
+legacy checks:175 PASS +1 FAIL (viewer mock lacks viewer_command_context).
+Broad non-slow run collected1123 parallel cases, showed failure markers, then
+was interrupted at12%, exit1; failure origins UNKNOWN, not a full-suite PASS.
+Existing launcher tests now explicitly mock consent/process exit, while actual
+exit behavior remains subprocess-tested. No physical operation or app restart.
+LAST_REVIEWED_HEAD unchanged. See reports/robot-pvp-20261102/PUBLISH_20261105.md.
+
+## 2026-11-03 one-confirmation application exit
+
+Window X, Ctrl+C and camera-q now ask once: Exit or Stay. Confirmed exit uses
+process termination without waiting for SDK/stop proof/pending transactions or
+atexit cleanup, including RECOVERY REQUIRED. Cancel leaves normal gameplay
+unchanged. Existing journal records are retained; no robot/gripper command is
+sent by this exit path.12 focused tests PASS (1 parallel +11 serial), exit0,
+9.78s. Terminal SIGINT cancellation also verified. No hardware operation/restart/
+merge. LAST_REVIEWED_HEAD unchanged.
+Graph search/detect_changes unavailable (Transport closed); scoped source review
+used instead. Report: reports/robot-pvp-20261102/EXIT_CONFIRMATION_20261103.md.
+
+## 2026-11-03 session buttons / named pick errors — scoped candidate
+
+SURRENDER accepted while busy/pick-paused, deferred until current work/stop/pending
+reconciliation settles. NEW GAME keeps stop/pending/opening-camera gates; V and
+Continue during ending do not replay a move. Successful-ACK stop timeouts can
+settle via two new idle observations after workers finish, without another stop
+command or enable; unknown/error/stale/gripper states stay blocked. Pick warning
+now names expected FEN piece/role/square (user's captured target: Red Knight b9).
+73 focused PASS; final stop39 and actual mock-UI14 PASS; no physical acceptance,
+restart, merge or original-checkout edit. LAST_REVIEWED_HEAD unchanged. Report:
+reports/robot-pvp-20261102/SESSION_BUTTONS_AND_PICK_NAMES_20261103.md.
+
+## 2026-11-02 robot PvP startup camera pause — scoped fix
+
+Runtime18:12:20 camera not yet fresh sets startup pause; later V verified32 but
+left snapshot_continue_required true, so Red remained locked even after explicit
+physical enable18:15:30. New-mode V/Continue now clears camera pause only after
+exact verification, fresh baseline, no unresolved work and existing recovery
+approval; persists checkpoint with rollback, respects newer stop requests.
+51 tests PASS, exit0,17.27s; no motion/live mutation/restart. Existing process can
+use its Continue path for this equal-board startup pause. Original checkout and
+hardware gates unchanged. LAST_REVIEWED_HEAD unchanged. Report:
+reports/robot-pvp-20261102/PVP_CAMERA_PAUSE.md.
+
+## 2026-11-02 named missing YOLO cells — scoped verification
+
+YOLO baseline diagnostic now names expected FEN piece + square + zero-based
+row/col for missing occupancy, and explicitly labels unexpected occupied cells.
+Names describe expected FEN, not proof that a physical piece is absent.30 tests
+PASS (23parallel+7serial), exit0,18.38s; no acceptance/motion changes or restart.
+See reports/robot-pvp-20261102/YOLO_BASELINE_31.md. LAST_REVIEWED_HEAD unchanged.
+
+## 2026-11-02 YOLO31 versus verified ONNX32 — diagnostic clarity
+
+Physical PvP runtime17:55:14 verifies Red16/Black16, diff0 in two fresh samples,
+then legacy T1 baseline prints31. That is YOLO occupied-cell count, not ONNX/FEN.
+Message now names source; camera.yolo_baseline logs raw boxes/occupied/expected
+counts and differing cells. No perception threshold, baseline or motion change.
+46 focused mock tests PASS, exit0,31.48s. Actual YOLO missing/mapping cause/cell
+UNKNOWN from old logs; not a recognition fix. No hardware actuation or restart.
+Report: reports/robot-pvp-20261102/YOLO_BASELINE_31.md. LAST_REVIEWED_HEAD unchanged.
+
+## 2026-11-02 isolated two-human robot candidate
+
+Separate worktree/branch codex/robot-pvp-20261102 on preserved local baseline
+8a45223. New HUMAN_VS_HUMAN_ROBOT mode: host Red, hardware-free Black client,
+localhost six-character room, both GUI moves through retained execution/journal.
+No AI/auto-enable/HOME. Existing mouse-only PvP preserved. Focused116 PASS, exit0;
+final new-mode30 PASS, exit0, in reports/robot-pvp-20261102/final-new-mode-tests.txt.
+Actual main loop + fake motion + real room sockets verifies two durable turns.
+Broad suite INTERRUPTED with failure markers; full result/causality UNKNOWN.
+Physical/full-game acceptance NOT RUN; no merge/push or original-source changes.
+LAST_REVIEWED_HEAD unchanged. Report: reports/robot-pvp-20261102/REPORT.md.
+
 ## 2026-11-02 camera confirmed / controller recovery blocker
 
 Fresh read-only controller query at 16:30:45+07 returned [0,1,29]; successful
@@ -1023,8 +1102,22 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 ## DO_NOT_ADVANCE_TO
 * **PHASE 4:** Physical FAIRINO FR3 robot hardware connection, power-on, or physical actuation.
 
+
+## 2026-11-05 need-review capsule r2 (scoped)
+
+Ported portable capsule onto current origin/need-review30649c4, preserving newer two-human/robot and exit implementation. Built new NeedReview-r2 ZIP (386975679 bytes), SHA256 dc9bbc820b4e479c904c084c9619439d743dc4e8d037a0394bfd04fa327f1754. README first heading links this distinct release and describes all four modes, O/localhost Black client and main/host exit confirmation.
+
+TEST_EVIDENCE: 105 focused tests PASS (93parallel+12serial), packaged CPU model/engine/render smoke PASS, untouched ZIP Unicode relocation PASS including actual 32-piece virtual world, JS/WASM, real bundled Black child room/state/render/request and main menu/exit dialog. No physical/clean-second-PC/full-suite claim. Historical LAST_REVIEWED_HEAD unchanged; full evidence reports/need-review-capsule-20261105/REPORT.md.
+
+
+
 ## 2026-11-05 Windows capsule — scoped packaging delivery
 
 At need-review eb69457 plus local capsule changes, built dist/Xiangqi-Capsule-Windows-x64-20261105.zip, SHA256 c5d1a6570d41954ffbeb0dbc0fb7451b275fa943f2bc09fbd1f61606f1120f5e. One START.bat, isolated app-local CPython/CPU dependencies, supplied vision weights, local engine/viewer/font, source/asset manifest; no event-PC setup step. No original journals/credentials copied. Small font/native URDF path adaptations; motion/recovery/calibration behavior unchanged.
 
 TEST_EVIDENCE: 66 focused tests PASS exit0; actual packaged --smoke PASS; untouched final ZIP extracted into Vietnamese/spaces path and real 32-piece virtual-world/local-engine/JS-WASM/app-menu-shutdown acceptance PASS; VC DLLs actually loaded app-locally. No physical or clean-second-PC acceptance, no entire-suite/whole-branch claim. See reports/windows-capsule-20261105/REPORT.md. Historical LAST_REVIEWED_HEAD unchanged; no commit/push.
+
+
+## 2026-11-05 final capsule r2 — delivery branch corrected
+
+User selected final. Merged need-review55c5fd5 into final, preserving current robot-PvP/session/exit code and capsule runtime. New final-r2 ZIP386748507bytes, SHA256 c0616011ef822978d269744516d1f99c0796e76419bb28cdab49374d4c227e15.105 tests rerun PASS; untouched final ZIP Unicode relocation/bundled models/world/Black child/menu-exit checks PASS. README first heading downloads final-r2. No physical/second-PC/full-suite claim; LAST_REVIEWED_HEAD unchanged. Evidence: reports/final-capsule-r2-20261105/REPORT.md.

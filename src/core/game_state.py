@@ -107,6 +107,7 @@ class GameState(GamePersistence):
             "game_mode": config.GAME_MODE,
             "robot_backend": config.ROBOT_BACKEND,
             "input_adapter": getattr(profile, "mouse_input", "LEGACY"),
+            "pvp_room": getattr(self, "pvp_room", None),
             "camera_enabled": bool(getattr(profile, "camera_enabled", True)),
             "robot_moves_enabled": bool(getattr(profile, "robot_moves_enabled", True)),
             "simulation_enabled": bool(getattr(profile, "simulation_enabled", True)),
@@ -174,7 +175,7 @@ class GameState(GamePersistence):
             # Nếu game đã kết thúc, dùng winner thực tế
             if self.game_over and self.winner:
                 winner = "RED" if self.winner == "r" else "BLACK"
-                reason = "CHECKMATE"
+                reason = self.game_over_reason or "CHECKMATE"
             
             if self._journal is not None:
                 retiring_snapshot = self.persistence_snapshot()
@@ -191,6 +192,7 @@ class GameState(GamePersistence):
         self.board, self.turn = fen_to_board_array(self.current_fen)
         self.game_over = False
         self.winner = None
+        self.game_over_reason = ""
         self.last_move = None
         self.selected_pos = None
         self.r_captured = []

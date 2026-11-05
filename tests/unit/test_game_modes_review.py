@@ -231,7 +231,7 @@ def test_ten_plies_two_captures_surrender_and_new_game_match_pybullet_scene(stat
         ctrl.close();bridge.close()
 
 
-def test_continuous_selfplay_surrender_is_accepted_at_ready_boundary(state,tmp_path,monkeypatch):
+def test_continuous_selfplay_surrender_is_accepted_at_ready_boundary(state,tmp_path,monkeypatch,launcher_exit):
     os.environ.setdefault('SDL_VIDEODRIVER','dummy');os.environ.setdefault('SDL_AUDIODRIVER','dummy')
     import pygame
     from src.core.motion_worker import MotionWorker

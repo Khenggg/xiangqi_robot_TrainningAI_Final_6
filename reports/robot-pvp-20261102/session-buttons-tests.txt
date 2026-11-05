@@ -1,0 +1,42 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_pvp_20261102
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+created: 2/2 workers
+2 workers [72 items]
+
+........................................................................ [100%]
+============================== warnings summary ===============================
+src\hardware\telemetry_publisher.py:20
+src\hardware\telemetry_publisher.py:20
+  D:\OJT\xiangqi_robot_pvp_20261102\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+  D:\OJT\xiangqi_robot_pvp_20261102\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 72 passed, 4 warnings in 26.79s =======================
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_pvp_20261102
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+collected 73 items / 72 deselected / 1 selected
+
+tests\unit\test_robot_pvp_main_ui.py .                                   [100%]
+
+============================== warnings summary ===============================
+src\hardware\telemetry_publisher.py:20
+  D:\OJT\xiangqi_robot_pvp_20261102\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+  D:\OJT\xiangqi_robot_pvp_20261102\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 1 passed, 72 deselected, 2 warnings in 13.45s ================

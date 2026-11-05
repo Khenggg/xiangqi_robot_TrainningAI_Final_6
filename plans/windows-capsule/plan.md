@@ -1,23 +1,16 @@
-# Windows capsule implementation
-Mode: --fast planning; Standard implementation, user authorized complete capsule without another approval round.
-Risk: normal — isolated packaging/launcher; retain hardware policy and motion code.
-Status: implemented; local acceptance passed; separate-PC/hardware acceptance unverified
+# Capsule on current need-review
+Mode: scoped integration of existing capsule, Standard implementation
+Risk: normal — packaging/font/native-path only; preserve current robot PvP and exit code.
+Status: locally verified; hardware/clean-second-PC acceptance remains open
+Baseline: origin/need-review 30649c4 (2026-11-05).
 
-## Decision
-App-local official embeddable CPython 3.12 x64 plus vendored dependencies, CPU Torch/ORT. Build on developer PC; release has no pip/npm/setup step. Relative paths and isolated _pth prevent reuse of developer virtualenv/system Python. One START.bat opens existing game menu. Fixed taught hardware profile stays unmodified; no session copied.
+- [x] Port packaging without reverting newer game/PvP/session code.
+- [x] Extend portable acceptance to localhost second-player subprocess and current exit confirmation.
+- [x] Synchronize README/operator guide for all four modes, build a NEW capsule/tag/download at README top.
+- [x] Run focused tests, actual packaged models/world/viewer/PvP/menu checks after Unicode relocation; code review and push need-review, publish versioned ZIP+checksum.
 
-## Phases
-- [x] Build cached runtime/dependencies, source allowlist, complete models/viewer, licenses and integrity manifest; fail closed on missing assets.
-- [x] Isolated launch/preflight, editable non-motion host settings, smoke checks and clear offline operator instructions.
-- [x] Tests, actual build/ZIP, relocated isolated verification, code review, document evidence and remaining hardware/second-machine boundary.
+No hardware calls or inherited session journals/credentials. Preserve independent final release. No whole-suite/physical/second-PC claim. User authorizes carrying all prior capsule/delivery requirements onto need-review.
 
-## Verification
-Use tools/test_fast.ps1 for packaging/startup tests; actual bundle --check and --smoke without host tool PATH. Check release SHA256 and absence of journals/tokens/venvs. No physical operations. Do not commit/push until requested.
+Evidence: 105 tests, actual packed/runtime model/world/client/menu acceptance PASS; new r2 ZIP SHA256 dc9bbc820b4e479c904c084c9619439d743dc4e8d037a0394bfd04fa327f1754. Report: reports/need-review-capsule-20261105/REPORT.md.
 
-## Sources
-https://docs.python.org/3.12/using/windows.html#the-embeddable-package
-https://docs.python.org/3.12/library/sys_path_init.html#pth-files
-https://www.python.org/downloads/release/python-31210/
-
-## Evidence
-Final ZIP dated 20261105, 386706814 bytes, SHA256 c5d1a6570d41954ffbeb0dbc0fb7451b275fa943f2bc09fbd1f61606f1120f5e. 66 selected tests, packaged smoke, clean ZIP relocation into Vietnamese/spaces path, actual virtual-world/engine/viewer/main menu and native DLL provenance all PASS. See reports/windows-capsule-20261105/REPORT.md. No commit/push or physical operations.
+Delivery correction: user selected final; normal merge of need-review55c5fd5 into final, runtime preserved. Archive root/file/tag uses final-r2 name; prior need-review draft was unpublished and removed. Final ZIP SHA256 c0616011ef822978d269744516d1f99c0796e76419bb28cdab49374d4c227e15.

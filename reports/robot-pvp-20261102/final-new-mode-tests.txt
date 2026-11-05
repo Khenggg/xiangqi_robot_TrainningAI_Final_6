@@ -1,0 +1,31 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_pvp_20261102
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+created: 2/2 workers
+2 workers [28 items]
+
+............................                                             [100%]
+============================= 28 passed in 2.74s ==============================
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_pvp_20261102
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+collected 30 items / 28 deselected / 2 selected
+
+tests\unit\test_robot_pvp_main_ui.py .                                   [ 50%]
+tests\unit\test_pvp_room_and_client.py .                                 [100%]
+
+============================== warnings summary ===============================
+tests/unit/test_robot_pvp_main_ui.py::test_menu_host_red_and_network_black_complete_two_gui_turns
+  D:\OJT\xiangqi_robot_pvp_20261102\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+tests/unit/test_robot_pvp_main_ui.py::test_menu_host_red_and_network_black_complete_two_gui_turns
+  D:\OJT\xiangqi_robot_pvp_20261102\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 2 passed, 28 deselected, 2 warnings in 5.22s =================

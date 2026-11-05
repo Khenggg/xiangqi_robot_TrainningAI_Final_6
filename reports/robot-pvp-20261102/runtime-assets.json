@@ -1,0 +1,32 @@
+[
+  {
+    "file": "models/best.pt",
+    "sha256": "49985dd211799d591922794a503d61a3c8277c2243e148c28ee25da46b490f0e",
+    "copied_unchanged": true
+  },
+  {
+    "file": "models/board_pose.pt",
+    "sha256": "22acb4d5ff9327414d6b317fe11d17ee42752fda11a1bfceb14f23ca80f51e40",
+    "copied_unchanged": true
+  },
+  {
+    "file": "models/cchess/layout_nano_v3.onnx",
+    "sha256": "da66ba9809f15127f8ae729b1755e42ee61c100c4f9979ce0ef13602ac471298",
+    "copied_unchanged": true
+  },
+  {
+    "file": "models/cchess/pose_4_v6.onnx",
+    "sha256": "fbd895d40ab81b41b8188f881866485678b7871775821aa50cfe74004a1dc796",
+    "copied_unchanged": true
+  },
+  {
+    "file": "models/hand_best_egohands.pt",
+    "sha256": "6508cc13211c81b80a74ce0935cc94473ac77ffc16d7a846a53bb3d732944db3",
+    "copied_unchanged": true
+  },
+  {
+    "file": "perspective.npy",
+    "sha256": "4dd1a19a2d28fc12b447a5a3f345031e1227588c7070dccbb7919d238a166a5f",
+    "copied_unchanged": true
+  }
+]

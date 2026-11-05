@@ -209,7 +209,7 @@ def test_known_king_capture_verifies_removal_and_terminal_board_then_commits_win
     assert not validate_board_sanity(both_missing,missing_king_color=missing)[0]
 
 
-def test_main_input_setup_failure_rolls_back_and_retries(tmp_path,monkeypatch):
+def test_main_input_setup_failure_rolls_back_and_retries(tmp_path,monkeypatch,launcher_exit):
     os.environ.setdefault('SDL_VIDEODRIVER','dummy')
     os.environ.setdefault('SDL_AUDIODRIVER','dummy')
     import pygame

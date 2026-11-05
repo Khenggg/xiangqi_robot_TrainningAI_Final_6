@@ -1,0 +1,21 @@
+============================================================
+ Xiangqi Robot -- Fast Parallel Test Runner
+============================================================
+Mode        : Full (Workers: 4)
+Targets     : tests/unit
+Base Marker : not slow
+Dist Scheme : worksteal
+Thread Caps : OMP=1, MKL=1, OPENBLAS=1, NUMEXPR=1
+Repo Root   : D:\OJT\xiangqi_robot_pvp_20261102
+
+>>> Part A: Running Parallel-Safe Tests (-n 4) ...
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_pvp_20261102
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+created: 4/4 workers
+4 workers [1123 items]
+
+.......F...............F................................................ [  6%]
+........................................................................ [ 12%]

@@ -13,6 +13,7 @@ class SessionControl:
         self._reset_started = False
         self._reset_done = False
         self._reset_error = None
+        self._surrender_winner = None
         hardware.session_control = self
 
     def workers_finished(self):
@@ -36,6 +37,7 @@ class SessionControl:
             self._reset_error = None
             self._reported = None
         self.action = action
+        self._reported = None
         self.state.manual_override_active = True
         self.state.snapshot_continue_required = True
         if self.self_play is not None and self.self_play.active:
@@ -48,6 +50,26 @@ class SessionControl:
         self.state.set_status("Đang dừng robot; giữ nguyên bàn và quân đang kẹp.", duration=30)
         return True
 
+    def request_surrender(self, winner):
+        if winner not in {'r','b'}:
+            raise ValueError('Invalid surrender winner')
+        if self.state.game_over or self.action in {'reset','home','quit','surrender'}:
+            return False
+        self.action = 'surrender'
+        self._reported = None
+        self._surrender_winner = winner
+        self.stop = None
+        # Let a current pick/place finish. No new GUI/AI move may be admitted.
+        self.state.manual_override_active = True
+        self.state.snapshot_continue_required = True
+        if self.state.pending_move is None and self.state.pending_ai_move is None:
+            self.state.retire_ai_job()
+            self.state.ai_epoch += 1
+            self.state.ai_job_token = None
+        event('session.surrender_requested', 'Đã nhận đầu hàng; chờ hoàn tất thao tác đang chạy', winner=winner)
+        self.state.set_status('Đã nhận đầu hàng; chờ hoàn tất nước đang chạy, không chọn nước mới.', duration=30)
+        return True
+
     def _report(self, message):
         if message != self._reported:
             self._reported = message
@@ -58,7 +80,7 @@ class SessionControl:
         hw = self.hardware
         if (self.state.game_over or self.state.mode_change_pending or self.state._match_end_intent is not None
                 or (hw.simulation_runtime is None and not hw.dry_run)
-                or self.action in {"reset", "quit", "home"} or hw.motion_worker.busy
+                or self.action in {"reset", "quit", "home", "surrender"} or hw.motion_worker.busy
                 or self.state.pending_move is not None or self.state.pending_ai_move is not None
                 or self.state.pending_test_motion is not None
                 or self.state.visual_capture_checkpoint is not None
@@ -85,12 +107,21 @@ class SessionControl:
 
     def poll(self):
         """Return 'quit' only when physical stop and all local workers are settled."""
+        if self.action == 'surrender' and self.stop is None:
+            if not self.workers_finished() or self.hardware.motion_worker.busy:
+                return None
+            self.stop = self.hardware.request_controlled_stop('surrender', workers_finished=self.workers_finished)
         if self.action is None or self.stop is None or not self.stop.done.is_set():
             return None
         if not self.stop.result.safe:
+            refresh = getattr(self.hardware.stop_coordinator, 'refresh_acknowledged_stop', None)
+            if callable(refresh):
+                refresh()
+        if not self.stop.result.safe:
             self.state.physical_sync_fault = True
             self.state.snapshot_continue_can_commit_pending = False
-            self._report("RECOVERY_REQUIRED: kiểm tra/dừng tay và kẹp trên pendant, Ctrl+F8 xác nhận; V đối soát bàn.")
+            detail = getattr(self.hardware.stop_coordinator, 'last_settle_diagnostic', None) or self.stop.result.reason
+            self._report(f"Chưa xác nhận dừng: {detail}. Kiểm tra tay/kẹp và controller; Ctrl+F8 xác nhận sau kiểm tra.")
             return None
         if not self.workers_finished() or self.hardware.motion_worker.busy:
             return None
@@ -99,6 +130,24 @@ class SessionControl:
         if not self.hardware.stop_coordinator.safe_for_release():
             self._report("RECOVERY_REQUIRED: trạng thái dừng không còn mới; Ctrl+F8 kiểm tra lại trên pendant.")
             return None
+        if self.action == 'surrender':
+            if (self.state.pending_move is not None or self.state.pending_ai_move is not None
+                    or self.state.pending_test_motion is not None or self.state.visual_capture_checkpoint is not None):
+                self._report('Đã dừng; đầu hàng đang chờ đối soát nước dang dở. V chỉ đối soát, không chạy lại nước.')
+                return None
+            winner = self.state.winner if self.state.game_over else self._surrender_winner
+            reason = (self.state.game_over_reason or 'CHECKMATE') if self.state.game_over else 'RESIGN'
+            try:
+                self.state.handle_game_over(winner, reason=reason)
+                self.state.publish_match_end(winner='RED' if winner == 'r' else 'BLACK', reason=reason)
+            except Exception as exc:
+                self._report(f'Chưa lưu được kết quả đầu hàng: {exc}')
+                return None
+            self.action = None
+            self._surrender_winner = None
+            self.state.set_status('Đã kết thúc ván do đầu hàng. Xếp lại bàn rồi NEW GAME để bắt đầu ván mới.', duration=60)
+            event('session.surrendered', 'Đã lưu kết quả đầu hàng', winner=winner)
+            return 'surrender'
         if self.action == "quit":
             return "quit"
         if self.action == "pause":

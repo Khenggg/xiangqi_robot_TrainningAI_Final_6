@@ -109,7 +109,7 @@ def test_unavailable_mirror_still_serves_http_without_autoconnect(tmp_path,monke
     finally: server.close()
 
 @pytest.mark.parametrize('flag,expect_http', [('--physical',True),('--virtual',False)])
-def test_real_entrypoint_missing_mirror_keeps_ui_and_respects_game_only(tmp_path,monkeypatch,flag,expect_http):
+def test_real_entrypoint_missing_mirror_keeps_ui_and_respects_game_only(tmp_path,monkeypatch,flag,expect_http,launcher_exit):
     import atexit, runpy,sys,os
     from pathlib import Path
     import pygame, config

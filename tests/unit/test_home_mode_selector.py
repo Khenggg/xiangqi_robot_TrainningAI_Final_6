@@ -57,7 +57,7 @@ def test_physical_camera_calibration_has_its_own_hit_target():
     assert not BoardRenderer.home_physical_camera_calibration_from_pixel(0, 0)
 
 
-def test_main_passes_selected_environment_into_session_startup(tmp_path, monkeypatch):
+def test_main_passes_selected_environment_into_session_startup(tmp_path, monkeypatch, launcher_exit):
     import atexit
     import runpy
     import sys
