@@ -1,5 +1,10 @@
 # Separate two-human robot mode — isolated candidate
 
+Publication update2026-11-05: feature changes below have now been committed and
+replayed on origin/need-review@eb69457, preserving newer remote documentation.
+The original snapshot description and test results below are historical.
+Fresh verification and publication details: `PUBLISH_20261105.md`.
+
 Branch: `codex/robot-pvp-20261102`.
 Worktree: sibling `xiangqi_robot_pvp_20261102`.
 Local baseline snapshot: `8a4522328c74b38b5a9627837578eef39515a379`, parent

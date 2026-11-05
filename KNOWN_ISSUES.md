@@ -1,3 +1,11 @@
+## 2026-11-05 publication — whole-suite validation remains OPEN
+
+115 focused cases pass. Expanded legacy checks expose a viewer test double
+missing viewer_command_context; production code was not altered to bypass it.
+Broad non-slow run was interrupted after failure markers (1123 parallel cases,
+12% progress, exit1); no final failure trace/count, origins UNKNOWN. No whole-
+suite green or physical acceptance claim. Evidence in publication report/logs.
+
 ## 2026-11-03 disconnected shutdown refusal — explicit exit replaced
 
 The old recovery loop refused exit with cached motion ownership/pending work

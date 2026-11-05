@@ -84,7 +84,7 @@ flag = '--physical', expect_http = True, launcher_exit = None
 >           app=runpy.run_path(str(Path(__file__).resolve().parents[2]/'main.py'),run_name='__main__')
                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-tests\unit\test_physical_ui_latency.py:153: 
+tests\unit\test_physical_ui_latency.py:153:
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 <frozen runpy>:287: in run_path
     ???

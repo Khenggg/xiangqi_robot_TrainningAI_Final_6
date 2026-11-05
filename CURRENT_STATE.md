@@ -1,3 +1,16 @@
+## 2026-11-05 need-review publication checks
+
+Robot PvP and the subsequent camera/stop/pick/exit fixes prepared on top of
+origin/need-review@eb69457; current remote README and four redacted donor-report
+files preserved. Only the feature delta is replayed, not the local snapshot
+commit.115 focused tests PASS (103 parallel +12 serial), exit0,27.89s. Expanded
+legacy checks:175 PASS +1 FAIL (viewer mock lacks viewer_command_context).
+Broad non-slow run collected1123 parallel cases, showed failure markers, then
+was interrupted at12%, exit1; failure origins UNKNOWN, not a full-suite PASS.
+Existing launcher tests now explicitly mock consent/process exit, while actual
+exit behavior remains subprocess-tested. No physical operation or app restart.
+LAST_REVIEWED_HEAD unchanged. See reports/robot-pvp-20261102/PUBLISH_20261105.md.
+
 ## 2026-11-03 one-confirmation application exit
 
 Window X, Ctrl+C and camera-q now ask once: Exit or Stay. Confirmed exit uses
