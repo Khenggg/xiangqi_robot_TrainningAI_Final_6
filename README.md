@@ -169,6 +169,7 @@ xiangqi_robot_TrainningAI_Final_6/
 ├── main.py                         # Launcher, menu, lifecycle và game loop
 ├── config.py                       # Cấu hình thực thi
 ├── RUN.bat / SETUP_WINDOWS.bat      # Khởi động / cài dependency Windows
+├── BUILD_CAPSULE.bat               # Team tạo bộ portable ZIP để bàn giao
 ├── SETUP_GPU.bat                    # Chuyển sang stack GPU riêng
 ├── requirements.txt                # Dependency runtime
 ├── package.json / package-lock.json # Three.js và viewer checks
@@ -194,7 +195,8 @@ xiangqi_robot_TrainningAI_Final_6/
 │   └── ui/                         # Renderer, input và recovery status
 ├── scripts/                        # Công cụ calibration/đo geometry
 ├── tools/
-│   ├── test_fast.ps1 / test_serial.ps1
+│   ├── test_fast.ps1               # Runner tests theo subsystem/marker
+│   ├── capsule/                    # Builder, launcher và acceptance probe
 │   ├── hardware_tests/             # Chẩn đoán có thể tác động robot thật
 │   └── simulation/                 # Server, demo và công cụ virtual
 ├── tests/unit/                     # Kiểm thử tự động Python/Node
@@ -477,7 +479,7 @@ Không lấy con số tests PASS trong README/báo cáo cũ làm kết quả hi�
 
 ### 8.2. Nhật ký phiên
 
-Mỗi lần chạy tạo `logs/<id-phien>/`; terminal in đường dẫn. Đọc `errors.log` trước, rồi `run.log` và dữ liệu có cấu trúc theo [LOGGING.md](docs/LOGGING.md).
+Với capsule, log game nằm ở `app/logs/<id-phien>/`, log lỗi launcher ở `state/launcher-error-*.log`. Với source, mỗi lần chạy tạo `logs/<id-phien>/` tại repo. Terminal in đường dẫn; đọc `errors.log` trước, rồi `run.log` và dữ liệu có cấu trúc theo [LOGGING.md](docs/LOGGING.md).
 
 ```powershell
 .\RUN.bat --log-level DEBUG
@@ -490,10 +492,10 @@ Khi báo lỗi, ghi lại branch/HEAD, môi trường/mode, bước vừa thao t
 
 | Hiện tượng | Kiểm tra/bước tiếp theo |
 |---|---|
-| Thiếu Python hoặc npm | Cài prerequisite, mở terminal mới, chạy SETUP lại |
-| SETUP lỗi cài PyBullet | Đọc lỗi wheel/compiler; chưa được coi là setup thành công |
+| Source thiếu Python hoặc npm | Cài prerequisite, mở terminal mới, chạy SETUP lại |
+| Source SETUP lỗi cài PyBullet | Đọc lỗi wheel/compiler; chưa được coi là setup thành công |
 | Physical không khởi tạo vision | Kiểm tra đủ `best.pt`, hai ONNX, camera, providers và calibration |
-| Viewer trống/lỗi module | `npm ci --include=dev`, kiểm tra vendor JS/WASM, xem `VIEWER_FAILED`, Ctrl+F5 |
+| Viewer trống/lỗi module | Capsule: kiểm tra/giải nén lại ZIP đầy đủ; source: `npm ci --include=dev`. Xem `VIEWER_FAILED`, Ctrl+F5 |
 | Viewer OFFLINE/board chưa khớp | Kiểm tra telemetry/bridge và trạng thái calibration; không sửa FEN để che lệch |
 | Nhận nước nhưng robot chưa chạy | Kiểm tra pending, motion enable, controller/worker/binding và mã lỗi thực tế |
 | RPC/GetControllerIP chập chờn | Kiểm tra kết nối theo [ROBOT_CONNECTION.md](ROBOT_CONNECTION.md); không bật motion khi link không ổn định |
