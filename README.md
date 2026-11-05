@@ -1,3 +1,11 @@
+# [⬇ TẢI CAPSULE.ZIP — WINDOWS X64](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-windows-x64-20261105/Xiangqi-Capsule-Windows-x64-20261105.zip)
+
+**368,8 MiB · Giải nén toàn bộ → mở START.bat · Những lần sau chỉ mở lại START.bat.**
+
+[Xem Release và checksum](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/tag/capsule-windows-x64-20261105) · [Source và hướng dẫn bản bàn giao trên nhánh final](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/tree/final)
+
+---
+
 # XIANGQI ROBOT CỜ TƯỚNG VIP — SPECIFICATION DOCUMENT
 
 > **Tài liệu kỹ thuật đầy đủ cho hệ thống Robot chơi Cờ Tướng tự động**  
