@@ -242,7 +242,7 @@ class VirtualPhysicalWorld:
         from src.simulation.physics.urdf_resolver import get_simulation_ready_fr3_urdf
         urdf_path = get_simulation_ready_fr3_urdf()
         self.robot_body_id = p.loadURDF(
-            str(urdf_path.resolve()),
+            str(urdf_path),  # Resolver preserves ASCII aliases required by Windows Bullet.
             basePosition=[0.0, 0.0, 0.0],
             baseOrientation=[0.0, 0.0, 0.0, 1.0],
             useFixedBase=True,

@@ -915,3 +915,7 @@ The seven reproduced software failures in `docs/RELIABILITY_RECHECK_20261012.md`
 * **Evidence:** Warning during pytest: `DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated`.
 * **Action:** Low impact, server functions normally. Can be migrated to `websockets.asyncio.server.ServerConnection` in a future dependency cleanup.
 * **Last Verified HEAD:** 12ce7330393a9014b0ad5e9013e845c8a3bf525e
+
+## 2026-11-05 capsule — separate-machine and physical acceptance remain OPEN
+
+Dated Windows x64 CPU ZIP is built; 66 scoped tests and isolated/Unicode-relocated actual bundle checks pass. Native dependencies are included and observed loading from the capsule. Fresh second-PC/clean-Windows, full UI game/browser session and event-kit camera/controller/loaded motion acceptance are not proven by these local checks. Existing physical blockers/calibration requirements remain; software packaging does not retire them. See reports/windows-capsule-20261105/REPORT.md. No physical calls or source motion-policy changes.

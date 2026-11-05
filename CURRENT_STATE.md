@@ -1022,3 +1022,9 @@ The delta between `5f2e84a` and current working tree has been fully reviewed and
 
 ## DO_NOT_ADVANCE_TO
 * **PHASE 4:** Physical FAIRINO FR3 robot hardware connection, power-on, or physical actuation.
+
+## 2026-11-05 Windows capsule — scoped packaging delivery
+
+At need-review eb69457 plus local capsule changes, built dist/Xiangqi-Capsule-Windows-x64-20261105.zip, SHA256 c5d1a6570d41954ffbeb0dbc0fb7451b275fa943f2bc09fbd1f61606f1120f5e. One START.bat, isolated app-local CPython/CPU dependencies, supplied vision weights, local engine/viewer/font, source/asset manifest; no event-PC setup step. No original journals/credentials copied. Small font/native URDF path adaptations; motion/recovery/calibration behavior unchanged.
+
+TEST_EVIDENCE: 66 focused tests PASS exit0; actual packaged --smoke PASS; untouched final ZIP extracted into Vietnamese/spaces path and real 32-piece virtual-world/local-engine/JS-WASM/app-menu-shutdown acceptance PASS; VC DLLs actually loaded app-locally. No physical or clean-second-PC acceptance, no entire-suite/whole-branch claim. See reports/windows-capsule-20261105/REPORT.md. Historical LAST_REVIEWED_HEAD unchanged; no commit/push.

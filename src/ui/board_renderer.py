@@ -116,12 +116,21 @@ def display_text(text):
     return text
 
 
+def piece_symbol_font(size):
+    """Portable releases include CJK glyphs even on English-only Windows."""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    bundled = os.path.join(root, "assets", "fonts", "NotoSerifCJKsc-Regular.otf")
+    if os.path.isfile(bundled):
+        return pygame.font.Font(bundled, size)
+    return pygame.font.SysFont("simsun", size, bold=True)
+
+
 class BoardRenderer:
     """Quản lý hiển thị bàn cờ Tướng trên Pygame."""
 
     def __init__(self, screen):
         self.screen = screen
-        self.piece_font = pygame.font.SysFont("simsun", 38, bold=True)
+        self.piece_font = piece_symbol_font(38)
         self.game_font = pygame.font.SysFont("times new roman", 64, bold=True)
         self.title_font = pygame.font.SysFont("times new roman", 76, bold=True)
         self.ui_font = unicode_ui_font(26, bold=True)
