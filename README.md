@@ -1,5 +1,13 @@
 # [⬇ TẢI CAPSULE.ZIP — WINDOWS X64](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-windows-x64-20261105-r2/Xiangqi-Capsule-Windows-x64-20261105-r2.zip)
 
+## ▶ Video demo
+
+[![Xem video demo Xiangqi Robot trên YouTube](https://img.youtube.com/vi/PShKIGPRk10/hqdefault.jpg)](https://youtu.be/PShKIGPRk10)
+
+[**▶ Xem video demo trên YouTube**](https://youtu.be/PShKIGPRk10)
+
+*Bấm vào ảnh để xem video. GitHub README hiển thị ảnh xem trước; video mở trên YouTube.*
+
 **368,8 MiB · Giải nén toàn bộ → mở START.bat · Những lần sau chỉ mở lại START.bat.**
 
 [Xem Release và checksum](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/tag/capsule-windows-x64-20261105-r2) · [Source và hướng dẫn bản bàn giao trên nhánh final](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/tree/final)
