@@ -50,3 +50,6 @@ robot-3d-viewer/assets/fr3_v6/fairino3_v6_pybullet.urdf
 # Portable release artifacts and build cache (models/runtime stay out of Git)
 /build/
 /dist/
+
+# Personal editor preferences (not shared project configuration)
+/.vscode/settings.json
