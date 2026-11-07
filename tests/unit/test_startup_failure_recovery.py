@@ -88,7 +88,8 @@ def test_real_entrypoint_routes_recovery_controls_after_selfplay_fault(tmp_path,
     from src.core.motion_worker import MotionWorker
     from src.core.self_play_controller import SelfPlayStatus
     from src.ui.input_handler import InputHandler
-    from src.ui.board_renderer import BTN_SCAN_FEN_RECT, BTN_NEW_GAME_RECT, BTN_CONTINUE_RECT
+    from src.ui.board_renderer import BoardRenderer, BTN_NEW_GAME_RECT
+    from src.core.session_profile import make_profile
     monkeypatch.setattr(config, 'AUTO_MOVE_CONFIRM_ENABLED', False)
     for name in ('DRY_RUN','ROBOT_BACKEND','GAME_ONLY','TELEMETRY_PORT','GAME_MODE'):
         monkeypatch.setattr(config,name,getattr(config,name,None),raising=False)
@@ -108,8 +109,8 @@ def test_real_entrypoint_routes_recovery_controls_after_selfplay_fault(tmp_path,
     monkeypatch.setattr(TuongKyDaiSuClient,'end_match',Mock())
     stage, index = [0], [0]
     deadline = time.monotonic()+10
-    expected_keys = [pygame.K_v,pygame.K_F4,pygame.K_1,pygame.K_2]
-    expected_clicks = [r.center for r in (BTN_SCAN_FEN_RECT,BTN_NEW_GAME_RECT,BTN_CONTINUE_RECT)]
+    expected_keys = [pygame.K_v,pygame.K_F4,pygame.K_1,pygame.K_2,pygame.K_F12]
+    expected_clicks = []
     def events():
         app = sys._getframe(1).f_globals
         assert time.monotonic()<deadline, 'GUI did not finish startup/recovery routing'
@@ -124,6 +125,15 @@ def test_real_entrypoint_routes_recovery_controls_after_selfplay_fault(tmp_path,
             return []
         app['self_play'].status=SelfPlayStatus.FAULTED
         app['state'].physical_sync_fault=True
+        app['state'].snapshot_continue_required=True
+        app['state'].session_profile=make_profile('ROBOT_VS_ROBOT','PHYSICAL')
+        if not expected_clicks:
+            render_state=app['state'].get_render_state()
+            actions=BoardRenderer.client_action_controls(render_state)
+            expected_clicks.extend(rect.center for rect,key,*_ in actions
+                                   if key in (pygame.K_v,pygame.K_F12))
+            expected_clicks.extend((BTN_NEW_GAME_RECT.center,
+                                   BoardRenderer.client_continue_rect(render_state,actions).center))
         index[0]+=1
         if index[0]<=len(expected_keys):
             return [pygame.event.Event(pygame.KEYDOWN,key=expected_keys[index[0]-1])]

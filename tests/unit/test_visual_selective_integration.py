@@ -11,12 +11,21 @@ from src.domain.game_move import MoveActor, MoveContext
 from src.motion.result import MotionExecutionResult
 from src.motion.stages import MotionStage
 from src.motion.result import MotionFailureCategory
+from src.core.session_profile import make_profile
 
 def fixture():
     state = GameState(allow_mouse_move=True)
-    hw = Mock(config=SimpleNamespace())
-    hw.execute_pick_place_test.return_value = MotionExecutionResult.ok()
-    hw.sync_committed_board.return_value = True
+    state.session_profile = make_profile('HUMAN_VS_ROBOT', 'VIRTUAL')
+    # Synchronous inert endpoint with the current test-transaction contract.
+    # A bare Mock worker accepts start() without ever executing the operation.
+    def execute(source, destination, *, move_context):
+        state.record_test_dispatch(move_context)
+        return MotionExecutionResult.ok()
+    hw = SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND='VIRTUAL'),
+        profile=state.session_profile, dry_run=True, simulation_runtime=object(),
+        execute_pick_place_test=Mock(side_effect=execute),
+        execute_piece_move=Mock(), sync_committed_board=Mock(return_value=True),
+        request_controlled_stop=Mock())
     handler = InputHandler(state, hw)
     handler._toggle_pick_test()
     return state, hw, handler
@@ -38,11 +47,10 @@ def test_manual_move_updates_separate_identity_and_scene_not_game_fen():
     assert context.piece_id == identity and context.src == (6, 4) and context.dst == (5, 4)
     assert not state.can_start_ai_turn()
 
-@pytest.mark.parametrize('failure', ['motion', 'verify', 'scene'])
+@pytest.mark.parametrize('failure', ['motion', 'verify'])
 def test_test_fault_latches_and_blocks_second_motion_even_after_toggle(failure):
     state, hw, handler = fixture()
-    if failure == 'scene': hw.sync_committed_board.return_value = False
-    else: hw.execute_pick_place_test.side_effect = RuntimeError(f'{failure} failed')
+    hw.execute_pick_place_test.side_effect = RuntimeError(f'{failure} failed')
     click(handler, (4, 6)); click(handler, (4, 5))
     assert state.pick_test_fault
     click(handler, (2, 6)); click(handler, (2, 5))
@@ -51,18 +59,34 @@ def test_test_fault_latches_and_blocks_second_motion_even_after_toggle(failure):
     assert hw.execute_pick_place_test.call_count == 1
     assert state.pick_test_board == state.board
 
+def test_test_projection_failure_keeps_confirmed_board_without_motion_replay():
+    state, hw, handler = fixture()
+    fen = state.current_fen
+    hw.sync_committed_board.return_value = False
+    click(handler, (4, 6)); click(handler, (4, 5))
+    assert state.pick_test_board[5][4] == 'r_P'
+    assert state.current_fen == fen and state.pending_test_motion is None
+    assert state.projection_error and state.pick_test_fault is None
+    hw.execute_pick_place_test.assert_called_once()
+
 def test_manager_rejects_sdk_failure_instead_of_reporting_success_or_verifying():
     manager = HardwareManager.__new__(HardwareManager)
     manager.simulation_runtime = None
+    state = GameState()
+    state.pick_test_mode = True
+    state.pick_test_board = [row[:] for row in state.board]
+    state.pick_test_piece_ids = dict(state.piece_ids)
+    manager.game_state = state
+    manager.capture_execution_binding = Mock(return_value={'calibration': 'fixed-test-context'})
+    manager.verify_physical_board = Mock(return_value=True)
     manager.is_cell_visually_clear = Mock(return_value=True)
     manager.get_robot_center_pick_targets = Mock(return_value={'moving': Mock()})
     manager.execute_piece_move = Mock(return_value=MotionExecutionResult.fail(
         MotionStage.APPROACH, MotionFailureCategory.MOTION_COMMAND_FAILED, 'SDK 112', backend_code=112))
-    manager.verify_visual_move = Mock(return_value=True)
-    context = MoveContext('red_pawn_3', (6,4), (5,4), MoveActor.ROBOT)
+    context = MoveContext(state.pick_test_piece_ids[(6,4)], (6,4), (5,4), MoveActor.ROBOT)
     with pytest.raises(RuntimeError, match='112'):
         manager.execute_pick_place_test((4,6), (4,5), move_context=context)
-    manager.verify_visual_move.assert_not_called()
+    manager.verify_physical_board.assert_called_once_with(state.pick_test_board)
 
 def test_manual_mode_blocks_direct_game_and_selfplay_entry_points():
     from src.core.ai_execution import execute_ai_move
@@ -183,8 +207,8 @@ def test_measurement_cleanup_disables_only_owned_activation_and_surfaces_failure
 @pytest.mark.parametrize('authorized,disable_code', [(False,0),(True,0),(True,112)])
 def test_manual_fault_revocation_disables_only_previously_authorized_controller(authorized,disable_code):
     from src.hardware.robot_VIP import FR5Robot, RobotCommandError
-    robot=FR5Robot.__new__(FR5Robot)
-    robot.dry=False; robot.connected=True; robot.physical_motion_authorized=authorized
+    robot=FR5Robot(dry_run=False)
+    robot.connected=True; robot.physical_motion_authorized=authorized
     robot.robot=Mock(); robot.robot.RobotEnable.return_value=disable_code
     if authorized and disable_code:
         with pytest.raises(RobotCommandError, match='112'): robot.deactivate_physical_control()

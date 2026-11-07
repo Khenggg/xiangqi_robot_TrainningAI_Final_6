@@ -324,6 +324,7 @@ class InputHandler:
         self._queue_or_run(hover)
 
     def handle_mouse_down(self, mx, my):
+        import pygame
         if BTN_SURRENDER_RECT.collidepoint(mx, my) and not self.state.game_over:
             control = getattr(self, 'session_control', None)
             if control is not None:
@@ -343,9 +344,13 @@ class InputHandler:
             getattr(self.state, "get_render_state", None)) else {}
         controls = BoardRenderer.client_action_controls(render_state)
         continue_rect = BoardRenderer.client_continue_rect(render_state, controls)
-        if (getattr(self.state, "visual_pick_retry", None)
-                and not continue_rect.collidepoint(mx, my) and not BTN_SCAN_FEN_RECT.collidepoint(mx, my)):
-            return
+        if getattr(self.state, "visual_pick_retry", None):
+            # A retained retry can coexist with a failed/stopped move. Let the
+            # visible recovery action reach its normal stop/camera checks.
+            recovery_hit = any(rect.collidepoint(mx, my) for rect, key, _labels, _color in controls
+                               if key in (pygame.K_v, pygame.K_F12))
+            if not continue_rect.collidepoint(mx, my) and not recovery_hit:
+                return
         for rect, key, _labels, _color in controls:
             if rect.collidepoint(mx, my) and not self.state.game_over:
                 self.handle_keyboard(key)
@@ -360,8 +365,7 @@ class InputHandler:
             if not can_continue:
                 return
             control = getattr(self, 'session_control', None)
-            if control is not None and control.action in {'reset','surrender'}:
-                import pygame
+            if control is not None and control.action in {'home','reset','surrender'}:
                 self.handle_keyboard(pygame.K_v)
                 return
             if getattr(self.state, "visual_pick_retry", None) or getattr(self.state, "test_pick_retry", None):
@@ -837,15 +841,18 @@ class InputHandler:
             return
         import pygame
         control = getattr(self, 'session_control', None)
-        if (key == pygame.K_v and control is not None and control.action in {'reset','surrender'}
-                and (self.state.pending_move is not None or self.state.pending_ai_move is not None)):
+        if (key == pygame.K_v and control is not None and control.action in {'home','reset','surrender'}
+                and (self.state.pending_move is not None or self.state.pending_ai_move is not None
+                     or getattr(self.state, 'pending_test_motion', None) is not None)):
             if not self.hw.stop_coordinator.safe_for_release():
                 self.state.set_status('Chờ xác nhận robot dừng trước khi đối soát nước đang dở.', duration=20)
                 return
-            self._queue_or_run(self._reconcile_physical_sync_fault)
+            operation = (self._reconcile_pick_test if getattr(self.state, 'pending_test_motion', None) is not None
+                         else self._reconcile_physical_sync_fault)
+            self._queue_or_run(operation)
             return
-        if control is not None and control.action in {'reset','surrender'}:
-            self.state.set_status('Đang đầu hàng/đổi ván. V đối soát nước đang dở; không chạy lại nước.', duration=20)
+        if control is not None and control.action in {'home','reset','surrender'}:
+            self.state.set_status('Đang kết thúc/đổi phiên. V đối soát nước đang dở; không chạy lại nước.', duration=20)
             return
         pvp = getattr(self.hw, "pvp_controller", None)
         if pvp is not None:

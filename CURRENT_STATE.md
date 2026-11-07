@@ -1130,3 +1130,12 @@ Scope baseline: `005f95539531c32601232cdeeec3cca4185f32d9` on `final`. Replaced 
 VERIFIED_FIXED (documentation scope only): stale quickstart instructions retired. No runtime/configuration/calibration changes or hardware calls.
 
 TEST_EVIDENCE: `git diff --check` PASS (exit 0); static Markdown validation PASS (exit 0, 66 local file/explicit-anchor links, balanced code fences/table row endings). Download asset matched the GitHub release metadata. Controls and failure guidance checked against current launch/menu/input/session/hardware/camera/journal code. Application tests, Windows UI, clean second-PC, camera and FR3 physical acceptance NOT RUN for this documentation-only change. Existing physical and broader-regression gaps remain OPEN. Historical `LAST_REVIEWED_HEAD` is intentionally unchanged; this is not a whole-branch functional review.
+
+
+## 2026-11-07 control recovery — scoped candidate
+
+Base `final` at `9b4c515241834241e85974799ddcf0189af54af6`; candidate `fix/control-recovery-20261107`. Home/reset/surrender reconciliation now owns V/Continue for pending game/manual-test work; Y cannot retry while closing. Self-play FAULTED allows F12 and real renderer recovery button rectangles, including retained visual retry; game-over hidden controls excluded. README documents F8 end-match → NEW GAME → F6. Existing stop/camera/controller verification remains intact.
+
+TEST_EVIDENCE: same 43 cases baseline 29 PASS/14 FAIL → candidate 43 PASS. Related subsystem 325 PASS, added F8 contract 1 PASS, explicit serial 11 PASS: 337 unique scoped cases. Full parallel gate FAIL: candidate 807 PASS/27 FAIL/38 ERROR, base 753 PASS/37 FAIL/38 ERROR; all 65 candidate failure/error IDs also occur on base. Eight baseline fixture-contract failures corrected; two other baseline-only viewer failures reflect missing node_modules there. pwsh unavailable; equivalent pytest parallel/serial routing and thread caps used. Independent scoped review complete.
+
+No whole-suite/Windows/camera/physical claim. Existing release ZIP unchanged; candidate is not merged into final by this work. Historical LAST_REVIEWED_HEAD unchanged. Details: docs/CONTROL_RECOVERY_FIX_20261107.md and reports/control-recovery-20261107/test-results.json.

@@ -992,3 +992,10 @@ Current need-review robot-PvP code is integrated into final r2, locally verified
 ## 2026-11-07 final — obsolete quickstart superseded; hardware gaps unchanged
 
 The 2026-09-09 quickstart did not match current final: it described calibration at piece centres, a camera-based dry-run/disconnected path, and unsafe motion-error/exit recovery assumptions. README is now the current user handbook and the old quickstart redirects to it. Guidance is traced to `005f95539531c32601232cdeeec3cca4185f32d9`; validation in this change is static documentation checking only. No runtime, controller recovery, post-interruption trajectory, loaded gripper, clean-PC or full-game acceptance claim. Existing OPEN findings and the separate capsule release boundary remain unchanged.
+
+
+## 2026-11-07 control recovery — candidate fixes and open boundaries
+
+FIXED IN CANDIDATE (mock/SDL verified): F2/home pending retry deadlock; self-play FAULTED F12 dispatch; obsolete recovery mouse hit boxes; retained-retry mouse clear-error guard; hidden game-over recovery hit regions. Manual-test closing selects existing test reconciliation. F8 end-match behavior is preserved and handbook corrected. See docs/CONTROL_RECOVERY_FIX_20261107.md.
+
+OPEN: full parallel gate is not green (candidate 27 FAIL/38 ERROR; all 65 IDs also reproduced on base). Missing PyBullet prevents physics collection/setup; missing OCCT assets, camera/telemetry fixture/contracts, and existing game/twin sync failure need separate investigation. Baseline comparison does not establish physical safety or whole-system acceptance. No new Windows ZIP was built; downloaded release still contains previous runtime. Camera recognition staleness/GPU-machine differences, complete Windows game, second-PC camera and physical FR3 acceptance remain unverified. No physical operations performed.
