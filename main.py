@@ -732,14 +732,13 @@ try:
                 elif event.key == pygame.K_F8 and self_play is not None:
                     self_play.end_match()
                 elif self_play is not None and self_play.recovery_input_allowed:
-                    if event.key in (pygame.K_v, pygame.K_F4, pygame.K_1, pygame.K_2):
+                    if event.key in (pygame.K_v, pygame.K_F4, pygame.K_1, pygame.K_2, pygame.K_F12):
                         input_mgr.handle_keyboard(event.key)
                 elif self_play is None or not self_play.human_input_disabled:
                     input_mgr.handle_keyboard(event.key)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if hw.motion_worker.busy:
                     continue
-                from src.ui.board_renderer import BTN_CONTINUE_RECT
                 if self_play is not None and self_play.status.value == "pick_paused":
                     from src.ui.board_renderer import BoardRenderer, BTN_SCAN_FEN_RECT
                     render_state = state.get_render_state()
@@ -748,8 +747,18 @@ try:
                         self_play.retry_visual_pick(source=("V" if BTN_SCAN_FEN_RECT.collidepoint(event.pos) else "CONTINUE"))
                         continue
                 if self_play is not None and self_play.recovery_input_allowed:
-                    from src.ui.board_renderer import BTN_NEW_GAME_RECT, BTN_SCAN_FEN_RECT
-                    if BTN_NEW_GAME_RECT.collidepoint(event.pos) or BTN_SCAN_FEN_RECT.collidepoint(event.pos) or BTN_CONTINUE_RECT.collidepoint(event.pos):
+                    from src.ui.board_renderer import BoardRenderer
+                    render_state = state.get_render_state()
+                    controls_visible = not render_state.get('game_over', False)
+                    actions = BoardRenderer.client_action_controls(render_state) if controls_visible else ()
+                    recovery_hit = any(rect.collidepoint(event.pos) for rect, key, _labels, _color in actions
+                                       if key in (pygame.K_v, pygame.K_F12))
+                    can_continue = (controls_visible and bool(render_state.get('snapshot_continue_required')
+                                    or render_state.get('visual_pick_retry')
+                                    or render_state.get('test_pick_retry')))
+                    continue_hit = (can_continue and
+                                    BoardRenderer.client_continue_rect(render_state, actions).collidepoint(event.pos))
+                    if BTN_NEW_GAME_RECT.collidepoint(event.pos) or recovery_hit or continue_hit:
                         input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
                     continue
                 if self_play is not None and self_play.human_input_disabled:

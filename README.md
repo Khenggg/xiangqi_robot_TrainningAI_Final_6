@@ -4,9 +4,9 @@ Giải nén **toàn bộ ZIP** → mở **START.bat** → chọn môi trường 
 
 # Xiangqi Robot — Sổ tay sử dụng
 
-Hướng dẫn cho người chơi và người vận hành hệ thống cờ tướng có camera, AI Moonfish và cánh tay **FAIRINO FR3**. Các tên nút/phím bên dưới được đối chiếu với code nhánh `final` tại [`005f955`](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/tree/005f95539531c32601232cdeeec3cca4185f32d9), ngày **07/11/2026**.
+Hướng dẫn cho người chơi và người vận hành hệ thống cờ tướng có camera, AI Moonfish và cánh tay **FAIRINO FR3**. Sổ tay được đối chiếu với code nền nhánh `final` tại [`9b4c515`](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/tree/9b4c515241834241e85974799ddcf0189af54af6) và bản vá điều phối phục hồi đi kèm, ngày **07/11/2026**. Xem [phạm vi bản vá và kết quả kiểm thử](docs/CONTROL_RECOVERY_FIX_20261107.md).
 
-**Phạm vi kiểm chứng:** tài liệu mô tả hành vi từ code và cấu hình; lần cập nhật sổ tay này chưa chạy thử camera, robot thật hay một ván hoàn chỉnh trên Windows. Các vấn đề phần cứng còn mở được nêu ở [Giới hạn hiện tại](#gioi-han).
+**Phạm vi kiểm chứng:** 337 ca kiểm thử liên quan tới điều khiển/phục hồi đạt trên Linux với thiết bị giả lập; đây không phải kết quả toàn bộ bộ test. Chưa chạy thử camera, robot thật hay một ván hoàn chỉnh trên Windows. Bản ZIP tải ở đầu trang chưa được đóng gói lại với bản vá này. Các vấn đề phần cứng còn mở được nêu ở [Giới hạn hiện tại](#gioi-han).
 
 [![Video demo Xiangqi Robot — bấm để xem trên YouTube](https://img.youtube.com/vi/PShKIGPRk10/hqdefault.jpg)](https://youtu.be/PShKIGPRk10)
 
@@ -150,8 +150,8 @@ Muốn robot gắp cho cả hai người, chọn **2 NGƯỜI + ROBOT** thay vì
 1. Chọn môi trường → **ROBOT VS ROBOT** → độ khó chung cho hai AI.
 2. Ở mô phỏng, khi executor sẵn sàng, chọn độ khó xong có thể bắt đầu chạy liên tục ngay. Chuẩn bị trước khi vào chế độ.
 3. Ở physical, hoàn tất kiểm tra/bật quyền robot; **F6** bắt đầu self-play liên tục khi đủ điều kiện.
-4. **F8** yêu cầu dừng. Chờ trạng thái dừng và đối soát nếu có nước đang dở. F8 không thay E-stop.
-5. Sau khi phục hồi, chỉ khởi động lại bằng F6 khi không còn nước/checkpoint/test chưa giải quyết.
+4. **F8** yêu cầu kết thúc self-play hiện tại. Chờ xác nhận dừng và đối soát nếu có nước đang dở. F8 không thay E-stop.
+5. Muốn chơi tiếp một ván mới: xử lý hết pending/checkpoint → **NEW GAME** → kiểm tra/xếp lại bàn; với physical, V xác nhận và bật lại quyền robot khi đủ điều kiện → **F6**. F6 không tiếp tục nguyên ván vừa kết thúc bằng F8.
 
 Nếu self-play đang **PICK_PAUSED**, dùng Y/V để đo lại hoặc F8 để dừng và xử lý pending. Nút đầu hàng không được nhận ở mọi trạng thái của self-play; nếu bấm chưa có tác dụng, đọc trạng thái thay vì bấm liên tục.
 
@@ -240,7 +240,7 @@ Khi camera hoặc bàn xê dịch, góc nhìn/độ phân giải/focus thay đ�
 
 | Mục đích | Thao tác | Điều cần đợi/kiểm tra |
 |---|---|---|
-| Tạm dừng | **F8** | Có thể yêu cầu controlled stop; chờ worker và bằng chứng dừng. Không tự thả quân đang kẹp |
+| Dừng phiên | **F8** | Self-play: kết thúc phiên, muốn chơi lại cần NEW GAME rồi F6. Các phiên khác: yêu cầu pause/controlled stop và tiếp tục theo UI sau đối soát. Chờ worker/bằng chứng dừng; không tự thả quân đang kẹp |
 | Chơi ván mới | **NEW GAME** | Đợi dừng/đối soát giao dịch trước; physical cần tự xếp lại 32 quân, V xác nhận rồi kích hoạt riêng |
 | Đổi môi trường/kiểu chơi | **F2 / CHỌN CHẾ ĐỘ** | Phiên cũ cần được đóng có kiểm soát; nếu bị giữ lại, xử lý panel phục hồi rồi thử F2 |
 | Đầu hàng | **SURRENDER** | Khi đang chạy, yêu cầu được giữ để chờ xử lý nước hiện tại và dừng/đối soát; không nhất thiết kết thúc ngay |
@@ -362,7 +362,7 @@ Log đánh số **hàng 0–9, cột 0–8**. Ô `b9` nghĩa cột `b = 1`, hàn
 
 ### 9.4. AI không đi
 
-Kiểm tra đang đúng lượt AI, đã chọn độ khó, không pause/recovery/test và physical đã được bật quyền. Với **ENGINE_FAILED / Engine failed; board unchanged**, kiểm tra engine Moonfish rồi **F5** khi không có lỗi đồng bộ. F5 không sửa lỗi robot/camera. Với ROBOT VS ROBOT, kiểm tra F8 đã dừng trước đó hay chưa và dùng F6 khi đủ điều kiện. Với 2 NGƯỜI + ROBOT/HUMAN VS HUMAN không có AI tự đi.
+Kiểm tra đang đúng lượt AI, đã chọn độ khó, không pause/recovery/test và physical đã được bật quyền. Với **ENGINE_FAILED / Engine failed; board unchanged**, kiểm tra engine Moonfish rồi **F5** khi không có lỗi đồng bộ. F5 không sửa lỗi robot/camera. Với ROBOT VS ROBOT, nếu đã kết thúc bằng F8 thì cần NEW GAME trước F6; giải quyết hết giao dịch đang dở và kiểm tra lại quyền robot khi dùng physical. Với 2 NGƯỜI + ROBOT/HUMAN VS HUMAN không có AI tự đi.
 
 <a id="phim-tat"></a>
 ## 10. Bảng nút và phím tắt
@@ -381,7 +381,7 @@ Phím game áp dụng khi **cửa sổ game chính** được chọn; các thao 
 | F5 | Lỗi AI, không lỗi đồng bộ | Yêu cầu AI tính lại |
 | F6 | ROBOT VS ROBOT | Bắt đầu self-play continuous khi đủ điều kiện |
 | F7 / NƯỚC TIẾP | Self-play READY | Yêu cầu nước tiếp; không phải nút chọn step mode |
-| F8 | Phiên đang mở | Dừng self-play hoặc yêu cầu pause/controlled stop; không phải E-stop |
+| F8 | Phiên đang mở | Kết thúc self-play (NEW GAME rồi F6 để mở ván mới), hoặc yêu cầu pause/controlled stop trong phiên khác; không phải E-stop |
 | F9 → F10 | Physical sau kiểm tra | Bắt đầu/xác nhận quyền chuyển động trong 30 giây |
 | Ctrl+F8 | Phục hồi stop khi được yêu cầu | Xác nhận đã kiểm tra tay/kẹp dừng; đọc lại bằng chứng dừng |
 | Ctrl+F9 | Chỉ khi UI yêu cầu sau disable chưa rõ | Xác nhận controller đã được disable trên pendant |

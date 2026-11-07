@@ -118,3 +118,30 @@ def test_shared_ai_engine_request_response_is_serialized():
     assert ai._engine_request_lock.locked()
     release_first.set();first.join(2);second.join(2)
     assert not overlap and results==[[1],[2]]
+
+
+def test_f8_ends_selfplay_and_requires_new_game_before_f6_restart(monkeypatch):
+    """The operator manual must not promise resume after a durable match end."""
+    import config
+    import threading
+    monkeypatch.setattr(config, 'GAME_MODE', 'ROBOT_VS_ROBOT')
+    monkeypatch.setattr('src.core.game_state.TuongKyDaiSuClient', lambda *a: Mock(token=None, room_id=None))
+    state = GameState()
+    done = threading.Event(); done.set()
+    hw = SimpleNamespace(
+        dry_run=True, simulation_runtime=object(), is_robot_ready=True,
+        config=SimpleNamespace(GAME_MODE='ROBOT_VS_ROBOT', ROBOT_BACKEND='VIRTUAL', GAME_ONLY=True),
+        execute_piece_move=Mock(), capture_baseline_if_needed=Mock(return_value=True),
+        request_controlled_stop=lambda *a, **kw: SimpleNamespace(done=done, result=SimpleNamespace(safe=True)),
+        stop_coordinator=SimpleNamespace(safe_for_release=lambda **kw: True))
+    ctrl = SelfPlayController(state, hw)
+    assert ctrl.start('easy', 'easy')
+    assert ctrl.end_match()
+    assert state._match_end_intent == {'winner': 'DRAW', 'reason': 'OTHER'}
+    assert ctrl.finish_recovery()
+    assert not ctrl.start('easy', 'easy')
+    assert 'New Game' in state.status_message
+    state.reset_game(hw)
+    assert state._match_end_intent is None
+    assert ctrl.start('easy', 'easy')
+    hw.execute_piece_move.assert_not_called()
