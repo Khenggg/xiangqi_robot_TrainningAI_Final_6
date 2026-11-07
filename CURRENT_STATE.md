@@ -1121,3 +1121,12 @@ TEST_EVIDENCE: 66 focused tests PASS exit0; actual packaged --smoke PASS; untouc
 ## 2026-11-05 final capsule r2 — delivery branch corrected
 
 User selected final. Merged need-review55c5fd5 into final, preserving current robot-PvP/session/exit code and capsule runtime. New final-r2 ZIP386748507bytes, SHA256 c0616011ef822978d269744516d1f99c0796e76419bb28cdab49374d4c227e15.105 tests rerun PASS; untouched final ZIP Unicode relocation/bundled models/world/Black child/menu-exit checks PASS. README first heading downloads final-r2. No physical/second-PC/full-suite claim; LAST_REVIEWED_HEAD unchanged. Evidence: reports/final-capsule-r2-20261105/REPORT.md.
+
+
+## 2026-11-07 final — user handbook (documentation only)
+
+Scope baseline: `005f95539531c32601232cdeeec3cca4185f32d9` on `final`. Replaced README's developer-oriented overview with a Vietnamese operator handbook covering capsule/source startup, three environments/four game modes, actual mouse/keyboard controls, camera calibration, physical enable, stop/session/end flows, pre-pick retry versus post-motion reconciliation, diagnostics and evidence collection. Replaced obsolete `docs/USER_MANUAL_QUICKSTART.md` with a pointer to the handbook, removing outdated centre-of-piece calibration, dry-run/disconnect and motion-error recovery advice. Download/video links retained; release ZIP is unchanged.
+
+VERIFIED_FIXED (documentation scope only): stale quickstart instructions retired. No runtime/configuration/calibration changes or hardware calls.
+
+TEST_EVIDENCE: `git diff --check` PASS (exit 0); static Markdown validation PASS (exit 0, 66 local file/explicit-anchor links, balanced code fences/table row endings). Download asset matched the GitHub release metadata. Controls and failure guidance checked against current launch/menu/input/session/hardware/camera/journal code. Application tests, Windows UI, clean second-PC, camera and FR3 physical acceptance NOT RUN for this documentation-only change. Existing physical and broader-regression gaps remain OPEN. Historical `LAST_REVIEWED_HEAD` is intentionally unchanged; this is not a whole-branch functional review.

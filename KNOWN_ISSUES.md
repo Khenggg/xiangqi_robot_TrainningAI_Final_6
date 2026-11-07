@@ -987,3 +987,8 @@ Dated Windows x64 CPU ZIP is built; 66 scoped tests and isolated/Unicode-relocat
 ## 2026-11-05 final r2 capsule boundary
 
 Current need-review robot-PvP code is integrated into final r2, locally verified with105tests plus actual bundled runtime/Unicode relocation/Black child/socket/menu probes. Clean second-PC and actual event-kit camera/robot acceptance remain OPEN; prior hardware and broader regression gaps are not cleared by packaging. No hardware access. See reports/final-capsule-r2-20261105/REPORT.md.
+
+
+## 2026-11-07 final — obsolete quickstart superseded; hardware gaps unchanged
+
+The 2026-09-09 quickstart did not match current final: it described calibration at piece centres, a camera-based dry-run/disconnected path, and unsafe motion-error/exit recovery assumptions. README is now the current user handbook and the old quickstart redirects to it. Guidance is traced to `005f95539531c32601232cdeeec3cca4185f32d9`; validation in this change is static documentation checking only. No runtime, controller recovery, post-interruption trajectory, loaded gripper, clean-PC or full-game acceptance claim. Existing OPEN findings and the separate capsule release boundary remain unchanged.
