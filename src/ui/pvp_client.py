@@ -1,14 +1,27 @@
 """Hardware-free Black player. Board updates arrive only from the room host."""
 import argparse
 import math
+import os
 import queue
 import time
 
 import pygame
 
 from src.core.pvp_room import LocalRoomClient, ROOM_ALPHABET
+from src.ui.board_renderer import (
+    BLACK_PIECE_COLOR,
+    BOARD_COLOR,
+    GOLD_COLOR,
+    JADE_DARK,
+    LINE_COLOR,
+    PIECE_DISPLAY_NAMES,
+    RED_PIECE_COLOR,
+    piece_symbol_font,
+)
 
-NAMES = {'K': 'Tg', 'A': 'Sĩ', 'E': 'Tư', 'N': 'Mã', 'R': 'Xe', 'C': 'Ph', 'P': 'Tốt'}
+# Piece type letters used by the room protocol; the glyph shown on a token comes
+# from PIECE_DISPLAY_NAMES so both windows draw the same characters per side.
+NAMES = ('K', 'A', 'E', 'N', 'R', 'C', 'P')
 
 
 def view_cell(cell):
@@ -23,7 +36,7 @@ class ClientBoard:
         self.snapshot = None
         self.seen_at = 0
         self.pending = None
-        self.status = 'Nhập mã phòng trên máy chủ để tham gia bên Đen.'
+        self.status = 'Enter the room code from the host to join as Black.'
 
     def receive(self, packet):
         kind = packet.get('type')
@@ -43,15 +56,15 @@ class ClientBoard:
             if self.snapshot and (packet['epoch'], packet['revision']) != (self.snapshot['epoch'], self.snapshot['revision']):
                 self.pending = None
             self.board, self.snapshot, self.seen_at = [row[:] for row in board], dict(packet), time.monotonic()
-            self.status = packet.get('blocked') or packet.get('status') or 'Đã đồng bộ bàn từ máy chủ.'
+            self.status = packet.get('blocked') or packet.get('status') or 'Board synced from the host.'
         elif kind in ('move_result', 'move_finished') and packet.get('request_id') == self.pending:
-            self.status = packet.get('reason') or 'Đã nhận phản hồi'
+            self.status = packet.get('reason') or 'Response received'
             if kind == 'move_finished' or not packet.get('accepted'):
                 self.pending = None
         elif kind in ('disconnected', 'error', 'rejected'):
             self.board = self.snapshot = None
             self.pending = None
-            self.status = packet.get('reason') or 'Đã mất kết nối. Kết nối lại và chọn nước mới; không tự gửi lại.'
+            self.status = packet.get('reason') or 'Disconnected. Reconnect and choose a new move; nothing is resent automatically.'
 
     def can_move(self, connected):
         s = self.snapshot
@@ -61,16 +74,17 @@ class ClientBoard:
 
 
 class ClientApp:
-    width, height, grid = 960, 850, 65
-    origin = (220, 170)
+    width, height, grid = 960, 900, 62
+    origin = (230, 200)
 
     def __init__(self, room=None):
         pygame.init()
-        pygame.display.set_caption('Xiangqi — Người Đen / điều khiển qua máy chủ')
+        pygame.display.set_caption('Xiangqi — Black player (host-driven robot)')
         self.screen = pygame.display.set_mode((self.width, self.height))
+        self.background = self._load_background()
         self.font = pygame.font.SysFont('segoeui', 21)
         self.small = pygame.font.SysFont('segoeui', 18)
-        self.piece_font = pygame.font.SysFont('segoeui', 19, bold=True)
+        self.piece_font = piece_symbol_font(27)
         self.model = ClientBoard()
         self.client = None
         self.code = room or ''
@@ -80,6 +94,16 @@ class ClientApp:
         if room:
             self.join()
 
+    def _load_background(self):
+        """Reuse the Ink & Jade art from the main window so both boards match."""
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        path = os.path.join(root, "assets", "ui", "ink-jade-landscape-1440x1080.png")
+        try:
+            image = pygame.image.load(path)
+            return pygame.transform.smoothscale(image, (self.width, self.height))
+        except (pygame.error, OSError):
+            return None
+
     def join(self):
         if self.client:
             self.client.close()
@@ -87,7 +111,7 @@ class ClientApp:
         self.model.receive(dict(type='disconnected'))
         try:
             self.client = LocalRoomClient(self.code.strip().upper())
-            self.model.status = 'Đang kết nối...'
+            self.model.status = 'Connecting...'
         except ValueError as exc:
             self.client = None
             self.model.status = str(exc)
@@ -125,7 +149,7 @@ class ClientApp:
                     request = self.client.send_move(self.selected, cell, s['revision'], s['epoch'])
                     if request:
                         self.model.pending = request
-                        self.model.status = 'Đã gửi; chờ robot và máy chủ xác nhận. Không bấm gửi lại.'
+                        self.model.status = 'Sent; waiting for the robot and host to confirm. Do not send again.'
                     self.selected = None
         return True
 
@@ -145,35 +169,50 @@ class ClientApp:
                     self.selected = None
 
     def draw(self):
-        self.screen.fill((247, 242, 225))
+        if self.background is not None:
+            self.screen.blit(self.background, (0, 0))
+        else:
+            self.screen.fill(BOARD_COLOR)
         def label(text, pos, color=(29, 67, 58), font=None):
             self.screen.blit((font or self.font).render(text, True, color), pos)
         pygame.draw.rect(self.screen, (255,255,255), self.code_rect, border_radius=6)
-        pygame.draw.rect(self.screen, (23,112,89), self.join_rect, border_radius=6)
-        label('Mã phòng: '+self.code, (230,46))
-        label('KẾT NỐI / KẾT NỐI LẠI', (665,46), (255,255,255), self.small)
-        label('Bạn: ĐEN — chọn quân rồi ô đến. Robot do máy chủ điều khiển.', (150,105))
+        pygame.draw.rect(self.screen, JADE_DARK, self.join_rect, border_radius=6)
+        label('Room code: '+self.code, (230,46))
+        label('CONNECT / RECONNECT', (665,46), (255,255,255), self.small)
+        intro_strip = pygame.Surface((720, 30), pygame.SRCALPHA)
+        intro_strip.fill((248, 238, 211, 215))
+        self.screen.blit(intro_strip, (144, 92))
+        label('You: BLACK — pick a piece, then a destination. The host drives the robot.', (150, 96))
         x, y = self.origin
-        pygame.draw.rect(self.screen, (229,197,133), (x-35,y-35,self.grid*8+70,self.grid*9+70))
+        board_w, board_h = self.grid * 8, self.grid * 9
+        # Same parchment tray and jade/gold frame as the host window.
+        # Wider top/left bands so the file letters and rank numbers clear the tokens.
+        tray = pygame.Rect(x - 52, y - 56, board_w + 52 + 34, board_h + 56 + 34)
+        pygame.draw.rect(self.screen, GOLD_COLOR, tray.inflate(12, 12), border_radius=18)
+        parchment = pygame.Surface(tray.size, pygame.SRCALPHA)
+        parchment.fill((248, 238, 211, 222))
+        self.screen.blit(parchment, tray.topleft)
+        pygame.draw.rect(self.screen, JADE_DARK, tray, width=3, border_radius=14)
+        pygame.draw.rect(self.screen, GOLD_COLOR, tray.inflate(-14, -14), width=2, border_radius=9)
         for col in range(9):
             if col in (0,8):
-                pygame.draw.line(self.screen, (92,69,41), (x+col*self.grid,y), (x+col*self.grid,y+9*self.grid))
+                pygame.draw.line(self.screen, LINE_COLOR, (x+col*self.grid,y), (x+col*self.grid,y+9*self.grid), 2)
             else:
-                pygame.draw.line(self.screen, (92,69,41), (x+col*self.grid,y), (x+col*self.grid,y+4*self.grid))
-                pygame.draw.line(self.screen, (92,69,41), (x+col*self.grid,y+5*self.grid), (x+col*self.grid,y+9*self.grid))
-            label(chr(ord('a')+8-col), (x+col*self.grid-5,y-32), font=self.small)
+                pygame.draw.line(self.screen, LINE_COLOR, (x+col*self.grid,y), (x+col*self.grid,y+4*self.grid), 2)
+                pygame.draw.line(self.screen, LINE_COLOR, (x+col*self.grid,y+5*self.grid), (x+col*self.grid,y+9*self.grid), 2)
+            label(chr(ord('a')+8-col), (x+col*self.grid-5,y-46), font=self.small)
         for row in range(10):
-            pygame.draw.line(self.screen, (92,69,41), (x,y+row*self.grid), (x+8*self.grid,y+row*self.grid))
-            label(str(9-row), (x-30,y+row*self.grid-10), font=self.small)
+            pygame.draw.line(self.screen, LINE_COLOR, (x,y+row*self.grid), (x+8*self.grid,y+row*self.grid), 2)
+            label(str(9-row), (x-44,y+row*self.grid-10), font=self.small)
         for start in (0,7):
             for a,b in ((3,5),(5,3)):
-                pygame.draw.line(self.screen, (92,69,41), (x+a*self.grid,y+start*self.grid),
-                                 (x+b*self.grid,y+(start+2)*self.grid))
+                pygame.draw.line(self.screen, LINE_COLOR, (x+a*self.grid,y+start*self.grid),
+                                 (x+b*self.grid,y+(start+2)*self.grid), 2)
         if self.model.snapshot:
-            side = 'Đỏ' if self.model.snapshot['turn'] == 'r' else 'Đen'
-            label('Lượt: '+side, (30,180), font=self.small)
+            side = 'Red' if self.model.snapshot['turn'] == 'r' else 'Black'
+            label('Turn: '+side, (30,180), font=self.small)
             if self.model.snapshot.get('busy'):
-                label('Robot đang đi', (30,210), font=self.small)
+                label('Robot moving', (30,210), font=self.small)
         for row in range(10):
             for col in range(9):
                 if not self.model.board:
@@ -184,14 +223,15 @@ class ClientApp:
                 vc, vr = view_cell((col,row))
                 center = (x+vc*self.grid, y+vr*self.grid)
                 pygame.draw.circle(self.screen, (255,250,232), center, 26)
-                color = (176,40,33) if piece.startswith('r') else (25,32,31)
+                color = RED_PIECE_COLOR if piece.startswith('r') else BLACK_PIECE_COLOR
                 pygame.draw.circle(self.screen, color, center, 26, 2)
-                text = self.piece_font.render(NAMES[piece[-1]], True, color)
+                glyph = PIECE_DISPLAY_NAMES.get(f'{piece[0]}_{piece[-1]}', '?')
+                text = self.piece_font.render(glyph, True, color)
                 self.screen.blit(text, text.get_rect(center=center))
                 if self.selected == (col,row):
                     pygame.draw.circle(self.screen, (34,146,110), center, 30, 3)
         stale = self.model.snapshot and time.monotonic()-self.model.seen_at >= 2
-        message = 'Trạng thái máy chủ đã cũ; tạm khóa chọn nước.' if stale else self.model.status
+        message = 'Host state is stale; move selection is locked.' if stale else self.model.status
         # Fit status without drawing over the board or outside the window.
         words, lines, line = str(message).split(), [], ''
         for word in words:
@@ -202,8 +242,11 @@ class ClientApp:
             else:
                 line = candidate
         lines.append(line)
+        strip = pygame.Surface((880, 22 * min(len(lines), 2) + 12), pygame.SRCALPHA)
+        strip.fill((248, 238, 211, 210))
+        self.screen.blit(strip, (32, 840))
         for index, text in enumerate(lines[:2]):
-            label(text, (40,790+index*24), font=self.small)
+            label(text, (40, 846 + index * 22), font=self.small)
         pygame.display.flip()
 
     def close(self):

@@ -33,7 +33,7 @@ def test_mouse_then_space_and_button_commit_once_without_camera(offline):
     assert state.turn == "b" and state.human_commit_generation == 1
     handler.handle_keyboard(pygame.K_SPACE)
     handler.handle_mouse_down(*BTN_CONFIRM_MOVE_RECT.center)
-    assert "không cần SPACE" in state.status_message
+    assert "không cần SPACE" in state.status_message  # input_handler status, still Vietnamese
     assert len(state.move_log) == 1 and state.human_commit_generation == 1
     observer.assert_called_once_with(state.piece_ids)
 
@@ -86,17 +86,17 @@ def test_renderer_shows_offline_instructions_and_robot_turn(offline, monkeypatch
         renderer.ui_font = renderer.button_font = renderer.log_font = RecordingFont()
         state, handler, _ = offline
         renderer._draw_client_actions(state.get_render_state())
-        assert "TỰ XÁC NHẬN" in recorded and "NƯỚC ĐỎ" not in recorded
+        assert "AUTO CONFIRM" in recorded and "RED MOVE" not in recorded
         move_mouse(handler, (4, 6), (4, 5))
         state.status_expiry = 0
         renderer._draw_ai_status(state.get_render_state())
-        assert any("Lượt robot" in text for text in recorded)
+        assert any("Robot turn" in text for text in recorded)
         assert not any("then confirm with SPACE" in text for text in recorded)
         recorded.clear()
         state.move_sync_error = "retained motion error"
         state.status_expiry = 0
         renderer._draw_ai_status(state.get_render_state())
         assert any("retained motion error" in text for text in recorded)
-        assert not any("Lượt robot" in text for text in recorded)
+        assert not any("Robot turn" in text for text in recorded)
     finally:
         pygame.display.quit()

@@ -7,7 +7,7 @@ import pygame
 def _confirm_without_window():
     import ctypes
     return ctypes.windll.user32.MessageBoxW(
-        None, "Bạn có muốn thoát ứng dụng không?", "Thoát ứng dụng", 0x124) == 6
+        None, "Do you want to exit the application?", "Exit application", 0x124) == 6
 
 
 def confirm_exit():
@@ -30,10 +30,10 @@ def confirm_exit():
         no = pygame.Rect(panel.centerx + 6, panel.bottom - 68, button_width, 44)
         pygame.draw.rect(surface, (245, 240, 224), panel, border_radius=12)
         pygame.draw.rect(surface, (20, 105, 87), panel, width=2, border_radius=12)
-        question = font.render("Bạn có muốn thoát ứng dụng?", True, (30, 44, 40))
+        question = font.render("Do you want to exit the application?", True, (30, 44, 40))
         surface.blit(question, question.get_rect(center=(panel.centerx, panel.top + 52)))
-        for rect, label, color in ((yes, "THOÁT (Enter)", (166, 51, 43)),
-                                   (no, "Ở LẠI (Esc)", (20, 105, 87))):
+        for rect, label, color in ((yes, "EXIT (Enter)", (166, 51, 43)),
+                                   (no, "STAY (Esc)", (20, 105, 87))):
             pygame.draw.rect(surface, color, rect, border_radius=6)
             text = small.render(label, True, (255, 255, 255))
             surface.blit(text, text.get_rect(center=rect.center))
