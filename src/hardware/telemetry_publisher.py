@@ -23,6 +23,21 @@ except ImportError:
     WebSocketServerProtocol = None
 
 
+def _packet_sequence(message):
+    """Coalescing order for one state channel.
+
+    Payloads are normally JSON objects, but callers may publish any JSON value
+    (a bare number or string is valid JSON). Only objects can carry packet_seq,
+    so anything else is treated as sequence zero instead of raising inside the
+    dispatch path, where an exception would stall every viewer on that channel.
+    """
+    try:
+        decoded = json.loads(message)
+    except (TypeError, ValueError):
+        return 0
+    return decoded.get("packet_seq", 0) if isinstance(decoded, dict) else 0
+
+
 class FR5Kinematics:
     """
     Standard Fairino FR5 6-DOF Kinematics (DH parameters in meters / radians).
@@ -223,7 +238,7 @@ class TelemetryPublisher:
                   code="PORT_BUSY" if isinstance(self._server_error, OSError) else "STARTUP_FAILED",
                   host=self.host, port=self.port)
             self.stop()
-            raise RuntimeError(f"Telemetry server startup failed: {self._server_error}")
+            raise RuntimeError(f"Telemetry server startup failed: {self._server_error}") from self._server_error
 
         # Start continuous 30 FPS heartbeat publisher
         self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True, name="TelemetryHeartbeatThread")
@@ -502,8 +517,7 @@ class TelemetryPublisher:
         with self._dispatch_lock:
             if state_key:
                 previous = self._pending_states.get(state_key)
-                if (previous is not None
-                        and json.loads(previous).get("packet_seq", 0) > json.loads(message).get("packet_seq", 0)):
+                if previous is not None and _packet_sequence(previous) > _packet_sequence(message):
                     return
                 self._pending_states[state_key] = message
             else:

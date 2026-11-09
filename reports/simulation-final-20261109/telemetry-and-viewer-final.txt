@@ -1,0 +1,92 @@
+============================================================
+ Xiangqi Robot -- Fast Parallel Test Runner
+============================================================
+Mode        : Full (Workers: 2)
+Targets     : tests/unit/test_virtual_telemetry_startup.py
+Base Marker : not slow
+Dist Scheme : worksteal
+Thread Caps : OMP=1, MKL=1, OPENBLAS=1, NUMEXPR=1
+Repo Root   : D:\OJT\xiangqi_robot_TrainningAI_Final_6
+
+>>> Part A: Running Parallel-Safe Tests (-n 2) ...
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_TrainningAI_Final_6
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+created: 2/2 workers
+2 workers [6 items]
+
+..F..
+================================== FAILURES ===================================
+__ test_busy_virtual_port_gets_owned_live_stream_and_actual_viewer_url[True] __
+[gw0] win32 -- Python 3.12.10 D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Scripts\python.exe
+
+startup_environment = (WindowsPath('C:/Users/Ken/AppData/Local/Temp/pytest-of-Ken/pytest-27/popen-gw0/test_busy_virtual_port_gets_ow1'), nam...rtual_telemetry_startup.startup_environment.<locals>.Manager object at 0x0000028DADE2F5C0>], <Mock id='2807531289680'>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000028DAB781790>
+viewer_busy = True
+
+    @pytest.mark.parametrize("viewer_busy", [False, True])
+    def test_busy_virtual_port_gets_owned_live_stream_and_actual_viewer_url(startup_environment, monkeypatch, viewer_busy):
+        root, state, options, created, browser = startup_environment
+        server_threads = []
+    
+        class ObservedPublisher(TelemetryPublisher):
+            def start(self):
+                try:
+                    return super().start()
+                finally:
+                    server_threads.append(self._server_thread)
+    
+        monkeypatch.setattr(session_startup, "TelemetryPublisher", ObservedPublisher)
+        with ExitStack() as owners:
+            occupied = owners.enter_context(socket.socket())
+            occupied.bind(("127.0.0.1", 0))
+            occupied.listen(1)
+            requested_port = occupied.getsockname()[1]
+            if viewer_busy:
+                occupied_http = owners.enter_context(socket.socket())
+                occupied_http.bind(("127.0.0.1", 0))
+                occupied_http.listen(1)
+                options.viewer_port = occupied_http.getsockname()[1]
+            hw = telemetry = viewer = None
+            try:
+                hw, telemetry, viewer, reason = session_startup.build_session(
+                    config(requested_port), options, root, state, mode="SIMULATION")
+                assert telemetry is not None, "A virtual game must retain its live arm stream"
+                assert telemetry.port not in (0, requested_port)
+                assert hw.telemetry is telemetry and hw.bridge.telemetry is telemetry
+                assert hw.backend.telemetry_publisher is telemetry
+                assert hw.simulation_runtime.telemetry is telemetry
+                assert telemetry._command_handlers == [hw.command_handler]
+                assert len(server_threads) == 2 and server_threads[0] is not server_threads[1]
+                assert not server_threads[0].is_alive()
+>               assert reason is None
+E               AssertionError: assert 'Viewer unavailable: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions; check assets or --viewer-port' is None
+
+tests\unit\test_virtual_telemetry_startup.py:121: AssertionError
+---------------------------- Captured stdout call -----------------------------
+[TELEMETRY] Server loop terminated: [Errno 10048] error while attempting to bind on address ('127.0.0.1', 55146): [winerror 10048] only one usage of each socket address (protocol/network address/port) is normally permitted
+[TELEMETRY] Virtual Robot Telemetry Server started at ws://127.0.0.1:55152
+------------------------------ Captured log call ------------------------------
+ERROR    xiangqi:telemetry_publisher.py:222 [Errno 10048] error while attempting to bind on address ('127.0.0.1', 55146): [winerror 10048] only one usage of each socket address (protocol/network address/port) is normally permitted\nWARNING  xiangqi:session_startup.py:131 M\xf4 ph\u1ecfng d\xf9ng c\u1ed5ng WebSocket tr\u1ed1ng
+============================== warnings summary ===============================
+src\hardware\telemetry_publisher.py:20
+src\hardware\telemetry_publisher.py:20
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_virtual_telemetry_startup.py::test_busy_virtual_port_gets_owned_live_stream_and_actual_viewer_url[True]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!! xdist.dsession.Interrupted: stopping after 1 failures !!!!!!!!!!!!
+================== 1 failed, 4 passed, 4 warnings in 10.36s ===================
+Part A FAILED with exit code 2
+
+=== TEST SUITE FAILED (exit code 2) in 12.35s ===

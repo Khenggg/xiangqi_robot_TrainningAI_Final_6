@@ -21,6 +21,7 @@ import {
 } from "./board.mjs";
 import { buildCoordinateRulerGroup, createDimensionTape } from "./ruler.mjs";
 import { inspectBoardPlacementPacket, canSendLiveCommand } from "./placement_integrity.mjs";
+import { computePlacementMetrics, formatMetric, placementAxisLabel } from "./placement_metrics.mjs";
 
 // ---------------------------------------------------------------------------
 // 1) CẤU HÌNH ROBOT & KINEMATICS DYNAMIC LOADER
@@ -1113,165 +1114,38 @@ function syncAllJointSliders() {
 // ---------------------------------------------------------------------------
 // 5.6) PHÂN TÍCH & ĐIỀU KHIỂN VỊ TRÍ BÀN CỜ ĐỘNG (DYNAMIC BOARD PLACEMENT)
 // ---------------------------------------------------------------------------
-export function computeGeometricPrecheck(d_mm, H_mm, z_board_mm = 10.5, yaw_deg = 90.0) {
-  const R = 650.0;
-  const L_tool = 150.0; // Canonical measured flange-to-TCP [MEASURED_APPROXIMATE] (CAD: 147.5mm, Legacy 218mm OBSOLETE)
-  const piece_h = 9.43;
-  const z_tcp_grasp = z_board_mm + piece_h / 2.0;
-  const z_flange_grasp = z_tcp_grasp + L_tool;
-  const z_flange_app = z_board_mm + H_mm + L_tool;
-
-  const theta = (yaw_deg * Math.PI) / 180.0;
-  const sinT = Math.sin(theta);
-  const cosT = Math.cos(theta);
-
-  const robCenterX_mm = -(360.0 + d_mm);
-  const robCenterY_mm = 0.0;
-
-  // Evaluate all 90 cells to find extrema dynamically via BoardPose
-  let maxFlangeAppDist = 0.0;
-  let maxFlangeGraspDist = 0.0;
-  let maxGridDist = 0.0;
-  let minGridDist = Infinity;
-  let minGridDepth = Infinity;
-  let maxGridDepth = 0.0;
-  let farthestCell = [0, 8];
-  let nearestCell = [4, 0];
-  let farX = -(520.0 + d_mm);
-  let farY = 180.0;
-
-  for (let r = 0; r < 10; r++) {
-    for (let c = 0; c < 9; c++) {
-      const u_mm = (c - 4.0) * 40.0;
-      const v_mm = (r - 4.5) * 40.0;
-      const cellX_mm = -sinT * u_mm - cosT * v_mm + robCenterX_mm;
-      const cellY_mm =  cosT * u_mm - sinT * v_mm + robCenterY_mm;
-
-      const gridDist = Math.hypot(cellX_mm, cellY_mm);
-      const gridDepth = Math.abs(cellX_mm);
-      const flangeGraspDist = Math.hypot(cellX_mm, cellY_mm, z_flange_grasp);
-      const flangeAppDist = Math.hypot(cellX_mm, cellY_mm, z_flange_app);
-
-      if (gridDist < minGridDist) {
-        minGridDist = gridDist;
-        nearestCell = [r, c];
-      }
-      if (gridDist > maxGridDist) {
-        maxGridDist = gridDist;
-      }
-      if (gridDepth < minGridDepth) {
-        minGridDepth = gridDepth;
-      }
-      if (gridDepth > maxGridDepth) {
-        maxGridDepth = gridDepth;
-      }
-      if (flangeAppDist > maxFlangeAppDist) {
-        maxFlangeAppDist = flangeAppDist;
-        farthestCell = [r, c];
-        farX = cellX_mm;
-        farY = cellY_mm;
-      }
-      if (flangeGraspDist > maxFlangeGraspDist) {
-        maxFlangeGraspDist = flangeGraspDist;
-      }
-    }
-  }
-
-  // Physical board corners (width 367mm along u, length 410mm along v)
-  const hw_mm = 367.0 / 2.0;
-  const hl_mm = 410.0 / 2.0;
-  const corners = [
-    [-hw_mm, -hl_mm],
-    [-hw_mm,  hl_mm],
-    [ hw_mm, -hl_mm],
-    [ hw_mm,  hl_mm],
-  ];
-  let nearEdgeDist = Infinity;
-  let farEdgeDist = 0.0;
-  for (const [cu, cv] of corners) {
-    const cx = -sinT * cu - cosT * cv + robCenterX_mm;
-    const absX = Math.abs(cx);
-    if (absX < nearEdgeDist) nearEdgeDist = absX;
-    if (absX > farEdgeDist) farEdgeDist = absX;
-  }
-  const boardCenterDist = Math.abs(robCenterX_mm);
-
-  // Dynamic d_max and H_max derived from farthest transformed cell
-  const rad_d = R * R - farY * farY - z_flange_app * z_flange_app;
-  const x_base_far = Math.abs(farX) - d_mm;
-  const d_max = rad_d >= 0 ? Math.sqrt(rad_d) - x_base_far : null;
-
-  const rad_h = R * R - farY * farY - farX * farX;
-  const H_max = rad_h >= 0 ? Math.sqrt(rad_h) - z_board_mm - L_tool : null;
-
-  const pass = maxFlangeGraspDist <= R && maxFlangeAppDist <= R && d_mm >= -20.0;
-
-  return {
-    D_far_grasp: maxFlangeGraspDist,
-    D_far_app: maxFlangeAppDist,
-    grasp_margin: R - maxFlangeGraspDist,
-    app_margin: R - maxFlangeAppDist,
-    d_max,
-    H_max,
-    pass,
-    nearest_cell: nearestCell,
-    nearest_cell_distance_mm: minGridDist,
-    farthest_cell: farthestCell,
-    farthest_cell_distance_mm: maxGridDist,
-    near_grid_depth_mm: minGridDepth,
-    far_grid_depth_mm: maxGridDepth,
-    near_board_edge_distance_mm: nearEdgeDist,
-    far_board_edge_distance_mm: farEdgeDist,
-    board_center_distance_mm: boardCenterDist,
-  };
+export function computeGeometricPrecheck(d_mm, H_mm, z_board_mm = null, yaw_deg = null) {
+  return computePlacementMetrics(getScenePlacement(), physicalGeometryRef, sceneToolLengthM, {
+    forwardShiftMm: d_mm, safeTransitHeightMm: H_mm,
+    surfaceZMm: z_board_mm, yawDeg: yaw_deg,
+  });
 }
 
 function updateGeometricPrecheckUI(d_mm, H_mm, z_off_mm = 0.0, yaw_deg = null) {
-  const activeYaw = yaw_deg !== null && yaw_deg !== undefined ? Number(yaw_deg) : Number(state.boardYawDeg ?? 0.0);
-  const z_board = 10.5 + z_off_mm;
-  const res = computeGeometricPrecheck(d_mm, H_mm, z_board, activeYaw);
-  const elD = document.getElementById("readoutShiftD");
-  const elNearGrid = document.getElementById("readoutNearGridDepth") || document.getElementById("readoutRow0Dist");
-  const elFarGrid = document.getElementById("readoutFarGridDepth") || document.getElementById("readoutRow9Dist");
-  const elNear = document.getElementById("readoutNearEdgeDist");
-  const elCenter = document.getElementById("readoutCenterDist");
-  const elFar = document.getElementById("readoutFarEdgeDist");
-  const elH = document.getElementById("readoutHVal");
-  const elYaw = document.getElementById("readoutBoardYaw");
-  if (elYaw) {
-    if (Math.abs(activeYaw) < 1.0) {
-      elYaw.textContent = "0.0° (col=-X, row=+Z)";
-    } else {
-      const sign = activeYaw > 0 ? "+" : "";
-      elYaw.textContent = `${sign}${activeYaw.toFixed(1)}° (col=-X, row=-Y)`;
-    }
+  const placement = getScenePlacement();
+  const activeYaw = yaw_deg ?? placement.boardYawDeg;
+  const nominalSurface = placement.boardSurfaceY - (placement.boardHeightOffsetMm ?? 0) / 1000;
+  const res = computeGeometricPrecheck(d_mm, H_mm, nominalSurface * 1000 + z_off_mm, activeYaw);
+  const fields = {
+    readoutShiftD: d_mm, readoutHVal: H_mm,
+    readoutNearGridDepth: res.near_grid_depth_mm, readoutFarGridDepth: res.far_grid_depth_mm,
+    readoutNearEdgeDist: res.near_board_edge_distance_mm, readoutCenterDist: res.board_center_distance_mm,
+    readoutFarEdgeDist: res.far_board_edge_distance_mm, readoutFarGraspDist: res.D_far_grasp,
+    readoutFarAppDist: res.D_far_app, readoutGraspMargin: res.grasp_margin,
+    readoutAppMargin: res.app_margin, readoutDMax: res.d_max, readoutHMax: res.H_max,
+  };
+  for (const [id, value] of Object.entries(fields)) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = formatMetric(value);
   }
-  const elFarGrasp = document.getElementById("readoutFarGraspDist");
-  const elFarApp = document.getElementById("readoutFarAppDist");
-  const elGraspMargin = document.getElementById("readoutGraspMargin");
-  const elAppMargin = document.getElementById("readoutAppMargin");
-  const elDMax = document.getElementById("readoutDMax");
-  const elHMax = document.getElementById("readoutHMax");
-  const badge = document.getElementById("geomPrecheckBadge");
-
-  if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
-  if (elNearGrid) elNearGrid.textContent = `${res.near_grid_depth_mm.toFixed(1)} mm`;
-  if (elFarGrid) elFarGrid.textContent = `${res.far_grid_depth_mm.toFixed(1)} mm`;
-  if (elNear) elNear.textContent = `${res.near_board_edge_distance_mm.toFixed(1)} mm`;
-  if (elCenter) elCenter.textContent = `${res.board_center_distance_mm.toFixed(1)} mm`;
-  if (elFar) elFar.textContent = `${res.far_board_edge_distance_mm.toFixed(1)} mm`;
-  if (elH) elH.textContent = `${H_mm.toFixed(1)} mm`;
-
-  if (elFarGrasp) elFarGrasp.textContent = `${res.D_far_grasp.toFixed(1)} mm`;
-  if (elFarApp) elFarApp.textContent = `${res.D_far_app.toFixed(1)} mm`;
-  if (elGraspMargin) elGraspMargin.textContent = `${res.grasp_margin.toFixed(1)} mm`;
-  if (elAppMargin) elAppMargin.textContent = `${res.app_margin.toFixed(1)} mm`;
-  if (elDMax) elDMax.textContent = res.d_max !== null ? `${res.d_max.toFixed(1)} mm` : "VÔ NGHIỆM";
-  if (elHMax) elHMax.textContent = res.H_max !== null ? `${res.H_max.toFixed(1)} mm` : "VÔ NGHIỆM";
-
+  const yaw = document.getElementById('readoutBoardYaw');
+  if (yaw) yaw.textContent = `${Number.isFinite(activeYaw) ? activeYaw.toFixed(1) + '°' : '—'} (${placementAxisLabel(placement)})`;
+  const hint = document.getElementById('boardShiftAxisHint');
+  if (hint) hint.textContent = `+d theo trục cột của bàn: ${placementAxisLabel(placement)}`;
+  const badge = document.getElementById('geomPrecheckBadge');
   if (badge) {
-    badge.className = res.pass ? "badge-safe" : "badge-warn";
-    badge.textContent = res.pass ? "GEOMETRIC PASS" : "GEOMETRIC FAIL";
+    badge.className = res.known && res.pass ? 'badge-safe' : 'badge-warn';
+    badge.textContent = !res.known ? 'GEOMETRIC UNKNOWN' : res.pass ? 'GEOMETRIC PASS' : 'GEOMETRIC FAIL';
   }
 }
 
@@ -1303,6 +1177,8 @@ export function applyAuthoritativeBoardPlacement(packet) {
 
   // 1 & 2. Atomically update board visual root & active scene placement cache
   setScenePlacement(packet);
+  const shiftAxisHint = document.getElementById("boardShiftAxisHint");
+  if (shiftAxisHint) shiftAxisHint.textContent = `+d theo trục cột của bàn: ${placementAxisLabel(getScenePlacement())}`;
 
   // 3, 4, 5, 6. Atomically update authoritative state values
   const d = Number(packet.forward_shift_mm ?? state.forwardShiftMm ?? 0.0);
@@ -1440,54 +1316,37 @@ window.applyPlacementAnalysisUI = applyPlacementAnalysisUI;
 
 export function applyPlacementAnalysisUI(data) {
   if (!data) return;
-  const d_mm = Number(data.forward_shift_mm ?? 0);
-  const H_mm = Number(data.safe_transit_height_mm ?? 70);
-
-  const elD = document.getElementById("readoutShiftD");
-  const elNearGrid = document.getElementById("readoutNearGridDepth") || document.getElementById("readoutRow0Dist");
-  const elFarGrid = document.getElementById("readoutFarGridDepth") || document.getElementById("readoutRow9Dist");
-  const elNear = document.getElementById("readoutNearEdgeDist");
-  const elCenter = document.getElementById("readoutCenterDist");
-  const elFar = document.getElementById("readoutFarEdgeDist");
-  const elH = document.getElementById("readoutHVal");
-  const elFarGrasp = document.getElementById("readoutFarGraspDist");
-  const elFarApp = document.getElementById("readoutFarAppDist");
-  const elGraspMargin = document.getElementById("readoutGraspMargin");
-  const elAppMargin = document.getElementById("readoutAppMargin");
-  const elDMax = document.getElementById("readoutDMax");
-  const elHMax = document.getElementById("readoutHMax");
-  const badge = document.getElementById("geomPrecheckBadge");
-
-  const activeYaw = Number(data.board_yaw_deg ?? state.boardYawDeg ?? 0.0);
-  const preview = computeGeometricPrecheck(d_mm, H_mm, 10.5 + Number(data.board_height_offset_mm ?? 0), activeYaw);
-  if (elD) elD.textContent = `${d_mm.toFixed(1)} mm`;
-  if (elNearGrid) elNearGrid.textContent = data.near_grid_depth_mm !== undefined ? `${data.near_grid_depth_mm.toFixed(1)} mm` : (data.nearest_cell_distance_mm !== undefined ? `${data.nearest_cell_distance_mm.toFixed(1)} mm` : `${preview.near_grid_depth_mm.toFixed(1)} mm`);
-  if (elFarGrid) elFarGrid.textContent = data.far_grid_depth_mm !== undefined ? `${data.far_grid_depth_mm.toFixed(1)} mm` : (data.farthest_cell_distance_mm !== undefined ? `${data.farthest_cell_distance_mm.toFixed(1)} mm` : `${preview.far_grid_depth_mm.toFixed(1)} mm`);
-  if (elNear) elNear.textContent = data.near_board_edge_distance_mm !== undefined ? `${data.near_board_edge_distance_mm.toFixed(1)} mm` : `${preview.near_board_edge_distance_mm.toFixed(1)} mm`;
-  if (elCenter) elCenter.textContent = data.board_center_distance_mm !== undefined ? `${data.board_center_distance_mm.toFixed(1)} mm` : `${preview.board_center_distance_mm.toFixed(1)} mm`;
-  if (elFar) elFar.textContent = data.far_board_edge_distance_mm !== undefined ? `${data.far_board_edge_distance_mm.toFixed(1)} mm` : `${preview.far_board_edge_distance_mm.toFixed(1)} mm`;
-  const elYaw = document.getElementById("readoutBoardYaw");
-  if (elYaw) {
-    if (Math.abs(activeYaw) < 1.0) {
-      elYaw.textContent = "0.0° (col=-X, row=+Z)";
-    } else {
-      const sign = activeYaw > 0 ? "+" : "";
-      elYaw.textContent = `${sign}${activeYaw.toFixed(1)}° (col=-X, row=-Y)`;
-    }
+  const authoritativeUnknown = data.is_geometric_known === false;
+  const placement = getScenePlacement();
+  const d = Number(data.forward_shift_mm ?? placement.forwardShiftMm);
+  const H = Number(data.safe_transit_height_mm ?? placement.safeTransitHeightMm);
+  const surface = data.board_surface_z_mm ?? placement.boardSurfaceY * 1000;
+  const preview = computeGeometricPrecheck(d, H, surface, data.board_yaw_deg ?? placement.boardYawDeg);
+  const fields = {
+    readoutShiftD: d, readoutHVal: H,
+    readoutNearGridDepth: data.near_grid_depth_mm ?? preview.near_grid_depth_mm,
+    readoutFarGridDepth: data.far_grid_depth_mm ?? preview.far_grid_depth_mm,
+    readoutNearEdgeDist: data.near_board_edge_distance_mm ?? preview.near_board_edge_distance_mm,
+    readoutCenterDist: data.board_center_distance_mm ?? preview.board_center_distance_mm,
+    readoutFarEdgeDist: data.far_board_edge_distance_mm ?? preview.far_board_edge_distance_mm,
+    readoutFarGraspDist: data.far_grasp_distance_mm ?? preview.D_far_grasp,
+    readoutFarAppDist: data.far_approach_distance_mm ?? preview.D_far_app,
+    readoutGraspMargin: data.grasp_reach_margin_mm ?? preview.grasp_margin,
+    readoutAppMargin: data.approach_reach_margin_mm ?? preview.app_margin,
+    readoutDMax: data.d_max_for_current_h_mm === undefined ? preview.d_max : data.d_max_for_current_h_mm,
+    readoutHMax: data.h_max_for_current_d_mm === undefined ? preview.H_max : data.h_max_for_current_d_mm,
+  };
+  for (const [id, value] of Object.entries(fields)) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = formatMetric(authoritativeUnknown ? null : value);
   }
-  if (elH) elH.textContent = `${H_mm.toFixed(1)} mm`;
-
-  if (elFarGrasp) elFarGrasp.textContent = data.far_grasp_distance_mm !== undefined ? `${data.far_grasp_distance_mm.toFixed(1)} mm` : `${preview.D_far_grasp.toFixed(1)} mm`;
-  if (elFarApp) elFarApp.textContent = data.far_approach_distance_mm !== undefined ? `${data.far_approach_distance_mm.toFixed(1)} mm` : `${preview.D_far_app.toFixed(1)} mm`;
-  if (elGraspMargin) elGraspMargin.textContent = data.grasp_reach_margin_mm !== undefined ? `${data.grasp_reach_margin_mm.toFixed(1)} mm` : `${preview.grasp_margin.toFixed(1)} mm`;
-  if (elAppMargin) elAppMargin.textContent = data.approach_reach_margin_mm !== undefined ? `${data.approach_reach_margin_mm.toFixed(1)} mm` : `${preview.app_margin.toFixed(1)} mm`;
-  if (elDMax) elDMax.textContent = data.d_max_for_current_h_mm !== null && data.d_max_for_current_h_mm !== undefined ? `${data.d_max_for_current_h_mm.toFixed(1)} mm` : (preview.d_max !== null ? `${preview.d_max.toFixed(1)} mm` : "VÔ NGHIỆM");
-  if (elHMax) elHMax.textContent = data.h_max_for_current_d_mm !== null && data.h_max_for_current_d_mm !== undefined ? `${data.h_max_for_current_d_mm.toFixed(1)} mm` : (preview.H_max !== null ? `${preview.H_max.toFixed(1)} mm` : "VÔ NGHIỆM");
-
+  const yaw = document.getElementById('readoutBoardYaw');
+  if (yaw) yaw.textContent = `${Number(data.board_yaw_deg ?? placement.boardYawDeg).toFixed(1)}° (${placementAxisLabel(placement)})`;
+  const badge = document.getElementById('geomPrecheckBadge');
   if (badge) {
-    const isPass = Boolean(data.is_geometric_pass !== undefined ? data.is_geometric_pass : preview.pass);
-    badge.className = isPass ? "badge-safe" : "badge-warn";
-    badge.textContent = isPass ? "GEOMETRIC PASS" : "GEOMETRIC FAIL";
+    const pass = Boolean(data.is_geometric_pass ?? preview.pass);
+    badge.className = preview.known && !authoritativeUnknown && pass ? 'badge-safe' : 'badge-warn';
+    badge.textContent = !preview.known || authoritativeUnknown ? 'GEOMETRIC UNKNOWN' : pass ? 'GEOMETRIC PASS' : 'GEOMETRIC FAIL';
   }
 }
 
@@ -2166,6 +2025,7 @@ function initJointControlPanelEvents() {
 }
 
 let physicalGeometryRef = null;
+let sceneToolLengthM = null;
 let cellTargetRing = null;
 
 function getOrCreateTargetRing() {
@@ -2653,12 +2513,14 @@ async function initApp() {
     setBoardGeometry(physicalGeometry);
     const scenePlacement = await fetchScenePlacement();
     state.boardYawDeg = Number(scenePlacement.board_yaw_deg ?? 0.0);
-    updateGeometricPrecheckUI(0, 70, 0, state.boardYawDeg);
 
     const cellDataset = await fetchCellReachabilityDataset();
     state.cellDataset = cellDataset;
 
     const sceneConfig = await fetchSceneConfig();
+    const toolLength = sceneConfig?.tool_transform?.flange_to_tcp_distance_m;
+    sceneToolLengthM = Number.isFinite(toolLength) && toolLength > 0 ? toolLength : null;
+    updateGeometricPrecheckUI(0, 70, 0, state.boardYawDeg);
     if (
       sceneConfig?.home_pose?.joints_deg &&
       Array.isArray(sceneConfig.home_pose.joints_deg) &&
@@ -2682,7 +2544,10 @@ async function initApp() {
     piecesGroupRef = piecesGroup;
     scene.add(piecesGroup);
 
-    coordinateRulerGroup = buildCoordinateRulerGroup({ initialLabelsVisible: false });
+    coordinateRulerGroup = buildCoordinateRulerGroup({
+      initialLabelsVisible: false, geometry: physicalGeometry,
+      placement: getScenePlacement(),
+    });
     scene.add(coordinateRulerGroup);
 
     await switchRobotProfile(state.robotProfileId);

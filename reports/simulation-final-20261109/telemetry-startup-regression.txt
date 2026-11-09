@@ -1,0 +1,131 @@
+============================================================
+ Xiangqi Robot -- Fast Parallel Test Runner
+============================================================
+Mode        : Full (Workers: 2)
+Targets     : tests/unit/test_virtual_telemetry_startup.py, tests/unit/test_simple_launch_sync.py, tests/unit/test_startup_failure_recovery.py
+Base Marker : not slow
+Dist Scheme : worksteal
+Thread Caps : OMP=1, MKL=1, OPENBLAS=1, NUMEXPR=1
+Repo Root   : D:\OJT\xiangqi_robot_TrainningAI_Final_6
+
+>>> Part A: Running Parallel-Safe Tests (-n 2) ...
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_TrainningAI_Final_6
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+created: 2/2 workers
+2 workers [31 items]
+
+.............................F
+================================== FAILURES ===================================
+_ test_failed_startup_keeps_gui_open_and_allows_explicit_retry[ai-Engine startup failed] _
+[gw1] win32 -- Python 3.12.10 D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Scripts\python.exe
+
+    def events():
+>       assert time.monotonic() < deadline, 'Startup did not become recoverable'
+E       AssertionError: Startup did not become recoverable
+E       assert 7369.093 < 7369.078
+E        +  where 7369.093 = <built-in function monotonic>()
+E        +    where <built-in function monotonic> = time.monotonic
+
+tests\unit\test_startup_failure_recovery.py:49: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+tmp_path = WindowsPath('C:/Users/Ken/AppData/Local/Temp/pytest-of-Ken/pytest-23/popen-gw1/test_failed_startup_keeps_gui_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000024438868380>
+component = 'ai', reason = 'Engine startup failed', launcher_exit = None
+
+    @pytest.mark.parametrize("component,reason", [
+        ("ai", "Engine startup failed"),
+        ("robot", "Controller startup failed"),
+        ("camera", "Camera startup blocked: Cannot read camera index 1. Close Windows Camera."),
+    ])
+    def test_failed_startup_keeps_gui_open_and_allows_explicit_retry(tmp_path, monkeypatch, component, reason, launcher_exit):
+        # Register old values for restoration after configure_runtime changes them.
+        for name in ("DRY_RUN", "ROBOT_BACKEND", "GAME_ONLY", "TELEMETRY_PORT", "GAME_MODE"):
+            monkeypatch.setattr(config, name, getattr(config, name, None), raising=False)
+        monkeypatch.setattr(sys, "argv", ["main.py", "--physical", "--log-dir", str(tmp_path / "logs")])
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        callbacks = []
+        monkeypatch.setattr(atexit, "register", lambda function, *args, **kwargs: callbacks.append(function))
+        for name in ("ai", "robot", "camera"):
+            monkeypatch.setattr(HardwareManager, "_init_" + name,
+                                Mock(side_effect=RuntimeError(reason) if name == component else None))
+        cleanup = Mock()
+        monkeypatch.setattr(HardwareManager, "cleanup", cleanup)
+        connect = Mock(side_effect=AssertionError("No physical connection in this test"))
+        monkeypatch.setattr(FR5Robot, "connect", connect)
+        monkeypatch.setattr(TuongKyDaiSuClient, "end_match", Mock())
+        messages = []
+        attempts = [0]
+        deadline = time.monotonic() + 5
+        def events():
+            assert time.monotonic() < deadline, 'Startup did not become recoverable'
+            displayed_error = messages and reason in messages[-1]
+            if attempts[0] == 0 or (attempts[0] < 2 and displayed_error and cleanup.call_count == attempts[0]):
+                attempts[0] += 1
+                return [pygame.event.Event(pygame.KEYDOWN,key=pygame.K_RETURN)]
+            if attempts[0] == 2 and cleanup.call_count == 2 and displayed_error:
+                return [pygame.event.Event(pygame.QUIT)]
+            return []
+        monkeypatch.setattr(pygame.event, 'get', events)
+        original = BoardRenderer.draw_home_screen
+    
+        def draw_home(self, message=""):
+            messages.append(message)
+            return original(self, message)
+    
+        monkeypatch.setattr(BoardRenderer, "draw_home_screen", draw_home)
+        try:
+>           app = runpy.run_path(str(Path(__file__).resolve().parents[2] / "main.py"), run_name="__main__")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\unit\test_startup_failure_recovery.py:66: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+<frozen runpy>:287: in run_path
+    ???
+<frozen runpy>:98: in _run_module_code
+    ???
+<frozen runpy>:88: in _run_code
+    ???
+main.py:927: in <module>
+    _recover_shutdown_after_exception(e)
+main.py:466: in _recover_shutdown_after_exception
+    for item in pygame.event.get():
+                ^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def events():
+>       assert time.monotonic() < deadline, 'Startup did not become recoverable'
+E       AssertionError: Startup did not become recoverable
+E       assert 7369.093 < 7369.078
+E        +  where 7369.093 = <built-in function monotonic>()
+E        +    where <built-in function monotonic> = time.monotonic
+
+tests\unit\test_startup_failure_recovery.py:49: AssertionError
+---------------------------- Captured stdout call -----------------------------
+13:05:25 INFO    [session.started] Nh\u1eadt k\xfd phi\xean: C:\\Users\\Ken\\AppData\\Local\\Temp\\pytest-of-Ken\\pytest-23\\popen-gw1\\test_failed_startup_keeps_gui_0\\logs\\20261109_130525_91cf634d\n13:05:26 INFO    [app.code_version] Phi\xean b\u1ea3n m\xe3 \u0111ang ch\u1ea1y\n13:05:26 INFO    [app.configuration] C\u1ea5u h\xecnh phi\xean ch\u1ea1y\n13:05:26 INFO    [console.stdout] === MODE: \U0001f916 REAL RUN (CAMERA & ROBOT) ===\n13:05:26 INFO    [console.stdout] [GAME] === GAME STARTED ===\n13:05:26 INFO    [console.stdout] [FEN] rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1\n13:05:26 INFO    [session.capabilities] Quy\u1ec1n v\u1eadn h\xe0nh c\u1ee7a ch\u1ebf \u0111\u1ed9 \u0111\xe3 ch\u1ecdn\n13:05:26 INFO    [session.started_fresh] \u0110\xe3 t\u1ea1o phi\xean m\u1edbi; kh\xf4ng n\u1ea1p FEN v\xe1n tr\u01b0\u1edbc\n13:05:26 INFO    [startup.component_started] Kh\u1edfi t\u1ea1o th\xe0nh ph\u1ea7n\n13:05:26 ERROR   [STARTUP_FAILED] Kh\u1edfi t\u1ea1o th\u1ea5t b\u1ea1i\n  V\u1ea5n \u0111\u1ec1: Kh\xf4ng kh\u1edfi t\u1ea1o \u0111\u01b0\u1ee3c m\u1ed9t th\xe0nh ph\u1ea7n\n  \u1ea2nh h\u01b0\u1edfng: Phi\xean game ch\u01b0a s\u1eb5n s\xe0ng\n  C\u1ea7n l\xe0m: \u0110\u1ecdc component v\xe0 traceback; ki\u1ec3m tra dependency, thi\u1ebft b\u1ecb ho\u1eb7c c\u1ed5ng t\u01b0\u01a1ng \u1ee9ng\n13:05:26 ERROR   [STARTUP_FAILED] Kh\xf4ng kh\u1edfi t\u1ea1o \u0111\u01b0\u1ee3c: Engine startup failed. Kh\u1eafc ph\u1ee5c r\u1ed3i ch\u1ecdn ch\u1ebf \u0111\u1ed9 l\u1ea1i. Chi ti\u1ebft STARTUP_FAILED trong logs/.\n  V\u1ea5n \u0111\u1ec1: Kh\xf4ng kh\u1edfi t\u1ea1o \u0111\u01b0\u1ee3c m\u1ed9t th\xe0nh ph\u1ea7n\n  \u1ea2nh h\u01b0\u1edfng: Phi\xean game ch\u01b0a s\u1eb5n s\xe0ng\n  C\u1ea7n l\xe0m: \u0110\u1ecdc component v\xe0 traceback; ki\u1ec3m tra dependency, thi\u1ebft b\u1ecb ho\u1eb7c c\u1ed5ng t\u01b0\u01a1ng \u1ee9ng\n13:05:26 INFO    [session.capabilities] Quy\u1ec1n v\u1eadn h\xe0nh c\u1ee7a ch\u1ebf \u0111\u1ed9 \u0111\xe3 ch\u1ecdn\n13:05:26 ERROR   [STARTUP_FAILED] Kh\xf4ng kh\u1edfi t\u1ea1o \u0111\u01b0\u1ee3c: Session journal unavailable; no game motion permitted: [Errno 13] Permission denied. Kh\u1eafc ph\u1ee5c r\u1ed3i ch\u1ecdn ch\u1ebf \u0111\u1ed9 l\u1ea1i. Chi ti\u1ebft STARTUP_FAILED trong logs/.\n  V\u1ea5n \u0111\u1ec1: Kh\xf4ng kh\u1edfi t\u1ea1o \u0111\u01b0\u1ee3c m\u1ed9t th\xe0nh ph\u1ea7n\n  \u1ea2nh h\u01b0\u1edfng: Phi\xean game ch\u01b0a s\u1eb5n s\xe0ng\n  C\u1ea7n l\xe0m: \u0110\u1ecdc component v\xe0 traceback; ki\u1ec3m tra dependency, thi\u1ebft b\u1ecb ho\u1eb7c c\u1ed5ng t\u01b0\u01a1ng \u1ee9ng\n13:05:30 CRITICAL [APP_UNHANDLED] Startup did not become recoverable\nassert 7369.093 < 7369.078\n +  where 7369.093 = <built-in function monotonic>()\n +    where <built-in function monotonic> = time.monotonic\n  V\u1ea5n \u0111\u1ec1: Ch\u01b0\u01a1ng tr\xecnh g\u1eb7p l\u1ed7i ch\u01b0a \u0111\u01b0\u1ee3c x\u1eed l\xfd\n  \u1ea2nh h\u01b0\u1edfng: Phi\xean ch\u1ea1y c\xf3 th\u1ec3 \u0111\xe3 d\u1eebng\n  C\u1ea7n l\xe0m: M\u1edf errors.log, t\xecm traceback c\xf9ng m\xe3 phi\xean; kh\xf4ng ch\u1ea1y l\u1ea1i l\u1ec7nh robot khi ch\u01b0a x\xe1c \u0111\u1ecbnh tr\u1ea1ng th\xe1i\n13:05:30 ERROR   [app.recovery_wait] RECOVERY REQUIRED: AssertionError. Inspect arm/gripper on pendant, then Ctrl+F8.\n13:05:30 INFO    [app.cleanup] \u0110\xe3 \u0111\xf3ng c\xe1c d\u1ecbch v\u1ee5; ki\u1ec3m tra l\u1ed7i c\xf2n ch\u1edd n\u1ebfu c\xf3.\n13:05:30 INFO    [session.ended] K\u1ebft th\xfac ghi log phi\xean
+------------------------------ Captured log call ------------------------------
+INFO     xiangqi:project_logging.py:232 Nh\u1eadt k\xfd phi\xean: C:\\Users\\Ken\\AppData\\Local\\Temp\\pytest-of-Ken\\pytest-23\\popen-gw1\\test_failed_startup_keeps_gui_0\\logs\\20261109_130525_91cf634d\nINFO     xiangqi:project_logging.py:273 Phi\xean b\u1ea3n m\xe3 \u0111ang ch\u1ea1y\nINFO     xiangqi:main.py:44 C\u1ea5u h\xecnh phi\xean ch\u1ea1y\nINFO     xiangqi:project_logging.py:121 === MODE: \U0001f916 REAL RUN (CAMERA & ROBOT) ===\nINFO     xiangqi:project_logging.py:121 [GAME] === GAME STARTED ===\nINFO     xiangqi:project_logging.py:121 [FEN] rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1\nINFO     xiangqi:session_startup.py:49 Quy\u1ec1n v\u1eadn h\xe0nh c\u1ee7a ch\u1ebf \u0111\u1ed9 \u0111\xe3 ch\u1ecdn\nINFO     xiangqi:game_persistence.py:273 \u0110\xe3 t\u1ea1o phi\xean m\u1edbi; kh\xf4ng n\u1ea1p FEN v\xe1n tr\u01b0\u1edbc\nINFO     xiangqi:hardware_manager.py:105 Kh\u1edfi t\u1ea1o th\xe0nh ph\u1ea7n\nERROR    xiangqi:hardware_manager.py:124 Kh\u1edfi t\u1ea1o th\u1ea5t b\u1ea1i\nTraceback (most recent call last):\n  File "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\src\\hardware\\hardware_manager.py", line 107, in initialize_all\n    initialize()\n  File "C:\\Users\\Ken\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\unittest\\mock.py", line 1139, in __call__\n    return self._mock_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "C:\\Users\\Ken\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\unittest\\mock.py", line 1143, in _mock_call\n    return self._execute_mock_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "C:\\Users\\Ken\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\unittest\\mock.py", line 1198, in _execute_mock_call\n    raise effect\nRuntimeError: Engine startup failed\nERROR    xiangqi:main.py:210 Kh\xf4ng kh\u1edfi t\u1ea1o \u0111\u01b0\u1ee3c: Engine startup failed. Kh\u1eafc ph\u1ee5c r\u1ed3i ch\u1ecdn ch\u1ebf \u0111\u1ed9 l\u1ea1i. Chi ti\u1ebft STARTUP_FAILED trong logs/.\nINFO     xiangqi:session_startup.py:49 Quy\u1ec1n v\u1eadn h\xe0nh c\u1ee7a ch\u1ebf \u0111\u1ed9 \u0111\xe3 ch\u1ecdn\nERROR    xiangqi:main.py:210 Kh\xf4ng kh\u1edfi t\u1ea1o \u0111\u01b0\u1ee3c: Session journal unavailable; no game motion permitted: [Errno 13] Permission denied. Kh\u1eafc ph\u1ee5c r\u1ed3i ch\u1ecdn ch\u1ebf \u0111\u1ed9 l\u1ea1i. Chi ti\u1ebft STARTUP_FAILED trong logs/.\nCRITICAL xiangqi:main.py:926 Startup did not become recoverable\nassert 7369.093 < 7369.078\n +  where 7369.093 = <built-in function monotonic>()\n +    where <built-in function monotonic> = time.monotonic\nTraceback (most recent call last):\n  File "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\main.py", line 572, in <module>\n    for event in pygame.event.get():\n                 ^^^^^^^^^^^^^^^^^^\n  File "D:\\OJT\\xiangqi_robot_TrainningAI_Final_6\\tests\\unit\\test_startup_failure_recovery.py", line 49, in events\n    assert time.monotonic() < deadline, 'Startup did not become recoverable'\nAssertionError: Startup did not become recoverable\nassert 7369.093 < 7369.078\n +  where 7369.093 = <built-in function monotonic>()\n +    where <built-in function monotonic> = time.monotonic\nERROR    xiangqi:main.py:452 RECOVERY REQUIRED: AssertionError. Inspect arm/gripper on pendant, then Ctrl+F8.\nINFO     xiangqi:main.py:419 \u0110\xe3 \u0111\xf3ng c\xe1c d\u1ecbch v\u1ee5; ki\u1ec3m tra l\u1ed7i c\xf2n ch\u1edd n\u1ebfu c\xf3.\nINFO     xiangqi:project_logging.py:242 K\u1ebft th\xfac ghi log phi\xean
+============================== warnings summary ===============================
+src\hardware\telemetry_publisher.py:20
+src\hardware\telemetry_publisher.py:20
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_startup_failure_recovery.py::test_failed_startup_keeps_gui_open_and_allows_explicit_retry[ai-Engine startup failed]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!! xdist.dsession.Interrupted: stopping after 1 failures !!!!!!!!!!!!
+================== 1 failed, 29 passed, 4 warnings in 22.04s ==================
+Part A FAILED with exit code 2
+
+=== TEST SUITE FAILED (exit code 2) in 23.68s ===

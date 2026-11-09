@@ -992,3 +992,9 @@ Current need-review robot-PvP code is integrated into final r2, locally verified
 ## 2026-11-07 final — obsolete quickstart superseded; hardware gaps unchanged
 
 The 2026-09-09 quickstart did not match current final: it described calibration at piece centres, a camera-based dry-run/disconnected path, and unsafe motion-error/exit recovery assumptions. README is now the current user handbook and the old quickstart redirects to it. Guidance is traced to `005f95539531c32601232cdeeec3cca4185f32d9`; validation in this change is static documentation checking only. No runtime, controller recovery, post-interruption trajectory, loaded gripper, clean-PC or full-game acceptance claim. Existing OPEN findings and the separate capsule release boundary remain unchanged.
+
+## 2026-11-09 final — baseline suite is red before the simulation work
+
+21 deterministic failures reproduce on a clean `9b4c515` worktree: 15 across `test_camera_game_pipeline`, `test_camera_startup_and_health`, `test_visual_selective_integration`, `test_game_twin_integration` and `test_visual_v2_simulation`; 2 in `test_physical_ui_latency` ("Viewer startup did not finish"); 4 across `test_arm_reconnect_qa`, `test_viewer_startup` and `test_ai_home_approach_recovery`. One further hover test (`test_visual_v2_simulation::test_hover_rotated_r1_r4_uses_guard_and_preserves_pieces`) passes in isolation and fails only under full-suite load.
+
+These predate the 2026-11-09 session and remain OPEN. Do not report a green focused run as a green branch, and do not attribute these to the placement/telemetry change without re-running the HEAD comparison.

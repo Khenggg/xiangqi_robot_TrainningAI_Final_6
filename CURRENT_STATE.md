@@ -1130,3 +1130,23 @@ Scope baseline: `005f95539531c32601232cdeeec3cca4185f32d9` on `final`. Replaced 
 VERIFIED_FIXED (documentation scope only): stale quickstart instructions retired. No runtime/configuration/calibration changes or hardware calls.
 
 TEST_EVIDENCE: `git diff --check` PASS (exit 0); static Markdown validation PASS (exit 0, 66 local file/explicit-anchor links, balanced code fences/table row endings). Download asset matched the GitHub release metadata. Controls and failure guidance checked against current launch/menu/input/session/hardware/camera/journal code. Application tests, Windows UI, clean second-PC, camera and FR3 physical acceptance NOT RUN for this documentation-only change. Existing physical and broader-regression gaps remain OPEN. Historical `LAST_REVIEWED_HEAD` is intentionally unchanged; this is not a whole-branch functional review.
+
+## 2026-11-09 final — simulation placement view + telemetry ownership
+
+Scope: uncommitted work from the 2026-11-09 session on `final` (baseline `9b4c515`), completed and verified here. Virtual/simulation paths only; no robot, camera or gripper access.
+
+VERIFIED_FIXED
+- Board placement is now computed once in Python and broadcast. `VirtualXiangqiSimulation` adds `placement_state` to the `board_placement` analysis packet (`src/simulation/runtime.py`), `BoardPlacementAnalyzer` exposes that same state (`src/simulation/placement.py`), and the viewer stopped re-deriving geometry: `robot-3d-viewer/main.mjs` loses 271 lines of local transform math and `ruler.mjs` 143, both consuming the new read-only `robot-3d-viewer/placement_metrics.mjs`. That module rejects non-rigid matrices (orthonormal rotation, determinant 1, unit scale) instead of drawing a skewed board.
+- Busy viewer port on Windows: `ViewerHTTPServer.allow_reuse_address` is now False on `win32`. With `SO_REUSEADDR`, Windows reports a conflict with a listening socket as WSAEACCES (10013) instead of WSAEADDRINUSE, so the VIRTUAL startup fallback never picked an ephemeral port and the session returned "Viewer unavailable" while a free port existed.
+- Telemetry coalescing raised AttributeError on non-object JSON payloads inside the dispatch path; sequence comparison now treats them as sequence 0 (`_packet_sequence`). This predates the session (introduced in `57aba7d1`).
+- `TelemetryPublisher` start failure now chains the socket cause, which the virtual port-retry predicate inspects.
+
+TEST_EVIDENCE
+- Focused run exit 0: `test_virtual_telemetry_startup.py` 6 PASS (both viewer_busy cases), `test_telemetry_liveness.py`, `test_simulation_placement_metrics.py`, `test_simple_launch_sync.py`; 57 tests PASS via `tools/test_fast.ps1 -Workers 2`.
+- Viewer JS: `node --test` over board-mesh, placement-integrity and placement-metrics files = 3/3 PASS. These `.mjs` tests spawn `python`, so the venv must be on PATH.
+- Session evidence kept in `reports/simulation-final-20261109/`: one virtual move 23.5 s, joints `0,-45,90,-45,-90,0` -> `0,-70,60,-80,-90,0`, 117 distinct joint poses over the websocket, 353 accepted viewer robot packets and 0 rejected; browser probe 13 distinct rotator poses.
+- Full suite `tools/test_fast.ps1 -Mode Balanced`: 22 failed / 1148 passed. A clean HEAD worktree (`9b4c515`) reproduces 21 of them exactly (15 camera/visual integration, 2 `test_physical_ui_latency`, 4 across arm-reconnect/viewer-startup/ai-home); the 22nd passes alone and only fails under full-suite load. No failure is introduced by this work.
+
+NOT RUN: physical FR3/camera/gripper acceptance, clean second PC, full browser game session end to end.
+
+OPEN: the 21 baseline failures above. `final` was already red before this session; a green focused run is not a green branch.

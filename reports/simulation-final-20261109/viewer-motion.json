@@ -1,0 +1,7 @@
+{
+  "scope": "Actual viewer packet validation and shipped joint application; no WebGL or CAD loading",
+  "accepted_robot_packets": 353,
+  "distinct_rotator_poses": 117,
+  "rejected_robot_packets": [],
+  "physical_actuation": "NOT RUN"
+}

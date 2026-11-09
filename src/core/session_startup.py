@@ -3,6 +3,7 @@ from src.core import launch_options
 from src.hardware.hardware_manager import HardwareManager
 from src.hardware.telemetry_publisher import TelemetryPublisher
 from src.core.project_logging import event
+import errno
 import logging
 
 
@@ -11,6 +12,12 @@ class StartupRollbackError(RuntimeError):
     def __init__(self, manager, telemetry, viewer, cause):
         super().__init__(f"Startup recovery required: {cause}")
         self.manager, self.telemetry, self.viewer = manager, telemetry, viewer
+
+
+def _address_in_use(error):
+    return (isinstance(error, OSError)
+            and (error.errno in (errno.EADDRINUSE, 10048)
+                 or getattr(error, "winerror", None) == 10048))
 
 
 def rollback_session(manager, telemetry, viewer, state):
@@ -113,16 +120,28 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
             try:
                 telemetry.start()
             except Exception as telemetry_error:
-                event("startup.telemetry_unavailable", "WebSocket chưa mở; Game không dùng server đang chiếm cổng",
-                      level=logging.WARNING, reason=str(telemetry_error), port=config.TELEMETRY_PORT)
-                telemetry.stop()
-                telemetry = None
-                bridge.telemetry = None
-                manager.telemetry = None
-                if manager.simulation_runtime is not None:
-                    manager.simulation_runtime.telemetry = None
-                    manager.backend.telemetry_publisher = None
-                manager.simulation_error = f"WebSocket unavailable: {telemetry_error}"
+                if (profile.execution_environment == "VIRTUAL" and profile.simulation_enabled
+                        and _address_in_use(telemetry_error.__cause__)):
+                    # Keep this session's publisher, handlers and cached snapshots.
+                    # Never connect to or stop the process occupying the old port.
+                    telemetry.stop()
+                    requested_port = telemetry.port
+                    telemetry.port = 0
+                    telemetry.start()  # One retry; failure rolls back virtual startup.
+                    event("startup.telemetry_port_changed", "Mô phỏng dùng cổng WebSocket trống",
+                          level=logging.WARNING, requested_port=requested_port,
+                          port=telemetry.port, environment="VIRTUAL")
+                else:
+                    event("startup.telemetry_unavailable", "WebSocket chưa mở; Game không dùng server đang chiếm cổng",
+                          level=logging.WARNING, reason=str(telemetry_error), port=config.TELEMETRY_PORT)
+                    telemetry.stop()
+                    telemetry = None
+                    bridge.telemetry = None
+                    manager.telemetry = None
+                    if manager.simulation_runtime is not None:
+                        manager.simulation_runtime.telemetry = None
+                        manager.backend.telemetry_publisher = None
+                    manager.simulation_error = f"WebSocket unavailable: {telemetry_error}"
         uncalibrated = getattr(bridge, 'uncalibrated_board', False) or not board_ready
         reason = None if not uncalibrated or config.GAME_ONLY else (
             'Bàn mô phỏng mặc định (đồng bộ quân cờ BẬT); tọa độ lệnh theo visual. ' + str(manager.simulation_error or 'mirror unavailable'))
@@ -131,8 +150,17 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
         if profile.viewer_enabled:
             try:
                 launch_options.check_viewer_assets(root)
-                viewer = launch_options.ViewerServer(root, options.viewer_port)
-                viewer.start(config.TELEMETRY_PORT, unavailable_reason=reason,
+                try:
+                    viewer = launch_options.ViewerServer(root, options.viewer_port)
+                except OSError as viewer_error:
+                    if (profile.execution_environment != "VIRTUAL" or not profile.simulation_enabled
+                            or not _address_in_use(viewer_error)):
+                        raise
+                    viewer = launch_options.ViewerServer(root, 0)
+                    event("startup.viewer_port_changed", "Mô phỏng dùng cổng HTTP viewer trống",
+                          level=logging.WARNING, requested_port=options.viewer_port,
+                          port=viewer.server.server_port, environment="VIRTUAL")
+                viewer.start(telemetry.port if telemetry is not None else config.TELEMETRY_PORT, unavailable_reason=reason,
                              telemetry_available=bridge is not None and telemetry is not None)
             except (OSError, FileNotFoundError) as exc:
                 reason = f'Viewer unavailable: {exc}; check assets or --viewer-port'

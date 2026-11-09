@@ -3,6 +3,7 @@ import argparse
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import sys
 import threading
 import webbrowser
 import json
@@ -16,7 +17,10 @@ class ViewerHTTPServer(ThreadingHTTPServer):
     """HTTP server with enough accept backlog for browser ES-module fan-out."""
     request_queue_size = 128
     daemon_threads = True
-    allow_reuse_address = True
+    # On Windows SO_REUSEADDR lets a bind hijack another owner's port, and a real
+    # conflict surfaces as WSAEACCES (10013) rather than WSAEADDRINUSE, which hid
+    # the conflict from the startup fallback that looks for an in-use port.
+    allow_reuse_address = sys.platform != "win32"
 
 
 

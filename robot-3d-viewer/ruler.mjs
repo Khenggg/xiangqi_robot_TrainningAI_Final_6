@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { placementCellWorld } from "./placement_metrics.mjs";
 
 /**
  * Tạo một Text Sprite 2D nhỏ gọn, sắc nét theo chuẩn CAD kỹ thuật.
@@ -251,25 +252,6 @@ export function buildCoordinateRulerGroup(options = {}) {
     group.add(new THREE.LineSegments(geo, tickMatFine));
   }
 
-  // Các mốc đặc biệt trên trục X (tương ứng vị trí bàn cờ X-)
-  const specialXMarkers = [
-    { x: -0.20, label: "Cột 0: -200mm (gần robot)", color: "#38bdf8" },
-    { x: -0.36, label: "Tâm bàn: -360mm", color: "#fbbf24" },
-    { x: -0.52, label: "Cột 8: -520mm (xa robot)", color: "#f87171" },
-  ];
-  specialXMarkers.forEach((m) => {
-    const sprite = createTextSprite(`📍 ${m.label}`, {
-      fontSize: 12,
-      fontColor: m.color,
-      bgColor: "rgba(15, 23, 42, 0.85)",
-      borderColor: m.color,
-      scale: 0.0095,
-      depthTest: true,
-    });
-    sprite.position.set(m.x, yFloor + 0.005, 0.018);
-    labelsX.add(sprite);
-  });
-
   // -------------------------------------------------------------------------
   // 2. TRỤC OZ (DỌC HƯỚNG 10 HÀNG: -350mm -> +350mm)
   // -------------------------------------------------------------------------
@@ -359,25 +341,6 @@ export function buildCoordinateRulerGroup(options = {}) {
       );
     }
   }
-
-  // Các mốc đặc biệt trên trục Z (tương ứng trục Hàng trong bố trí Yaw 0°)
-  const specialZMarkers = [
-    { z: -0.18, label: "Hàng 0 (Đen): -180mm", color: "#4ade80" },
-    { z: 0.0, label: "Sông (Trung Lộ): 0mm", color: "#fbbf24" },
-    { z: 0.18, label: "Hàng 9 (Đỏ): +180mm", color: "#f87171" },
-  ];
-  specialZMarkers.forEach((m) => {
-    const sprite = createTextSprite(`📍 ${m.label}`, {
-      fontSize: 12,
-      fontColor: m.color,
-      bgColor: "rgba(15, 23, 42, 0.85)",
-      borderColor: m.color,
-      scale: 0.0095,
-      depthTest: true,
-    });
-    sprite.position.set(0.018, yFloor + 0.005, m.z);
-    labelsZ.add(sprite);
-  });
 
   if (zTickMajorPoints.length > 0) {
     const geo = new THREE.BufferGeometry().setFromPoints(zTickMajorPoints);
@@ -472,25 +435,6 @@ export function buildCoordinateRulerGroup(options = {}) {
     }
   }
 
-  // Các mốc cao độ kỹ thuật
-  const specialYMarkers = [
-    { y: 0.0105, label: "Mặt Bàn: 10.5mm", color: "#e3a857" },
-    { y: 0.0152, label: "Tâm Cờ: 15.2mm", color: "#4ade80" },
-    { y: 0.0805, label: "Safe Z: 80.5mm", color: "#38bdf8" },
-  ];
-  specialYMarkers.forEach((m) => {
-    const sprite = createTextSprite(`📏 ${m.label}`, {
-      fontSize: 11,
-      fontColor: m.color,
-      bgColor: "rgba(15, 23, 42, 0.85)",
-      borderColor: m.color,
-      scale: 0.009,
-      depthTest: true,
-    });
-    sprite.position.set(0.018, m.y, 0);
-    labelsY.add(sprite);
-  });
-
   if (yTickMajorPoints.length > 0) {
     const geo = new THREE.BufferGeometry().setFromPoints(yTickMajorPoints);
     group.add(new THREE.LineSegments(geo, tickMatMajor));
@@ -523,18 +467,16 @@ export function buildCoordinateRulerGroup(options = {}) {
   boardEdgesGroup.name = "board-edges-group";
   group.add(boardEdgesGroup);
 
-  // Khởi tạo vị trí ban đầu theo bố trí X- (yaw 0.0°)
-  boardEdgesGroup.position.set(-0.36, 0.0105, 0.0);
-  boardEdgesGroup.rotation.y = -Math.PI / 2; // (0° - 90°) * PI / 180
-  labelsBoard.position.set(-0.36, 0.0105, 0.0);
-  labelsBoard.rotation.y = -Math.PI / 2;
-
-  const boardHalfZ = 0.367 / 2; // 0.1835m (chiều cột trong hệ local)
-  const boardHalfX = 0.410 / 2; // 0.205m (chiều hàng trong hệ local)
-
-  // Edge proxies removed to prevent intercepting piece and board clicks
-  const makeEdgeProxy = (w, h, d, x, y, z, edgeName) => {
-    // No-op: no hit proxy meshes added to prevent blocking piece clicks
+  // Board markers are built from the same transform as the visible grid.
+  // Empty edge group is retained for compatibility; it never intercepts clicks.
+  const heightMarkers = new THREE.Group();
+  heightMarkers.name = 'board-height-markers';
+  labelsY.add(heightMarkers);
+  const clearLabels = (labels) => {
+    for (const child of [...labels.children]) {
+      child.material?.map?.dispose(); child.material?.dispose();
+      labels.remove(child);
+    }
   };
 
   // -------------------------------------------------------------------------
@@ -586,35 +528,41 @@ export function buildCoordinateRulerGroup(options = {}) {
   /**
    * Cập nhật vị trí và góc quay các hit proxies cạnh bàn cờ theo authoritative runtime placement.
    */
-  group.updateBoardPlacement = function (centerXOrObj, surfaceY, centerZ, yawDeg) {
-    let cx = -0.36, cy = 0.0105, cz = 0.0, yaw = 0.0;
-    if (typeof centerXOrObj === "object" && centerXOrObj !== null) {
-      const c = centerXOrObj.board_center_world_m || [
-        centerXOrObj.boardCenterX ?? -0.36,
-        centerXOrObj.boardSurfaceY ?? 0.0105,
-        centerXOrObj.boardCenterZ ?? 0.0,
-      ];
-      cx = Number(c[0]);
-      cy = Number(c[1]);
-      cz = Number(c[2]);
-      yaw = Number(centerXOrObj.board_yaw_deg ?? centerXOrObj.boardYawDeg ?? 0.0);
-    } else if (arguments.length === 2) {
-      cz = Number(centerXOrObj);
-      cy = Number(surfaceY);
-      cx = -0.36;
-      yaw = 0.0;
-    } else {
-      cx = Number(centerXOrObj ?? -0.36);
-      cy = Number(surfaceY ?? 0.0105);
-      cz = Number(centerZ ?? 0.0);
-      yaw = Number(yawDeg ?? 0.0);
+  group.updateBoardPlacement = function (placement) {
+    clearLabels(labelsBoard); clearLabels(heightMarkers);
+    if (!options.geometry || !placement) return;
+    const geo = options.geometry;
+    const midRow = (geo.rows - 1) / 2, midCol = (geo.columns - 1) / 2;
+    const markers = [
+      ['col0', 'Cột 0', midRow, 0], ['center', 'Tâm bàn', midRow, midCol],
+      ['colLast', `Cột ${geo.columns - 1}`, midRow, geo.columns - 1],
+      ['row0', 'Hàng 0 (Đen)', 0, midCol],
+      ['rowLast', `Hàng ${geo.rows - 1} (Đỏ)`, geo.rows - 1, midCol],
+    ];
+    for (const [id, name, row, col] of markers) {
+      const point = placementCellWorld(placement, geo, row, col);
+      if (!point || !point.every(Number.isFinite)) continue;
+      const text = `${name}: X=${(point[0]*1000).toFixed(1)}, Z=${(point[2]*1000).toFixed(1)}mm`;
+      const sprite = createTextSprite(text, { fontSize: 12, fontColor: '#fbbf24', scale: 0.0095 });
+      sprite.name = `board-marker-${id}`;
+      sprite.userData = { coordinateFrame: '3d_world', positionUnit: 'm', anchorWorld: [...point], row, col, text };
+      sprite.position.set(point[0], point[1] + 0.005, point[2]);
+      labelsBoard.add(sprite);
     }
-
-    boardEdgesGroup.position.set(cx, cy, cz);
-    const yawOffsetRad = ((yaw - 90.0) * Math.PI) / 180.0;
-    boardEdgesGroup.rotation.y = yawOffsetRad;
-    labelsBoard.position.set(cx, cy, cz);
-    labelsBoard.rotation.y = yawOffsetRad;
+    const center = placementCellWorld(placement, geo, midRow, midCol);
+    if (!center || !center.every(Number.isFinite)) return;
+    boardEdgesGroup.position.set(...center);
+    const H = placement.safeTransitHeightMm ?? placement.safe_transit_height_mm;
+    const heights = [['surface', 'Mặt bàn', center[1]], ['piece', 'Tâm cờ', center[1] + geo.pieceHeightM/2]];
+    if (Number.isFinite(H)) heights.push(['transit', 'Transit Z', center[1] + H/1000]);
+    for (const [id, name, y] of heights) {
+      const text = `${name}: ${(y*1000).toFixed(1)}mm`;
+      const sprite = createTextSprite(text, { fontSize: 11, fontColor: '#e3a857', scale: 0.009 });
+      sprite.name = `board-height-${id}`;
+      sprite.userData = { coordinateFrame: '3d_world', positionUnit: 'm', text };
+      sprite.position.set(0.018, y, 0);
+      heightMarkers.add(sprite);
+    }
   };
 
   /**
@@ -634,6 +582,7 @@ export function buildCoordinateRulerGroup(options = {}) {
     }
   };
 
+  group.updateBoardPlacement(options.placement);
   return group;
 }
 
