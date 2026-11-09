@@ -5,7 +5,7 @@ import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget, cre
 import { fetchPhysicalGeometry } from "./geometry.mjs";
 import { nearestBoardIntersection } from "./board_picker.mjs";
 import { fetchVirtualGripperProfile } from "./gripper_profile.mjs";
-import { fetchGripperVisualAsset, fingerClosedShift, fingerDirection, fingerOffsetCadMm, fingerOpenShift, isFingerPartName } from "./gripper_asset.mjs";
+import { fetchGripperVisualAsset, fingerClosedShift, fingerDirection, fingerOffsetCadMm, fingerOpenShift, heldContactCadMm, isFingerPartName } from "./gripper_asset.mjs";
 import { fetchStartLayout } from "./layout.mjs";
 import {
   buildBoardGrid,
@@ -368,7 +368,17 @@ async function setGripperClosed(closed) {
   }
   const visualAsset = await getGripperVisualAsset();
   const virtual = state.liveSource === "VIRTUAL";
-  for (const { mesh, cadPosition, direction, openShift, closedShift } of gripperVisual.fingers) {
+  // Close onto the piece when one is held: a jaw drawn past the piece surface
+  // (the old fixed 2 CAD mm target) made the gripper look like it clipped through.
+  const contact = state.gripperHoldingPiece && virtual
+    ? heldContactCadMm(state.gripperPieceDiameterMm, visualAsset.scaleToM)
+    : VIRTUAL_CLOSED_CONTACT_CAD_MM;
+  for (const finger of gripperVisual.fingers) {
+    const { mesh, cadPosition, direction, openShift, localCenterX, halfWidth } = finger;
+    const closedShift = fingerClosedShift({
+      localCenterX, halfWidth, side: direction, midX: state.gripperFingerMidX, contact,
+    });
+    finger.closedShift = closedShift;
     mesh.position.copy(cadPosition);
     mesh.position.x += closed
       ? (virtual ? closedShift : fingerOffsetCadMm(visualAsset, direction, true, 1))
@@ -619,6 +629,10 @@ const state = {
   targetDestinationCell: null,
   trajectoryStage: "IDLE",
   gripperClosed: false,
+  // Canonical piece diameter (shared/physical_geometry.json: 22.5 mm). Used to
+  // stop the jaws on the piece surface instead of through it.
+  gripperPieceDiameterMm: 22.5,
+  gripperHoldingPiece: false,
   liveSocket: null,
   liveSource: null,
   livePlacementValid: null,
@@ -906,6 +920,14 @@ function connectLive() {
           if (piecesGroupRef && xiangqiPieces) {
             updatePiecesFromWorldState(
               piecesGroupRef, xiangqiPieces, val.pieces, val.capturedPieces);
+          }
+          const holding = (val.pieces || []).some((piece) => piece.is_grasped || piece.attached);
+          if (holding !== state.gripperHoldingPiece) {
+            state.gripperHoldingPiece = holding;
+            if (state.gripperClosed && state.currentArm?.gripper) {
+              gripperVisual.closed = null;  // force a re-apply with the new target gap
+              state.currentArm.gripper.setClosed(true);
+            }
           }
           if (val.gripper && state.currentArm?.gripper) {
             state.gripperClosed = Boolean(val.gripper.closed);

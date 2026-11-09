@@ -123,4 +123,22 @@ export function fingerClosedShift({ localCenterX, halfWidth, side, midX,
   return (Number(midX) + Number(side) * contact) - innerFace;
 }
 
+/**
+ * Piece diameter expressed in CAD units.
+ *
+ * The STEP mesh is scaled by scaleToM (0.0008 m per CAD unit) at the mount, so a
+ * piece measured in world millimetres is worldMm / (scaleToM * 1000) CAD units.
+ * A 22.5 mm piece is 28.125 CAD units: closing the jaws to 2 CAD units would
+ * draw them inside the piece.
+ */
+export function pieceDiameterCadMm(worldDiameterMm, scaleToM) {
+  const cadPerWorldMm = 1 / (Number(scaleToM) * 1000);
+  return Number(worldDiameterMm) * cadPerWorldMm;
+}
+
+/** Half the held piece plus a hair of clearance, in CAD units. */
+export function heldContactCadMm(worldDiameterMm, scaleToM, clearanceCadMm = 0.5) {
+  return pieceDiameterCadMm(worldDiameterMm, scaleToM) / 2 + Number(clearanceCadMm);
+}
+
 

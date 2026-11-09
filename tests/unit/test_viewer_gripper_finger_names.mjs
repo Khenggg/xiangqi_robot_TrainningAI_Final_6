@@ -7,8 +7,10 @@ import {
   fingerDirection,
   fingerOffsetCadMm,
   fingerOpenShift,
+  heldContactCadMm,
   isFingerPartName,
   parseGripperVisualAsset,
+  pieceDiameterCadMm,
 } from "../../robot-3d-viewer/gripper_asset.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -74,4 +76,18 @@ test("virtual clamp lands on the contact gap, not on a 0.34 mm stroke", () => {
 test("virtual open shift spreads the fingers outward", () => {
   assert.equal(fingerOpenShift(visualAsset, -1), -visualAsset.fingerOpenInsetMm);
   assert.equal(fingerOpenShift(visualAsset, 1), visualAsset.fingerOpenInsetMm);
+});
+
+test("a held piece stops the jaws on its surface instead of inside it", () => {
+  const scaleToM = visualAsset.scaleToM;
+  const pieceCad = pieceDiameterCadMm(22.5, scaleToM);          // shared/physical_geometry.json
+  assert.ok(Math.abs(pieceCad - 28.125) < 1e-9, `piece is ${pieceCad} CAD units`);
+  const contact = heldContactCadMm(22.5, scaleToM);
+  const gapWithPiece = contact * 2;
+  assert.ok(gapWithPiece > pieceCad,
+    `jaws must clear the piece: gap ${gapWithPiece} > piece ${pieceCad}`);
+  assert.ok(gapWithPiece - pieceCad < 2,
+    "the jaws should touch the piece, not hover far from it");
+  assert.ok(gapWithPiece > VIRTUAL_CLOSED_CONTACT_CAD_MM * 2,
+    "gripping a piece must open wider than an empty clamp");
 });
