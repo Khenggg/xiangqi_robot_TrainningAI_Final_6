@@ -10,4 +10,4 @@ The 3D showcase is an observational adapter, not part of donor decisions. Physic
 
 This preserves the vsc-v3 in-memory gameplay model; it does not add the shared runtime's durable journal/typed transaction semantics to the donor. Hardware absence never counts as successful physical motion. Actual camera/FR3 acceptance and visual inspection of an entire 3D game remain required; automated checks use mocked physical IO.
 
-GPU packaging is separate and has not been rebuilt with this migration yet. The previously delivered xiangqi.zip does not contain these changes.
+The complete GPU-light fixed ZIP includes this migration, the explicit R1–R4 fixed-profile constructor argument and DO1-open/DO0-close configuration. The older 20261109 unpatched ZIP needs its separate patches; the new complete ZIP does not.

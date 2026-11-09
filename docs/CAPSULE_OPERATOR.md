@@ -1,5 +1,7 @@
 ﻿# Xiangqi — xiangqi.zip
 
+Bản đầy đủ `xiangqi-gpu-light-20261109-fixed` đã tích hợp sửa lỗi truyền profile R1–R4 và chiều kẹp DO1 mở / DO0 đóng. Không cần bản vá riêng; thời gian xung giữ nguyên.
+
 1. Giải nén **toàn bộ** xiangqi.zip vào thư mục local có quyền ghi, ví dụ D:\Xiangqi. Không mở trực tiếp trong ZIP.
 2. Lần đầu mở **INSTALL.bat**, hoặc chạy **start.bat -Setup**. File này thực thi start.run để giải nén runtime nền rồi tải/cài thư viện ML vào runtime của ứng dụng. Lần đầu cần Internet và vài GB trống; NVIDIA dùng PyTorch CUDA, máy không có NVIDIA dùng CPU. Không cài vào Python hệ thống, không cần admin.
 3. Từ đó mở **start.bat** để chạy project. Nếu chưa setup, start.bat tự chuẩn bị runtime trước rồi mở game.

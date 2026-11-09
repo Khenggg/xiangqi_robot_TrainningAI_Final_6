@@ -1,12 +1,14 @@
-# [⬇ TẢI XIANGQI.ZIP — WINDOWS X64, ƯU TIÊN GPU](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi.zip)
+# [⬇ TẢI XIANGQI.ZIP — WINDOWS X64, ƯU TIÊN GPU](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109-fixed/xiangqi.zip)
 
-**Bản vá R1–R4 (09/11):** sau khi giải nén ZIP ở trên, tải [xiangqi-r1-r4-fix.zip](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-r1-r4-fix.zip), thoát ứng dụng rồi giải nén bản vá **vào đúng thư mục chứa `start.bat`**, cho phép ghi đè `app/` và `manifest.json`. Máy đã cài GPU chỉ cần mở lại `start.bat`, không cần cài lại GPU. Bản vá sửa việc Player vs Robot chưa truyền đường dẫn profile cố định, dẫn đến lỗi User/WObj 1/0. Push source không tự cập nhật ZIP đã tải.
+**Bản ZIP hoàn chỉnh mới đã tích hợp cả sửa lỗi R1–R4 và DO1 mở / DO0 đóng. Không cần tải hoặc chạy bản vá riêng.** Giữ nguyên thời gian xung và các luồng hiện tại.
 
-**Bản vá chiều kẹp DO (09/11):** tải [xiangqi-do1-open-do0-close-patch.zip](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-do1-open-do0-close-patch.zip), thoát Xiangqi, giải nén vào thư mục chứa `start.bat`, rồi mở **APPLY_DO_PATCH.bat**. Bản vá đặt **DO1 mở / DO0 đóng**, giữ thời gian xung và camera/IP; không cần cài lại GPU. Sau đó mở `start.bat` để dùng. [Hướng dẫn chi tiết và sao lưu](docs/GRIPPER_DO_PATCH.md). Bản vá này không thay thế bản vá R1–R4 ở trên.
+Máy đang dùng ZIP cũ có thể tiếp tục dùng [bản vá R1–R4](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-r1-r4-fix.zip) và [bản vá DO](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-do1-open-do0-close-patch.zip), hoặc tải bản đầy đủ mới. [Hướng dẫn vá cho bản cũ](docs/GRIPPER_DO_PATCH.md).
+
+**Cập nhật máy đã dùng bản cũ:** thoát ứng dụng và sao lưu `app/config.py` nếu đã chỉnh riêng. Có thể giải nén ZIP mới chồng lên đúng thư mục cũ để giữ `runtime/`, `state/` và dữ liệu ván; sau đó chỉ khôi phục các giá trị camera/IP riêng nếu cần, không chép lại nguyên config cũ vì sẽ đảo chiều DO trở lại. Bản mới không yêu cầu chạy hai bản vá riêng.
 
 Giải nén **toàn bộ ZIP** → lần đầu mở **INSTALL.bat** (cần Internet để cài thư viện GPU/CPU) → những lần sau mở **start.bat**. ZIP khoảng **274 MiB**; lúc cài cần thêm vài GB dung lượng.
 
-Bản mới từ `fix/fix-capsule`: camera thử 0–2, tự enable khi kiểm tra đạt, Player vs Robot dùng logic `vsc-v3` riêng và giữ cấu hình phần cứng hiện tại; web 3D tiếp tục hiển thị. Đã kiểm tra YOLO và ONNX chạy CUDA trên GTX 1650. Xem [hướng dẫn capsule](docs/CAPSULE_OPERATOR.md), [luồng Player vs Robot](docs/HVR_VSC_V3.md) và [SHA256](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi.zip.sha256).
+Bản mới từ `fix/fix-capsule`: camera thử 0–2, tự enable khi kiểm tra đạt, Player vs Robot dùng logic `vsc-v3` riêng và giữ cấu hình phần cứng hiện tại; web 3D tiếp tục hiển thị. Đã kiểm tra YOLO và ONNX chạy CUDA trên GTX 1650. Xem [hướng dẫn capsule](docs/CAPSULE_OPERATOR.md), [luồng Player vs Robot](docs/HVR_VSC_V3.md) và [SHA256](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109-fixed/xiangqi.zip.sha256).
 
 # Xiangqi Robot — Sổ tay sử dụng
 
@@ -441,7 +443,7 @@ GPU được ưu tiên khi runtime CUDA và driver phù hợp; `VISION_DEVICE=cp
 <a id="gioi-han"></a>
 ## 12. Giới hạn hiện tại
 
-- **Nhánh source và ZIP là hai bản phát hành khác nhau.** ZIP ở đầu trang là bản `xiangqi-gpu-light-20261109` từ nhánh `fix/fix-capsule`. Sửa README/source trên GitHub không tự thay file trong ZIP; cần build/nghiệm thu capsule mới để cập nhật bộ đóng gói.
+- **Nhánh source và ZIP là hai bản phát hành khác nhau.** ZIP ở đầu trang là bản `xiangqi-gpu-light-20261109-fixed` từ nhánh `fix/fix-capsule`. Sửa README/source trên GitHub không tự thay file trong ZIP; cần build/nghiệm thu capsule mới để cập nhật bộ đóng gói.
 - Lần cập nhật hướng dẫn này dựa trên đọc code, **chưa nghiệm thu camera/controller/robot thật, Windows sạch thứ hai hoặc cả ván UI/browser**. Kết quả test cũ trong báo cáo chỉ có giá trị trong phạm vi/ngày được ghi; không có tuyên bố toàn bộ bộ test hiện tại xanh.
 - Dự án còn ghi nhận vấn đề physical sau gián đoạn nguồn/đường tiếp cận, lỗi controller/tool context và kiểm chứng nhả kẹp có tải. **V/F12/F9/F10 không chứng minh đường đi sau sự cố đã an toàn**. Khi gặp các tình huống đó, dừng vận hành physical và để team kiểm tra trước khi chạy tiếp.
 - Kẹp dùng điều khiển theo xung, không có cảm biến vị trí ngàm; hình kẹp trên viewer không chứng minh đã gắp/nhả đúng ngoài đời.
