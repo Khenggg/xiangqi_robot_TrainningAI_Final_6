@@ -127,15 +127,15 @@
               </label>
               <label>Cột (Col):
                 <select id="cellColSelect">
-                  <option value="0">0 (Gần robot / Near side)</option>
+                  <option value="0">0</option>
                   <option value="1">1</option>
                   <option value="2">2</option>
                   <option value="3">3</option>
-                  <option value="4" selected>4 (Trung lộ / Mid-depth)</option>
+                  <option value="4" selected>4 (Trung lộ)</option>
                   <option value="5">5</option>
                   <option value="6">6</option>
                   <option value="7">7</option>
-                  <option value="8">8 (Xa robot / Far side)</option>
+                  <option value="8">8</option>
                 </select>
               </label>
               <button id="reachCellBtn" class="action-btn primary-action" title="Di chuyển ngàm kẹp đến ô đích (không gắp cờ)">🚀 Đi Tới</button>
@@ -274,8 +274,8 @@
                 />
               </div>
               <div style="font-size: 10px; color: #8b949e; display: flex; flex-direction: column; gap: 2px;">
-                <span>+ = Xa robot hơn (Robot <strong>-X</strong>, Viewer <strong>+Z</strong>)</span>
-                <span style="color: #d29922;">Preliminary candidate region: ~25–30 mm (PRELIMINARY / NOT YET VERIFIED)</span>
+                <span id="boardShiftAxisHint">+d theo trục cột của bàn; đang tải hướng trục.</span>
+                <span style="color: #d29922;">Chỉ phân tích hình học; chưa xác minh đường đi.</span>
               </div>
             </div>
 
@@ -344,27 +344,27 @@
               </div>
               <div class="diag-row">
                 <span>Board Orientation (Yaw):</span>
-                <strong id="readoutBoardYaw" style="color: #4ade80">+90.0° (col=-X, row=-Y)</strong>
+                <strong id="readoutBoardYaw" style="color: #4ade80">—</strong>
               </div>
               <div class="diag-row">
-                <span>Near-side grid depth:</span>
-                <strong id="readoutNearGridDepth">200.0 mm</strong>
+                <span>Lưới: min |X_robot|:</span>
+                <strong id="readoutNearGridDepth">—</strong>
               </div>
               <div class="diag-row">
-                <span>Far-side grid depth:</span>
-                <strong id="readoutFarGridDepth">520.0 mm</strong>
+                <span>Lưới: max |X_robot|:</span>
+                <strong id="readoutFarGridDepth">—</strong>
               </div>
               <div class="diag-row">
-                <span>Mép bàn gần (Near edge):</span>
-                <strong id="readoutNearEdgeDist">176.5 mm</strong>
+                <span>Mép bàn: min |X_robot|:</span>
+                <strong id="readoutNearEdgeDist">—</strong>
               </div>
               <div class="diag-row">
-                <span>Tâm bàn cờ (Center distance):</span>
-                <strong id="readoutCenterDist">360.0 mm</strong>
+                <span>Tâm bàn: |X_robot|:</span>
+                <strong id="readoutCenterDist">—</strong>
               </div>
               <div class="diag-row">
-                <span>Mép bàn xa (Far edge):</span>
-                <strong id="readoutFarEdgeDist">543.5 mm</strong>
+                <span>Mép bàn: max |X_robot|:</span>
+                <strong id="readoutFarEdgeDist">—</strong>
               </div>
               <div class="diag-divider" style="height: 1px; background: rgba(240, 246, 252, 0.1); margin: 6px 0;"></div>
               <div class="diag-row">
@@ -374,7 +374,7 @@
               <div class="diag-divider" style="height: 1px; background: rgba(240, 246, 252, 0.1); margin: 6px 0;"></div>
               <div class="diag-header" style="margin-top: 4px;">
                 <strong>📐 GEOMETRIC PRECHECK (R = 650 mm)</strong>
-                <span id="geomPrecheckBadge" class="badge-safe">PASS</span>
+                <span id="geomPrecheckBadge" class="badge-warn">UNKNOWN</span>
               </div>
               <div class="diag-row">
                 <span>Max flange grasp distance (D_grasp):</span>

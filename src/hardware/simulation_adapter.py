@@ -244,6 +244,18 @@ def execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
         return rejected(str(exc))
 
 
+def _playback_speed(runtime):
+    """Playback speed for a simulated pick/place.
+
+    runtime.pick_piece/place_piece default to 50.0, which is the backend's
+    "no interpolation" sentinel: one joint step and zero sleep per Cartesian
+    sample, so the viewer only ever sees the final pose of each stage. Passing
+    the backend's configured playback speed keeps the motion interpolated at
+    the rate the operator selected.
+    """
+    return getattr(getattr(runtime, "backend", None), "default_speed_factor", None)
+
+
 def _execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
                           piece_id=None, captured_piece_id=None):
     from src.domain.board_pose import BoardCell
@@ -255,6 +267,7 @@ def _execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
     except (TypeError, ValueError) as exc:
         return rejected(str(exc), MotionFailureCategory.TARGET_INVALID)
     world = runtime.world
+    speed = _playback_speed(runtime)
     if piece_id is None:
         matches = [pid for pid, piece in world.pieces.items()
                    if runtime.find_nearest_cell(piece.get_position_robot()) == (s_row, s_col)
@@ -278,10 +291,10 @@ def _execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
         if slot is None:
             return rejected("No free reachable simulated capture slot; configure capture_area in the scene",
                             MotionFailureCategory.SAFETY_INTERLOCK)
-        removed = runtime.pick_piece(captured_piece_id)
+        removed = runtime.pick_piece(captured_piece_id, speed_factor=speed)
         if not removed.get("success", False):
             return rejected(removed.get("error") or removed.get("status"), MotionFailureCategory.PAYLOAD_NOT_CONFIRMED)
-        disposed = runtime.place_piece(capture_slot_robot_m=slot)
+        disposed = runtime.place_piece(capture_slot_robot_m=slot, speed_factor=speed)
         if not disposed.get("success", False):
             return rejected(disposed.get("error") or disposed.get("status"),
                             MotionFailureCategory.MOTION_COMMAND_FAILED, MotionStage.RELEASE)
@@ -296,11 +309,11 @@ def _execute_virtual_move(runtime, s_col, s_row, d_col, d_row, is_capture,
             return rejected("Captured piece snapshot unavailable", MotionFailureCategory.PAYLOAD_NOT_CONFIRMED)
     elif victims:
         return rejected("Destination is occupied", MotionFailureCategory.TARGET_INVALID)
-    picked = runtime.pick_piece(piece_id)
+    picked = runtime.pick_piece(piece_id, speed_factor=speed)
     if not picked.get("success", False):
         return rejected(picked.get("error") or picked.get("status", "Virtual pick failed"),
                         MotionFailureCategory.PAYLOAD_NOT_CONFIRMED, MotionStage.GRIP)
-    placed = runtime.place_piece(target_cell=(d_row, d_col))
+    placed = runtime.place_piece(target_cell=(d_row, d_col), speed_factor=speed)
     if not placed.get("success", False):
         return rejected(placed.get("error") or placed.get("status", "Virtual place failed"),
                         MotionFailureCategory.MOTION_COMMAND_FAILED, MotionStage.PLACE_LAND)

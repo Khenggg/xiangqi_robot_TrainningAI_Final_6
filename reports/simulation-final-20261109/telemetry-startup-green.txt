@@ -1,0 +1,56 @@
+============================================================
+ Xiangqi Robot -- Fast Parallel Test Runner
+============================================================
+Mode        : Full (Workers: 2)
+Targets     : tests/unit/test_virtual_telemetry_startup.py
+Base Marker : not slow
+Dist Scheme : worksteal
+Thread Caps : OMP=1, MKL=1, OPENBLAS=1, NUMEXPR=1
+Repo Root   : D:\OJT\xiangqi_robot_TrainningAI_Final_6
+
+>>> Part A: Running Parallel-Safe Tests (-n 2) ...
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_TrainningAI_Final_6
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+created: 2/2 workers
+2 workers [3 items]
+
+...                                                                      [100%]
+============================== warnings summary ===============================
+src\hardware\telemetry_publisher.py:20
+src\hardware\telemetry_publisher.py:20
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 3 passed, 4 warnings in 11.04s ========================
+Part A PASSED.
+>>> Part B: Running Serial Tests (Single Process) ...
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_TrainningAI_Final_6
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+collected 3 items / 3 deselected / 0 selected
+
+============================== warnings summary ===============================
+src\hardware\telemetry_publisher.py:20
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+====================== 3 deselected, 2 warnings in 4.66s ======================
+Part B: No serial tests collected (none required).
+
+=== ALL TEST SUITES PASSED in 19.09s ===

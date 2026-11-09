@@ -80,3 +80,65 @@ export function fingerOffsetCadMm(asset, direction, closed, travelScale = 1) {
   const travel = asset.fingerTravelMm * Number(travelScale || 1);
   return direction * (asset.fingerOpenInsetMm + (closed ? -travel : 0));
 }
+
+/**
+ * True when a STEP mesh is one of the two parallel fingers.
+ *
+ * occt-import-js reports assembly instance names, not the bare product name:
+ * the shipped assembly yields "pinza:3" and "pinza:4", so an exact match on
+ * "pinza" finds nothing and the jaws silently stop animating.
+ */
+export function isFingerPartName(name) {
+  return /^pinza(?::\d+)?$/i.test(String(name ?? "").trim());
+}
+
+/**
+ * Outward unit direction for one finger, given the pair's centre.
+ *
+ * fingerOffsetCadMm() subtracts the travel when the gripper closes, so the
+ * direction must point away from the centre: subtracting then pulls each finger
+ * inward and the gap narrows. Pointing inward inverts the animation and the
+ * jaws spread apart on a clamp command.
+ */
+export function fingerDirection(centerX, midX) {
+  return Number(centerX) < Number(midX) ? -1 : 1;
+}
+
+/**
+ * Virtual clamp target: the inner faces stop this far apart (CAD millimetres).
+ *
+ * The shipped STEP has a real stroke of only 0.344 mm per finger, so animating
+ * by travel (even x12) moves the jaws ~6 mm inside a ~40 mm opening and still
+ * looks open. The virtual pose therefore targets a gap instead of a stroke.
+ */
+export const VIRTUAL_CLOSED_CONTACT_CAD_MM = 2;
+
+export function fingerOpenShift(asset, side) {
+  return Number(side) * asset.fingerOpenInsetMm;
+}
+
+export function fingerClosedShift({ localCenterX, halfWidth, side, midX,
+                                    contact = VIRTUAL_CLOSED_CONTACT_CAD_MM }) {
+  const innerFace = Number(localCenterX) - Number(side) * Number(halfWidth);
+  return (Number(midX) + Number(side) * contact) - innerFace;
+}
+
+/**
+ * Piece diameter expressed in CAD units.
+ *
+ * The STEP mesh is scaled by scaleToM (0.0008 m per CAD unit) at the mount, so a
+ * piece measured in world millimetres is worldMm / (scaleToM * 1000) CAD units.
+ * A 22.5 mm piece is 28.125 CAD units: closing the jaws to 2 CAD units would
+ * draw them inside the piece.
+ */
+export function pieceDiameterCadMm(worldDiameterMm, scaleToM) {
+  const cadPerWorldMm = 1 / (Number(scaleToM) * 1000);
+  return Number(worldDiameterMm) * cadPerWorldMm;
+}
+
+/** Half the held piece plus a hair of clearance, in CAD units. */
+export function heldContactCadMm(worldDiameterMm, scaleToM, clearanceCadMm = 0.5) {
+  return pieceDiameterCadMm(worldDiameterMm, scaleToM) / 2 + Number(clearanceCadMm);
+}
+
+

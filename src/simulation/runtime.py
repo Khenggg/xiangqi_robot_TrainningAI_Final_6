@@ -1554,6 +1554,7 @@ class VirtualXiangqiSimulation:
                         board_surface_mm=new_state.grid_origin_robot_m[2] * 1000.0,
                         board_yaw_deg=new_state.board_yaw_deg,
                         placement_version=new_version,
+                        placement_state=new_state,
                     )
                     if self.telemetry is not None and hasattr(self.telemetry, "broadcast_custom"):
                         self.telemetry.broadcast_custom(analysis_packet)
@@ -3092,6 +3093,7 @@ class VirtualXiangqiSimulation:
                         safe_transit_height_mm=self.placement_state.safe_transit_height_mm,
                         board_surface_mm=self.board_surface_z * 1000.0,
                         placement_version=self.placement_state.placement_version,
+                        placement_state=self.placement_state,
                     )
                     self.telemetry.broadcast_custom(analysis_packet)
 

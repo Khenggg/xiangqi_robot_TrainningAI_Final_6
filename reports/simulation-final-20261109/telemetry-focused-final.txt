@@ -1,0 +1,114 @@
+============================================================
+ Xiangqi Robot -- Fast Parallel Test Runner
+============================================================
+Mode        : Full (Workers: 2)
+Targets     : tests/unit/test_virtual_telemetry_startup.py, tests/unit/test_simple_launch_sync.py, tests/unit/test_telemetry_liveness.py
+Base Marker : not slow
+Dist Scheme : worksteal
+Thread Caps : OMP=1, MKL=1, OPENBLAS=1, NUMEXPR=1
+Repo Root   : D:\OJT\xiangqi_robot_TrainningAI_Final_6
+
+>>> Part A: Running Parallel-Safe Tests (-n 2) ...
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_TrainningAI_Final_6
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+created: 2/2 workers
+2 workers [34 items]
+
+...............................F.
+================================== FAILURES ===================================
+_ test_slow_viewer_keeps_only_latest_snapshot_and_does_not_delay_fast_viewer __
+[gw1] win32 -- Python 3.12.10 D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Scripts\python.exe
+
+    def test_slow_viewer_keeps_only_latest_snapshot_and_does_not_delay_fast_viewer():
+        from collections import deque
+        publisher = TelemetryPublisher()
+    
+        async def observe():
+            gate, entered = asyncio.Event(), asyncio.Event()
+            class Client:
+                def __init__(self, slow=False):
+                    self.slow, self.packets = slow, []
+                async def send(self, message):
+                    if self.slow:
+                        entered.set()
+                        await gate.wait()
+                    self.packets.append(message)
+                async def close(self, **kwargs):
+                    pass
+            slow, fast = Client(True), Client()
+            publisher._loop = asyncio.get_running_loop()
+            publisher._outboxes = {client: ({}, deque(), asyncio.Event()) for client in (slow, fast)}
+            writers = [asyncio.create_task(publisher._send_client_packets(client)) for client in (slow, fast)]
+            try:
+                publisher._queue_packet('0', 'robot_state')
+                await asyncio.wait_for(entered.wait(), 1)
+                for value in range(1, 1001):
+                    publisher._queue_packet(str(value), 'robot_state')
+                await asyncio.sleep(0.1)
+                assert len(publisher._outboxes[slow][0]) == 1
+                assert fast.packets[-1] == '1000'
+                gate.set()
+                await asyncio.sleep(0.1)
+                assert slow.packets == ['0', '1000']
+            finally:
+                for writer in writers:
+                    writer.cancel()
+                await asyncio.gather(*writers, return_exceptions=True)
+                publisher._loop = None
+>       asyncio.run(observe())
+
+tests\unit\test_telemetry_liveness.py:126: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Ken\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+C:\Users\Ken\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Ken\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+tests\unit\test_telemetry_liveness.py:114: in observe
+    publisher._queue_packet(str(value), 'robot_state')
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <src.hardware.telemetry_publisher.TelemetryPublisher object at 0x000002107121B800>
+message = '2', state_key = 'robot_state'
+
+    def _queue_packet(self, message, state_key=None):
+        """Coalesce snapshots before crossing threads; never queue one send per frame."""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        with self._dispatch_lock:
+            if state_key:
+                previous = self._pending_states.get(state_key)
+                if (previous is not None
+>                       and json.loads(previous).get("packet_seq", 0) > json.loads(message).get("packet_seq", 0)):
+                            ^^^^^^^^^^^^^^^^^^^^^^^^
+E                       AttributeError: 'int' object has no attribute 'get'
+
+src\hardware\telemetry_publisher.py:506: AttributeError
+============================== warnings summary ===============================
+src\hardware\telemetry_publisher.py:20
+src\hardware\telemetry_publisher.py:20
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_telemetry_liveness.py::test_slow_viewer_keeps_only_latest_snapshot_and_does_not_delay_fast_viewer
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!! xdist.dsession.Interrupted: stopping after 1 failures !!!!!!!!!!!!
+================== 1 failed, 32 passed, 4 warnings in 9.87s ===================
+Part A FAILED with exit code 2
+
+=== TEST SUITE FAILED (exit code 2) in 11.42s ===

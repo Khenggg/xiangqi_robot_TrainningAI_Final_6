@@ -13,7 +13,7 @@ Enforces:
     +column board axis (u) -> -X_robot
     +row board axis (v)    -> -Y_robot
     +Z_board               -> +Z_robot
-- Dynamic board forward shift d (d > 0 means board center moves farther from robot along -X_robot)
+- Dynamic board shift d follows the positive board column axis at the current yaw
 - Exact geometry-independent reach prechecks and robustness quality scoring
 """
 
@@ -73,124 +73,134 @@ class BoardPlacementAnalyzer:
         safe_transit_height_mm: float = 70.0,
         board_height_offset_mm: float = 0.0,
         board_surface_mm: Optional[float] = None,
-        board_yaw_deg: float = 90.0,
+        board_yaw_deg: Optional[float] = None,
         placement_version: int = 1,
+        placement_state: Optional[BoardPlacementState] = None,
     ) -> Dict[str, Any]:
-        """
-        Derive pure analytical geometric feasibility precheck using geometry-independent metrics.
-        """
-        d = float(forward_shift_mm)
-        H = float(safe_transit_height_mm)
-        h_off = float(board_height_offset_mm)
-        z_board = board_surface_mm if board_surface_mm is not None else (self.board_surface_nominal_mm + h_off)
-        piece_h_m = self.piece_height_mm / 1000.0
+        """Read-only analytical diagnostics from the exact board transform.
 
-        state = BoardPlacementState.compute(
-            forward_shift_mm=d,
-            safe_transit_height_mm=H,
-            board_height_offset_mm=h_off,
-            board_yaw_deg=board_yaw_deg,
-            placement_version=placement_version,
+        X-depth fields retain their historical |X_robot| meaning, not radial
+        distance. This reach sphere is not IK, collision or physical safety proof.
+        ``placement_state`` avoids reconstructing a calibrated pose from nominal
+        scene values; callers that omit it use the current nominal scene.
+        """
+        metric_fields = (
+            "board_center_distance_mm", "near_board_edge_distance_mm",
+            "far_board_edge_distance_mm", "near_grid_depth_mm", "far_grid_depth_mm",
+            "nearest_grid_cell_distance_mm", "farthest_grid_cell_distance_mm",
+            "far_grasp_distance_mm", "far_approach_distance_mm", "r_precheck_mm",
+            "grasp_reach_margin_mm", "approach_reach_margin_mm",
+            "d_max_for_current_h_mm", "h_max_for_current_d_mm",
         )
 
-        max_flange_approach_dist_mm = 0.0
-        max_flange_grasp_dist_mm = 0.0
-        max_tcp_reach_dist_mm = 0.0
-        min_tcp_reach_dist_mm = float("inf")
-        farthest_cell = (0, 0)
-        nearest_cell = (0, 0)
-        p_flange_ap_far = None
-        min_grid_depth_mm = float("inf")
-        max_grid_depth_mm = 0.0
+        def unknown(reason):
+            return {"type": "placement_analysis", "status": "GEOMETRIC UNKNOWN",
+                    "is_geometric_pass": False, "is_geometric_known": False,
+                    "reason": reason, **{name: None for name in metric_fields}}
 
-        # Evaluate across all 90 cells
-        for r in range(10):
-            for c in range(9):
-                p_gr = state.cell_to_robot_xyz(r, c, z_rel_m=piece_h_m / 2.0)
-                p_ap = state.cell_to_robot_xyz(r, c, z_rel_m=H / 1000.0)
+        try:
+            d, H, h_off = map(float, (forward_shift_mm, safe_transit_height_mm, board_height_offset_mm))
+            if not all(math.isfinite(value) for value in (d, H, h_off, self.tool_length_m, self.R_precheck_mm)):
+                return unknown("Non-finite placement or tool geometry")
+            if self.tool_length_m <= 0 or self.R_precheck_mm <= 0:
+                return unknown("Invalid tool geometry or reach radius")
+            state = placement_state if placement_state is not None else BoardPlacementState.compute(
+                forward_shift_mm=d, safe_transit_height_mm=H,
+                board_height_offset_mm=h_off, board_yaw_deg=board_yaw_deg,
+                nominal_board_surface_z_m=self.board_surface_nominal_m,
+                placement_version=placement_version,
+            )
+            T = np.array(state.T_robot_from_board, dtype=float, copy=True)
+            z_board = float(board_surface_mm) if board_surface_mm is not None else T[2, 3] * 1000.0
+            if T.shape != (4, 4) or not np.all(np.isfinite(T)) or not math.isfinite(z_board):
+                return unknown("Non-finite board transform or surface")
+            if (not np.allclose(T[3], [0, 0, 0, 1], atol=1e-6, rtol=0)
+                    or not np.allclose(T[:3, :3].T @ T[:3, :3], np.eye(3), atol=1e-4, rtol=0)
+                    or abs(float(np.linalg.det(T[:3, :3])) - 1.0) > 1e-4):
+                return unknown("Board transform is not rigid")
+            T[2, 3] = z_board / 1000.0
+        except (TypeError, ValueError, OverflowError) as error:
+            return unknown(str(error))
 
-                p_flange_gr = p_gr + np.array([0.0, 0.0, self.tool_length_m])
-                p_flange_ap = p_ap + np.array([0.0, 0.0, self.tool_length_m])
+        def point(u, v, height=0.0):
+            return (T[:3, :3] @ np.array([u, v, height]) + T[:3, 3]) * 1000.0
 
-                d_flange_gr = float(np.linalg.norm(p_flange_gr)) * 1000.0
-                d_flange_ap = float(np.linalg.norm(p_flange_ap)) * 1000.0
-                d_tcp = float(np.linalg.norm(p_gr[:2])) * 1000.0
-                grid_depth = abs(p_gr[0]) * 1000.0
+        def interval(base, axis):
+            # Exact intersection of |base + t*axis| <= R with a line.
+            a = float(np.dot(axis, axis))
+            b = float(np.dot(base, axis))
+            c = float(np.dot(base, base)) - self.R_precheck_mm**2
+            discriminant = b*b - a*c
+            if a <= 0 or discriminant < 0:
+                return None
+            half = math.sqrt(discriminant)
+            return ((-b-half)/a, (-b+half)/a)
 
-                if grid_depth < min_grid_depth_mm:
-                    min_grid_depth_mm = grid_depth
-                if grid_depth > max_grid_depth_mm:
-                    max_grid_depth_mm = grid_depth
+        max_app = max_grasp = max_grid = max_depth = 0.0
+        min_grid = min_depth = float("inf")
+        nearest_cell = farthest_cell = (0, 0)
+        shift_lower, shift_upper = -20.0, float("inf")
+        height_lower, height_upper = -float("inf"), float("inf")
+        column_axis, normal = T[:3, 0], T[:3, 2]
+        rows, columns = self.geom.board.rows, self.geom.board.columns
+        for row in range(rows):
+            for col in range(columns):
+                u = (col-(columns-1)/2) * self.geom.grid_cell_width_mm / 1000.0
+                v = (row-(rows-1)/2) * self.geom.grid_cell_length_mm / 1000.0
+                p = point(u, v)
+                grasp = point(u, v, self.piece_height_mm / 2000.0)
+                approach = point(u, v, H / 1000.0)
+                grasp[2] += self.tool_length_mm
+                approach[2] += self.tool_length_mm
+                grid_dist = float(np.linalg.norm(p[:2]))
+                if grid_dist < min_grid:
+                    min_grid, nearest_cell = grid_dist, (row, col)
+                max_grid = max(max_grid, grid_dist)
+                min_depth, max_depth = min(min_depth, abs(p[0])), max(max_depth, abs(p[0]))
+                max_grasp = max(max_grasp, float(np.linalg.norm(grasp)))
+                app_dist = float(np.linalg.norm(approach))
+                if app_dist > max_app:
+                    max_app, farthest_cell = app_dist, (row, col)
+                # All cells and both endpoint heights constrain d; the farthest
+                # cell can change as the board moves along its column axis.
+                for endpoint in (grasp, approach):
+                    bounds = interval(endpoint-d*column_axis, column_axis)
+                    if bounds is None:
+                        shift_lower, shift_upper = float("inf"), -float("inf")
+                    else:
+                        shift_lower, shift_upper = max(shift_lower, bounds[0]), min(shift_upper, bounds[1])
+                bounds = interval(approach-H*normal, normal)
+                if bounds is None:
+                    height_lower, height_upper = float("inf"), -float("inf")
+                else:
+                    height_lower, height_upper = max(height_lower, bounds[0]), min(height_upper, bounds[1])
 
-                if d_flange_ap > max_flange_approach_dist_mm:
-                    max_flange_approach_dist_mm = d_flange_ap
-                    farthest_cell = (r, c)
-                    p_flange_ap_far = p_flange_ap
-                if d_flange_gr > max_flange_grasp_dist_mm:
-                    max_flange_grasp_dist_mm = d_flange_gr
-                if d_tcp > max_tcp_reach_dist_mm:
-                    max_tcp_reach_dist_mm = d_tcp
-                if d_tcp < min_tcp_reach_dist_mm:
-                    min_tcp_reach_dist_mm = d_tcp
-                    nearest_cell = (r, c)
-
-        approach_margin_mm = self.R_precheck_mm - max_flange_approach_dist_mm
-        grasp_margin_mm = self.R_precheck_mm - max_flange_grasp_dist_mm
-
-        # Physical board edges from robot base:
-        # Box has local half-widths: width (367mm) along u, length (410mm) along v
-        hw = 0.367 / 2.0
-        hl = 0.410 / 2.0
-        corners_local = [(-hw, -hl), (-hw, hl), (hw, -hl), (hw, hl)]
-        corners_robot = [state.board_local_to_robot(u, v, 0.0) for u, v in corners_local]
-        x_corners = [c[0] for c in corners_robot]
-        near_edge_x = max(x_corners)
-        far_edge_x = min(x_corners)
-        near_board_edge_dist = abs(near_edge_x) * 1000.0
-        far_board_edge_dist = abs(far_edge_x) * 1000.0
-        board_center_dist = abs(state.board_center_robot_m[0]) * 1000.0
-
-        # Dynamic d_max and h_max derived from farthest transformed cell
-        d_max_mm = None
-        h_max_mm = None
-        if p_flange_ap_far is not None:
-            x_far_mm = p_flange_ap_far[0] * 1000.0
-            y_far_mm = p_flange_ap_far[1] * 1000.0
-            z_flange_app_mm = p_flange_ap_far[2] * 1000.0
-            rad_d = self.R_precheck_mm**2 - y_far_mm**2 - z_flange_app_mm**2
-            x_base_far_mm = abs(x_far_mm) - d
-            d_max_mm = math.sqrt(rad_d) - x_base_far_mm if rad_d >= 0.0 else None
-
-            rad_h = self.R_precheck_mm**2 - y_far_mm**2 - x_far_mm**2
-            h_max_mm = math.sqrt(rad_h) - z_board - self.tool_length_mm if rad_h >= 0.0 else None
-
-        is_geometric_pass = (approach_margin_mm >= 0.0) and (grasp_margin_mm >= 0.0) and (d >= -20.0)
-
+        hw, hl = self.geom.outer_width_mm / 2000.0, self.geom.outer_length_mm / 2000.0
+        corners_x = [point(u, v)[0] for u in (-hw, hw) for v in (-hl, hl)]
+        min_x, max_x = min(corners_x), max(corners_x)
+        near_edge = 0.0 if min_x <= 0 <= max_x else min(abs(min_x), abs(max_x))
+        far_edge = max(abs(min_x), abs(max_x))
+        # Round published upper limits inward, never past the exact reach sphere.
+        d_max = math.floor(shift_upper*100)/100 if shift_lower <= shift_upper else None
+        H_max = math.floor(height_upper*100)/100 if height_lower <= height_upper and max_grasp <= self.R_precheck_mm else None
+        app_margin, grasp_margin = self.R_precheck_mm-max_app, self.R_precheck_mm-max_grasp
+        passed = app_margin >= 0 and grasp_margin >= 0 and d >= -20.0
+        center = [float(T[0, 3]), float(T[1, 3]), z_board/1000-self.geom.board_thickness_m/2]
         return {
-            "type": "placement_analysis",
-            "forward_shift_mm": round(d, 2),
-            "board_surface_z_mm": round(z_board, 2),
-            "safe_transit_height_mm": round(H, 2),
-            "board_yaw_deg": round(board_yaw_deg, 2),
-            "board_center_robot_xyz_m": [round(v, 5) for v in state.board_center_robot_m],
-            "board_center_distance_mm": round(board_center_dist, 2),
-            "near_board_edge_distance_mm": round(near_board_edge_dist, 2),
-            "far_board_edge_distance_mm": round(far_board_edge_dist, 2),
-            "near_grid_depth_mm": round(min_grid_depth_mm, 2),
-            "far_grid_depth_mm": round(max_grid_depth_mm, 2),
-            "nearest_grid_cell": list(nearest_cell),
-            "nearest_grid_cell_distance_mm": round(min_tcp_reach_dist_mm, 2),
-            "farthest_grid_cell": list(farthest_cell),
-            "farthest_grid_cell_distance_mm": round(max_tcp_reach_dist_mm, 2),
-            "far_grasp_distance_mm": round(max_flange_grasp_dist_mm, 2),
-            "far_approach_distance_mm": round(max_flange_approach_dist_mm, 2),
+            "type": "placement_analysis", "is_geometric_known": True,
+            "forward_shift_mm": round(d, 2), "board_surface_z_mm": round(z_board, 2),
+            "safe_transit_height_mm": round(H, 2), "board_yaw_deg": round(state.board_yaw_deg, 2),
+            "board_center_robot_xyz_m": [round(value, 5) for value in center],
+            "board_center_distance_mm": round(abs(T[0, 3])*1000, 2),
+            "near_board_edge_distance_mm": round(near_edge, 2), "far_board_edge_distance_mm": round(far_edge, 2),
+            "near_grid_depth_mm": round(min_depth, 2), "far_grid_depth_mm": round(max_depth, 2),
+            "nearest_grid_cell": list(nearest_cell), "nearest_grid_cell_distance_mm": round(min_grid, 2),
+            "farthest_grid_cell": list(farthest_cell), "farthest_grid_cell_distance_mm": round(max_grid, 2),
+            "far_grasp_distance_mm": round(max_grasp, 2), "far_approach_distance_mm": round(max_app, 2),
             "r_precheck_mm": round(self.R_precheck_mm, 2),
-            "grasp_reach_margin_mm": round(grasp_margin_mm, 2),
-            "approach_reach_margin_mm": round(approach_margin_mm, 2),
-            "d_max_for_current_h_mm": round(d_max_mm, 2) if d_max_mm is not None else None,
-            "h_max_for_current_d_mm": round(h_max_mm, 2) if h_max_mm is not None else None,
-            "status": "GEOMETRIC PASS" if is_geometric_pass else "GEOMETRIC FAIL",
-            "is_geometric_pass": is_geometric_pass,
+            "grasp_reach_margin_mm": round(grasp_margin, 2), "approach_reach_margin_mm": round(app_margin, 2),
+            "d_max_for_current_h_mm": d_max, "h_max_for_current_d_mm": H_max,
+            "status": "GEOMETRIC PASS" if passed else "GEOMETRIC FAIL", "is_geometric_pass": bool(passed),
             "placement_version": int(placement_version),
         }
 

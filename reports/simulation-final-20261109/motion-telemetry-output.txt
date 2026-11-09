@@ -1,0 +1,144 @@
+pybullet build time: Oct  9 2026 17:21:30
+Twin rejected board reconciliation
+Traceback (most recent call last):
+  File "D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\core\game_state.py", line 906, in sync_current_board
+    raise RuntimeError("Twin rejected board reconciliation")
+RuntimeError: Twin rejected board reconciliation
+[ROBOT] Virtual runtime ready; physical hardware untouched.
+[TELEMETRY] Virtual Robot Telemetry Server started at ws://127.0.0.1:64817
+[TELEMETRY] 3D Viewer Client connected (1 active).
+[HUMAN] ✅ Moved: r_P e6 -> e5
+[SPACE] 💾 State saved for rollback (Z to undo).
+[FEN] rnbakabnr/9/1c5c1/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR b - - 0 2
+[TELEMETRY] 3D Viewer Client disconnected (0 active).
+{
+  "scope": "VIRTUAL_ONLY",
+  "physical_actuation": "NOT RUN",
+  "reply_success": true,
+  "reply_error": null,
+  "duration_s": 23.546,
+  "initial_joints": [
+    0.0,
+    -45.0,
+    90.0,
+    -45.0,
+    -90.0,
+    0.0
+  ],
+  "final_joints": [
+    0.0,
+    -70.0,
+    60.0,
+    -80.0,
+    -90.0,
+    0.0
+  ],
+  "final_fen": "rnbakabnr/9/1c2c4/p1p1p1p1p/9/4P4/P1P3P1P/1C5C1/9/RNBAKABNR w - - 0 3",
+  "placement": {
+    "type": "board_placement",
+    "forward_shift_mm": 0.0,
+    "safe_transit_height_mm": 70.0,
+    "board_height_offset_mm": 0.0,
+    "board_yaw_deg": 180.0,
+    "grid_origin_robot_m": [
+      -0.2038,
+      0.537,
+      0.0105
+    ],
+    "physical_board_center_robot_m": [
+      -0.0238,
+      0.377,
+      0.00525
+    ],
+    "physical_board_center_world_m": [
+      -0.377,
+      0.00525,
+      0.0238
+    ],
+    "board_surface_z_robot_m": 0.0105,
+    "board_surface_z_m": 0.0105,
+    "board_visual_root_world_m": [
+      -0.377,
+      0.0105,
+      0.0238
+    ],
+    "board_center_robot_m": [
+      -0.0238,
+      0.377,
+      0.00525
+    ],
+    "board_center_world_m": [
+      -0.377,
+      0.0105,
+      0.0238
+    ],
+    "quat_robot_from_board": [
+      0.0,
+      0.0,
+      -0.70711,
+      0.70711
+    ],
+    "quat_world": [
+      -0.70711,
+      -0.0,
+      -0.0,
+      0.70711
+    ],
+    "R_robot_from_board": [
+      [
+        -0.0,
+        1.0,
+        0.0
+      ],
+      [
+        -1.0,
+        -0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_robot_from_board": [
+      [
+        -0.0,
+        1.0,
+        0.0,
+        -0.0238
+      ],
+      [
+        -1.0,
+        -0.0,
+        0.0,
+        0.377
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.0105
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "teaching_points": null,
+    "placement_version": 1,
+    "calibration_space": "LEGACY",
+    "timestamp": 1794203879.7494314
+  },
+  "backend_samples": 253,
+  "backend_distinct_joints": 207,
+  "websocket_packets": 655,
+  "websocket_robot_packets": 353,
+  "websocket_distinct_joints": 117,
+  "receiver_errors": [],
+  "source_values": [
+    "VIRTUAL"
+  ]
+}

@@ -1,0 +1,66 @@
+============================================================
+ Xiangqi Robot -- Fast Parallel Test Runner
+============================================================
+Mode        : Full (Workers: 2)
+Targets     : tests/unit/test_virtual_telemetry_startup.py
+Base Marker : not slow
+Dist Scheme : worksteal
+Thread Caps : OMP=1, MKL=1, OPENBLAS=1, NUMEXPR=1
+Repo Root   : D:\OJT\xiangqi_robot_TrainningAI_Final_6
+
+>>> Part A: Running Parallel-Safe Tests (-n 2) ...
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\OJT\xiangqi_robot_TrainningAI_Final_6
+configfile: pytest.ini
+plugins: anyio-4.15.1, xdist-3.8.0
+created: 2/2 workers
+2 workers [3 items]
+
+.F.
+================================== FAILURES ===================================
+_____ test_busy_virtual_port_gets_owned_live_stream_and_actual_viewer_url _____
+[gw0] win32 -- Python 3.12.10 D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Scripts\python.exe
+
+startup_environment = (WindowsPath('C:/Users/Ken/AppData/Local/Temp/pytest-of-Ken/pytest-20/popen-gw0/test_busy_virtual_port_gets_ow0'), nam...rtual_telemetry_startup.startup_environment.<locals>.Manager object at 0x000002C96294DA30>], <Mock id='3064180205920'>)
+
+    def test_busy_virtual_port_gets_owned_live_stream_and_actual_viewer_url(startup_environment):
+        root, state, options, created, browser = startup_environment
+        with socket.socket() as occupied:
+            occupied.bind(("127.0.0.1", 0))
+            occupied.listen(1)
+            requested_port = occupied.getsockname()[1]
+            hw = telemetry = viewer = None
+            try:
+                hw, telemetry, viewer, reason = session_startup.build_session(
+                    config(requested_port), options, root, state, mode="SIMULATION")
+>               assert telemetry is not None, "A virtual game must retain its live arm stream"
+E               AssertionError: A virtual game must retain its live arm stream
+E               assert None is not None
+
+tests\unit\test_virtual_telemetry_startup.py:93: AssertionError
+---------------------------- Captured stdout call -----------------------------
+[TELEMETRY] Server loop terminated: [Errno 10048] error while attempting to bind on address ('127.0.0.1', 58992): [winerror 10048] only one usage of each socket address (protocol/network address/port) is normally permitted
+[VIEWER] http://127.0.0.1:58997/robot-3d-viewer/?ws=ws%3A%2F%2F127.0.0.1%3A58992&autoconnect=0&mirror_error=WebSocket+unavailable%3A+Telemetry+server+startup+failed%3A+%5BErrno+10048%5D+error+while+attempting+to+bind+on+address+%28%27127.0.0.1%27%2C+58992%29%3A+%5Bwinerror+10048%5D+only+one+usage+of+each+socket+address+%28protocol%2Fnetwork+address%2Fport%29+is+normally+permitted
+------------------------------ Captured log call ------------------------------
+ERROR    xiangqi:telemetry_publisher.py:222 [Errno 10048] error while attempting to bind on address ('127.0.0.1', 58992): [winerror 10048] only one usage of each socket address (protocol/network address/port) is normally permitted\nWARNING  xiangqi:session_startup.py:116 WebSocket ch\u01b0a m\u1edf; Game kh\xf4ng d\xf9ng server \u0111ang chi\u1ebfm c\u1ed5ng
+============================== warnings summary ===============================
+src\hardware\telemetry_publisher.py:20
+src\hardware\telemetry_publisher.py:20
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\src\hardware\telemetry_publisher.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+.venv312\Lib\site-packages\websockets\legacy\__init__.py:6
+  D:\OJT\xiangqi_robot_TrainningAI_Final_6\.venv312\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_virtual_telemetry_startup.py::test_busy_virtual_port_gets_owned_live_stream_and_actual_viewer_url
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!! xdist.dsession.Interrupted: stopping after 1 failures !!!!!!!!!!!!
+=================== 1 failed, 2 passed, 4 warnings in 8.05s ===================
+Part A FAILED with exit code 2
+
+=== TEST SUITE FAILED (exit code 2) in 9.13s ===
