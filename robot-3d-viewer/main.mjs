@@ -849,7 +849,10 @@ function connectLive() {
           }
         }
         if (data.gripper !== undefined && state.currentArm?.gripper) {
-          state.currentArm.gripper.setClosed(Boolean(data.gripper));
+          // Keep the toggle source of truth in sync, otherwise the panel button
+          // keeps sending the same command and can never reopen the jaws.
+          state.gripperClosed = Boolean(data.gripper);
+          state.currentArm.gripper.setClosed(state.gripperClosed);
         }
         if (data.placement_version !== undefined) {
           state.placementVersion = Number(data.placement_version);
@@ -859,8 +862,9 @@ function connectLive() {
       } else if (data.type === "gripper_command") {
         if (!gripperCommandApplies(data, state.liveSource)) return;
         state.lastGripperCommand = data;
+        state.gripperClosed = data.phase === "CLOSE";
         if (state.currentArm?.gripper) {
-          state.currentArm.gripper.setClosed(data.phase === "CLOSE");
+          state.currentArm.gripper.setClosed(state.gripperClosed);
         }
       } else if (data.type === "twin_status") {
         if (data.error) {
@@ -876,7 +880,8 @@ function connectLive() {
               piecesGroupRef, xiangqiPieces, val.pieces, val.capturedPieces);
           }
           if (val.gripper && state.currentArm?.gripper) {
-            state.currentArm.gripper.setClosed(Boolean(val.gripper.closed));
+            state.gripperClosed = Boolean(val.gripper.closed);
+            state.currentArm.gripper.setClosed(state.gripperClosed);
           }
         }
       } else if (data.type === "board_placement") {
