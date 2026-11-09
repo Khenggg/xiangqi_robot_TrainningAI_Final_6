@@ -527,8 +527,11 @@ class HardwareManager(VisualPickModes):
             return f"Robot chưa ở trạng thái dừng: {snapshot.motion_state}."
         return None
 
-    def activate_physical_game(self, state, *, commissioned=False):
-        """Operator-confirmed enable; never invoked by connection/startup."""
+    def activate_physical_game(self, state, *, commissioned=False,
+                               expected_stop_generation=None, startup_guard=None):
+        """Enable after explicit manual or configured startup authorization."""
+        if startup_guard is not None:
+            startup_guard()
         if getattr(self, "_closing", False):
             raise RuntimeError("Session is closing; create a new session before enabling")
         controls = getattr(self, "session_control", None)
@@ -536,6 +539,9 @@ class HardwareManager(VisualPickModes):
             raise RuntimeError("Finish the requested session action before enabling")
         stop_coord = getattr(self, "stop_coordinator", None)
         stop_generation = stop_coord.generation if stop_coord is not None else 0
+        if expected_stop_generation is not None and (
+                stop_coord is None or stop_generation != expected_stop_generation or stop_coord.blocked):
+            raise RuntimeError("Automatic enable cancelled by a stop request")
         profile = getattr(self, "profile", None)
         if profile is not None and not profile.physical_robot_enabled:
             raise RuntimeError("This game mode/environment has no physical robot capability")
@@ -580,6 +586,11 @@ class HardwareManager(VisualPickModes):
                 raise RuntimeError("RECOVERY_REQUIRED: verify stopped robot before enabling")
         if stop_coord is not None and stop_generation != stop_coord.generation:
             raise RuntimeError("Enable cancelled by a newer stop request")
+        if startup_guard is not None:
+            startup_guard()
+        if expected_stop_generation is not None and (
+                stop_coord.generation != expected_stop_generation or stop_coord.blocked):
+            raise RuntimeError("Automatic enable cancelled by a stop request")
         if stop_coord is not None:
             enabled = self.robot.activate_physical_control(commissioned=True, stop_recovered=stopped)
         else:
@@ -763,10 +774,26 @@ class HardwareManager(VisualPickModes):
             cancelled = getattr(self, "startup_cancelled", None)
             if cancelled is not None and cancelled.is_set():
                 raise RuntimeError("Startup cancelled")
-            cam_index = int(os.environ.get("VIDEO_INDEX", str(self.config.VIDEO_SOURCE)))
-            self.cap = open_validated_camera(cam_index)
+            requested_index = int(os.environ.get("VIDEO_INDEX", str(self.config.VIDEO_SOURCE)))
+            candidates = [requested_index] + [index for index in range(3) if index != requested_index]
+            errors = []
+            for cam_index in candidates:
+                if cancelled is not None and cancelled.is_set():
+                    raise RuntimeError("Startup cancelled")
+                try:
+                    self.cap = open_validated_camera(cam_index)
+                except RuntimeError as exc:
+                    errors.append(f"index {cam_index}: {exc}")
+                    print(f"[CAMERA] {errors[-1]}")
+                    continue
+                break
+            else:
+                raise RuntimeError("Cannot read any camera; " + "; ".join(errors))
             self.camera_selected_index = cam_index
             self.actual_camera_index = cam_index
+            if cam_index != requested_index:
+                print(f"[CAMERA] Requested {requested_index}; using {cam_index}. "
+                      "Check board calibration for this camera before enabling motion.")
             print(f"[INIT] Camera VIDEO_INDEX={cam_index}: valid BGR frame received")
             self._prepare_perspective_calibration(cam_index)
         except Exception as exc:

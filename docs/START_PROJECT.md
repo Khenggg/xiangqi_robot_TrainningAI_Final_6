@@ -39,6 +39,8 @@ Các alias `--virtual`, `--physical`, `--no-viewer` lần lượt tương ứng 
 
 ## Phiên mới và phục hồi
 
+Phiên robot thật tự kết nối, giữ web 3D/telemetry và thử enable một lần sau khi lấy baseline/xác nhận bàn. Không cần F9/F10 ở phiên mới nếu mọi kiểm tra đạt; không tự HOME hay chỉnh kẹp. Nếu baseline ban đầu chưa đạt, V đối soát rồi ứng dụng có thể thực hiện lần enable đang chờ. Enable lỗi không tự thử lại; xem lý do rồi F9/F10 thử thủ công. Sau stop, recovery, đầu hàng hoặc hủy bằng F9, cơ chế tự enable bị hủy cho phiên đó. Đặt `AUTO_ENABLE_PHYSICAL_ON_STARTUP = False` trong `config.py` để dùng hoàn toàn F9/F10. Robot vs Robot vẫn dùng F6 để bắt đầu self-play sau khi robot sẵn sàng.
+
 Mỗi lần mở/chọn ván tạo bàn khai cuộc mới, Đỏ đi trước. Hiện không có lựa chọn tiếp tục nguyên ván cũ; dữ liệu phiên cũ được archive.
 
 Khi phiên physical trước còn thao tác chưa giải quyết, khởi động lại vẫn giữ yêu cầu phục hồi. Kiểm tra arm/kẹp, xử lý stop theo UI, xếp bàn khai cuộc và V xác nhận trước khi F9/F10. Ứng dụng không tự phát lại lệnh cũ. Giữ journal để xử lý giao dịch có kết quả chưa xác định.
@@ -46,6 +48,8 @@ Khi phiên physical trước còn thao tác chưa giải quyết, khởi động
 Đóng cửa sổ máy chủ hoặc Ctrl+C hiện **Thoát / Ở lại**. Xác nhận Thoát đóng phần mềm ngay; thao tác này không gửi lệnh dừng robot và không xác nhận thiết bị đã dừng. Cửa sổ người Đen đóng trực tiếp khi bấm X.
 
 ## Camera và profile robot
+
+Khi chạy source, camera ưu tiên `VIDEO_INDEX` nếu có, nếu không dùng `VIDEO_SOURCE` trong `config.py`. Nếu thiết bị đó không trả frame hợp lệ, ứng dụng thử các index còn lại trong `0–2` và ghi index thực tế vào console. Khi tất cả đều lỗi, phiên dừng khởi tạo. Lỗi calibration không làm ứng dụng chuyển sang camera khác. Nếu camera dự phòng khác thiết bị đã hiệu chuẩn, chấm lại bốn góc trước khi bật quyền chuyển động; ma trận đã lưu chưa gắn với danh tính camera.
 
 Camera dùng calibration đã lưu khi setup không thay đổi. Để chấm lại bốn góc, chọn **Robot thật**, tick **Chấm lại 4 góc bàn từ camera** rồi bắt đầu phiên:
 

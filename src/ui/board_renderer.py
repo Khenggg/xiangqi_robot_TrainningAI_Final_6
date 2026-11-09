@@ -473,7 +473,7 @@ class BoardRenderer:
                     if game_state.get("physical_enable_pending"):
                         message = "Bấm F10 để bật robot (F9 để hủy)"
                     else:
-                        message = "Robot READ-ONLY. Bấm F9 rồi F10 để bật robot!"
+                        message = "Robot READ-ONLY. Kiểm tra trạng thái tự bật; F9/F10 để thử lại."
                     accent = AMBER_COLOR
                 else:
                     message = "Lượt robot — đang chờ thực hiện nước đi"

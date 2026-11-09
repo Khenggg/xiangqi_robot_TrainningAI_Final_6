@@ -12,8 +12,10 @@ trên máy, không điều khiển robot thật.
 4. Bấm **O / MỞ NGƯỜI ĐEN** để mở cửa sổ Đen. Hoặc từ menu chọn
    **VÀO PHÒNG / NGƯỜI ĐEN** rồi nhập mã. Phòng dùng localhost: hai cửa sổ
    trên cùng máy, không phải chơi qua LAN/Internet.
-5. Với FR3 thật, khởi tạo chỉ đọc. Người vận hành kiểm tra camera/controller và
-   xác nhận F9 rồi F10 như luồng hiện có. Không tự Enable/HOME khi tạo/join phòng.
+5. Với FR3 thật, máy chủ kết nối chỉ đọc rồi tự thử enable một lần sau khi camera,
+   calibration, telemetry và trạng thái phiên đạt kiểm tra. Không tự HOME/chỉnh kẹp.
+   Nếu lỗi, xem lý do rồi F9/F10 thử lại thủ công. Join phòng không cấp quyền phần cứng;
+   web 3D/telemetry vẫn hoạt động theo luồng máy chủ.
 
 ## Trong ván
 

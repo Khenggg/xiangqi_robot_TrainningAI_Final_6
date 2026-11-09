@@ -56,6 +56,46 @@ def test_camera_requires_valid_bgr_frame():
     assert not validate_perspective(np.full((3, 3), np.nan))
 
 
+@pytest.mark.parametrize("working, expected", [(1, [1]), (0, [1, 0]), (2, [1, 0, 2]), (None, [1, 0, 2])])
+def test_manager_camera_fallback_tracks_actual_device(tmp_path, monkeypatch, working, expected):
+    import src.hardware.hardware_manager as hw
+    import src.vision.camera_startup as startup
+    manager = hw.HardwareManager.__new__(hw.HardwareManager)
+    manager.config = SimpleNamespace(CCHESS_RECOGNITION_ENABLED=False, VIDEO_SOURCE=1)
+    manager.project_dir = tmp_path
+    manager.dry_run = False
+    manager.profile = None
+    manager.cap = None
+    manager.model = manager.cchess_recognizer = None
+    cap = Capture(np.zeros((3, 3, 3), dtype=np.uint8))
+    attempted, calibrated = [], []
+
+    def open_device(index):
+        attempted.append(index)
+        if index != working:
+            raise RuntimeError("device unavailable")
+        return cap
+
+    def calibrate(index):
+        calibrated.append(index)
+        # Stop before model setup; a calibration failure must not try another camera.
+        raise RuntimeError("calibration rejected")
+
+    monkeypatch.delenv("VIDEO_INDEX", raising=False)
+    monkeypatch.setattr(hw, "YOLO", None)
+    monkeypatch.setattr(startup, "open_validated_camera", open_device)
+    manager._prepare_perspective_calibration = calibrate
+    reason = "any camera" if working is None else "calibration rejected"
+    with pytest.raises(RuntimeError, match=reason):
+        manager._init_camera()
+    assert attempted == expected
+    assert calibrated == ([] if working is None else [working])
+    assert manager.cap is None
+    if working is not None:
+        assert manager.camera_selected_index == manager.actual_camera_index == working
+        assert cap.released
+
+
 class Model:
     def __init__(self): self.fail = False; self.frame = None
     def predict(self, frame, **kwargs):

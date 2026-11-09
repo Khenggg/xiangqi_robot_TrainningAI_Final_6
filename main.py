@@ -144,6 +144,9 @@ def _start_selected_game():
     profile = getattr(hw, "profile", None)
     captured = (hw.capture_baseline_if_needed(force_delay=0.0, expected_board=state.board)
                 if profile is None or profile.camera_enabled else True)
+    automatic_startup = getattr(hw, "automatic_startup", None)
+    if automatic_startup is not None:
+        automatic_startup.baseline_checked = True
     if profile is not None and profile.mouse_input == "VIRTUAL_TEST_ADAPTER":
         state.set_status("HvR ẢO: bộ nhập chuột phục vụ test, không phải xác nhận camera thật.", duration=30)
     if not config.DRY_RUN and not captured:
@@ -154,7 +157,10 @@ def _start_selected_game():
     if config.ROBOT_BACKEND == "PHYSICAL" and not hw.is_robot_ready:
         hint = ("O mở người Đen; hai bên chọn nước bằng chuột." if config.GAME_MODE == "HUMAN_VS_HUMAN_ROBOT"
                 else "F6 bắt đầu self-play.")
-        state.set_status("FR3 chỉ đọc. Kiểm tra setup, bấm F9 rồi F10 để bật robot; " + hint, duration=30)
+        enable_hint = ("Đang chờ kiểm tra để tự bật robot; "
+                       if getattr(config, "AUTO_ENABLE_PHYSICAL_ON_STARTUP", True)
+                       else "Bấm F9 rồi F10 để bật robot; ")
+        state.set_status("FR3 đã kết nối chỉ đọc. " + enable_hint + hint, duration=30)
     if config.GAME_MODE == "ROBOT_VS_ROBOT" and self_play is not None and hw.is_robot_ready:
         difficulty = getattr(config, "AI_DIFFICULTY", "medium")
         if self_play.start(difficulty, difficulty, run_mode="continuous"):
@@ -249,6 +255,8 @@ def _finish_startup(result, error):
     from src.core.session_control import SessionControl
     session_control = SessionControl(state, manager, controller)
     handler.session_control = session_control
+    from src.core.automatic_physical_startup import AutomaticPhysicalStartup
+    manager.automatic_startup = AutomaticPhysicalStartup(state, manager)
     if mirror_error:
         state.set_status(mirror_error, duration=30)
     home_screen_active = False
@@ -691,6 +699,9 @@ try:
                     _select_difficulty(choice)
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_F9 and config.ROBOT_BACKEND == "PHYSICAL":
+                    automatic_startup = getattr(hw, "automatic_startup", None)
+                    if automatic_startup is not None:
+                        automatic_startup.cancel()
                     physical_enable_pending = not physical_enable_pending
                     physical_enable_deadline = time.monotonic() + 30.0
                     state.set_status("Đã kiểm tra setup và nút dừng khẩn cấp? F10 bật robot trong 30s; F9 hủy."
@@ -770,6 +781,11 @@ try:
         startup_worker.poll()
         if hw is not None:
             hw.motion_worker.poll()
+            automatic_startup = getattr(hw, "automatic_startup", None)
+            if (automatic_startup is not None and not home_screen_active
+                    and not difficulty_menu_active and not settings_menu_active
+                    and not mode_switching and not mode_switch_failed and not quit_requested):
+                automatic_startup.tick()
             pvp = getattr(hw, "pvp_controller", None)
             if pvp is not None:
                 pvp.tick()

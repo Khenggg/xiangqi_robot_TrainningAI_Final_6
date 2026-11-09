@@ -1,5 +1,14 @@
 [
   {
+    "id": "automatic-physical-startup",
+    "title": "Automatic enable for a new physical session",
+    "user_visible_behavior": "Connect and enable after existing startup checks while retaining the web 3D showcase, without automatic HOME or gripper commands.",
+    "verification_command": "tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_automatic_physical_startup.py,tests/unit/test_legacy_physical_robot_gates.py,tests/unit/test_live_twin_physical_mirror.py,tests/unit/test_robot_pvp_main_ui.py,tests/unit/test_camera_recognition_readiness.py,tests/unit/test_camera_gpu_lifecycle.py",
+    "status": "passing",
+    "evidence": "80 passed (76 parallel + 4 serial); no physical device calls. Tests include cancellation/stop before and during verification.",
+    "notes": "No 80% board relaxation. Three unrelated stale viewer/UI fixture failures reproduced against HEAD. Capsule not rebuilt. Physical hardware acceptance pending."
+  },
+  {
     "id": "two-output-gripper-actuation",
     "title": "Safe two-output gripper actuation",
     "user_visible_behavior": "",

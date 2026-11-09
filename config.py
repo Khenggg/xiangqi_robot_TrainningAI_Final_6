@@ -141,8 +141,9 @@ R1_R4_TAUGHT_AT_BOARD_SURFACE = False
 BOARD_CALIBRATION_Z_TOLERANCE_MM = 1.0
 
 # Camera index (0 = built-in webcam, 1 = USB cam, 2 = DroidCam, etc.)
-# VIDEO_INDEX overrides this explicitly; startup never substitutes another camera.
+# VIDEO_INDEX overrides the first choice; startup then tries remaining indices 0-2.
 VIDEO_SOURCE = 2
+AUTO_ENABLE_PHYSICAL_ON_STARTUP = True  # Once per new session, with existing checks; no HOME/gripper.
 # Mặc định dùng perspective.npy đã lưu; mở calibration tương tác khi
 # chạy --recalibrate-camera, tick checkbox camera trên launcher, hoặc chưa có file.
 RECALIBRATE_CAMERA = False
