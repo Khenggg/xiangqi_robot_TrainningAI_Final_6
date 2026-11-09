@@ -2,6 +2,8 @@
 
 **Bản vá R1–R4 (09/11):** sau khi giải nén ZIP ở trên, tải [xiangqi-r1-r4-fix.zip](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-r1-r4-fix.zip), thoát ứng dụng rồi giải nén bản vá **vào đúng thư mục chứa `start.bat`**, cho phép ghi đè `app/` và `manifest.json`. Máy đã cài GPU chỉ cần mở lại `start.bat`, không cần cài lại GPU. Bản vá sửa việc Player vs Robot chưa truyền đường dẫn profile cố định, dẫn đến lỗi User/WObj 1/0. Push source không tự cập nhật ZIP đã tải.
 
+**Bản vá chiều kẹp DO (09/11):** tải [xiangqi-do1-open-do0-close-patch.zip](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-do1-open-do0-close-patch.zip), thoát Xiangqi, giải nén vào thư mục chứa `start.bat`, rồi mở **APPLY_DO_PATCH.bat**. Bản vá đặt **DO1 mở / DO0 đóng**, giữ thời gian xung và camera/IP; không cần cài lại GPU. Sau đó mở `start.bat` để dùng. [Hướng dẫn chi tiết và sao lưu](docs/GRIPPER_DO_PATCH.md). Bản vá này không thay thế bản vá R1–R4 ở trên.
+
 Giải nén **toàn bộ ZIP** → lần đầu mở **INSTALL.bat** (cần Internet để cài thư viện GPU/CPU) → những lần sau mở **start.bat**. ZIP khoảng **274 MiB**; lúc cài cần thêm vài GB dung lượng.
 
 Bản mới từ `fix/fix-capsule`: camera thử 0–2, tự enable khi kiểm tra đạt, Player vs Robot dùng logic `vsc-v3` riêng và giữ cấu hình phần cứng hiện tại; web 3D tiếp tục hiển thị. Đã kiểm tra YOLO và ONNX chạy CUDA trên GTX 1650. Xem [hướng dẫn capsule](docs/CAPSULE_OPERATOR.md), [luồng Player vs Robot](docs/HVR_VSC_V3.md) và [SHA256](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi.zip.sha256).
