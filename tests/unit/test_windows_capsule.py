@@ -27,6 +27,49 @@ def test_capsule_rejects_missing_runtime_before_start(tmp_path):
         launcher.verify_release(tmp_path)
 
 
+def test_source_config_remains_editable_for_normal_start(tmp_path):
+    release_fixture(tmp_path)
+    (tmp_path / 'app/config.py').write_text('VIDEO_SOURCE = 1\nROBOT_IP = "192.168.58.9"\n')
+    launcher.verify_release(tmp_path)
+    with pytest.raises(RuntimeError, match='missing/damaged|checksum mismatch'):
+        launcher.verify_release(tmp_path, full=True)
+
+
+@pytest.mark.parametrize('arguments', [['--help'], ['--physical', '--no-viewer'], ['--simulation']])
+def test_project_cli_is_forwarded_unchanged(tmp_path, monkeypatch, arguments):
+    import sys
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'runtime/python.exe'))
+    monkeypatch.setattr(sys, 'argv', list(sys.argv))
+    monkeypatch.setattr(launcher, 'verify_release', lambda *a, **k: {'source': {'head': 'test-head'}})
+    monkeypatch.setattr(launcher, 'prepare_environment', lambda root: None)
+    observed = []
+    monkeypatch.setattr(launcher.runpy, 'run_path', lambda *a, **k: observed.append(list(sys.argv)))
+    assert launcher.main(arguments, root=tmp_path) == 0
+    assert observed == [[str(tmp_path / 'app/main.py'), *arguments]]
+
+
+def test_launcher_preserves_source_config_and_environment(tmp_path, monkeypatch):
+    import os
+    import sys
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(VIDEO_SOURCE=1, ROBOT_IP='192.168.58.9', ENGINE_TYPE='HYBRID',
+                          VISION_DEVICE='auto', AUTO_ENABLE_PHYSICAL_ON_STARTUP=True)
+    (tmp_path / 'app').mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, 'path', list(sys.path))
+    monkeypatch.setitem(sys.modules, 'config', cfg)
+    for key, value in {'VIDEO_INDEX':'0', 'VISION_DEVICE':'auto', 'DRY_RUN':'0',
+                       'ROBOT_BACKEND':'PHYSICAL', 'XIANGQI_SIMULATION_TOKEN':'test-token'}.items():
+        monkeypatch.setenv(key, value)
+    before = vars(cfg).copy()
+    assert launcher.prepare_environment(tmp_path) is cfg
+    assert vars(cfg) == before
+    assert os.environ['VIDEO_INDEX'] == '0'
+    assert os.environ['ROBOT_BACKEND'] == 'PHYSICAL'
+    assert os.environ['DRY_RUN'] == '0'
+    assert os.environ['XIANGQI_SIMULATION_TOKEN'] == 'test-token'
+
+
 def test_full_check_detects_same_size_corruption(tmp_path):
     release_fixture(tmp_path)
     (tmp_path / 'app/models/best.pt').write_bytes(b'wrong')

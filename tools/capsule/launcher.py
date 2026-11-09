@@ -51,6 +51,8 @@ def verify_release(root, *, full=False):
     checks = files.items() if full else ((name, files[name]) for name in REQUIRED)
     for relative, entry in checks:
         path = contained(root, relative)
+        if relative == 'app/config.py' and not full and path.is_file():
+            continue  # Operator-editable source config; --check still audits original hashes.
         if not path.is_file() or path.stat().st_size != entry['size']:
             raise RuntimeError(f'Capsule missing/damaged: {relative}. Extract the complete ZIP again.')
         if full and sha256(path) != entry['sha256']:
@@ -71,31 +73,17 @@ def read_settings(root):
     return value
 
 
-def prepare_environment(root, settings):
-    # Ignore developer-machine settings and credentials. No pip/npm or downloads.
-    for key in list(os.environ):
-        if key.startswith(('PYTHON', 'XIANGQI_')) or key in {
-                'GAME_MODE', 'ROBOT_BACKEND', 'DRY_RUN', 'VIDEO_INDEX', 'VISION_DEVICE'}:
-            os.environ.pop(key, None)
+def prepare_environment(root):
+    """Relocate paths only; config and inherited project options stay authoritative."""
     state = root / 'state'
     state.mkdir(exist_ok=True)
-    os.environ.update({
-        'PYTHONUTF8': '1', 'PYTHONIOENCODING': 'utf-8',
-        'VISION_DEVICE': 'cpu', 'CUDA_VISIBLE_DEVICES': '-1',
-        'YOLO_CONFIG_DIR': str(state / 'ultralytics'), 'YOLO_AUTOINSTALL': 'false',
-        'YOLO_OFFLINE': 'true', 'MPLCONFIGDIR': str(state / 'matplotlib'),
-        'HF_HUB_OFFLINE': '1', 'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1',
-        'VIDEO_INDEX': str(settings['camera_index']),
-    })
+    # Cache locations do not alter game modes, device selection or authorization.
+    os.environ.setdefault('YOLO_CONFIG_DIR', str(state / 'ultralytics'))
+    os.environ.setdefault('MPLCONFIGDIR', str(state / 'matplotlib'))
     app = root / 'app'
     os.chdir(app)
     sys.path.insert(0, str(app))
     import config
-    config.ENGINE_TYPE = 'LOCAL'
-    config.SIMULATION_TOKEN = ''
-    config.ROBOT_IP = settings['robot_ip']
-    config.VIDEO_SOURCE = settings['camera_index']
-    config.VISION_DEVICE = 'cpu'
     return config
 
 
@@ -142,18 +130,34 @@ def self_check(root, *, smoke=False):
         finally:
             engine.stop()
         print('[OK] local Moonfish subprocess')
+        import torch
         import onnxruntime as ort
+        import numpy as np
+        cuda_ready = torch.cuda.is_available()
+        device = 0 if cuda_ready else 'cpu'
+        providers = [('CUDAExecutionProvider', {'cudnn_conv_algo_search': 'HEURISTIC',
+                     'cudnn_conv_use_max_workspace': '0'}), 'CPUExecutionProvider'] if cuda_ready else ['CPUExecutionProvider']
+        if cuda_ready:
+            print(f'[GPU] {torch.cuda.get_device_name(0)} | Torch {torch.__version__} | CUDA {torch.version.cuda}')
+            if 'CUDAExecutionProvider' not in ort.get_available_providers():
+                raise RuntimeError('GPU runtime missing ONNX CUDA provider')
+        else:
+            print('[GPU] NVIDIA CUDA unavailable; CPU fallback. Check NVIDIA driver on the target PC.')
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = 1
         for name in ('pose_4_v6.onnx', 'layout_nano_v3.onnx'):
-            ort.InferenceSession(str(root / 'app/models/cchess' / name),
-                                 sess_options=opts, providers=['CPUExecutionProvider'])
-        print('[OK] both ONNX models / CPU')
-        import numpy as np
+            session = ort.InferenceSession(str(root / 'app/models/cchess' / name),
+                                           sess_options=opts, providers=providers)
+            if cuda_ready and session.get_providers()[0] != 'CUDAExecutionProvider':
+                raise RuntimeError(f'{name}: CUDA initialization failed; not a GPU acceptance pass')
+            feed = {entry.name: np.zeros([dim if isinstance(dim, int) else 1 for dim in entry.shape], dtype=np.float32)
+                    for entry in session.get_inputs()}
+            session.run(None, feed)
+            print(f'[OK] {name} inference / {session.get_providers()[0]}')
         from ultralytics import YOLO
         model = YOLO(str(root / 'app/models/best.pt'))
-        model.predict(np.zeros((640, 640, 3), dtype=np.uint8), device='cpu', verbose=False)
-        print('[OK] packaged YOLO weights / CPU inference')
+        model.predict(np.zeros((640, 640, 3), dtype=np.uint8), device=device, verbose=False)
+        print(f'[OK] packaged YOLO weights / {"CUDA" if cuda_ready else "CPU"} inference')
         import pybullet as bullet
         client = bullet.connect(bullet.DIRECT)
         try:
@@ -181,10 +185,10 @@ def self_check(root, *, smoke=False):
 
 
 def main(argv=None, *, root=None):
-    parser = argparse.ArgumentParser(description='Xiangqi portable capsule')
+    parser = argparse.ArgumentParser(description='Xiangqi portable capsule', add_help=False, allow_abbrev=False)
     parser.add_argument('--check', action='store_true', help='Full offline integrity/model check; no hardware')
     parser.add_argument('--smoke', action='store_true', help='Also initialize a headless Pygame renderer')
-    args = parser.parse_args(argv)
+    args, project_args = parser.parse_known_args(argv)
     root = Path(root or Path(__file__).resolve().parent).resolve()
     sys.dont_write_bytecode = True
     try:
@@ -194,15 +198,13 @@ def main(argv=None, *, root=None):
         if Path(sys.executable).resolve() != root / 'runtime/python.exe':
             raise RuntimeError('Open START.bat; do not run this file with system Python')
         manifest = verify_release(root, full=args.check or args.smoke)
-        settings = read_settings(root)
-        prepare_environment(root, settings)
-        print(f"Xiangqi capsule | {manifest['source']['head'][:12]} | CPU offline")
+        prepare_environment(root)
+        print(f"Xiangqi capsule | {manifest['source']['head'][:12]} | source configuration")
         if args.check or args.smoke:
             self_check(root, smoke=args.smoke)
             print('CAPSULE CHECK PASSED (no physical hardware accessed)')
             return 0
-        option = {'SIMULATION': '--simulation', 'BOARD_ONLY': '--board-only', 'PHYSICAL': '--physical'}
-        sys.argv = [str(root / 'app/main.py'), option[settings['mode']]]
+        sys.argv = [str(root / 'app/main.py'), *project_args]
         runpy.run_path(sys.argv[0], run_name='__main__')
         return 0
     except Exception:

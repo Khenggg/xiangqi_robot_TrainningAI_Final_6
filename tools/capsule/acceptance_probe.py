@@ -79,7 +79,7 @@ def main():
     # The caller verifies ZIP SHA256 before extraction; builder already ran full
     # per-file hashing. Exercise the same fast preflight as an operator launch.
     capsule.verify_release(root)
-    capsule.prepare_environment(root, capsule.read_settings(root))
+    capsule.prepare_environment(root)
     capsule.self_check(root, smoke=True)
     results = {'isolated_preflight_and_models': True}
     with capsule.offline_probe():

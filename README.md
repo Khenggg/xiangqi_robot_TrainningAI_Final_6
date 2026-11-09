@@ -1,10 +1,12 @@
-# [⬇ TẢI CAPSULE.ZIP — WINDOWS X64](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/capsule-windows-x64-20261105-r2/Xiangqi-Capsule-Windows-x64-20261105-r2.zip)
+# [⬇ TẢI XIANGQI.ZIP — WINDOWS X64, ƯU TIÊN GPU](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi.zip)
 
-Giải nén **toàn bộ ZIP** → mở **START.bat** → chọn môi trường → chọn kiểu chơi.
+Giải nén **toàn bộ ZIP** → lần đầu mở **INSTALL.bat** (cần Internet để cài thư viện GPU/CPU) → những lần sau mở **start.bat**. ZIP khoảng **274 MiB**; lúc cài cần thêm vài GB dung lượng.
+
+Bản mới từ `fix/fix-capsule`: camera thử 0–2, tự enable khi kiểm tra đạt, Player vs Robot dùng logic `vsc-v3` riêng và giữ cấu hình phần cứng hiện tại; web 3D tiếp tục hiển thị. Đã kiểm tra YOLO và ONNX chạy CUDA trên GTX 1650. Xem [hướng dẫn capsule](docs/CAPSULE_OPERATOR.md), [luồng Player vs Robot](docs/HVR_VSC_V3.md) và [SHA256](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi.zip.sha256).
 
 # Xiangqi Robot — Sổ tay sử dụng
 
-Hướng dẫn cho người chơi và người vận hành hệ thống cờ tướng có camera, AI Moonfish và cánh tay **FAIRINO FR3**. Các tên nút/phím bên dưới được đối chiếu với code nhánh `final` tại [`005f955`](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/tree/005f95539531c32601232cdeeec3cca4185f32d9), ngày **07/11/2026**.
+Hướng dẫn cho người chơi và người vận hành hệ thống cờ tướng có camera, AI Moonfish và cánh tay **FAIRINO FR3**. Các tên nút/phím bên dưới được đối chiếu với code nhánh `final` tại [`005f955`](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/tree/005f95539531c32601232cdeeec3cca4185f32d9), ngày **07/11/2026**. Phần tải/cài và cấu hình capsule được cập nhật **09/11/2026**; các mục điều khiển/recovery cũ bên dưới cần đọc cùng hướng dẫn luồng Player vs Robot mới ở trên.
 
 **Phạm vi kiểm chứng:** tài liệu mô tả hành vi từ code và cấu hình; lần cập nhật sổ tay này chưa chạy thử camera, robot thật hay một ván hoàn chỉnh trên Windows. Các vấn đề phần cứng còn mở được nêu ở [Giới hạn hiện tại](#gioi-han).
 
@@ -32,8 +34,8 @@ Hướng dẫn cho người chơi và người vận hành hệ thống cờ tư
 ### Máy đã có capsule
 
 1. Tải bản **Capsule Windows x64** ở đầu trang. ZIP **Source code** của GitHub là mã nguồn, cần cài môi trường riêng.
-2. Giải nén toàn bộ vào thư mục local có quyền ghi. Giữ nguyên `START.bat`, `runtime/`, `app/`, `manifest.json` và `settings.json`; không chạy trong ZIP hoặc chỉ copy riêng START.bat.
-3. Mở **START.bat**. Capsule dành cho **Windows 10/11 x64**, có trình duyệt; đã kèm Python, thư viện CPU, model nhận diện, engine và tài nguyên 3D. Chơi local không cần Internet hoặc cài Git/Node.js/CUDA.
+2. Giải nén toàn bộ vào thư mục local có quyền ghi. Giữ nguyên `start.bat`, `INSTALL.bat`, `start.run`, `runtime.zip`, `app/` và `manifest.json`; không chạy trong ZIP hoặc chỉ copy riêng START.bat.
+3. Lần đầu mở **INSTALL.bat**. Capsule dành cho **Windows 10/11 x64**: có Python nền, model, engine và tài nguyên 3D; bộ cài tải thư viện ML vào runtime riêng của ứng dụng. NVIDIA có driver phù hợp được ưu tiên CUDA; máy không có NVIDIA dùng CPU. Không cần Python/Git/Node riêng. Những lần sau mở **start.bat**.
 4. Chọn **CHƠI TRÊN MÁY** để bắt đầu dễ nhất, hoặc **MÔ PHỎNG 3D** để xem robot ảo.
 5. Bấm **VS ROBOT**, chọn độ khó, rồi bấm quân Đỏ và bấm ô đích. Đỏ đi trước. Chờ AI hoàn tất rồi đi tiếp.
 
@@ -406,25 +408,11 @@ Phím game áp dụng khi **cửa sổ game chính** được chọn; các thao 
 <a id="du-lieu"></a>
 ## 11. Cài đặt, dữ liệu và gửi thông tin lỗi
 
-### Capsule: `settings.json`
+### Capsule mới: cấu hình source
 
-File tại thư mục cùng START.bat; đây là ví dụ cấu hình mặc định, **không bảo đảm đúng camera/mạng của mọi máy**:
+Bản mới không dùng `settings.json` để ghi đè cấu hình. Chỉnh camera/IP tại `app/config.py` giống chạy source; biến môi trường vẫn có tác dụng. Camera ưu tiên `VIDEO_INDEX` nếu có, nếu không dùng `VIDEO_SOURCE`, rồi thử các index còn lại trong 0–2.
 
-```json
-{
-  "mode": "SIMULATION",
-  "camera_index": 2,
-  "robot_ip": "192.168.58.2"
-}
-```
-
-| Trường | Giá trị hợp lệ | Ý nghĩa |
-|---|---|---|
-| `mode` | `SIMULATION`, `BOARD_ONLY`, `PHYSICAL` | Chọn sẵn môi trường; người dùng vẫn đổi trên menu |
-| `camera_index` | Số nguyên `0` đến `20` | Đúng thiết bị camera trên máy hiện tại; không mặc định index 2 luôn là DroidCam |
-| `robot_ip` | Địa chỉ IPv4 | Đúng IP controller, PC cần IP riêng trên subnet phù hợp |
-
-Chỉ ba khóa này được chấp nhận; không thêm comment hoặc dấu phẩy cuối JSON. Thay đổi cần mở lại ứng dụng sau khi giải quyết phiên cũ. Capsule ép **CPU vision và Moonfish local**, không lấy thiết lập GPU/token của máy phát triển. SETTINGS trên màn hình không thay file này.
+GPU được ưu tiên khi runtime CUDA và driver phù hợp; `VISION_DEVICE=cpu` cho phép chọn CPU theo cấu hình project. Lần đầu cần Internet để cài ML; những lần sau dùng runtime đã cài. Không ép engine/chế độ/token về cấu hình capsule cũ. Xem [hướng dẫn bộ cài](docs/CAPSULE_OPERATOR.md).
 
 ### Dữ liệu ở đâu?
 
@@ -449,7 +437,7 @@ Chỉ ba khóa này được chấp nhận; không thêm comment hoặc dấu ph
 <a id="gioi-han"></a>
 ## 12. Giới hạn hiện tại
 
-- **Nhánh source và ZIP là hai bản phát hành khác nhau.** ZIP ở đầu trang là bản `capsule-windows-x64-20261105-r2`. Sửa README/source trên GitHub không tự thay file trong ZIP; cần build/nghiệm thu capsule mới để cập nhật bộ đóng gói.
+- **Nhánh source và ZIP là hai bản phát hành khác nhau.** ZIP ở đầu trang là bản `xiangqi-gpu-light-20261109` từ nhánh `fix/fix-capsule`. Sửa README/source trên GitHub không tự thay file trong ZIP; cần build/nghiệm thu capsule mới để cập nhật bộ đóng gói.
 - Lần cập nhật hướng dẫn này dựa trên đọc code, **chưa nghiệm thu camera/controller/robot thật, Windows sạch thứ hai hoặc cả ván UI/browser**. Kết quả test cũ trong báo cáo chỉ có giá trị trong phạm vi/ngày được ghi; không có tuyên bố toàn bộ bộ test hiện tại xanh.
 - Dự án còn ghi nhận vấn đề physical sau gián đoạn nguồn/đường tiếp cận, lỗi controller/tool context và kiểm chứng nhả kẹp có tải. **V/F12/F9/F10 không chứng minh đường đi sau sự cố đã an toàn**. Khi gặp các tình huống đó, dừng vận hành physical và để team kiểm tra trước khi chạy tiếp.
 - Kẹp dùng điều khiển theo xung, không có cảm biến vị trí ngàm; hình kẹp trên viewer không chứng minh đã gắp/nhả đúng ngoài đời.

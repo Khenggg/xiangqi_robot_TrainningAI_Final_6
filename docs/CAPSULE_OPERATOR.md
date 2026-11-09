@@ -1,30 +1,27 @@
-# Xiangqi — bộ mang đi sự kiện
+﻿# Xiangqi — xiangqi.zip
 
-1. Giải nén **toàn bộ** ZIP vào một thư mục local có quyền ghi, ví dụ `D:\Xiangqi`. Không mở ứng dụng trực tiếp trong ZIP.
-2. Mở **START.bat**.
-3. Chọn môi trường và kiểu chơi trên màn hình, rồi bắt đầu.
+1. Giải nén **toàn bộ** xiangqi.zip vào thư mục local có quyền ghi, ví dụ D:\Xiangqi. Không mở trực tiếp trong ZIP.
+2. Lần đầu mở **INSTALL.bat**, hoặc chạy **start.bat -Setup**. File này thực thi start.run để giải nén runtime nền rồi tải/cài thư viện ML vào runtime của ứng dụng. Lần đầu cần Internet và vài GB trống; NVIDIA dùng PyTorch CUDA, máy không có NVIDIA dùng CPU. Không cài vào Python hệ thống, không cần admin.
+3. Từ đó mở **start.bat** để chạy project. Nếu chưa setup, start.bat tự chuẩn bị runtime trước rồi mở game.
 
-Không cần cài Python, Node.js, Git, CUDA; không chạy SETUP hoặc pip/npm. Chơi local không cần Internet. Bộ này dành cho **Windows 10/11 x64**, có trình duyệt và đủ RAM/dung lượng cho ứng dụng; không phải bản ARM/32-bit/Windows Server không giao diện. CPU vision được đóng gói sẵn, tốc độ tùy máy.
+start.run là script PowerShell cho bước cài đặt, không phải định dạng double-click chuẩn của Windows. Dùng INSTALL.bat hoặc start.bat -Setup để Windows thực thi đúng script; không cần đổi registry hay file association.
 
-## Khi dùng robot thật
+## Giữ nguyên luồng source
 
-Kết nối bộ camera và robot của team; xếp bàn khai cuộc. Chọn **Robot thật**. Kiểm tra camera nhìn đúng bàn, robot/kẹp đã dừng và vùng chuyển động phù hợp; xác nhận trên giao diện trước khi F9 → F10 cho phép chuyển động. Mở START không tự bật hoặc chạy robot.
+Launcher chạy Python đi kèm, chuyển thư mục làm việc sang app và chạy đúng app/main.py. Không ghi đè config.py, engine, chế độ chơi, camera/IP hoặc lựa chọn vision. Không tự thêm tham số chọn chế độ. Tham số CLI truyền vào start.bat được chuyển nguyên sang project. Không dùng settings.json của capsule r2. Chỉnh cấu hình như source tại app/config.py; biến môi trường giữ nguyên tác dụng như chạy source.
 
-Camera và controller vẫn cần driver/kết nối phần cứng hoạt động. Nếu đổi cổng/camera/máy, team chỉnh `camera_index` và `robot_ip` trong `settings.json` khi bàn giao. Nếu dịch chuyển camera/bàn hoặc đổi bộ robot, phải xác nhận/hiệu chuẩn lại theo setup thực tế; đóng gói phần mềm không thay thế bước này. Không dùng tọa độ robot đi kèm cho một robot/setup khác khi chưa commissioning.
+Source giữ camera ưu tiên index cấu hình rồi thử các index còn lại trong 0–2; phiên physical tự thử enable một lần khi kiểm tra hiện có đạt. Không tự HOME/chỉnh kẹp; sau lỗi/stop/recovery vẫn dùng đối soát và F9/F10 thủ công. Web 3D và telemetry giữ nguyên. Robot vs Robot dùng F6 để bắt đầu self-play.
 
-## Nếu không mở được
+Runtime dành cho Windows 10/11 x64, đóng gói PyTorch CUDA 12.4 và ONNX Runtime GPU 1.20.1. Project ưu tiên GPU khi driver NVIDIA tương thích sẵn có, tự dùng CPU nếu GPU không khả dụng theo luồng source. CUDA/cuDNN DLL cần thiết đi kèm runtime; không cài CUDA Toolkit toàn hệ thống. Gói không tự cài hoặc cập nhật driver NVIDIA. Model/engine/viewer/font đi kèm; thư viện ML được tải trong lần setup đầu. Camera và controller vẫn cần driver, mạng và calibration đúng thiết bị. Khi đổi camera hoặc bàn, chấm lại bốn góc; đóng gói không thay thế calibration vật lý.
 
-- Giải nén lại đầy đủ, không copy riêng START.bat. Thư mục cần quyền ghi; không chạy trong Program Files/thư mục chỉ đọc.
-- Chụp thông báo và gửi team file `state/launcher-error-*.log`; log game nằm trong `app/logs/`.
-- Để team kiểm tra trọn bộ, chạy `START.bat --check` từ terminal. Lệnh này kiểm tra file/model offline, không mở camera/robot. `--smoke` thêm kiểm tra renderer không màn hình.
-- Không xóa `app/data/runtime/` để bỏ recovery sau lỗi robot. Giữ nguyên journal và xử lý theo thông báo trong game.
+## Kiểm tra và lỗi
 
-`settings.json` chọn sẵn môi trường (`SIMULATION`, `BOARD_ONLY`, `PHYSICAL`), số camera và IP controller. Người vận hành vẫn đổi môi trường trên màn hình chính được. Team chuẩn bị file này trước sự kiện; người dùng thường chỉ cần START.
+- start.bat --check: kiểm tra SHA256/model offline, không mở camera/robot.
+- start.bat --smoke: thêm kiểm tra renderer headless, không mở camera/robot.
+- Log launcher nằm trong state/launcher-error-*.log; log project tại app/logs/.
+- Không xóa app/data/runtime/ để bỏ recovery. Giữ journal và xử lý theo trạng thái thực tế.
+- Nếu runtime.zip hỏng, giải nén lại toàn bộ xiangqi.zip. Không copy riêng start.bat.
 
-## Hai người + một robot
+Đóng ứng dụng chính hỏi Thoát/Ở lại như source. Thoát phần mềm không chứng minh robot đã dừng. Cửa sổ người Đen đóng trực tiếp. Phòng Đỏ/Đen chỉ localhost trên cùng máy.
 
-Chọn MÔ PHỎNG 3D hoặc ROBOT THẬT → 2 NGƯỜI + ROBOT. Đỏ dùng máy chủ; nhấn O / MỞ NGƯỜI ĐEN để mở cửa sổ Đen, hoặc VÀO PHÒNG và nhập mã 6 ký tự. Hai cửa sổ chỉ kết nối localhost trên cùng máy, không LAN/Internet. Không có AI trong mode này; một robot/executor thực hiện cả hai màu. Không chạy thêm host physical.
-
-Đóng cửa sổ máy chủ/game chính hoặc Ctrl+C sẽ hỏi Thoát / Ở lại. Xác nhận Thoát đóng phần mềm ngay, không gửi lệnh robot/kẹp và không chứng minh robot đã dừng. Giữ journal nếu còn nước đang dở; xử lý thiết bị theo quy trình của team.
-
-Cửa sổ người Đen đóng trực tiếp khi bấm X; máy chủ giữ ván/trạng thái và khóa nhận nước mới khi mất client.
+Bản này có Player vs Robot dùng logic vsc-v3 riêng, giữ cấu hình phần cứng hiện tại và cầu web 3D hiển thị. Xem docs/HVR_VSC_V3.md trong source.

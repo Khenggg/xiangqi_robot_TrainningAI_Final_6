@@ -53,3 +53,6 @@ robot-3d-viewer/assets/fr3_v6/fairino3_v6_pybullet.urdf
 
 # Personal editor preferences (not shared project configuration)
 /.vscode/settings.json
+
+# Generated Ultralytics per-machine settings
+/Ultralytics/

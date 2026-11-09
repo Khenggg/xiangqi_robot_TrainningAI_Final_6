@@ -16,6 +16,7 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
+from urllib.parse import unquote, urlsplit
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,16 +32,34 @@ START_BAT = r'''@echo off
 setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
-if not exist "%~dp0runtime\python.exe" (
-  echo [ERROR] Capsule incomplete. Extract the complete ZIP before opening START.bat.
-  pause
-  exit /b 1
-)
+set "XIANGQI_CAPSULE_ROOT=%~dp0"
+if /I "%~1"=="-Setup" goto :SETUP
+if not exist "%~dp0runtime\python.exe" goto :INSTALL
+if not exist "%~dp0runtime\.capsule-ready" goto :INSTALL
+goto :RUN
+:SETUP
+set "XIANGQI_SETUP_ONLY=1"
+:INSTALL
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $env:XIANGQI_CAPSULE_ROOT 'start.run')))) -Root $env:XIANGQI_CAPSULE_ROOT"
+if errorlevel 1 goto :FAILED
+if defined XIANGQI_SETUP_ONLY exit /b 0
+:RUN
 "%~dp0runtime\python.exe" -I "%~dp0launcher.py" %*
 set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" pause
 exit /b %RC%
+:FAILED
+echo [ERROR] First-run setup failed. See the message above.
+pause
+exit /b 1
 '''
+INSTALL_BAT = r'''@echo off
+call "%~dp0start.bat" -Setup
+if errorlevel 1 exit /b 1
+echo Setup complete. Open start.bat to run Xiangqi.
+pause
+'''
+
 
 
 def run(command, **kwargs):
@@ -106,9 +125,21 @@ def prepare_dependencies(cache):
         raise RuntimeError(f'Incomplete dependency cache: {site}. Move it aside and rebuild.')
     wheels = cache / 'wheels'
     wheels.mkdir(exist_ok=True)
-    run([sys.executable, '-m', 'pip', 'wheel', '--no-deps', '--wheel-dir', wheels, 'pybullet==3.2.7'])
+    if not list(wheels.glob('pybullet-3.2.7-cp312-cp312-win_amd64.whl')):
+        run([sys.executable, '-m', 'pip', 'wheel', '--no-deps', '--wheel-dir', wheels, 'pybullet==3.2.7'])
+    # Reuse checksum-verified large CUDA wheels instead of restarting pip's download.
+    install_lines = []
+    for line in requirements.read_text(encoding='utf-8').splitlines():
+        if ' @ https://' in line and '#sha256=' in line:
+            name, reference = line.split(' @ ', 1)
+            url, digest = reference.split('#sha256=', 1)
+            wheel = download(url, wheels / unquote(Path(urlsplit(url).path).name), digest)
+            line = f'{name} @ {wheel.resolve().as_uri()}#sha256={digest}'
+        install_lines.append(line)
+    install_requirements = cache / 'install-requirements.txt'
+    install_requirements.write_text('\n'.join(install_lines) + '\n', encoding='utf-8')
     run([sys.executable, '-m', 'pip', 'install', '--target', site, '--no-compile',
-         '--only-binary=:all:', '--find-links', wheels, '-r', requirements,
+         '--only-binary=:all:', '--find-links', wheels, '-r', install_requirements,
          '--report', cache / 'dependency-install.json'])
     stamp.write_text(json.dumps({'requirements_sha256': fingerprint}), encoding='utf-8')
     return site
@@ -195,7 +226,7 @@ def write_manifest(destination, source_files):
     with ThreadPoolExecutor(max_workers=4) as pool:
         files = dict(pool.map(fingerprint, candidates))
     manifest = {'schema_version': 1, 'created_utc': datetime.now(timezone.utc).isoformat(),
-                'platform': 'Windows 10/11 x64', 'python': '3.12.10', 'vision': 'CPU',
+                'platform': 'Windows 10/11 x64', 'python': '3.12.10', 'vision': 'GPU preferred (CUDA 12.4), CPU fallback',
                 'source': {'head': head, 'tracked_changes': source_dirty,
                            'files': {name: files['app/' + name]['sha256'] for name in source_files}},
                 'packages': packages, 'files': files}
@@ -205,7 +236,7 @@ def write_manifest(destination, source_files):
 def build(args):
     if os.name != 'nt' or sys.version_info[:2] != (3, 12):
         raise RuntimeError('Build using Windows x64 Python 3.12')
-    cache = (ROOT / 'build/capsule-cache').resolve()
+    cache = (ROOT / 'build/capsule-cache-gpu').resolve()
     cache.mkdir(parents=True, exist_ok=True)
     destination = Path(args.output).resolve()
     if destination.exists():
@@ -221,7 +252,10 @@ def build(args):
     for name in MODEL_FILES:
         if not (models / name).is_file():
             raise RuntimeError(f'Required model missing: {models / name}')
-    site = prepare_dependencies(cache)
+    lightweight = getattr(args, 'lightweight', False)
+    site = ROOT / 'build/capsule-cache/site' if lightweight else prepare_dependencies(cache)
+    if not site.is_dir():
+        raise RuntimeError('Base dependency cache unavailable')
     python_archive = download(PYTHON_URL, cache / 'python-3.12.10-embed-amd64.zip', PYTHON_SHA256)
     destination.parent.mkdir(parents=True, exist_ok=True)
     # Staging is within the explicit output parent; TemporaryDirectory cleans only its own resolved folder.
@@ -232,9 +266,16 @@ def build(args):
         runtime.mkdir()
         extract_zip(python_archive, runtime)
         print('[PACKAGE] Copying runtime dependencies (no development headers/tests/static libraries)', flush=True)
+        omitted = ('torch', 'torchgen', 'functorch', 'torchvision', 'torch-*.dist-info',
+                   'torchvision-*.dist-info', 'onnxruntime', 'onnxruntime-*.dist-info') if lightweight else ()
         shutil.copytree(site, runtime / 'Lib/site-packages', ignore=shutil.ignore_patterns(
             '__pycache__', '*.pyc', 'bin', 'include', 'tests', '*.lib', '*.h', '*.hpp', '*.pyi',
-            'pybullet_data'))  # Stock demo datasets; this app ships its own checked FR3/board assets.
+            'pybullet_data', *omitted))
+        if lightweight:
+            import pip
+            shutil.copytree(Path(pip.__file__).parent, runtime / 'Lib/site-packages/pip')
+            pip_info = Path(importlib.metadata.distribution('pip')._path)
+            shutil.copytree(pip_info, runtime / 'Lib/site-packages' / pip_info.name)
         install_vc_runtime(runtime)
         (runtime / 'python312._pth').write_text(
             'python312.zip\n.\nLib/site-packages\n../app/moonfish\n../app\nimport site\n', encoding='ascii')
@@ -250,9 +291,11 @@ def build(args):
         resource_assets(cache, app)
         shutil.copy2(ROOT / 'tools/capsule/launcher.py', stage / 'launcher.py')
         shutil.copy2(ROOT / 'docs/CAPSULE_OPERATOR.md', stage / 'READ_ME_FIRST.md')
-        (stage / 'START.bat').write_text(START_BAT, encoding='ascii')
-        (stage / 'settings.json').write_text(json.dumps(
-            {'mode': 'SIMULATION', 'camera_index': 2, 'robot_ip': '192.168.58.2'}, indent=2), encoding='utf-8')
+        (stage / 'start.bat').write_text(START_BAT, encoding='ascii')
+        (stage / 'INSTALL.bat').write_text(INSTALL_BAT, encoding='ascii')
+        shutil.copy2(ROOT / 'tools/capsule/bootstrap.ps1', stage / 'start.run')
+        shutil.copy2(ROOT / 'tools/capsule/setup_runtime.py', stage / 'setup_runtime.py')
+        shutil.copy2(ROOT / 'tools/capsule/requirements.txt', stage / 'gpu-requirements.txt')
         (stage / 'state').mkdir()
         licenses = stage / 'LICENSES'
         licenses.mkdir()
@@ -268,17 +311,32 @@ def build(args):
         environment.pop('PYTHONPATH', None)
         environment.pop('PYTHONHOME', None)
         environment['PYTHONDONTWRITEBYTECODE'] = '1'
-        run([runtime / 'python.exe', '-B', '-I', stage / 'launcher.py', '--smoke'], env=environment, cwd=stage)
+        if not lightweight:
+            run([runtime / 'python.exe', '-B', '-I', stage / 'launcher.py', '--smoke'], env=environment, cwd=stage)
         # Logs/model caches from self-check are build evidence, not an operator session.
         # Keep smoke evidence in state, which is explicitly mutable/non-manifest.
+        # Ship runtime compressed; the first start expands it locally, offline.
+        runtime_archive = stage / 'runtime.zip'
+        with zipfile.ZipFile(runtime_archive, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as packed:
+            for file in sorted(runtime.rglob('*')):
+                if file.is_file():
+                    packed.write(file, file.relative_to(runtime).as_posix())
+        manifest_path = stage / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        manifest['first_run_downloads'] = lightweight
+        manifest['files']['runtime.zip'] = {'size': runtime_archive.stat().st_size,
+                                          'sha256': sha256(runtime_archive)}
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
         stage.rename(destination)
     archive = destination.with_suffix('.zip')
     if archive.exists():
         raise RuntimeError(f'Archive already exists: {archive}')
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as output:
         for file in sorted(destination.rglob('*')):
-            if file.is_file():
-                output.write(file, f'{destination.name}/{file.relative_to(destination).as_posix()}')
+            relative = file.relative_to(destination)
+            if file.is_file() and relative.parts[0] != 'runtime':
+                output.write(file, f'{destination.name}/{relative.as_posix()}',
+                             compress_type=zipfile.ZIP_STORED if relative.as_posix() == 'runtime.zip' else zipfile.ZIP_DEFLATED)
     checksum = sha256(archive)
     archive.with_suffix('.zip.sha256').write_text(f'{checksum}  {archive.name}\n', encoding='ascii')
     print(f'CAPSULE BUILT: {destination}\nZIP: {archive}\nSHA256: {checksum}', flush=True)
@@ -289,6 +347,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--models', required=True, help='Team-supplied models directory (best.pt and cchess/*.onnx)')
     parser.add_argument('--output', default=str(ROOT / 'dist/Xiangqi-Capsule-Windows-x64'))
+    parser.add_argument('--lightweight', action='store_true', help='Download CUDA/ML packages on first setup instead of bundling them')
     build(parser.parse_args())
 
 

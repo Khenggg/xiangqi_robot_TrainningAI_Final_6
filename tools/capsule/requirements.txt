@@ -3,18 +3,18 @@ opencv-python==4.10.0.84
 numpy==1.26.4
 requests==2.32.5
 ultralytics==8.3.40
-torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.5.1%2Bcpu-cp312-cp312-win_amd64.whl#sha256=a6b720410350765d3d77c01a5ce098a6c45af446284e45e87a98b8a16e7d564d
-torchvision @ https://download-r2.pytorch.org/whl/cpu/torchvision-0.20.1%2Bcpu-cp312-cp312-win_amd64.whl#sha256=64832095b9b8b8185f24788f1a531ae96c937bf797cd3474a2ea7511852e5cd7
+torch @ https://download.pytorch.org/whl/cu124/torch-2.5.1%2Bcu124-cp312-cp312-win_amd64.whl#sha256=3c3f705fb125edbd77f9579fa11a138c56af8968a10fc95834cdd9fdf4f1f1a6
+torchvision @ https://download.pytorch.org/whl/cu124/torchvision-0.20.1%2Bcu124-cp312-cp312-win_amd64.whl#sha256=0f6c7b3b0e13663fb3359e64f3604c0ab74c2b4809ae6949ace5635a5240f0e5
 pybullet==3.2.7
 websockets==15.0.1
-onnxruntime==1.20.1
+onnxruntime-gpu==1.20.2
 Pillow==11.3.0
 scipy==1.13.1
 matplotlib==3.9.4
 sympy==1.13.1
 setuptools==75.6.0
 
-# Resolved transitive baseline for this Windows CPU release.
+# Resolved transitive baseline for this Windows CUDA 12.4 release (GPU preferred, CPU fallback).
 certifi==2026.10.23
 charset-normalizer==3.5.2
 colorama==0.4.6
