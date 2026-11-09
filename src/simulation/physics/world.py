@@ -133,6 +133,11 @@ class VirtualPhysicalWorld:
         validate_start_layout(self.layout_cfg)
 
         self.geom = get_physical_geometry()
+        grip_cfg = self.physics_cfg.get("grip", {}) or {}
+        # 0 disables the breakaway model: the grip then behaves as a rigid weld,
+        # which keeps deterministic unit tests stable.
+        self.grip_break_force_n = float(grip_cfg.get("break_on_contact_force_n", 0.0) or 0.0)
+        self.last_grip_break: Optional[Dict[str, Any]] = None
         self.board_cfg = self.scene_cfg.get("virtual_board_placement", {})
         yaw_deg = float(self.board_cfg.get("board_yaw_deg", 90.0))
         d_mm = float(self.board_cfg.get("forward_shift_mm", 0.0))
@@ -1104,6 +1109,7 @@ class VirtualPhysicalWorld:
                     self.gripper.tcp_quat,
                     self.sim_time,
                 )
+                self._maybe_break_grip()
 
             # Update piece states and out-of-bounds detection
             for piece in self.pieces.values():
@@ -1216,6 +1222,47 @@ class VirtualPhysicalWorld:
         """Failure-injection drop primitive: detaches piece regardless of gripper state."""
         self.gripper.set_gripper_state(False)
         return self.gripper.detach_piece()
+
+    def grip_contact_force_n(self) -> float:
+        """Contact force currently pushing on the held piece, excluding the gripper."""
+        piece = self.gripper.attached_piece
+        if piece is None or self.client_id < 0:
+            return 0.0
+        try:
+            contacts = p.getContactPoints(bodyA=piece.body_id, physicsClientId=self.client_id)
+        except Exception:
+            return 0.0
+        proxies = set(self.gripper.proxy_body_ids)
+        total = 0.0
+        for contact in contacts:
+            other = contact[2] if contact[1] == piece.body_id else contact[1]
+            if other in proxies:
+                continue
+            total += max(0.0, float(contact[9]))
+        return total
+
+    def _maybe_break_grip(self) -> None:
+        """Release the payload when contact force exceeds the modelled grip capacity.
+
+        The grip is still a kinematic weld, but it is not unconditional: a held
+        piece that is driven into another piece or into the board transfers a
+        contact force, and past the configured limit the payload slips out and
+        falls under gravity. A limit of 0 keeps the old rigid behaviour.
+        """
+        if self.grip_break_force_n <= 0:
+            return
+        force = self.grip_contact_force_n()
+        if force < self.grip_break_force_n:
+            return
+        dropped = self.force_drop_attached_piece()
+        if dropped is None:
+            return
+        self.last_grip_break = {
+            "piece_id": dropped.piece_id,
+            "contact_force_n": round(force, 4),
+            "limit_n": self.grip_break_force_n,
+            "sim_time": round(self.sim_time, 4),
+        }
 
     def get_attached_piece(self) -> Optional[XiangqiPieceBody]:
         return self.gripper.attached_piece
