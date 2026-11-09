@@ -649,13 +649,13 @@ try:
                         startup_message = ""
                         continue
                     home_action = renderer.home_action_from_pixel(event.pos[0], event.pos[1])
-                    start_vs_robot = home_action in ("vs_robot", "self_play", "human_vs_human", "robot_pvp")
+                    start_vs_robot = home_action in ("vs_robot", "self_play", "robot_pvp")
                     if home_action == "join_pvp":
                         from src.core.robot_pvp import launch_client
                         launch_client()
                         continue
                 if start_vs_robot:
-                    config.GAME_MODE = {"self_play": "ROBOT_VS_ROBOT", "human_vs_human": "HUMAN_VS_HUMAN",
+                    config.GAME_MODE = {"self_play": "ROBOT_VS_ROBOT",
                                         "robot_pvp": "HUMAN_VS_HUMAN_ROBOT"}.get(home_action, "HUMAN_VS_ROBOT")
                     if home_action == "robot_pvp" and home_mode == "BOARD_ONLY":
                         startup_message = "Hai người + robot cần chọn MÔ PHỎNG 3D hoặc ROBOT THẬT trước."

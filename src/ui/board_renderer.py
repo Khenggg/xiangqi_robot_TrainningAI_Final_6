@@ -665,7 +665,7 @@ class BoardRenderer:
         detail = self.log_font.render("Choose the robot difficulty next", True, (227, 245, 237))
         self.screen.blit(detail, detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery + 32)))
 
-        for rect, label in ((HOME_SELF_PLAY_RECT, "ROBOT VS ROBOT"), (HOME_HUMAN_RECT, "HUMAN VS HUMAN")):
+        for rect, label in ((HOME_SELF_PLAY_RECT, "ROBOT VS ROBOT"),):
             self._draw_panel(rect, fill=(249, 245, 232), border=GOLD_COLOR, radius=12)
             text = self.log_font.render(label, True, JADE_DARK)
             self.screen.blit(text, text.get_rect(center=rect.center))
@@ -729,8 +729,6 @@ class BoardRenderer:
             return "vs_robot"
         if HOME_SELF_PLAY_RECT.collidepoint(px, py):
             return "self_play"
-        if HOME_HUMAN_RECT.collidepoint(px, py):
-            return "human_vs_human"
         if HOME_ROBOT_PVP_RECT.collidepoint(px, py):
             return "robot_pvp"
         if HOME_JOIN_PVP_RECT.collidepoint(px, py):
