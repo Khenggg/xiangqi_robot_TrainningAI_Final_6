@@ -82,7 +82,7 @@ class FR5Robot:
         self.user_num    = configured_user
         self.default_vel = config.MOVE_SPEED
 
-        # Two-direction direct-drive gripper: Tool DO1=open, Tool DO0=close.
+        # Tool output directions are set by the hardware configuration.
         self.gripper_open_do_id = config.GRIPPER_OPEN_DO_ID
         self.gripper_close_do_id = config.GRIPPER_CLOSE_DO_ID
         self._gripper_lock = threading.RLock()
@@ -851,20 +851,20 @@ class FR5Robot:
         else:
             pose_safe = self.board_to_pose(col, row, config.SAFE_Z, rotation=pick_rotation)
             pose_pick = self.board_to_pose(col, row, config.PICK_Z, rotation=pick_rotation)
+        if self.gripper_command_known and self.gripper_closed_estimate:
+            raise GripperCommandError(
+                "Gripper is closed; inspect for a held payload before another pick")
         reference = self.board_to_pose_bilinear(col, row, config.PICK_Z, rotation=pick_rotation) if visual_target is not None else pose_pick
         self.visual_pick_correction = dict(dx_mm=pose_pick[0]-reference[0], dy_mm=pose_pick[1]-reference[1],
             cell=[col, row], target=[visual_target.col, visual_target.row] if visual_target else [col, row],
             visual=visual_target is not None, active=True)
         event("motion.visual_correction", "Bù tâm quân theo camera", correction=self.visual_pick_correction)
-        if self.gripper_command_known and self.gripper_closed_estimate:
-            raise GripperCommandError(
-                "Gripper is closed; inspect for a held payload before another pick")
-        if not self.gripper_command_known:
-            # First pick of a session: jaw state is unknown. Open before descent
-            # instead of approaching a piece with closed jaws.
+        try:
+            # Establish the same jaw gap before every approach, including both picks in a capture.
             self._run_stage(MotionStage.PREPOSITION, self.gripper_ctrl,
                             config.GRIPPER_ACTION_OPEN_MAX)
-        try:
+            self._run_stage(MotionStage.PREPOSITION, self.gripper_ctrl,
+                            config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
             self._run_stage(MotionStage.APPROACH, self.move_safe_pose, pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
             self._run_stage(MotionStage.LAND, self.movel_pose, pose_pick)                # Hạ xuống
             self._run_stage(MotionStage.GRIP, self.gripper_ctrl, config.GRIPPER_ACTION_CLOSE)
@@ -883,10 +883,10 @@ class FR5Robot:
 
         self._run_stage(MotionStage.PLACE_APPROACH, self.move_safe_pose, pose_safe, col=col, row=row)  # Đến vị trí an toàn
         self._run_stage(MotionStage.PLACE_LAND, self.movel_pose, pose_place)               # Hạ xuống
-        self._run_stage(MotionStage.RELEASE, self.gripper_ctrl, config.GRIPPER_ACTION_RELEASE)
+        self._run_stage(MotionStage.RELEASE, self.gripper_ctrl, config.GRIPPER_ACTION_OPEN_MAX)
         self._payload_state = PayloadState.EXPECTED_RELEASED
         self._run_stage(MotionStage.POST_RELEASE_LIFT, self.movel_pose, pose_safe)                # Nhấc lên
-        # Short release retains the jaw gap; safe-gap closing assumes fully open jaws.
+        self._run_stage(MotionStage.SETTLE, self.gripper_ctrl, config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
         print(f"[ROBOT] ✅ Đặt xong ({col},{row})")
     
     def move_to_extra_safe(self, col, row, visual_target=None):
@@ -911,7 +911,7 @@ class FR5Robot:
         self._run_stage(MotionStage.RELEASE,self.gripper_ctrl,config.GRIPPER_ACTION_OPEN_MAX)
         self._payload_state = PayloadState.EXPECTED_RELEASED
         self._run_stage(MotionStage.SERVICE_RETREAT,self.go_to_home_chess)
-        self._run_stage(MotionStage.SETTLE,self.gripper_ctrl,config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
+        self._run_stage(MotionStage.SETTLE, self.gripper_ctrl, config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
         return 0
 
 

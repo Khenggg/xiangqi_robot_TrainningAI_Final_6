@@ -39,7 +39,7 @@ PICK_Z  = 178.0   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn
 PLACE_Z = 178.0   # Hạ xuống đặt
 
 # Cấu hình kẹp: motor 2 chiều dùng Tool DO trên đầu robot.
-# Khôi phục chiều điều khiển cũ theo yêu cầu: DO1 MỞ, DO0 ĐÓNG.
+# Tool DO0 mở, Tool DO1 đóng trên robot này.
 # Không bao giờ bật cả hai cùng lúc.
 GRIPPER_ACTION_CLOSE = "close"
 # There is no jaw-position sensor: each state below is established only by
@@ -47,20 +47,21 @@ GRIPPER_ACTION_CLOSE = "close"
 GRIPPER_ACTION_OPEN_MAX = "open_max"
 GRIPPER_ACTION_RELEASE = "release"
 GRIPPER_ACTION_CLOSE_TO_SAFE_GAP = "close_to_safe_gap"
-GRIPPER_OPEN_DO_ID = 1
-GRIPPER_CLOSE_DO_ID = 0
+GRIPPER_OPEN_DO_ID = 0
+GRIPPER_CLOSE_DO_ID = 1
 GRIPPER_IDLE_STATUS = 0
 GRIPPER_ACTIVE_STATUS = 1
 
 # Motor không có công tắc hành trình: chỉ cấp điện theo xung ngắn rồi tắt cả hai DO.
-# Tinh chỉnh hai PULSE riêng sau khi thử với tay robot đứng yên và không có quân cờ.
+# Tinh chỉnh từng xung riêng với tay robot đứng yên.
 GRIPPER_DIRECTION_DEADTIME_SEC = 0.10
-# Open fully only when establishing the initial jaw opening or at the capture bin.
+# Open fully before each pick and when releasing a piece.
 # Tune this to the shortest pulse that reaches the physical open limit.
-GRIPPER_OPEN_MAX_PULSE_SEC = 0.3
-# User-selected short opening when releasing a piece on the board.
+GRIPPER_OPEN_MAX_PULSE_SEC = 0.25
+# Short-opening action for callers that request it explicitly.
 GRIPPER_RELEASE_PULSE_SEC = 0.06
-GRIPPER_CLOSE_PULSE_SEC = 0.8
+# Final grip pulse starts from the pre-pick gap, after descent to PICK_Z.
+GRIPPER_CLOSE_PULSE_SEC = 0.20
 # Starting from fully open, close only to the travelling/pre-pick safe gap.
 # Increase to narrow the gap; decrease to widen it. Do not drive into hard stop.
 GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC = 0.06

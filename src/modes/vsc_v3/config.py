@@ -44,14 +44,14 @@ PICK_Z  = 178   # Hạ xuống gắp (Đã nâng lên để tránh đập bàn, 
 PLACE_Z = 178   # Hạ xuống đặt
 
 # Cấu hình kẹp: motor 2 chiều dùng Tool DO trên đầu robot.
-# Verified wiring: DO1 chạy hướng MỞ, DO0 chạy hướng ĐÓNG. Không bao giờ bật cả hai cùng lúc.
+# DO0 chạy hướng MỞ, DO1 chạy hướng ĐÓNG. Không bao giờ bật cả hai cùng lúc.
 GRIPPER_ACTION_CLOSE = "close"
 # There is no jaw-position sensor: each state below is established only by
 # calibrated motor timing on the real gripper.
 GRIPPER_ACTION_OPEN_MAX = "open_max"
 GRIPPER_ACTION_CLOSE_TO_SAFE_GAP = "close_to_safe_gap"
-GRIPPER_OPEN_DO_ID = 1
-GRIPPER_CLOSE_DO_ID = 0
+GRIPPER_OPEN_DO_ID = 0
+GRIPPER_CLOSE_DO_ID = 1
 GRIPPER_IDLE_STATUS = 0
 GRIPPER_ACTIVE_STATUS = 1
 
