@@ -95,6 +95,9 @@ renderer = BoardRenderer(screen)
 # Khởi tạo các module quản lý SRP
 state = GameState(allow_mouse_move=config.DRY_RUN)
 hw = None
+vsc_session = None
+vsc_retiring = False
+vsc_retained_session = None
 telemetry = None
 self_play = None
 input_mgr = None
@@ -313,9 +316,16 @@ def _request_mode_menu():
 def _launch_session_mode(selected_mode, *, camera_recalibration=False):
     """Start one session, optionally forcing manual four-corner camera calibration."""
     global startup_message
+    if vsc_retained_session is not None:
+        return _retry_retained_vsc()
     mode_label = {"BOARD_ONLY": "bàn cờ 2D", "SIMULATION": "mô phỏng 3D",
                   "PHYSICAL": "robot thật"}.get(selected_mode, selected_mode)
     startup_message = f"Đang khởi tạo {mode_label}… Có thể đóng cửa sổ để hủy."
+    if config.GAME_MODE == "HUMAN_VS_ROBOT":
+        from src.modes.vsc_v3_session import VscV3Session
+        session = VscV3Session(config, launch_options, _BASE_DIR, selected_mode,
+                               camera_recalibration=camera_recalibration, cancelled=startup_cancelled)
+        return startup_worker.start(session.initialize, _finish_vsc_startup)
     from src.core.session_startup import build_session
     previous_recalibrate = bool(getattr(config, "RECALIBRATE_CAMERA", False))
     previous_manual = bool(getattr(config, "CAMERA_CALIBRATION_MANUAL_ONLY", False))
@@ -335,6 +345,68 @@ def _launch_session_mode(selected_mode, *, camera_recalibration=False):
                   "Người vận hành yêu cầu chấm lại 4 góc bàn từ camera",
                   level=logging.INFO)
     return startup_worker.start(_start_selected_session, _finish_startup)
+
+
+def _finish_vsc_startup(session, error):
+    global vsc_session, home_screen_active, startup_message
+    if error is not None:
+        retained = getattr(error, "session", None)
+        if retained is not None:
+            _retain_vsc_startup(retained, error)
+            return
+        _finish_startup(None, error)
+        return
+    try:
+        session.activate(screen)
+    except Exception as activation_error:
+        try:
+            session.close()
+        except Exception as cleanup_error:
+            _retain_vsc_startup(session, cleanup_error)
+            return
+        _finish_startup(None, activation_error)
+        return
+    vsc_session = session
+    home_screen_active = False
+    startup_message = ""
+
+
+def _retain_vsc_startup(session, error):
+    global vsc_retained_session, home_screen_active, startup_message
+    vsc_retained_session = session
+    home_screen_active = True
+    startup_message = f"Phiên Player vs Robot chưa đóng được: {error}. F2 thử đóng lại; chưa mở phiên mới."
+    log_event("startup.blocked", startup_message, level=logging.ERROR)
+
+
+def _retry_retained_vsc():
+    if startup_worker.busy:
+        return False
+    def completed(result, error):
+        global vsc_retained_session, startup_message
+        if error is not None:
+            _retain_vsc_startup(vsc_retained_session, error)
+            return
+        vsc_retained_session = None
+        startup_message = "Đã đóng phiên lỗi. Chọn chế độ để khởi tạo lại."
+    return startup_worker.start(vsc_retained_session.close, completed)
+
+
+def _retire_vsc_session():
+    global vsc_retiring
+    if vsc_retiring or startup_worker.busy:
+        return
+    def completed(result, error):
+        global vsc_session, vsc_retiring, home_screen_active, startup_message
+        vsc_retiring = False
+        if error is not None:
+            _retain_vsc_startup(vsc_session, error)
+            vsc_session = None  # Freeze gameplay; only an explicit F2 may retry close.
+            return
+        vsc_session = None
+        home_screen_active = True
+        startup_message = ""
+    vsc_retiring = startup_worker.start(vsc_session.close, completed)
 
 
 def _begin_mode_disposal():
@@ -382,7 +454,7 @@ def _finish_mode_disposal(result, error):
 
 
 def _cleanup_all():
-    global _cleanup_done, _cleanup_disposal
+    global _cleanup_done, _cleanup_disposal, vsc_session, vsc_retained_session
     if _cleanup_done:
         return True
     startup_cancelled.set()
@@ -399,6 +471,14 @@ def _cleanup_all():
         return False
     if not close("startup result", startup_worker.poll):
         return False
+    if vsc_retained_session is not None:
+        if not close("retained vsc-v3 session", vsc_retained_session.close):
+            return False
+        vsc_retained_session = None
+    if vsc_session is not None:
+        if not close("vsc-v3 session", vsc_session.close):
+            return False
+        vsc_session = None
     if _cleanup_disposal is None:
         from src.core.session_disposal import SessionDisposal
         _cleanup_disposal = mode_disposal or SessionDisposal(
@@ -558,6 +638,32 @@ try:
                 running = False
                 break
         frame_started = time.monotonic()
+        if vsc_session is not None:
+            # This mode owns the donor game loop; shared controllers never see its state.
+            startup_worker.poll()
+            if vsc_session is None:
+                continue
+            vsc_session.draw(screen)
+            for raw_event in pygame.event.get():
+                event = game_window.map_event(raw_event)
+                if event is None:
+                    continue
+                if (event.type == pygame.QUIT or
+                        (event.type == pygame.KEYDOWN and event.key == pygame.K_c
+                         and getattr(event, "mod", 0) & pygame.KMOD_CTRL)):
+                    if confirm_exit():
+                        exit_application()
+                        running = False
+                        break
+                elif not vsc_retiring:
+                    vsc_session.handle_event(event)
+            if not vsc_retiring:
+                vsc_session.tick()
+                if vsc_session.wants_home:
+                    _retire_vsc_session()
+            game_window.present()
+            clock.tick(30)
+            continue
         # 2a. Vẽ khung hình
         if settings_menu_active:
             renderer.draw_settings_menu(getattr(config, "DEBUG_DASHBOARD", False))
@@ -590,6 +696,9 @@ try:
                     break
                 continue
             # Urgent controls bypass the normal busy-input filter.
+            elif (event.type == pygame.KEYDOWN and event.key == pygame.K_F2
+                  and vsc_retained_session is not None):
+                _retry_retained_vsc()
             elif (event.type == pygame.KEYDOWN and event.key == pygame.K_F9
                   and getattr(event, "mod", 0) & pygame.KMOD_CTRL and hw is not None):
                 if not startup_worker.busy:
