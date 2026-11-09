@@ -5,7 +5,7 @@ import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget, cre
 import { fetchPhysicalGeometry } from "./geometry.mjs";
 import { nearestBoardIntersection } from "./board_picker.mjs";
 import { fetchVirtualGripperProfile } from "./gripper_profile.mjs";
-import { fetchGripperVisualAsset, fingerDirection, fingerOffsetCadMm, isFingerPartName } from "./gripper_asset.mjs";
+import { fetchGripperVisualAsset, fingerClosedShift, fingerDirection, fingerOffsetCadMm, fingerOpenShift, isFingerPartName } from "./gripper_asset.mjs";
 import { fetchStartLayout } from "./layout.mjs";
 import {
   buildBoardGrid,
@@ -300,12 +300,24 @@ async function loadSharedGripper() {
     built.forEach(({ stepMesh, mesh }) => {
       if (isFingerPartName(stepMesh.name)) {
         const cadPosition = mesh.position.clone();
-        const direction = fingerDirection(centerXOf(mesh), fingerMidX);
-        mesh.position.x += fingerOffsetCadMm(visualAsset, direction, false);
+        const bounds = new THREE.Box3().setFromBufferAttribute(
+          mesh.geometry.getAttribute("position"));
+        const localCenterX = bounds.getCenter(new THREE.Vector3()).x;
+        const halfWidth = (bounds.max.x - bounds.min.x) / 2;
+        const side = fingerDirection(localCenterX, fingerMidX);
+        const openShift = fingerOpenShift(visualAsset, side);
+        const closedShift = fingerClosedShift({
+          localCenterX, halfWidth, side, midX: fingerMidX,
+        });
+        mesh.position.x = cadPosition.x + openShift;
         gripperVisual.fingers.push({
           mesh,
           cadPosition,
-          direction,
+          direction: side,
+          openShift,
+          closedShift,
+          localCenterX,
+          halfWidth,
         });
       }
       mesh.castShadow = true;
@@ -316,6 +328,16 @@ async function loadSharedGripper() {
       console.warn("[VIEWER] STEP has no recognizable finger part; jaw animation is disabled");
     }
     state.gripperFingers = gripperVisual.fingers.length;
+    state.gripperFingerCadXs = gripperVisual.fingers.map(
+      ({ cadPosition }) => Number(cadPosition.x.toFixed(4)));
+    state.gripperFingerDebug = gripperVisual.fingers.map((f) => ({
+      c: Number(f.localCenterX.toFixed(3)),
+      w: Number(f.halfWidth.toFixed(3)),
+      side: f.direction,
+      open: Number(f.openShift.toFixed(3)),
+      closed: Number(f.closedShift.toFixed(3)),
+    }));
+    state.gripperFingerMidX = Number(fingerMidX.toFixed(3));
     gripperVisual.group = gripper;
     return gripper;
   })().catch((error) => {
@@ -336,20 +358,26 @@ function updateGripperStateBadge(closed) {
 
 async function setGripperClosed(closed) {
   updateGripperStateBadge(closed);
-  // The CAD asset's real travel is only ~0.34 mm; exaggerate the virtual
-  // visualization so the jaw state is visible. Physical mode stays exact.
+  // The CAD asset's real travel is only ~0.34 mm per finger, so travelling by it
+  // (even x12) leaves the jaws looking open. Virtual mode instead targets a gap
+  // between the inner faces; physical mode keeps the exact CAD stroke.
   const travelScale = state.liveSource === "VIRTUAL" ? VIRTUAL_GRIPPER_VISUAL_TRAVEL_SCALE : 1.0;
   if (!gripperVisual.fingers.length
       || (gripperVisual.closed === closed && gripperVisual.travelScale === travelScale)) {
     return;
   }
   const visualAsset = await getGripperVisualAsset();
-  for (const { mesh, cadPosition, direction } of gripperVisual.fingers) {
+  const virtual = state.liveSource === "VIRTUAL";
+  for (const { mesh, cadPosition, direction, openShift, closedShift } of gripperVisual.fingers) {
     mesh.position.copy(cadPosition);
-    mesh.position.x += fingerOffsetCadMm(visualAsset, direction, closed, travelScale);
+    mesh.position.x += closed
+      ? (virtual ? closedShift : fingerOffsetCadMm(visualAsset, direction, true, 1))
+      : openShift;
   }
   gripperVisual.closed = closed;
   gripperVisual.travelScale = travelScale;
+  state.gripperFingerXs = gripperVisual.fingers.map(
+    ({ mesh }) => Number(mesh.position.x.toFixed(4)));
 }
 
 export function buildProceduralGripper(profile) {

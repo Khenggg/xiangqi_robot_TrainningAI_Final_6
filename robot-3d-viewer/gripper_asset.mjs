@@ -104,4 +104,23 @@ export function fingerDirection(centerX, midX) {
   return Number(centerX) < Number(midX) ? -1 : 1;
 }
 
+/**
+ * Virtual clamp target: the inner faces stop this far apart (CAD millimetres).
+ *
+ * The shipped STEP has a real stroke of only 0.344 mm per finger, so animating
+ * by travel (even x12) moves the jaws ~6 mm inside a ~40 mm opening and still
+ * looks open. The virtual pose therefore targets a gap instead of a stroke.
+ */
+export const VIRTUAL_CLOSED_CONTACT_CAD_MM = 2;
+
+export function fingerOpenShift(asset, side) {
+  return Number(side) * asset.fingerOpenInsetMm;
+}
+
+export function fingerClosedShift({ localCenterX, halfWidth, side, midX,
+                                    contact = VIRTUAL_CLOSED_CONTACT_CAD_MM }) {
+  const innerFace = Number(localCenterX) - Number(side) * Number(halfWidth);
+  return (Number(midX) + Number(side) * contact) - innerFace;
+}
+
 

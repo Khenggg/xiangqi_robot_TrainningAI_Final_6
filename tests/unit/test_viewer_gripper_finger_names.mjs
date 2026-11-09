@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { fingerDirection, fingerOffsetCadMm, isFingerPartName, parseGripperVisualAsset } from "../../robot-3d-viewer/gripper_asset.mjs";
+import {
+  VIRTUAL_CLOSED_CONTACT_CAD_MM,
+  fingerClosedShift,
+  fingerDirection,
+  fingerOffsetCadMm,
+  fingerOpenShift,
+  isFingerPartName,
+  parseGripperVisualAsset,
+} from "../../robot-3d-viewer/gripper_asset.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -40,4 +48,30 @@ test("closing the gripper narrows the gap between the two fingers", () => {
   const shut = gap(true);
   assert.ok(shut < open, `closing must narrow the gap: closed ${shut} >= open ${open}`);
   assert.ok(Math.abs(open - shut) > 1, "the visual travel must be visible");
+});
+
+test("virtual clamp lands on the contact gap, not on a 0.34 mm stroke", () => {
+  // Two symmetric jaws around the assembly centre, as occt reports them.
+  const halfWidth = 5;
+  const midX = 0;
+  const leftCenter = -22;
+  const rightCenter = 22;
+  const leftSide = fingerDirection(leftCenter, midX);
+  const rightSide = fingerDirection(rightCenter, midX);
+  const leftShift = fingerClosedShift({ localCenterX: leftCenter, halfWidth, side: leftSide, midX });
+  const rightShift = fingerClosedShift({ localCenterX: rightCenter, halfWidth, side: rightSide, midX });
+
+  const leftInnerFace = leftCenter + leftShift + halfWidth;
+  const rightInnerFace = rightCenter + rightShift - halfWidth;
+  const gap = rightInnerFace - leftInnerFace;
+
+  assert.ok(Math.abs(gap - 2 * VIRTUAL_CLOSED_CONTACT_CAD_MM) < 1e-9,
+    `inner faces must end ${2 * VIRTUAL_CLOSED_CONTACT_CAD_MM} CAD mm apart, got ${gap}`);
+  assert.ok(gap < 2 * Math.abs(leftCenter),
+    "the clamped gap must be much smaller than the CAD separation");
+});
+
+test("virtual open shift spreads the fingers outward", () => {
+  assert.equal(fingerOpenShift(visualAsset, -1), -visualAsset.fingerOpenInsetMm);
+  assert.equal(fingerOpenShift(visualAsset, 1), visualAsset.fingerOpenInsetMm);
 });
