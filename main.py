@@ -206,12 +206,12 @@ def _finish_startup(result, error):
         state = GameState(allow_mouse_move=config.DRY_RUN)
         error_text = str(error)
         lower_error = error_text.lower()
-        if "calibration" in lower_error or "perspective" in lower_error:
+        if "R1-R4" in error_text or "R1–R4" in error_text:
+            calibration_hint = (
+                " Kiểm tra profile R1–R4/frame robot; đây không phải lỗi chấm 4 góc camera.")
+        elif "calibration" in lower_error or "perspective" in lower_error:
             calibration_hint = (
                 " Tick Chấm lại 4 góc bàn từ camera trong thẻ ROBOT THẬT rồi thử lại.")
-        elif "R1-R4" in error_text or "R1–R4" in error_text:
-            calibration_hint = (
-                " Kiểm tra/dạy lại R1–R4 trên pendant (cùng tool, user 0) trước khi thử lại.")
         else:
             calibration_hint = ""
         startup_message = (f"Không khởi tạo được: {error}. Khắc phục rồi chọn chế độ lại."

@@ -41,7 +41,10 @@ class HardwareManager:
         self.dry_run = config.DRY_RUN
         
         # Hardware instances
-        self.robot = FR5Robot()
+        fixed_points = getattr(config, 'PHYSICAL_TEACHING_POINTS_FILE', None)
+        fixed_points = Path(project_dir) / fixed_points if fixed_points else None
+        self.robot = FR5Robot(ip=getattr(config, 'ROBOT_IP', None), dry_run=self.dry_run,
+                              teaching_points_path=fixed_points)
         self.engine = None
         self.ai_ctrl = None
         self.cap = None

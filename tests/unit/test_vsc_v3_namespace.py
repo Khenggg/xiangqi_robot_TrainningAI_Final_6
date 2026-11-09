@@ -38,6 +38,30 @@ def test_current_hardware_profile_and_wiring_override_donor_values(tmp_path):
     assert issubclass(FR5Robot, CurrentRobot)
 
 
+def test_real_manager_constructor_selects_fixed_profile_without_sdk_calls(tmp_path):
+    from pathlib import Path
+    import shutil
+    cfg = SimpleNamespace(DRY_RUN=False, ROBOT_IP='192.168.58.2',
+                          PHYSICAL_TEACHING_POINTS_FILE='calibration/physical_teaching_points_user0.json')
+    manager = HardwareManager(cfg, tmp_path)
+    assert manager.robot.uses_fixed_teaching_points
+    assert manager.robot.fixed_teaching_points_path == str(tmp_path / cfg.PHYSICAL_TEACHING_POINTS_FILE)
+    assert manager.robot.ip == cfg.ROBOT_IP
+    assert not manager.robot.dry
+    assert manager.robot.robot is None  # Constructor never opens SDK or actuates.
+    profile = tmp_path / cfg.PHYSICAL_TEACHING_POINTS_FILE
+    profile.parent.mkdir(parents=True)
+    shutil.copy2(Path(__file__).resolve().parents[2] / cfg.PHYSICAL_TEACHING_POINTS_FILE, profile)
+    manager.robot.connected = True
+    manager.robot.robot = Mock()
+    manager.robot._load_teaching_points()
+    manager.robot.robot.GetRobotTeachingPoint.assert_not_called()
+    manager.robot.robot.GetActualWObjNum.assert_not_called()
+    manager.robot.robot.GetWObjCoordWithID.assert_not_called()
+    assert manager.robot.teaching_points_error is None
+    assert all(point['user'] == 0 for point in manager.robot.teaching_points.values())
+
+
 def test_robot_initialization_uses_loaded_fixed_profile_without_home_or_gripper():
     manager = HardwareManager.__new__(HardwareManager)
     manager.config = SimpleNamespace()
