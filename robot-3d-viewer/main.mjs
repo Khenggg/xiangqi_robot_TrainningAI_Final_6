@@ -5,7 +5,7 @@ import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget, cre
 import { fetchPhysicalGeometry } from "./geometry.mjs";
 import { nearestBoardIntersection } from "./board_picker.mjs";
 import { fetchVirtualGripperProfile } from "./gripper_profile.mjs";
-import { fetchGripperVisualAsset, fingerOffsetCadMm, isFingerPartName } from "./gripper_asset.mjs";
+import { fetchGripperVisualAsset, fingerDirection, fingerOffsetCadMm, isFingerPartName } from "./gripper_asset.mjs";
 import { fetchStartLayout } from "./layout.mjs";
 import {
   buildBoardGrid,
@@ -300,7 +300,7 @@ async function loadSharedGripper() {
     built.forEach(({ stepMesh, mesh }) => {
       if (isFingerPartName(stepMesh.name)) {
         const cadPosition = mesh.position.clone();
-        const direction = centerXOf(mesh) < fingerMidX ? 1 : -1;
+        const direction = fingerDirection(centerXOf(mesh), fingerMidX);
         mesh.position.x += fingerOffsetCadMm(visualAsset, direction, false);
         gripperVisual.fingers.push({
           mesh,

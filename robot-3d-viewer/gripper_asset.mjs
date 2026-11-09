@@ -92,3 +92,16 @@ export function isFingerPartName(name) {
   return /^pinza(?::\d+)?$/i.test(String(name ?? "").trim());
 }
 
+/**
+ * Outward unit direction for one finger, given the pair's centre.
+ *
+ * fingerOffsetCadMm() subtracts the travel when the gripper closes, so the
+ * direction must point away from the centre: subtracting then pulls each finger
+ * inward and the gap narrows. Pointing inward inverts the animation and the
+ * jaws spread apart on a clamp command.
+ */
+export function fingerDirection(centerX, midX) {
+  return Number(centerX) < Number(midX) ? -1 : 1;
+}
+
+
