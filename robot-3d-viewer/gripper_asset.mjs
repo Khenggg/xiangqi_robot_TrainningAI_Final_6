@@ -80,3 +80,15 @@ export function fingerOffsetCadMm(asset, direction, closed, travelScale = 1) {
   const travel = asset.fingerTravelMm * Number(travelScale || 1);
   return direction * (asset.fingerOpenInsetMm + (closed ? -travel : 0));
 }
+
+/**
+ * True when a STEP mesh is one of the two parallel fingers.
+ *
+ * occt-import-js reports assembly instance names, not the bare product name:
+ * the shipped assembly yields "pinza:3" and "pinza:4", so an exact match on
+ * "pinza" finds nothing and the jaws silently stop animating.
+ */
+export function isFingerPartName(name) {
+  return /^pinza(?::\d+)?$/i.test(String(name ?? "").trim());
+}
+

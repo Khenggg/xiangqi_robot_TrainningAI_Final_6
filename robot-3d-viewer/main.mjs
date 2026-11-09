@@ -5,7 +5,7 @@ import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget, cre
 import { fetchPhysicalGeometry } from "./geometry.mjs";
 import { nearestBoardIntersection } from "./board_picker.mjs";
 import { fetchVirtualGripperProfile } from "./gripper_profile.mjs";
-import { fetchGripperVisualAsset, fingerOffsetCadMm } from "./gripper_asset.mjs";
+import { fetchGripperVisualAsset, fingerOffsetCadMm, isFingerPartName } from "./gripper_asset.mjs";
 import { fetchStartLayout } from "./layout.mjs";
 import {
   buildBoardGrid,
@@ -256,7 +256,8 @@ function buildStepMesh(stepMesh) {
   });
   const mesh = new THREE.Mesh(geometry, material);
   // STEP part name is stable; source color varies across occt-import-js builds.
-  mesh.userData.isGripperFinger = stepMesh.name === "pinza";
+  // occt reports assembly instances ("pinza:3", "pinza:4"), hence the prefix match.
+  mesh.userData.isGripperFinger = isFingerPartName(stepMesh.name);
   return mesh;
 }
 
@@ -288,15 +289,18 @@ async function loadSharedGripper() {
     const gripper = new THREE.Group();
     gripper.name = "parallel_gripper";
     gripper.userData.robotVisualRole = "shared-gripper";
+    const built = result.meshes.map((stepMesh) => ({ stepMesh, mesh: buildStepMesh(stepMesh) }));
+    const centerXOf = (mesh) => new THREE.Box3()
+      .setFromBufferAttribute(mesh.geometry.getAttribute("position"))
+      .getCenter(new THREE.Vector3()).x;
+    const fingerMeshes = built.filter(({ stepMesh }) => isFingerPartName(stepMesh.name));
+    const fingerXs = fingerMeshes.map(({ mesh }) => centerXOf(mesh));
+    const fingerMidX = fingerXs.length ? (Math.min(...fingerXs) + Math.max(...fingerXs)) / 2 : 0;
     gripperVisual.fingers = [];
-    result.meshes.forEach((stepMesh) => {
-      const mesh = buildStepMesh(stepMesh);
-      if (mesh.userData.isGripperFinger) {
-        const bounds = new THREE.Box3().setFromBufferAttribute(
-          mesh.geometry.getAttribute("position"),
-        );
-        const direction = bounds.getCenter(new THREE.Vector3()).x < 40 ? 1 : -1;
+    built.forEach(({ stepMesh, mesh }) => {
+      if (isFingerPartName(stepMesh.name)) {
         const cadPosition = mesh.position.clone();
+        const direction = centerXOf(mesh) < fingerMidX ? 1 : -1;
         mesh.position.x += fingerOffsetCadMm(visualAsset, direction, false);
         gripperVisual.fingers.push({
           mesh,
@@ -308,6 +312,10 @@ async function loadSharedGripper() {
       mesh.receiveShadow = true;
       gripper.add(mesh);
     });
+    if (!gripperVisual.fingers.length) {
+      console.warn("[VIEWER] STEP has no recognizable finger part; jaw animation is disabled");
+    }
+    state.gripperFingers = gripperVisual.fingers.length;
     gripperVisual.group = gripper;
     return gripper;
   })().catch((error) => {
