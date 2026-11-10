@@ -79,7 +79,7 @@ const indexPath = path.resolve(repoRoot, "robot-3d-viewer", "index.html");
 const indexContent = fs.readFileSync(indexPath, "utf-8");
 
 assert.ok(
-  indexContent.includes("Đang đọc tool profile"),
+  indexContent.includes("Reading tool profile"),
   "index.html must await canonical tool metadata, not show an obsolete 150mm offset"
 );
 assert.ok(

@@ -327,7 +327,7 @@ class GameState(GamePersistence):
             return False
         if self._pre_space_state is None:
             print("[ROLLBACK] ⚠️ Không có state để rollback!")
-            self.set_status("⚠️  Không có nước nào để rollback!", color=(180, 100, 0), duration=2.5)
+            self.set_status("⚠️  Nothing to roll back!", color=(180, 100, 0), duration=2.5)
             return
 
         print("[ROLLBACK] ↩️ Khôi phục trạng thái trước SPACE...")
@@ -369,7 +369,7 @@ class GameState(GamePersistence):
         print("[ROLLBACK] 📸 T1 baselines restored.")
 
         self._pre_space_state = None   # Xóa sau khi rollback
-        self.set_status("↩️  Đã rollback! Di quân lại rồi bấm SPACE.", color=(180, 100, 0), duration=5.0)
+        self.set_status("↩️  Rolled back! Move the piece again, then press SPACE.", color=(180, 100, 0), duration=5.0)
         print(f"[ROLLBACK] ✅ Done. FEN: {self.current_fen}")
         
         self.manual_override_active = False
@@ -846,7 +846,7 @@ class GameState(GamePersistence):
             self._durable_commit_count += 1
         self.sync_current_board()
         if needs_turn_confirmation:
-            self.move_sync_error = "Bàn đã đồng bộ; xác nhận lượt tiếp theo bằng phím 1 (Đỏ) hoặc 2 (Đen)."
+            self.move_sync_error = "Board synced; confirm the side to move with key 1 (Red) or 2 (Black)."
             self.set_status(self.move_sync_error, color=(180, 100, 0), duration=30.0)
         if self.api_client and not needs_turn_confirmation:
             try:
@@ -876,7 +876,7 @@ class GameState(GamePersistence):
                 self.publish_committed_fen()
             except Exception as exc:
                 print(f"[API] Confirmed-turn update failed: {exc}")
-        self.set_status("Đã xác nhận lượt tiếp theo.", color=(0, 120, 0), duration=5.0)
+        self.set_status("Side to move confirmed.", color=(0, 120, 0), duration=5.0)
         return True
 
     @durable_transition
@@ -907,7 +907,7 @@ class GameState(GamePersistence):
             event("board.sync_failed", str(exc), level=logging.ERROR, code="BOARD_SYNC_FAILED",
                   exc_info=True, fen=self.current_fen, piece_count=len(self.piece_ids))
             self.projection_error = str(exc)
-            self.set_status(f"Viewer chưa đồng bộ; nước đã commit được giữ nguyên: {exc}", duration=30)
+            self.set_status(f"Viewer not synced; the committed move is kept: {exc}", duration=30)
             return False
         self.projection_error = None
         return True
@@ -971,14 +971,14 @@ class GameState(GamePersistence):
                 or self.recovery_required or self.mode_change_pending
                 or self.physical_sync_fault or self.move_sync_error
                 or self._match_end_intent is not None):
-            self.set_status("Đối soát nước đang dở trước khi hoàn tác; ván đã kết thúc cần New Game.", duration=20)
+            self.set_status("Verify the move in progress before rolling back; a finished game needs New Game.", duration=20)
             return False
         if hw_manager is not None:
             worker = getattr(hw_manager, "motion_worker", None)
             lock = getattr(hw_manager, "_piece_move_lock", None)
             if ((worker is not None and worker.busy)
                     or (lock is not None and lock.locked())):
-                self.set_status("Chờ thao tác robot kết thúc trước khi hoàn tác.", duration=10)
+                self.set_status("Wait for the robot action to finish before rolling back.", duration=10)
                 return False
         return True
 
@@ -987,10 +987,10 @@ class GameState(GamePersistence):
         if not self._history_change_allowed(hw_manager):
             return False
         if self.ai_thinking:
-            self.set_status("AI đang tính toán; chờ trước khi hoàn tác.", duration=5)
+            self.set_status("The AI is thinking; wait before rolling back.", duration=5)
             return False
         if not self.history_snapshots:
-            self.set_status("Chưa có nước đi để hoàn tác.", duration=5)
+            self.set_status("There is no move to roll back.", duration=5)
             return False
         snapshot = self.history_snapshots.pop()
         for key, value in snapshot.items():
@@ -1012,7 +1012,7 @@ class GameState(GamePersistence):
                                        or self._is_game_only(hw_manager)):
             self.sync_current_board()
             return True
-        self.set_status("Đã hoàn tác; xác minh bàn trước khi tiếp tục.", duration=10)
+        self.set_status("Rolled back; verify the board before continuing.", duration=10)
         self._require_scene_reconciliation("Undo requires board reconciliation")
         return True
 

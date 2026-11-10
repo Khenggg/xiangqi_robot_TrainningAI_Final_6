@@ -149,19 +149,19 @@ def _start_selected_game():
     if automatic_startup is not None:
         automatic_startup.baseline_checked = True
     if profile is not None and profile.mouse_input == "VIRTUAL_TEST_ADAPTER":
-        state.set_status("HvR ẢO: bộ nhập chuột phục vụ test, không phải xác nhận camera thật.", duration=30)
+        state.set_status("VIRTUAL HvR: mouse input is for testing, not real camera confirmation.", duration=30)
     if not config.DRY_RUN and not captured:
         state.manual_override_active = True
         state.snapshot_continue_required = True
-        state.set_status("Camera chưa xác nhận bàn ban đầu. Sắp xếp quân rồi bấm V để đối soát.", duration=30)
+        state.set_status("The camera has not confirmed the initial board. Arrange the pieces, then press V to verify.", duration=30)
         return
     if config.ROBOT_BACKEND == "PHYSICAL" and not hw.is_robot_ready:
-        hint = ("O mở người Đen; hai bên chọn nước bằng chuột." if config.GAME_MODE == "HUMAN_VS_HUMAN_ROBOT"
-                else "")
-        enable_hint = ("Đang chờ kiểm tra để tự bật robot; "
+        hint = ("O opens the Black player; both sides choose moves with the mouse."
+                if config.GAME_MODE == "HUMAN_VS_HUMAN_ROBOT" else "")
+        enable_hint = ("waiting for the check that enables the robot automatically; "
                        if getattr(config, "AUTO_ENABLE_PHYSICAL_ON_STARTUP", True)
-                       else "Bấm F9 rồi F10 để bật robot; ")
-        state.set_status(("FR3 đã kết nối chỉ đọc. " + enable_hint + hint).strip(), duration=30)
+                       else "press F9 then F10 to enable the robot; ")
+        state.set_status(("FR3 connected, read-only. " + enable_hint + hint).strip(), duration=30)
     if state.api_client.token and not state.recovery_required:
         state.ensure_spectator_match()
 
@@ -184,7 +184,7 @@ def _retain_startup_failure(error):
         hw.request_controlled_stop("Partial startup retirement")
     mode_switch_failed = True
     home_screen_active = difficulty_menu_active = False
-    state.set_status(f"Giữ phiên khởi tạo lỗi: {error}. F2 đóng lại trước khi chọn chế độ mới.", duration=60)
+    state.set_status(f"Keeping the failed init session: {error}. Press F2 to close it before choosing a new mode.", duration=60)
 
 
 def _finish_startup(result, error):
@@ -202,14 +202,14 @@ def _finish_startup(result, error):
         lower_error = error_text.lower()
         if "R1-R4" in error_text or "R1–R4" in error_text:
             calibration_hint = (
-                " Kiểm tra profile R1–R4/frame robot; đây không phải lỗi chấm 4 góc camera.")
+                " Check the R1-R4 profile or robot frame; this is not a four-corner camera marking error.")
         elif "calibration" in lower_error or "perspective" in lower_error:
             calibration_hint = (
-                " Tick Chấm lại 4 góc bàn từ camera trong thẻ ROBOT THẬT rồi thử lại.")
+                " Tick \"Re-mark the 4 board corners from the camera\" in the REAL ROBOT card, then retry.")
         else:
             calibration_hint = ""
-        startup_message = (f"Không khởi tạo được: {error}. Khắc phục rồi chọn chế độ lại."
-                           f"{calibration_hint} Chi tiết STARTUP_FAILED trong logs/.")
+        startup_message = (f"Initialization failed: {error}. Fix it, then choose the mode again."
+                           f"{calibration_hint} See STARTUP_FAILED in logs/.")
         log_event("startup.blocked", startup_message, level=logging.ERROR, code="STARTUP_FAILED")
         return
     manager, publisher, server, reason = result
@@ -243,9 +243,9 @@ def _finish_startup(result, error):
     hw, telemetry, viewer_server, mirror_error = manager, publisher, server, reason
     input_mgr = handler
     profile = manager.profile
-    caption = "ẢO / bộ nhập test" if profile.dry_run else "THẬT / Camera & FR3"
+    caption = "VIRTUAL / test input" if profile.dry_run else "PHYSICAL / camera & FR3"
     if profile.game_mode == "HUMAN_VS_HUMAN_ROBOT":
-        caption = "2 người + robot — " + ("Mô phỏng" if profile.dry_run else "Camera & FR3 thật")
+        caption = "2 players + robot — " + ("Simulation" if profile.dry_run else "real camera & FR3")
     pygame.display.set_caption(f"Xiangqi Robot — {caption}")
     from src.core.session_control import SessionControl
     session_control = SessionControl(state, manager, None)
@@ -265,7 +265,7 @@ def _finish_startup(result, error):
 
 def _job_completed(value, error):
     if error:
-        state.set_status(f"Thao tác thất bại: {error}. Đọc log để khắc phục.", duration=30)
+        state.set_status(f"Action failed: {error}. Read the log to recover.", duration=30)
         log_event("job.failed", str(error), level=logging.ERROR, code="STARTUP_FAILED")
 
 
@@ -274,7 +274,7 @@ def _refresh_game_baseline():
     if not config.DRY_RUN and not captured:
         state.manual_override_active = True
         state.snapshot_continue_required = True
-        state.set_status("Nước đã hoàn tất nhưng baseline camera lỗi. Bấm V để đối soát trước khi tiếp tục.", duration=30)
+        state.set_status("The move completed but the camera baseline failed. Press V to verify before continuing.", duration=30)
     return captured
 
 
@@ -310,9 +310,9 @@ def _launch_session_mode(selected_mode, *, camera_recalibration=False):
     global startup_message
     if vsc_retained_session is not None:
         return _retry_retained_vsc()
-    mode_label = {"BOARD_ONLY": "bàn cờ 2D", "SIMULATION": "mô phỏng 3D",
-                  "PHYSICAL": "robot thật"}.get(selected_mode, selected_mode)
-    startup_message = f"Đang khởi tạo {mode_label}… Có thể đóng cửa sổ để hủy."
+    mode_label = {"BOARD_ONLY": "2D board", "SIMULATION": "3D simulation",
+                  "PHYSICAL": "real robot"}.get(selected_mode, selected_mode)
+    startup_message = f"Initializing {mode_label}… Close the window to cancel."
     if config.GAME_MODE == "HUMAN_VS_ROBOT":
         from src.modes.vsc_v3_session import VscV3Session
         session = VscV3Session(config, launch_options, _BASE_DIR, selected_mode,
@@ -334,7 +334,7 @@ def _launch_session_mode(selected_mode, *, camera_recalibration=False):
 
     if camera_recalibration:
         log_event("physical.camera_calibration_requested",
-                  "Người vận hành yêu cầu chấm lại 4 góc bàn từ camera",
+                  "Operator requested re-marking the 4 board corners from the camera",
                   level=logging.INFO)
     return startup_worker.start(_start_selected_session, _finish_startup)
 
@@ -367,7 +367,7 @@ def _retain_vsc_startup(session, error):
     global vsc_retained_session, home_screen_active, startup_message
     vsc_retained_session = session
     home_screen_active = True
-    startup_message = f"Phiên Player vs Robot chưa đóng được: {error}. F2 thử đóng lại; chưa mở phiên mới."
+    startup_message = f"Player vs Robot session did not close: {error}. Press F2 to retry; no new session was opened."
     log_event("startup.blocked", startup_message, level=logging.ERROR)
 
 
@@ -380,7 +380,7 @@ def _retry_retained_vsc():
             _retain_vsc_startup(vsc_retained_session, error)
             return
         vsc_retained_session = None
-        startup_message = "Đã đóng phiên lỗi. Chọn chế độ để khởi tạo lại."
+        startup_message = "The failed session is closed. Choose a mode to start again."
     return startup_worker.start(vsc_retained_session.close, completed)
 
 
@@ -410,7 +410,7 @@ def _begin_mode_disposal():
         mode_disposal = SessionDisposal(state, hw, None, telemetry, viewer_server, debug_dashboard)
     mode_switching = True
     mode_switch_failed = False
-    state.set_status("Đang đóng phiên cũ; chưa mở camera/robot của chế độ mới.", duration=60)
+    state.set_status("Closing the previous session; the new mode's camera/robot is not open yet.", duration=60)
     camera = getattr(hw, "cam_monitor", None)
     if callable(getattr(camera, "close_display", None)):
         camera.close_display()
@@ -428,7 +428,7 @@ def _finish_mode_disposal(result, error):
         mode_switch_failed = True
         reason = str(error or "Teardown did not complete")
         log_event("session.switch_failed", reason, level=logging.ERROR, code="SESSION_SWITCH_FAILED")
-        state.set_status(f"Chưa đổi chế độ: {reason}. F2 thử lại sau khi xử lý; Ctrl+F9 chỉ khi đã tắt controller trên pendant.", duration=60)
+        state.set_status(f"Mode not changed: {reason}. Press F2 to retry after fixing it; Ctrl+F9 only after the pendant controller is off.", duration=60)
         return
     # All old actor/read/projection owners are closed before replacing globals.
     hw = telemetry = viewer_server = input_mgr = session_control = debug_dashboard = None
@@ -440,9 +440,9 @@ def _finish_mode_disposal(result, error):
     if not quit_requested:
         state = GameState(allow_mouse_move=True)
         startup_cancelled = threading.Event()
-        startup_message = "Phiên cũ đã đóng. Chọn chế độ để bắt đầu ván mới."
+        startup_message = "Previous session closed. Choose a mode to start a new game."
         home_screen_active = True
-        pygame.display.set_caption("Xiangqi Robot — Chọn chế độ")
+        pygame.display.set_caption("Xiangqi Robot — Mode select")
 
 
 def _cleanup_all():
@@ -483,7 +483,7 @@ def _cleanup_all():
                 (state.ai_thread is None or not state.ai_thread.is_alive())
                 and all(not thread.is_alive() for thread in state._retired_ai_threads))
             if not stop.done.wait(7.0) or not stop.result.safe:
-                raise RuntimeError("Chưa xác nhận robot dừng; giữ camera/controller/phiên")
+                raise RuntimeError("Robot stop not confirmed; keeping camera/controller/session")
         except Exception as exc:
             log_event("cleanup.recovery_required", str(exc), level=logging.ERROR)
             return False
@@ -750,15 +750,11 @@ try:
                         continue
                     home_action = renderer.home_action_from_pixel(event.pos[0], event.pos[1])
                     start_vs_robot = home_action in ("vs_robot", "robot_pvp")
-                    if home_action == "join_pvp":
-                        from src.core.robot_pvp import launch_client
-                        launch_client()
-                        continue
                 if start_vs_robot:
                     config.GAME_MODE = ("HUMAN_VS_HUMAN_ROBOT" if home_action == "robot_pvp"
                                         else "HUMAN_VS_ROBOT")
                     if home_action == "robot_pvp" and home_mode == "BOARD_ONLY":
-                        startup_message = "Hai người + robot cần chọn MÔ PHỎNG 3D hoặc ROBOT THẬT trước."
+                        startup_message = "Two players + robot needs 3D SIMULATION or REAL ROBOT selected first."
                         continue
                     selected_mode = home_mode
                     camera_recalibration = bool(
@@ -795,26 +791,26 @@ try:
                         automatic_startup.cancel()
                     physical_enable_pending = not physical_enable_pending
                     physical_enable_deadline = time.monotonic() + 30.0
-                    state.set_status("Đã kiểm tra setup và nút dừng khẩn cấp? F10 bật robot trong 30s; F9 hủy."
-                                     if physical_enable_pending else "Đã hủy yêu cầu bật robot.", duration=30)
+                    state.set_status("Have you checked the setup and the emergency stop? F10 enables the robot for 30 s; F9 cancels."
+                                     if physical_enable_pending else "Robot enable request cancelled.", duration=30)
                     continue
                 if event.key == pygame.K_F10 and physical_enable_pending:
                     physical_enable_pending = False
                     try:
                         if time.monotonic() > physical_enable_deadline:
-                            raise RuntimeError("Xác nhận hết hạn; bấm F9 để bắt đầu lại")
+                            raise RuntimeError("Confirmation expired; press F9 to start again")
                         def enabled(result, error):
                             if error:
                                 log_event("physical.enable_failed", str(error), level=logging.ERROR,
                                           code="PHYSICAL_ENABLE_FAILED",
                                           exc_info=(type(error), error, error.__traceback__))
-                            state.set_status(f"Không bật được robot: {error}" if error else
-                                             "Robot đã được bật quyền chuyển động cho game.", duration=60)
+                            state.set_status(f"Could not enable the robot: {error}" if error else
+                                             "The robot is now allowed to move for the game.", duration=60)
                         hw.motion_worker.start(lambda: hw.activate_physical_game(state, commissioned=True), enabled)
                     except Exception as exc:
                         log_event("physical.enable_failed", str(exc), level=logging.ERROR,
                               code="PHYSICAL_ENABLE_FAILED", exc_info=True)
-                        state.set_status(f"Không bật được robot: {exc}", duration=30)
+                        state.set_status(f"Could not enable the robot: {exc}", duration=30)
                     continue
                 if hw.motion_worker.busy:
                     continue

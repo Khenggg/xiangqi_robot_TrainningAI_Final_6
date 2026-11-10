@@ -64,8 +64,7 @@ HOME_MODE_PHYSICAL_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 180, 500, 300, 96)
 # four-corner camera calibration window when the session starts.
 HOME_PHYSICAL_CAMERA_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 160, 600, 340, 28)
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 240, 650, 480, 104)
-HOME_ROBOT_PVP_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 310, 810, 300, 58)
-HOME_JOIN_PVP_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 10, 810, 300, 58)
+HOME_ROBOT_PVP_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 150, 810, 300, 58)
 HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 230, 42, 180, 58)
 SETTINGS_BACK_RECT = pygame.Rect(48, 42, 168, 58)
 DEBUG_STATUS_RECT = pygame.Rect(886, 330, 320, 70)
@@ -76,10 +75,10 @@ DIFFICULTY_OPTIONS = (
     ("impossible", "IMPOSSIBLE", pygame.Rect(760, 680, 560, 210), (109, 56, 51)),
 )
 DIFFICULTY_PRESENTATION = {
-    "easy": ("兵", "TỐT", "Calm practice"),
-    "medium": ("馬", "MÃ", "Balanced strategy"),
-    "hard": ("車", "XE", "Tactical pressure"),
-    "impossible": ("將", "TƯỚNG", "Master level"),
+    "easy": ("兵", "PAWN", "Calm practice"),
+    "medium": ("馬", "HORSE", "Balanced strategy"),
+    "hard": ("車", "ROOK", "Tactical pressure"),
+    "impossible": ("將", "GENERAL", "Master level"),
 }
 
 PIECE_DISPLAY_NAMES = {
@@ -90,8 +89,8 @@ PIECE_DISPLAY_NAMES = {
 }
 
 PIECE_LOG_NAMES = {
-    "K": "Tướng", "A": "Sĩ", "E": "Tượng", "N": "Mã",
-    "R": "Xe", "C": "Pháo", "P": "Tốt",
+    "K": "General", "A": "Advisor", "E": "Elephant", "N": "Horse",
+    "R": "Rook", "C": "Cannon", "P": "Pawn",
 }
 
 UNSUPPORTED_UI_GLYPHS = {
@@ -255,7 +254,7 @@ class BoardRenderer:
         self._draw_board_backdrop()
         self._draw_board_grid()
         pygame.draw.rect(self.screen, JADE_COLOR, BTN_MODE_SELECT_RECT, border_radius=14)
-        mode_text = self.ui_font.render("CHỌN CHẾ ĐỘ | F2", True, (255, 255, 255))
+        mode_text = self.ui_font.render("MODE SELECT | F2", True, (255, 255, 255))
         self.screen.blit(mode_text, mode_text.get_rect(center=BTN_MODE_SELECT_RECT.center))
 
         if not game_state.get("game_over"):
@@ -283,29 +282,29 @@ class BoardRenderer:
         simulation = bool(game_state.get("simulation_enabled", True))
         robot_pvp = game_state.get("game_mode") == "HUMAN_VS_HUMAN_ROBOT"
         allow_mouse = bool(game_state.get("allow_mouse", False))
-        confirm_label = (("ĐI CHUỘT", "TỰ XÁC NHẬN") if allow_mouse
-                         else ("XÁC NHẬN", "NƯỚC ĐI"))
+        confirm_label = (("MOUSE MOVE", "AUTO CONFIRM") if allow_mouse
+                         else ("CONFIRM", "MOVE"))
 
         actions = []
         if camera:
-            scan_label = (("ĐO LẠI / THỬ NƯỚC CHỜ",) if game_state.get("visual_pick_retry")
-                          else ("QUÉT / ĐỐI SOÁT FEN",))
+            scan_label = (("RE-MEASURE / TRY PENDING",) if game_state.get("visual_pick_retry")
+                          else ("SCAN / VERIFY FEN",))
             actions.append((BTN_SCAN_FEN_RECT, pygame.K_v, scan_label, JADE_COLOR))
             if not robot_pvp:
                 actions.append((BTN_CONFIRM_MOVE_RECT, pygame.K_SPACE, confirm_label, JADE_DARK))
                 actions.append((BTN_EMERGENCY_RECT, pygame.K_m, ("EMERGENCY MODE",), VERMILION_COLOR))
         elif simulation and game_state.get("viewer_enabled", True):
             # No camera: V re-synchronizes the game board to the viewer.
-            actions.append((BTN_SCAN_FEN_RECT, pygame.K_v, ("ĐỒNG BỘ VIEWER",), JADE_COLOR))
+            actions.append((BTN_SCAN_FEN_RECT, pygame.K_v, ("SYNC VIEWER",), JADE_COLOR))
         if (camera and (game_state.get("move_sync_error")
                         or game_state.get("physical_sync_fault"))):
             actions.append((BTN_CLEAR_ERROR_RECT, pygame.K_F12,
-                            ("XÓA PHIÊN", "LỖI"), (139, 48, 38)))
+                            ("CLEAR SESSION", "ERROR"), (139, 48, 38)))
 
         if robot_pvp:
-            actions.append((BTN_CONFIRM_MOVE_RECT, pygame.K_o, ("MỞ NGƯỜI ĐEN",), JADE_DARK))
+            actions.append((BTN_CONFIRM_MOVE_RECT, pygame.K_o, ("OPEN BLACK PLAYER",), JADE_DARK))
         if robot_moves and simulation and not robot_pvp:
-            actions.append((BTN_PICK_TEST_RECT, pygame.K_t, ("GẮP", "THẢ"), JADE_COLOR))
+            actions.append((BTN_PICK_TEST_RECT, pygame.K_t, ("CLAMP", "RELEASE"), JADE_COLOR))
             actions.append((BTN_HOVER_RECT, pygame.K_h, ("HOVER",), JADE_DARK))
         if game_state.get("can_rollback", True) and not robot_pvp:
             actions.append((BTN_ROLLBACK_RECT, pygame.K_z, ("ROLLBACK",), AMBER_COLOR))
@@ -370,19 +369,19 @@ class BoardRenderer:
             continue_color = JADE_COLOR
             pygame.draw.rect(self.screen, continue_color, continue_rect, border_radius=12)
             continue_key = self.ui_font.render("Y" if pick_retry else "▶", True, (255, 255, 255))
-            continue_label = self.ui_font.render("ĐO LẠI" if pick_retry else "CONTINUE", True, (255, 255, 255))
+            continue_label = self.ui_font.render("RE-MEASURE" if pick_retry else "CONTINUE", True, (255, 255, 255))
             self.screen.blit(continue_key, (continue_rect.x + 18, continue_rect.y + 17))
             self.screen.blit(continue_label, (continue_rect.x + 66, continue_rect.y + 17))
 
         camera = bool(game_state.get("camera_enabled", True))
         simulation = bool(game_state.get("simulation_enabled", True))
-        note = ("M đang bật: đi tay Đỏ / Đen" if emergency_active else
-                "Đi chuột; không cần SPACE" if camera and game_state.get("allow_mouse") else
-                "Chọn phím hoặc bấm nút" if camera else
-                "Mô phỏng: chuột/AI; không camera" if simulation else
-                "Game-only: chỉ bàn cờ/chuột")
+        note = ("M is on: moving Red / Black by hand" if emergency_active else
+                "Mouse moves; SPACE not needed" if camera and game_state.get("allow_mouse") else
+                "Use the keys or the buttons" if camera else
+                "Simulation: mouse/AI; no camera" if simulation else
+                "Game-only: board and mouse only")
         if game_state.get("game_mode") == "HUMAN_VS_HUMAN_ROBOT":
-            note = "Đỏ: máy chủ · Đen: O"
+            note = "Red: host · Black: O"
         note_surf = self.log_font.render(note, True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(note_surf, note_surf.get_rect(center=(panel.centerx, panel.bottom - 26)))
 
@@ -425,7 +424,7 @@ class BoardRenderer:
         """Render one live status, never a historical activity feed."""
         now = time.time()
         if game_state.get("pick_test_fault"):
-            message = f"Test bị khóa: {game_state['pick_test_fault']}"
+            message = f"Test locked: {game_state['pick_test_fault']}"
             accent = VERMILION_COLOR
         elif game_state.get("move_sync_error"):
             message = f"Move stopped: {game_state['move_sync_error']}"
@@ -441,48 +440,48 @@ class BoardRenderer:
             if "CHECK" in message.upper():
                 accent = VERMILION_COLOR
         elif game_state.get("pick_test_mode"):
-            message = "TEST GẮP / THẢ — game tạm dừng"
+            message = "PICK / RELEASE TEST — game paused"
             accent = AMBER_COLOR
         elif game_state.get("pick_test_resume_required"):
-            message = "Khôi phục bàn rồi New Game để chơi tiếp"
+            message = "Restore the board, then New Game to continue"
             accent = AMBER_COLOR
         else:
             mode = game_state.get("game_mode", "HUMAN_VS_ROBOT")
             if mode == "HUMAN_VS_HUMAN_ROBOT":
                 room = game_state.get("pvp_room") or {}
-                side = "Đỏ (máy chủ)" if game_state.get("turn") == "r" else "Đen (cửa sổ riêng)"
-                message = f"Phòng {room.get('code', '...')} · Lượt {side} — chọn nước bằng chuột"
+                side = "Red (host)" if game_state.get("turn") == "r" else "Black (separate window)"
+                message = f"Room {room.get('code', '...')} · {side} to move — choose with the mouse"
                 if not room.get('connected'):
-                    message = f"Phòng {room.get('code', '...')} · O: mở người Đen / nhập mã để tham gia"
+                    message = f"Room {room.get('code', '...')} · O: open the Black player / enter the code to join"
                 accent = JADE_COLOR
             elif mode == "HUMAN_VS_ROBOT" and game_state.get("turn") == "b":
                 if not game_state.get("simulation_enabled", True):
-                    message = "Lượt AI — đang xử lý trên máy"
+                    message = "AI turn — computing locally"
                     accent = JADE_COLOR
                 elif game_state.get("robot_backend") == "PHYSICAL" and not game_state.get("is_robot_ready", True):
                     if game_state.get("physical_enable_pending"):
-                        message = "Bấm F10 để bật robot (F9 để hủy)"
+                        message = "Press F10 to enable the robot (F9 to cancel)"
                     else:
-                        message = "Robot READ-ONLY. Kiểm tra trạng thái tự bật; F9/F10 để thử lại."
+                        message = "Robot READ-ONLY. Press F9 then F10 to enable the robot!"
                     accent = AMBER_COLOR
                 else:
-                    message = "Lượt robot — đang chờ thực hiện nước đi"
+                    message = "Robot turn — waiting to execute the move"
                     accent = JADE_COLOR
             else:
-                side = "Đỏ" if game_state.get("turn", "r") == "r" else "Đen"
-                instruction = ("chọn quân và ô đến bằng chuột" if game_state.get("allow_mouse")
-                               else "đi quân rồi xác nhận bằng SPACE")
+                side = "Red" if game_state.get("turn", "r") == "r" else "Black"
+                instruction = ("pick a piece and a destination with the mouse" if game_state.get("allow_mouse")
+                               else "move the piece, then confirm with SPACE")
                 adapter = ""
                 if game_state.get("simulation_enabled", True) and game_state.get("input_adapter") == "VIRTUAL_TEST_ADAPTER":
-                    adapter = " (bộ nhập test ảo)"
-                message = f"Lượt {side} — {instruction}{adapter}"
+                    adapter = " (virtual test input)"
+                message = f"{side} to move — {instruction}{adapter}"
                 accent = JADE_COLOR
 
         self._draw_panel(AI_STATUS_RECT, fill=(249, 245, 232), border=accent, radius=12)
         pulse = 10 + int((now * 2) % 4)
         pygame.draw.circle(self.screen, accent, (AI_STATUS_RECT.x + 37, AI_STATUS_RECT.centery), pulse)
         room = game_state.get("pvp_room")
-        heading = f"PHÒNG {room['code']} · MÁY CHỦ ĐỎ" if room else "AI STATUS"
+        heading = f"ROOM {room['code']} · RED HOST" if room else "AI STATUS"
         label = self.log_font.render(heading, True, JADE_DARK)
         self.screen.blit(label, (AI_STATUS_RECT.x + 67, AI_STATUS_RECT.y + 16))
         available = AI_STATUS_RECT.width - 95
@@ -517,11 +516,11 @@ class BoardRenderer:
         x, y = MOVE_LOG_RECT.x + 18, MOVE_LOG_RECT.y + 20
         width = MOVE_LOG_RECT.width - 36
         bottom = MOVE_LOG_RECT.bottom - 18
-        entries = [("GAME ĐANG KHÓA", VERMILION_COLOR),
-                   ("Cần làm: " + recovery["action"], JADE_DARK),
-                   ("Lý do: " + recovery["reason"], INK_COLOR),
-                   ("Nước chờ: " + recovery["pending"], INK_COLOR),
-                   ("Thực thi: " + recovery["execution"], INK_COLOR)]
+        entries = [("GAME LOCKED", VERMILION_COLOR),
+                   ("Action: " + recovery["action"], JADE_DARK),
+                   ("Reason: " + recovery["reason"], INK_COLOR),
+                   ("Pending move: " + recovery["pending"], INK_COLOR),
+                   ("Execution: " + recovery["execution"], INK_COLOR)]
         for message, color in entries:
             words = message.split()
             lines, current = [], ""
@@ -544,9 +543,9 @@ class BoardRenderer:
                         current = candidate
             if current:
                 lines.append(current)
-            limit = 6 if message.startswith(("Lý do:", "Cần làm:")) else 2
+            limit = 6 if message.startswith(("Reason:", "Action:")) else 2
             if len(lines) > limit:
-                lines = lines[:limit - 1] + ["… Chi tiết trong log phiên chơi."]
+                lines = lines[:limit - 1] + ["… See the session log for details."]
             for line in lines:
                 if y + self.log_font.get_height() > bottom:
                     return
@@ -619,9 +618,9 @@ class BoardRenderer:
         self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 430)))
 
         mode_cards = (
-            (HOME_MODE_BOARD_RECT, "BOARD_ONLY", "CHƠI TRÊN MÁY", "Bàn cờ 2D · Không robot"),
-            (HOME_MODE_SIM_RECT, "SIMULATION", "MÔ PHỎNG 3D", "Robot ảo · Viewer 3D"),
-            (HOME_MODE_PHYSICAL_RECT, "PHYSICAL", "ROBOT THẬT", "Camera + FR3"),
+            (HOME_MODE_BOARD_RECT, "BOARD_ONLY", "LOCAL PLAY", "2D board · No robot"),
+            (HOME_MODE_SIM_RECT, "SIMULATION", "3D SIMULATION", "Virtual robot · 3D viewer"),
+            (HOME_MODE_PHYSICAL_RECT, "PHYSICAL", "REAL ROBOT", "Camera + FR3"),
         )
         for rect, mode, label, detail in mode_cards:
             selected = self.home_mode == mode
@@ -655,7 +654,7 @@ class BoardRenderer:
         detail = self.log_font.render("Choose the robot difficulty next", True, (227, 245, 237))
         self.screen.blit(detail, detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery + 32)))
 
-        for rect, label in ((HOME_ROBOT_PVP_RECT, "2 NGƯỜI + ROBOT"), (HOME_JOIN_PVP_RECT, "VÀO PHÒNG / NGƯỜI ĐEN")):
+        for rect, label in ((HOME_ROBOT_PVP_RECT, "2 PLAYERS + ROBOT"),):
             self._draw_panel(rect, fill=(232,245,238), border=JADE_COLOR, radius=12)
             text = self.log_font.render(label, True, JADE_DARK)
             self.screen.blit(text, text.get_rect(center=rect.center))
@@ -689,7 +688,7 @@ class BoardRenderer:
                              (box.x + 9, box.bottom - 5), 3)
             pygame.draw.line(self.screen, JADE_COLOR, (box.x + 9, box.bottom - 5),
                              (box.right - 4, box.y + 5), 3)
-        label = "Chấm lại 4 góc bàn từ camera"
+        label = "Re-mark the 4 board corners from the camera"
         font = self.log_font
         if font.size(label)[0] > rect.width - 42:
             font = unicode_ui_font(17, bold=True)
@@ -715,8 +714,6 @@ class BoardRenderer:
             return "vs_robot"
         if HOME_ROBOT_PVP_RECT.collidepoint(px, py):
             return "robot_pvp"
-        if HOME_JOIN_PVP_RECT.collidepoint(px, py):
-            return "join_pvp"
         if HOME_SETTINGS_RECT.collidepoint(px, py):
             return "settings"
         return None

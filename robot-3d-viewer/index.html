@@ -13,7 +13,7 @@
             stack: String(error?.stack || "").slice(0, 4000), source}), keepalive: true}).catch(() => {});
       };
       window.addEventListener("error", (e) => window.reportProjectDiagnostic(
-        e.error || e.message || `Không tải được tài nguyên: ${e.target?.src || e.target?.href || "unknown"}`,
+        e.error || e.message || `Failed to load resource: ${e.target?.src || e.target?.href || "unknown"}`,
         "window.error"), true);
       window.addEventListener("unhandledrejection", (e) => window.reportProjectDiagnostic(e.reason, "promise.rejection"));
     </script>
@@ -44,23 +44,23 @@
         </label>
         <button id="liveBtn">Connect live</button>
         <span id="liveState">OFFLINE</span>
-        <span id="sourceBadge" class="source-badge" title="Nguồn telemetry cánh tay robot"></span>
-        <span id="opStateBadge" class="state-idle" title="Trạng thái vận hành máy trạng thái runtime">IDLE</span>
-        <span id="gripperStateBadge" class="gripper-badge" title="Trạng thái kẹp từ telemetry; hành trình visual ở chế độ mô phỏng được phóng đại">KẸP: --</span>
-        <label title="Tốc độ di chuyển cánh tay robot (Speed Factor - Giảm tốc để an toàn)">
-          ⚡ Tốc độ:
+        <span id="sourceBadge" class="source-badge" title="Robot arm telemetry source"></span>
+        <span id="opStateBadge" class="state-idle" title="Runtime state machine status">IDLE</span>
+        <span id="gripperStateBadge" class="gripper-badge" title="Gripper state from telemetry; visual travel is exaggerated in simulation">GRIP: --</span>
+        <label title="Robot arm speed factor (lower is safer)">
+          ⚡ Speed:
           <select id="speedFactorSelect">
-            <option value="0.1">0.1x (Siêu chậm 10%)</option>
-            <option value="0.2" selected>0.2x (Chậm & An toàn 20%)</option>
-            <option value="0.35">0.35x (Êm ái 35%)</option>
-            <option value="0.5">0.5x (Vừa phải 50%)</option>
-            <option value="1.0">1.0x (Tốc độ thường)</option>
+            <option value="0.1">0.1x (Very slow 10%)</option>
+            <option value="0.2" selected>0.2x (Slow & safe 20%)</option>
+            <option value="0.35">0.35x (Smooth 35%)</option>
+            <option value="0.5">0.5x (Moderate 50%)</option>
+            <option value="1.0">1.0x (Normal speed)</option>
           </select>
         </label>
-        <button id="toggleControlsBtn" class="hud-btn-secondary" title="Bật/tắt bảng điều khiển góc khớp">🎮 Điều khiển khớp</button>
-        <button id="toggleRulerBtn" class="hud-btn-secondary" title="Click trực tiếp vào cạnh trục/bàn cờ hoặc bấm nút này để hiện hệ số tọa độ (Phím R)">📏 Thước đo (Click cạnh)</button>
-        <button id="resetBackendBtn" class="hud-btn-danger" title="Khởi động lại toàn bộ dữ liệu backend (Robot về Home, 32 quân cờ về vị trí xuất phát, reset vị trí bàn cờ)">🔄 Reset Backend</button>
-        <span id="coordReadout" class="hud-coord-readout" title="Tọa độ mục tiêu / Click vào cạnh để xem tọa độ">Click cạnh để đo tọa độ mm</span>
+        <button id="toggleControlsBtn" class="hud-btn-secondary" title="Show or hide the joint control panel">🎮 Joint controls</button>
+        <button id="toggleRulerBtn" class="hud-btn-secondary" title="Click a board edge or use this button to show coordinate factors (R)">📏 Ruler (click edge)</button>
+        <button id="resetBackendBtn" class="hud-btn-danger" title="Restart all backend data (robot to Home, 32 pieces to the start layout, board placement reset)">🔄 Reset Backend</button>
+        <span id="coordReadout" class="hud-coord-readout" title="Target coordinates / click an edge to read coordinates">Click an edge to measure coordinates in mm</span>
         <span id="jointsReadout"></span>
       </header>
       <div id="canvasContainer">
@@ -70,84 +70,84 @@
           <div class="panel-header">
             <div class="panel-title">
               <span class="panel-icon">🦾</span>
-              <strong>Điều Khiển Góc Khớp</strong>
+              <strong>Joint Angle Control</strong>
             </div>
-            <button id="closeControlsBtn" class="close-btn" title="Đóng panel">✕</button>
+            <button id="closeControlsBtn" class="close-btn" title="Close panel">✕</button>
           </div>
           <div class="panel-tabs">
-            <button id="tabJointsBtn" class="tab-btn active">🎮 Khớp</button>
-            <button id="tabReachBtn" class="tab-btn">🎯 90 Ô</button>
-            <button id="tabPlacementBtn" class="tab-btn">📐 Vị Trí</button>
+            <button id="tabJointsBtn" class="tab-btn active">🎮 Joints</button>
+            <button id="tabReachBtn" class="tab-btn">🎯 90 Cells</button>
+            <button id="tabPlacementBtn" class="tab-btn">📐 Placement</button>
             <button id="tabServiceBtn" class="tab-btn">🛠️ Service</button>
           </div>
 
           <!-- GLOBAL SPEED OVERRIDE SECTION (VISIBLE ACROSS ALL TABS) -->
           <div class="panel-speed-section" id="panelSpeedSection">
             <div class="speed-header">
-              <span class="speed-title">⚡ Tốc độ vận hành (Speed):</span>
-              <span id="panelSpeedBadge" class="speed-badge speed-safe">20% (An toàn - Khuyên dùng)</span>
+              <span class="speed-title">⚡ Operating speed:</span>
+              <span id="panelSpeedBadge" class="speed-badge speed-safe">20% (Safe - recommended)</span>
             </div>
             <div class="speed-slider-wrap">
-              <input type="range" id="panelSpeedSlider" min="5" max="100" step="5" value="20" title="Kéo để điều chỉnh tốc độ robot" />
+              <input type="range" id="panelSpeedSlider" min="5" max="100" step="5" value="20" title="Drag to adjust robot speed" />
               <span id="panelSpeedVal">20%</span>
             </div>
             <div class="speed-presets">
-              <button type="button" class="speed-preset-btn" data-speed="0.1">10% Chậm</button>
-              <button type="button" class="speed-preset-btn active" data-speed="0.2">20% An toàn</button>
-              <button type="button" class="speed-preset-btn" data-speed="0.35">35% Êm ái</button>
-              <button type="button" class="speed-preset-btn" data-speed="0.5">50% Vừa</button>
+              <button type="button" class="speed-preset-btn" data-speed="0.1">10% Slow</button>
+              <button type="button" class="speed-preset-btn active" data-speed="0.2">20% Safe</button>
+              <button type="button" class="speed-preset-btn" data-speed="0.35">35% Smooth</button>
+              <button type="button" class="speed-preset-btn" data-speed="0.5">50% Moderate</button>
               <button type="button" class="speed-preset-btn danger-preset" data-speed="1.0">100% Nhanh</button>
             </div>
           </div>
           <div id="jointsTabContent" class="tab-content active">
             <div class="panel-actions" style="flex-wrap: wrap;">
-              <button id="homeBtn" class="action-btn" title="Đưa robot về vị trí Home (Tọa độ hiện tại đã lưu)">🏠 Về Home</button>
-              <button id="setHomeBtn" class="action-btn" title="Lưu tọa độ/góc khớp hiện tại của robot làm điểm Home mới">📍 Đặt làm Home</button>
-              <button id="gripperCloseBtn" class="action-btn" title="Kẹp ngàm giữ quân cờ (Tool DO0)">🗜️ Kẹp Lại</button>
-              <button id="gripperOpenBtn" class="action-btn" title="Nhả ngàm mở rộng về vị trí ban đầu (Tool DO1)">🔓 Nhả Kẹp</button>
-              <button id="panelResetBackendBtn" class="action-btn danger-action" title="Khởi động lại toàn bộ dữ liệu backend">🔄 Reset Data</button>
+              <button id="homeBtn" class="action-btn" title="Move the robot to the saved Home pose">🏠 Go Home</button>
+              <button id="setHomeBtn" class="action-btn" title="Save the current pose as the new Home">📍 Set as Home</button>
+              <button id="gripperCloseBtn" class="action-btn" title="Close the jaws on the piece (tool DO0)">🗜️ Clamp</button>
+              <button id="gripperOpenBtn" class="action-btn" title="Open the jaws back to the initial position (tool DO1)">🔓 Release</button>
+              <button id="panelResetBackendBtn" class="action-btn danger-action" title="Restart all backend data">🔄 Reset Data</button>
             </div>
             <div class="joints-container" id="jointControlsList"></div>
           </div>
           <div id="reachTabContent" class="tab-content">
             <div class="cell-inputs-row">
-              <label>Hàng (Row):
+              <label>Row:
                 <select id="cellRowSelect">
-                  <option value="0">0 (Đen / Black side)</option>
+                  <option value="0">0 (Black side)</option>
                   <option value="1">1</option>
                   <option value="2">2</option>
                   <option value="3">3</option>
-                  <option value="4" selected>4 (Bờ sông Đen)</option>
-                  <option value="5">5 (Bờ sông Đỏ)</option>
+                  <option value="4" selected>4 (Black river bank)</option>
+                  <option value="5">5 (Red river bank)</option>
                   <option value="6">6</option>
                   <option value="7">7</option>
                   <option value="8">8</option>
-                  <option value="9">9 (Đỏ / Red side)</option>
+                  <option value="9">9 (Red side)</option>
                 </select>
               </label>
-              <label>Cột (Col):
+              <label>Column:
                 <select id="cellColSelect">
                   <option value="0">0</option>
                   <option value="1">1</option>
                   <option value="2">2</option>
                   <option value="3">3</option>
-                  <option value="4" selected>4 (Trung lộ)</option>
+                  <option value="4" selected>4 (Center file)</option>
                   <option value="5">5</option>
                   <option value="6">6</option>
                   <option value="7">7</option>
                   <option value="8">8</option>
                 </select>
               </label>
-              <button id="reachCellBtn" class="action-btn primary-action" title="Di chuyển ngàm kẹp đến ô đích (không gắp cờ)">🚀 Đi Tới</button>
-              <button id="pickPlaceBtn" class="action-btn" style="background: #238636; color: #fff; font-weight: bold;" title="Gắp quân cờ tại ô nguồn và đặt sang ô đích">🎯 Gắp &amp; Đặt Quân</button>
+              <button id="reachCellBtn" class="action-btn primary-action" title="Move the gripper to the target cell without picking a piece">🚀 Go</button>
+              <button id="pickPlaceBtn" class="action-btn" style="background: #238636; color: #fff; font-weight: bold;" title="Pick the piece at the source cell and place it on the target cell">🎯 Pick &amp; Place</button>
             </div>
 
             <div style="margin: 8px 0; padding: 6px 10px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;">
               <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none;">
                 <input type="checkbox" id="autoGraspCheckbox" checked style="accent-color: #238636; width: 16px; height: 16px;">
-                <span>🎯 <strong>Chế độ Gắp Quân (Pick &amp; Place)</strong></span>
+                <span>🎯 <strong>Pick &amp; Place mode</strong></span>
               </label>
-              <span style="font-size: 11px; opacity: 0.8; color: #94a3b8;">(Click quân cờ ➔ Click ô trống)</span>
+              <span style="font-size: 11px; opacity: 0.8; color: #94a3b8;">(Click a piece ➔ click an empty cell)</span>
             </div>
 
             <div class="safety-guard-badge" style="margin: 8px 0 12px 0; padding: 6px 10px; background: rgba(46, 160, 67, 0.15); border: 1px solid rgba(46, 160, 67, 0.4); border-radius: 6px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #3fb950; font-weight: 600;">
@@ -155,78 +155,78 @@
               <span style="font-size: 10px; opacity: 0.8; margin-left: auto;">(0 colliding poses permitted)</span>
             </div>
 
-            <div class="quick-cells-label">Điểm then chốt (Quick Targets):</div>
+            <div class="quick-cells-label">Quick targets:</div>
             <div class="quick-cells-grid">
-              <button class="quick-cell-btn" data-row="0" data-col="0">Góc (0,0)</button>
-              <button class="quick-cell-btn" data-row="0" data-col="8">Góc (0,8)</button>
-              <button class="quick-cell-btn" data-row="4" data-col="4">Tâm (4,4)</button>
-              <button class="quick-cell-btn" data-row="9" data-col="0">Góc (9,0)</button>
-              <button class="quick-cell-btn" data-row="9" data-col="8">Góc (9,8)</button>
+              <button class="quick-cell-btn" data-row="0" data-col="0">Corner (0,0)</button>
+              <button class="quick-cell-btn" data-row="0" data-col="8">Corner (0,8)</button>
+              <button class="quick-cell-btn" data-row="4" data-col="4">Center (4,4)</button>
+              <button class="quick-cell-btn" data-row="9" data-col="0">Corner (9,0)</button>
+              <button class="quick-cell-btn" data-row="9" data-col="8">Corner (9,8)</button>
             </div>
 
             <div class="diagnostic-card" id="reachDiagnosticCard">
               <div class="diag-header">
-                <strong>📊 Kết Quả Chẩn Đoán</strong>
-                <span id="diagStatusBadge" class="badge-safe">CHƯA DI CHUYỂN</span>
+                <strong>📊 Diagnosis Result</strong>
+                <span id="diagStatusBadge" class="badge-safe">NOT MOVED</span>
               </div>
               <div class="diag-row">
-                <span>Ô mục tiêu:</span>
-                <strong id="diagCellLabel">Cột 4, Hàng 4</strong>
+                <span>Target cell:</span>
+                <strong id="diagCellLabel">Col 4, Row 4</strong>
               </div>
               <div class="diag-row">
-                <span>Tọa độ 3D (World):</span>
+                <span>3D position (world):</span>
                 <strong id="diagWorldCoord" style="color: #38bdf8">X: 0.0mm, Y: 10.5mm, Z: 360.0mm</strong>
               </div>
               <div class="diag-row">
-                <span>Tọa độ Robot Base:</span>
+                <span>Robot base position:</span>
                 <strong id="diagRobotCoord" style="color: #a78bfa">X: -360.0mm, Y: 0.0mm, Z: 10.5mm</strong>
               </div>
 
               <!-- 3-Phase Safe Trajectory Stepper -->
               <div class="traj-stepper-container">
-                <div class="traj-stepper-label">🛡️ Quỹ đạo 3 giai đoạn (Authoritative Backend Trajectory):</div>
+                <div class="traj-stepper-label">🛡️ Three-stage trajectory (authoritative backend):</div>
                 <div class="traj-stepper">
-                  <div id="stepLift" class="traj-step"><span class="step-icon">🛫</span> 1. Nhấc lên<span class="step-sub">+70mm</span></div>
+                  <div id="stepLift" class="traj-step"><span class="step-icon">🛫</span> 1. Lift<span class="step-sub">+70mm</span></div>
                   <div class="step-arrow">➔</div>
                   <div id="stepTransit" class="traj-step"><span class="step-icon">✈️</span> 2. Bay ngang<span class="step-sub">Safe Z</span></div>
                   <div class="step-arrow">➔</div>
-                  <div id="stepLand" class="traj-step"><span class="step-icon">🛬</span> 3. Hạ cánh<span class="step-sub">+4.715mm (Tâm cờ)</span></div>
+                  <div id="stepLand" class="traj-step"><span class="step-icon">🛬</span> 3. Land<span class="step-sub">+4.715mm (piece centre)</span></div>
                 </div>
               </div>
 
               <div class="diag-row">
-                <span>Công cụ (Tool Offset):</span>
-                <strong id="diagToolOffset" style="color: #58a6ff">Đang đọc tool profile…</strong>
+                <span>Tool offset:</span>
+                <strong id="diagToolOffset" style="color: #58a6ff">Reading tool profile…</strong>
               </div>
               <div class="diag-row">
                 <span>Visual Asset:</span>
                 <strong id="diagVisualAsset" style="color: #8b949e">VISUAL_CALIBRATION_PROVISIONAL</strong>
               </div>
               <div class="diag-row">
-                <span>Góc J4 thực tế:</span>
+                <span>Actual J4 angle:</span>
                 <strong id="diagJ4Val">--</strong>
               </div>
               <div class="diag-row">
-                <span>Độ nghiêng ngàm kẹp:</span>
+                <span>Gripper tilt:</span>
                 <strong id="diagTiltVal">--</strong>
               </div>
               <div class="diag-row">
-                <span>Kiểm tra xuyên bàn:</span>
+                <span>Board penetration check:</span>
                 <strong id="diagClearanceVal">--</strong>
               </div>
               <div id="diagExplanation" class="diag-note">
-                💡 Bấm <strong>"Đi Tới"</strong> hoặc click trực tiếp vào bàn cờ để robot di chuyển theo quy trình 3 giai đoạn được điều phối độc quyền bởi backend (Nhấc lên ➔ Bay ngang ➔ Hạ cánh).
+                💡 Press <strong>"Go"</strong> or click the board directly; the backend owns the three-stage motion (lift ➔ travel ➔ land).
               </div>
             </div>
           </div>
           <div id="placementTabContent" class="tab-content">
             <section class="joint-item" aria-label="R1 R4 board teaching" style="border: 1px solid #3b82f6; padding: 10px; margin-bottom: 12px;">
-              <strong>R1–R4 · đặt bàn theo 4 điểm (robot_base, mm)</strong>
+              <strong>R1–R4 · four-point board placement (robot_base, mm)</strong>
               <p style="font-size: 11px; color: #aab7c8; margin: 6px 0;">
-                R1 (0,0) → R2 (0,8) → R3 (9,8) → R4 (9,0). Điểm là giao lưới trên mặt bàn.
-                X/Y xác định vị trí và góc quay; chiều cao mặt bàn được nhập riêng.
-                Số lấy từ mô phỏng không phải số đo đầu kẹp chạm bàn thật.
-                Trước khi áp dụng, dùng tab Service để chuẩn bị dời bàn và đưa tay ảo về SERVICE_SAFE.
+                R1 (0,0) → R2 (0,8) → R3 (9,8) → R4 (9,0). Points are grid intersections on the board surface.
+                X/Y set the position and yaw; the surface height is entered separately.
+                Numbers come from simulation, not from a measured gripper contact.
+                Before applying, use the Service tab to prepare the move and park the virtual arm at SERVICE_SAFE.
               </p>
               <div style="display: grid; grid-template-columns: 35px repeat(3, minmax(0, 1fr)); gap: 5px; align-items: center;">
                 <span></span><span>X mm</span><span>Y mm</span><span>Z mm</span>
@@ -235,25 +235,25 @@
                 <label for="teachR3X">R3</label><input id="teachR3X" aria-label="R3 X mm" type="number" step="0.001" /><input id="teachR3Y" aria-label="R3 Y mm" type="number" step="0.001" /><input id="teachR3Z" aria-label="R3 Z mm" type="number" step="0.001" />
                 <label for="teachR4X">R4</label><input id="teachR4X" aria-label="R4 X mm" type="number" step="0.001" /><input id="teachR4Y" aria-label="R4 Y mm" type="number" step="0.001" /><input id="teachR4Z" aria-label="R4 Z mm" type="number" step="0.001" />
               </div>
-              <label for="teachSurfaceZ" style="font-size: 11px;">Chiều cao mặt bàn Z (robot_base, mm)</label>
-              <input id="teachSurfaceZ" aria-label="Chiều cao mặt bàn Z mm" type="number" step="0.001" />
+              <label for="teachSurfaceZ" style="font-size: 11px;">Board surface height Z (robot_base, mm)</label>
+              <input id="teachSurfaceZ" aria-label="Board surface height Z in mm" type="number" step="0.001" />
               <div class="panel-actions" style="margin-top: 8px;">
-                <button id="btnLoadSimTeachingPoints" class="action-btn">Lấy 4 điểm từ bàn mô phỏng</button>
-                <button id="btnApplyTeachingPoints" class="action-btn primary-action">Áp dụng R1–R4</button>
-                <button id="btnSaveBoardProfile" class="action-btn">Lưu vị trí đã áp dụng</button>
-                <button id="btnLoadBoardProfile" class="action-btn">Khôi phục profile đã lưu</button>
+                <button id="btnLoadSimTeachingPoints" class="action-btn">Load 4 points from the simulated board</button>
+                <button id="btnApplyTeachingPoints" class="action-btn primary-action">Apply R1–R4</button>
+                <button id="btnSaveBoardProfile" class="action-btn">Save applied placement</button>
+                <button id="btnLoadBoardProfile" class="action-btn">Restore saved profile</button>
               </div>
-              <div id="teachingPointsStatus" role="status" style="font-size: 11px; margin-top: 6px; color: #aab7c8;">Kết nối live để nạp bốn điểm hiện tại.</div>
-              <small>Profile chỉ dùng cho mô phỏng. Sau khi khởi động lại: chuẩn bị SERVICE_SAFE rồi khôi phục. Chưa lưu các ô đang nhập.</small>
+              <div id="teachingPointsStatus" role="status" style="font-size: 11px; margin-top: 6px; color: #aab7c8;">Connect live to load the current four points.</div>
+              <small>Profiles are simulation-only. After a restart, prepare SERVICE_SAFE then restore. Typed values are not saved.</small>
             </section>
             <div class="panel-section-header">
-              <strong>📐 THIẾT LẬP VỊ TRÍ BÀN CỜ (DYNAMIC PLACEMENT)</strong>
+              <strong>📐 BOARD PLACEMENT (DYNAMIC)</strong>
             </div>
 
             <!-- Forward Shift d -->
             <div class="joint-item">
               <div class="joint-row" style="grid-template-columns: 140px minmax(0, 1fr) 60px;">
-                <label for="boardShiftSlider">Tịnh tiến (<em>d</em> mm):</label>
+                <label for="boardShiftSlider">Forward shift (<em>d</em> mm):</label>
                 <input
                   type="range"
                   id="boardShiftSlider"
@@ -274,15 +274,15 @@
                 />
               </div>
               <div style="font-size: 10px; color: #8b949e; display: flex; flex-direction: column; gap: 2px;">
-                <span id="boardShiftAxisHint">+d theo trục cột của bàn; đang tải hướng trục.</span>
-                <span style="color: #d29922;">Chỉ phân tích hình học; chưa xác minh đường đi.</span>
+                <span id="boardShiftAxisHint">+d along the board column axis; loading axis direction.</span>
+                <span style="color: #d29922;">Geometry analysis only; the path is not verified.</span>
               </div>
             </div>
 
             <!-- Safe Transit Height H -->
             <div class="joint-item">
               <div class="joint-row" style="grid-template-columns: 140px minmax(0, 1fr) 60px;">
-                <label for="safeTransitSlider">Độ cao an toàn (<em>H</em> mm):</label>
+                <label for="safeTransitSlider">Safe transit height (<em>H</em> mm):</label>
                 <input
                   type="range"
                   id="safeTransitSlider"
@@ -303,14 +303,14 @@
                 />
               </div>
               <div style="font-size: 10px; color: #8b949e;">
-                <span>Độ cao bay ngang trên mặt bàn (20..80 mm)</span>
+                <span>Lateral travel height above the surface (20..80 mm)</span>
               </div>
             </div>
 
             <!-- Optional Height Offset -->
             <div class="joint-item">
               <div class="joint-row" style="grid-template-columns: 140px minmax(0, 1fr) 60px;">
-                <label for="boardZOffsetNum">Độ lệch cao trình (Z):</label>
+                <label for="boardZOffsetNum">Surface Z offset:</label>
                 <div></div>
                 <input
                   type="number"
@@ -325,17 +325,17 @@
             </div>
 
             <div class="panel-actions" style="margin-top: 4px;">
-              <button id="btnApplyPlacement" class="action-btn primary-action">🚀 Áp Dụng Vị Trí</button>
+              <button id="btnApplyPlacement" class="action-btn primary-action">🚀 Apply placement</button>
               <button id="btnResetPlacement" class="action-btn">🔄 Reset Nominal</button>
             </div>
             <button id="btnValidatePlacement" class="action-btn" style="width: 100%; margin-top: 2px; background: #238636; border-color: #2ea043; color: white;">
-              🔍 VALIDATE CURRENT PLACEMENT (90 Ô)
+              🔍 VALIDATE CURRENT PLACEMENT (90 CELLS)
             </button>
 
             <!-- Analysis & Diagnostics Panel -->
             <div class="diagnostic-card" style="margin-top: 8px;">
               <div class="diag-header">
-                <strong>📊 PHÂN TÍCH HÌNH HỌC (CURRENT PLACEMENT)</strong>
+                <strong>📊 GEOMETRY ANALYSIS (CURRENT PLACEMENT)</strong>
                 <span id="placementVersionBadge" class="badge-safe">VER: 1</span>
               </div>
               <div class="diag-row">
@@ -347,23 +347,23 @@
                 <strong id="readoutBoardYaw" style="color: #4ade80">—</strong>
               </div>
               <div class="diag-row">
-                <span>Lưới: min |X_robot|:</span>
+                <span>Grid: min |X_robot|:</span>
                 <strong id="readoutNearGridDepth">—</strong>
               </div>
               <div class="diag-row">
-                <span>Lưới: max |X_robot|:</span>
+                <span>Grid: max |X_robot|:</span>
                 <strong id="readoutFarGridDepth">—</strong>
               </div>
               <div class="diag-row">
-                <span>Mép bàn: min |X_robot|:</span>
+                <span>Board edge: min |X_robot|:</span>
                 <strong id="readoutNearEdgeDist">—</strong>
               </div>
               <div class="diag-row">
-                <span>Tâm bàn: |X_robot|:</span>
+                <span>Board centre: |X_robot|:</span>
                 <strong id="readoutCenterDist">—</strong>
               </div>
               <div class="diag-row">
-                <span>Mép bàn: max |X_robot|:</span>
+                <span>Board edge: max |X_robot|:</span>
                 <strong id="readoutFarEdgeDist">—</strong>
               </div>
               <div class="diag-divider" style="height: 1px; background: rgba(240, 246, 252, 0.1); margin: 6px 0;"></div>
@@ -401,15 +401,15 @@
                 <strong id="readoutHMax">-- mm</strong>
               </div>
               <div class="diag-note" style="margin-top: 6px; font-size: 11px; color: #8b949e;">
-                ⚠️ <em>PRECHECK ONLY — Không được coi là FULLY SAFE cho tới khi vượt qua kiểm định IK và Collision Guard!</em>
+                ⚠️ <em>PRECHECK ONLY — not FULLY SAFE until IK and the collision guard pass.</em>
               </div>
             </div>
 
             <!-- Full Validation Result Card -->
             <div class="diagnostic-card" id="validationSummaryCard" style="margin-top: 8px;">
               <div class="diag-header">
-                <strong>🛡️ KẾT QUẢ KIỂM ĐỊNH RUNTIME (90 Ô)</strong>
-                <span id="valResultBadge" class="badge-safe" style="background: #30363d; color: #8b949e;">CHƯA KIỂM ĐỊNH</span>
+                <strong>🛡️ RUNTIME VALIDATION (90 CELLS)</strong>
+                <span id="valResultBadge" class="badge-safe" style="background: #30363d; color: #8b949e;">NOT VALIDATED</span>
               </div>
               <div class="diag-row">
                 <span>Grasp IK Success:</span>
@@ -428,36 +428,36 @@
                 <strong id="valAppColCount">-- / 90</strong>
               </div>
               <div id="valFailuresContainer" style="display: none; margin-top: 6px; font-size: 11px; color: #f85149;">
-                <div style="font-weight: 600;">Ô thất bại:</div>
+                <div style="font-weight: 600;">Failing cells:</div>
                 <div id="valFailuresList" style="max-height: 80px; overflow-y: auto; font-family: monospace;"></div>
               </div>
             </div>
           </div>
           <div id="serviceTabContent" class="tab-content">
             <div class="service-section">
-              <div class="service-section-title">🚨 PHỤC HỒI & RESET (RECOVERY)</div>
+              <div class="service-section-title">🚨 RECOVERY & RESET</div>
               <div class="panel-actions-grid">
-                <button id="btnOpClearError" class="action-btn" title="Xóa cờ lỗi runtime và cho phép nhận lệnh tiếp theo">🧹 Xóa Lỗi</button>
-                <button id="btnOpResetRobot" class="action-btn" title="Đưa robot về tư thế chuẩn Home an toàn">🤖 Reset Robot</button>
-                <button id="btnOpResetBoard" class="action-btn" title="Đưa vị trí bàn cờ về danh định (nominal)">🏁 Reset Bàn</button>
-                <button id="btnOpResetPieces" class="action-btn" title="Phục hồi 32 quân cờ về vị trí ban đầu">♟️ Reset Quân</button>
-                <button id="btnOpFullReset" class="action-btn danger-action" style="grid-column: span 2;" title="Phục hồi toàn bộ hệ thống in-process">🔄 FULL RESET TOÀN BỘ</button>
+                <button id="btnOpClearError" class="action-btn" title="Clear the runtime fault flag and accept commands again">🧹 Clear error</button>
+                <button id="btnOpResetRobot" class="action-btn" title="Move the robot to the safe Home pose">🤖 Reset Robot</button>
+                <button id="btnOpResetBoard" class="action-btn" title="Reset the board placement to nominal">🏁 Reset board</button>
+                <button id="btnOpResetPieces" class="action-btn" title="Restore all 32 pieces to the start layout">♟️ Reset pieces</button>
+                <button id="btnOpFullReset" class="action-btn danger-action" style="grid-column: span 2;" title="Reset the whole in-process system">🔄 FULL RESET</button>
               </div>
             </div>
 
             <div class="service-section" style="margin-top: 10px;">
-              <div class="service-section-title">🛡️ AN TOÀN DỊCH VỤ (SERVICE SAFE)</div>
+              <div class="service-section-title">🛡️ SERVICE SAFE</div>
               <div class="panel-actions-grid">
-                <button id="btnGoServiceSafe" class="action-btn primary-action" title="Đưa robot về tư thế lùi an toàn [0, -45, 90, -45, -90, 0] deg">🛡️ Go Service Safe</button>
-                <button id="btnRetractBoard" class="action-btn" title="Nâng thẳng Z lên transit plane an toàn rồi lùi">⬆️ Lùi Khỏi Bàn</button>
-                <button id="btnPrepareBoardAdj" class="action-btn" style="grid-column: span 2;" title="Nâng ngàm nhả kẹp và chuyển sang service safe trước khi dời bàn cờ">⚙️ Chuẩn Bị Dời Bàn</button>
+                <button id="btnGoServiceSafe" class="action-btn primary-action" title="Move the robot to the safe retreat pose [0, -45, 90, -45, -90, 0] deg">🛡️ Go Service Safe</button>
+                <button id="btnRetractBoard" class="action-btn" title="Raise Z to the safe transit plane, then retreat">⬆️ Retract from board</button>
+                <button id="btnPrepareBoardAdj" class="action-btn" style="grid-column: span 2;" title="Open the jaws and move to service safe before relocating the board">⚙️ Prepare board move</button>
               </div>
             </div>
 
             <div class="service-section" style="margin-top: 10px;">
               <div class="service-section-title">🕹️ CARTESIAN JOG (TCP)</div>
               <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
-                <span style="font-size: 11px; color: #8b949e;">Bước dịch:</span>
+                <span style="font-size: 11px; color: #8b949e;">Shift step:</span>
                 <select id="tcpJogStepSelect" style="flex: 1; padding: 2px 4px; background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px; font-size: 11px;">
                   <option value="1">1 mm</option>
                   <option value="5" selected>5 mm</option>
@@ -478,7 +478,7 @@
             <div class="service-section" style="margin-top: 10px;">
               <div class="service-section-title">🦾 JOINT JOG (J1..J6)</div>
               <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
-                <span style="font-size: 11px; color: #8b949e;">Bước góc:</span>
+                <span style="font-size: 11px; color: #8b949e;">Angle step:</span>
                 <select id="jointJogStepSelect" style="flex: 1; padding: 2px 4px; background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px; font-size: 11px;">
                   <option value="1">1 °</option>
                   <option value="5" selected>5 °</option>
