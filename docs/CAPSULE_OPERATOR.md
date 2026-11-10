@@ -12,7 +12,7 @@ start.run là script PowerShell cho bước cài đặt, không phải định d
 
 Launcher chạy Python đi kèm, chuyển thư mục làm việc sang app và chạy đúng app/main.py. Không ghi đè config.py, engine, chế độ chơi, camera/IP hoặc lựa chọn vision. Không tự thêm tham số chọn chế độ. Tham số CLI truyền vào start.bat được chuyển nguyên sang project. Không dùng settings.json của capsule r2. Chỉnh cấu hình như source tại app/config.py; biến môi trường giữ nguyên tác dụng như chạy source.
 
-Source giữ camera ưu tiên index cấu hình rồi thử các index còn lại trong 0–2; phiên physical tự thử enable một lần khi kiểm tra hiện có đạt. Không tự HOME/chỉnh kẹp; sau lỗi/stop/recovery vẫn dùng đối soát và F9/F10 thủ công. Web 3D và telemetry giữ nguyên. Robot vs Robot dùng F6 để bắt đầu self-play.
+Source giữ camera ưu tiên index cấu hình rồi thử các index còn lại trong 0–2; phiên physical tự thử enable một lần khi kiểm tra hiện có đạt. Không tự HOME/chỉnh kẹp; sau lỗi/stop/recovery vẫn dùng đối soát và F9/F10 thủ công. Web 3D và telemetry giữ nguyên. Đã bỏ chế độ Human vs Human và Robot vs Robot (F6 self-play); menu chỉ còn Player vs Robot (`HUMAN_VS_ROBOT`) và hai người chơi có robot (`HUMAN_VS_HUMAN_ROBOT`).
 
 Runtime dành cho Windows 10/11 x64, đóng gói PyTorch CUDA 12.4 và ONNX Runtime GPU 1.20.1. Project ưu tiên GPU khi driver NVIDIA tương thích sẵn có, tự dùng CPU nếu GPU không khả dụng theo luồng source. CUDA/cuDNN DLL cần thiết đi kèm runtime; không cài CUDA Toolkit toàn hệ thống. Gói không tự cài hoặc cập nhật driver NVIDIA. Model/engine/viewer/font đi kèm; thư viện ML được tải trong lần setup đầu. Camera và controller vẫn cần driver, mạng và calibration đúng thiết bị. Khi đổi camera hoặc bàn, chấm lại bốn góc; đóng gói không thay thế calibration vật lý.
 
