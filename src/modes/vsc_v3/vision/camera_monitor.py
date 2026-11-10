@@ -504,8 +504,8 @@ class CameraMonitor:
         self._detect_thread.start()
         print("[CAM MONITOR] 🎥 Camera Monitor started (decoupled capture & detect threads)")
 
-    def stop(self):
-        """Dừng thread và giải phóng camera AN TOÀN."""
+    def stop(self, *, release_capture=True):
+        """Stop readers; optionally retain the capture for a startup handoff."""
         print("[CAM MONITOR] 🛑 Stopping Camera Monitor...")
         
         # 1. Signal thread dừng
@@ -520,8 +520,8 @@ class CameraMonitor:
         if any(thread is not None and thread.is_alive()
                for thread in (self._thread, self._detect_thread)):
             raise RuntimeError('Camera reader still running; capture retained')
-        # 3. Release camera SAU KHI thread đã dừng
-        if self.cap is not None:
+        # 3. Release only after readers stop; startup handoff retains capture.
+        if release_capture and self.cap is not None:
             self.cap.release()
             self.cap = None
             print("[CAM MONITOR] ✅ Camera released.")

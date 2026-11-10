@@ -1,5 +1,6 @@
 """One automatic enable attempt for a newly selected physical session."""
 import logging
+import time
 
 from src.core.project_logging import event
 
@@ -11,6 +12,9 @@ class AutomaticPhysicalStartup:
         self.baseline_checked = False
         self.finished = False
         self.cancelled = False
+        self.retry_after = 0.0
+        self.retry_interval = max(0.1, float(getattr(
+            getattr(hardware, "config", None), "AUTO_ENABLE_RETRY_INTERVAL_SEC", 2.0)))
 
     def cancel(self):
         self.cancelled = True
@@ -22,6 +26,8 @@ class AutomaticPhysicalStartup:
 
     def tick(self):
         if self.finished:
+            return
+        if time.monotonic() < self.retry_after:
             return
         state, hw = self.state, self.hardware
         profile = getattr(hw, "profile", None)
@@ -56,14 +62,31 @@ class AutomaticPhysicalStartup:
         def completed(result, error):
             if error is not None or not result:
                 error = error or "Controller chưa xác nhận enable"
-                state.set_status(f"Chưa tự bật được robot: {error}. Khắc phục rồi F9/F10 thử lại.", duration=60)
-                event("physical.auto_enable_failed", str(error), level=logging.ERROR)
+                # Robot PvP may reach this gate before camera/telemetry has
+                # settled. Retry only a preflight rejection. Once the enable
+                # command is dispatched, an uncertain reply must never replay.
+                command_started = bool(getattr(hw, "_physical_enable_command_started", False))
+                is_robot_pvp = getattr(profile, "game_mode", None) == "HUMAN_VS_HUMAN_ROBOT"
+                if is_robot_pvp and not command_started and not self.cancelled:
+                    self.finished = False
+                    self.retry_after = time.monotonic() + self.retry_interval
+                    state.set_status(
+                        f"Robot đang chờ điều kiện startup: {error}. Hệ thống sẽ tự kiểm tra lại.",
+                        duration=15)
+                    event("physical.auto_enable_deferred", str(error), level=logging.WARNING)
+                else:
+                    fallback = ("Khởi động lại phiên để thử lại."
+                                if is_robot_pvp else "Khắc phục rồi F9/F10 thử lại.")
+                    state.set_status(f"Chưa tự bật được robot: {error}. {fallback}", duration=60)
+                    event("physical.auto_enable_failed", str(error), level=logging.ERROR)
             else:
                 state.set_status("Robot đã tự bật quyền chuyển động. Không chạy HOME hay chỉnh kẹp.", duration=30)
                 event("physical.auto_enabled", "Đã bật quyền qua kiểm tra khởi động")
 
         # Never automatically replay an enable whose reply may have been lost.
         self.finished = True
+        if getattr(profile, "game_mode", None) == "HUMAN_VS_HUMAN_ROBOT":
+            hw._physical_enable_command_started = False
         if not hw.motion_worker.start(
                 lambda: hw.activate_physical_game(
                     state, commissioned=True, expected_stop_generation=0,

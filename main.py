@@ -325,9 +325,36 @@ def _launch_session_mode(selected_mode, *, camera_recalibration=False):
     def _start_selected_session():
         config.RECALIBRATE_CAMERA = bool(previous_recalibrate or camera_recalibration)
         config.CAMERA_CALIBRATION_MANUAL_ONLY = bool(camera_recalibration)
+        startup_initializer = None
+        if (config.GAME_MODE == "HUMAN_VS_HUMAN_ROBOT"
+                and str(selected_mode).upper() == "PHYSICAL"):
+            def startup_initializer(gameplay_manager):
+                from src.modes.vsc_v3_session import VscV3Session
+                startup_session = VscV3Session(
+                    config, launch_options, _BASE_DIR, selected_mode,
+                    camera_recalibration=camera_recalibration,
+                    cancelled=startup_cancelled, startup_only=True,
+                    physical_startup_owner=gameplay_manager.physical_startup_owner)
+                # Keep the VSC reader reachable so rollback proves it stopped
+                # before the shared owner releases the camera capture.
+                gameplay_manager.vsc_startup_session = startup_session
+                try:
+                    startup_session.initialize()
+                    handoff = startup_session.prepare_startup_handoff()
+                    gameplay_manager.vsc_startup_session = None
+                    # VSC-v3 already calibrated this camera. The gameplay
+                    # manager validates and reuses that saved matrix.
+                    config.RECALIBRATE_CAMERA = False
+                    config.CAMERA_CALIBRATION_MANUAL_ONLY = False
+                    return handoff
+                except Exception:
+                    if not startup_session._handed_off:
+                        startup_session.close()
+                    raise
         try:
             return build_session(config, launch_options, _BASE_DIR, state,
-                                 startup_cancelled, selected_mode)
+                                 startup_cancelled, selected_mode,
+                                 startup_initializer=startup_initializer)
         finally:
             config.RECALIBRATE_CAMERA = previous_recalibrate
             config.CAMERA_CALIBRATION_MANUAL_ONLY = previous_manual
@@ -786,7 +813,8 @@ try:
                 if choice:
                     _select_difficulty(choice)
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_F9 and config.ROBOT_BACKEND == "PHYSICAL":
+                if (event.key == pygame.K_F9 and config.ROBOT_BACKEND == "PHYSICAL"
+                        and config.GAME_MODE != "HUMAN_VS_HUMAN_ROBOT"):
                     automatic_startup = getattr(hw, "automatic_startup", None)
                     if automatic_startup is not None:
                         automatic_startup.cancel()
@@ -795,7 +823,8 @@ try:
                     state.set_status("Have you checked the setup and the emergency stop? F10 enables the robot for 30 s; F9 cancels."
                                      if physical_enable_pending else "Robot enable request cancelled.", duration=30)
                     continue
-                if event.key == pygame.K_F10 and physical_enable_pending:
+                if (event.key == pygame.K_F10 and physical_enable_pending
+                        and config.GAME_MODE != "HUMAN_VS_HUMAN_ROBOT"):
                     physical_enable_pending = False
                     try:
                         if time.monotonic() > physical_enable_deadline:

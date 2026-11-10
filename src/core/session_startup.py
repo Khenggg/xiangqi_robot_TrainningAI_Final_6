@@ -42,8 +42,9 @@ def rollback_session(manager, telemetry, viewer, state):
         raise StartupRollbackError(manager, telemetry, viewer, exc) from exc
 
 
-def build_session(config, options, root, state, cancelled=None, mode=None):
+def build_session(config, options, root, state, cancelled=None, mode=None, *, startup_initializer=None):
     manager = telemetry = viewer = None
+    startup_handoff = None
     try:
         if cancelled is not None and cancelled.is_set():
             raise RuntimeError('Startup cancelled')
@@ -73,10 +74,19 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
             state.attach_journal(root, profile.execution_environment, profile.game_mode, fresh_start=True)
         if cancelled is not None and cancelled.is_set():
             raise RuntimeError('Startup cancelled')
-        # Retain the manager even when initialize_all cannot retire a partial open.
+        # Construct the gameplay manager first so it owns the same physical
+        # handles if VSC-v3 startup or the subsequent handoff fails.
         manager = HardwareManager(config, root)
         manager.profile = profile
         manager.startup_cancelled = cancelled
+        # Mode-specific startup runs only after the environment lease is held.
+        if startup_initializer is not None:
+            startup_handoff = startup_initializer(manager)
+        if startup_handoff is not None:
+            if startup_handoff.physical_startup_owner is not manager.physical_startup_owner:
+                raise RuntimeError("VSC-v3 returned a different physical startup owner")
+            manager.startup_camera_index = startup_handoff.camera_index
+            manager.camera_calibration_handoff_ready = True
         # Initialization is read-only. If it fails, retire only the resources
         # opened here; historical receipts remain in the journal for next launch.
         initialized = manager.initialize_all()

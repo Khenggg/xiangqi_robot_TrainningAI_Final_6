@@ -1166,3 +1166,12 @@ Local source runtime follow-up: `.venv312` uses PyTorch 2.14.0+cu132, torchvisio
 Stash integration at `42877e9`: kept the incoming English viewer controls and removed obsolete tool-output labels. The stashed camera changes and gripper timings were preserved. Windows Python 3.12.10 in dry-run passed 24 tests (23 parallel + 1 serial, exit 0) via `tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_hvr_mode_dispatch.py,tests/unit/test_vsc_v3_lifecycle.py,tests/unit/test_camera_calibration_startup.py,tests/unit/test_offline_mouse_confirmation.py`. Nine focused Node viewer tests and the headless Edge CAD gripper probe also passed. Physical acceptance remains open.
 
 VS ROBOT edge-pick follow-up: its camera filter and robot adapter read the same 10 mm margin per axis. The PvP resolver prechecks measured coordinates with the actual robot pose converter before handing them off. The other-mode adapter retains its 6 mm cap. VERIFIED_FIXED (offline): the logged rook target at grid (7.768, -0.201) passes the VS ROBOT bound, fails the shared 6 mm bound, and a target beyond 10 mm is rejected at handoff. TEST_EVIDENCE: Windows Python 3.12.10, DRY_RUN=1, `tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_vsc_v3_namespace.py,tests/unit/test_vsc_v3_session.py,tests/unit/test_visual_pick_estimator.py,tests/unit/test_connection_calibration_split.py,tests/unit/test_physical_placement_consistency.py` PASS (57 parallel + 1 serial, exit 0). Physical clearance for the expanded edge region is NOT RUN.
+## 2026-11-10 shared physical startup handoff for human-vs-human-robot
+
+PHYSICAL startup for `HUMAN_VS_HUMAN_ROBOT` now runs the VSC-v3 robot/camera
+startup path, then hands the same `PhysicalStartupOwner` and selected camera
+index to the mode's existing gameplay `HardwareManager`. Gameplay remains in the
+human-vs-human-robot session/controller. Startup handoff is limited to PHYSICAL;
+virtual and board-only startup paths are unchanged. Syntax check (`py_compile`)
+PASS for six touched Python modules; `git diff --check` PASS. Runtime tests and
+physical hardware verification NOT RUN. `LAST_REVIEWED_HEAD` unchanged.

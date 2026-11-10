@@ -126,6 +126,37 @@ def test_scheduled_enable_rechecks_stop_and_manual_cancel_before_activation(reas
         operation()
 
 
+def test_robot_pvp_retries_preflight_rejection_without_manual_f9_f10():
+    startup, state, hw = setup_startup()
+    hw.profile.game_mode = "HUMAN_VS_HUMAN_ROBOT"
+    hw.config.AUTO_ENABLE_RETRY_INTERVAL_SEC = 2.0
+    startup.baseline_checked = True
+
+    startup.tick()
+    _, completed = hw.motion_worker.start.call_args.args
+    completed(None, RuntimeError("Fresh idle robot telemetry required"))
+
+    assert not startup.finished
+    assert startup.retry_after > 0
+    assert "tự kiểm tra lại" in state.set_status.call_args.args[0]
+    assert "F9/F10" not in state.set_status.call_args.args[0]
+
+
+def test_robot_pvp_does_not_retry_after_enable_command_was_dispatched():
+    startup, state, hw = setup_startup()
+    hw.profile.game_mode = "HUMAN_VS_HUMAN_ROBOT"
+    startup.baseline_checked = True
+
+    startup.tick()
+    _, completed = hw.motion_worker.start.call_args.args
+    hw._physical_enable_command_started = True
+    completed(None, RuntimeError("enable reply unknown"))
+
+    assert startup.finished
+    assert startup.retry_after == 0.0
+    assert "F9/F10" not in state.set_status.call_args.args[0]
+
+
 @pytest.mark.parametrize("reason", ["stop", "cancel"])
 def test_stop_or_cancel_during_board_verification_prevents_servo_enable(reason):
     from src.hardware.hardware_manager import HardwareManager

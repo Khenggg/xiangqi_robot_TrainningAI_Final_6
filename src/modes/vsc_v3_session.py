@@ -4,6 +4,7 @@ The donor game owns decisions and commits. Projection failures never authorize,
 reject, retry or commit a game/physical move.
 """
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 import queue
 import random
@@ -186,13 +187,23 @@ class VscV3Showcase:
         self._closed = True
 
 
+@dataclass(frozen=True)
+class VscV3StartupHandoff:
+    physical_startup_owner: object
+    camera_index: int
+
+
 class VscV3Session:
-    def __init__(self, config, options, root, selected_mode, *, camera_recalibration=False, cancelled=None):
+    def __init__(self, config, options, root, selected_mode, *, camera_recalibration=False,
+                 cancelled=None, startup_only=False, physical_startup_owner=None):
         from src.modes.vsc_v3.config import configure
         self.config = configure(config, selected_mode, root, camera_recalibration=camera_recalibration)
         self.options, self.root = options, Path(root)
         self.selected_mode = selected_mode
         self.cancelled = cancelled
+        self.startup_only = bool(startup_only)
+        self.physical_startup_owner = physical_startup_owner
+        self._handed_off = False
         self.state = self.hw = self.input = self.renderer = None
         self.showcase = VscV3Showcase(self)
         self.difficulty_active = True
@@ -202,12 +213,22 @@ class VscV3Session:
         self._api_end_sent = False
 
     def initialize(self):
-        from src.modes.vsc_v3.core.game_state import GameState
         from src.modes.vsc_v3.hardware.hardware_manager import HardwareManager
-        from src.modes.vsc_v3.ui.input_handler import InputHandler
         try:
             if self.cancelled is not None and self.cancelled.is_set():
                 raise RuntimeError('Startup cancelled')
+            if self.startup_only:
+                if self.config.DRY_RUN:
+                    raise RuntimeError('VSC-v3 startup handoff requires the PHYSICAL environment')
+                self.hw = HardwareManager(
+                    self.config, str(self.root),
+                    physical_startup_owner=self.physical_startup_owner)
+                # Run VSC-v3 hardware startup without constructing its game or AI.
+                self.hw._init_robot()
+                self.hw._init_camera()
+                return self
+            from src.modes.vsc_v3.core.game_state import GameState
+            from src.modes.vsc_v3.ui.input_handler import InputHandler
             self.state = GameState(allow_mouse_move=self.config.DRY_RUN)
             self.hw = HardwareManager(self.config, str(self.root))
             self.hw.startup_cancelled = self.cancelled
@@ -228,6 +249,25 @@ class VscV3Session:
             except Exception as cleanup_error:
                 raise VscV3StartupError(self, error, cleanup_error) from error
             raise
+
+    def prepare_startup_handoff(self):
+        if not self.startup_only or self.hw is None:
+            raise RuntimeError('This is not an initialized VSC-v3 startup-only session')
+        robot = self.hw.robot
+        if (not getattr(robot, 'connected', False)
+                or not getattr(robot, 'physical_motion_authorized', False)):
+            raise RuntimeError('VSC-v3 startup did not authorize the connected robot')
+        if self.hw.cap is None or not self.hw.perspective_path.is_file():
+            raise RuntimeError('VSC-v3 startup did not retain a calibrated camera')
+        camera_index = getattr(self.hw, 'actual_camera_index', None)
+        if type(camera_index) is not int:
+            raise RuntimeError('VSC-v3 startup camera index is unavailable')
+        camera = getattr(self.hw, 'cam_monitor', None)
+        if camera is not None:
+            camera.stop(release_capture=False)
+            self.hw.cam_monitor = None
+        self._handed_off = True
+        return VscV3StartupHandoff(self.hw.physical_startup_owner, camera_index)
 
     def activate(self, screen):
         from src.modes.vsc_v3.ui.board_renderer import BoardRenderer
@@ -380,6 +420,9 @@ class VscV3Session:
     def close(self):
         if self._closed:
             return
+        if self._handed_off:
+            self._closed = True
+            return
         for worker in (getattr(self.input, '_motion_thread', None), getattr(self.state, 'ai_thread', None)):
             if worker is not None:
                 worker.join(5)
@@ -395,6 +438,8 @@ class VscV3Session:
             except Exception:
                 pass
         if self.hw is not None:
+            if self.startup_only:
+                self.hw._preserve_camera_capture = True
             self.hw.cleanup()
         if client is not None:
             close = getattr(client, 'close', None)

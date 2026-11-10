@@ -29,7 +29,7 @@ from src.vision.visual_pick_modes import VisualPickModes, PickGeometry, TopFaceP
 
 class HardwareManager(VisualPickModes):
     """Manages Robot, Camera (Vision), and AI Engine connections."""
-    def __init__(self, config, project_dir):
+    def __init__(self, config, project_dir, *, physical_startup_owner=None):
         self.config = config
         self.project_dir = project_dir
         self.scene_id = uuid4().hex
@@ -39,15 +39,22 @@ class HardwareManager(VisualPickModes):
             raise ValueError("Game mode changed without a new session profile; use controlled session startup")
         self.profile = profile if profile is not None else profile_from_config(config)
         self.dry_run = self.profile.dry_run
+        from src.hardware.physical_startup import PhysicalStartupOwner, PhysicalStartupPolicy
+        self.physical_startup_owner = physical_startup_owner or PhysicalStartupOwner(
+            PhysicalStartupPolicy(camera_required=bool(self.profile.camera_enabled)))
         fixed_points = getattr(config, "PHYSICAL_TEACHING_POINTS_FILE", None)
         fixed_points = Path(project_dir) / fixed_points if fixed_points else None
         
         # Hardware instances
-        self.robot = (FR5Robot(ip=getattr(config, "ROBOT_IP", None), dry_run=self.profile.dry_run,
-                              teaching_points_path=fixed_points)
-                      if (self.profile.physical_robot_enabled or
-                          str(getattr(config, "ROBOT_BACKEND", "VIRTUAL")).upper() == "PHYSICAL")
-                      else None)
+        robot_factory = lambda: FR5Robot(
+            ip=getattr(config, "ROBOT_IP", None), dry_run=self.profile.dry_run,
+            teaching_points_path=fixed_points)
+        needs_robot = (self.profile.physical_robot_enabled or
+                       (self.profile.game_mode != "HUMAN_VS_HUMAN"
+                        and str(getattr(config, "ROBOT_BACKEND", "VIRTUAL")).upper() == "PHYSICAL"))
+        self.robot = (self.physical_startup_owner.acquire(
+            "robot", robot_factory, self._close_owned_robot)
+            if needs_robot and not self.profile.dry_run else robot_factory() if needs_robot else None)
         self.backend = None
         self.simulation_runtime = None
         self.simulation_playback_profile = None
@@ -118,6 +125,16 @@ class HardwareManager(VisualPickModes):
             raise
         return self
 
+    @staticmethod
+    def _close_owned_robot(robot):
+        rpc = getattr(robot, "robot", None)
+        close_rpc = getattr(rpc, "CloseRPC", None)
+        if rpc is not None:
+            if not callable(close_rpc):
+                raise RuntimeError("SDK has no CloseRPC; controller owner retained")
+            close_rpc()
+        robot.connected = False
+
     @property
     def virtual_projection_pending(self):
         state = getattr(self, "game_state", None)
@@ -183,7 +200,13 @@ class HardwareManager(VisualPickModes):
                   rotation=list(getattr(self.config, "ROTATION", [])),
                   move_speed=getattr(self.config, "MOVE_SPEED", None))
         try:
-            self.robot.connect()  # Read-only; no enable, home, or gripper command.
+            if getattr(self, "camera_calibration_handoff_ready", False):
+                if (not self.physical_startup_owner.owns("robot")
+                        or not self.robot.connected
+                        or not getattr(self.robot, "physical_motion_authorized", False)):
+                    raise RuntimeError("VSC-v3 robot startup handoff is incomplete")
+            else:
+                self.robot.connect()  # Read-only; no enable, home, or gripper command.
             if not self.robot.connected:
                 raise RuntimeError("Physical controller connection failed")
             self._calibrate_robot()
@@ -510,6 +533,7 @@ class HardwareManager(VisualPickModes):
     def activate_physical_game(self, state, *, commissioned=False,
                                expected_stop_generation=None, startup_guard=None):
         """Enable after explicit manual or configured startup authorization."""
+        self._physical_enable_command_started = False
         if startup_guard is not None:
             startup_guard()
         if getattr(self, "_closing", False):
@@ -572,8 +596,10 @@ class HardwareManager(VisualPickModes):
                 stop_coord.generation != expected_stop_generation or stop_coord.blocked):
             raise RuntimeError("Automatic enable cancelled by a stop request")
         if stop_coord is not None:
+            self._physical_enable_command_started = True
             enabled = self.robot.activate_physical_control(commissioned=True, stop_recovered=stopped)
         else:
+            self._physical_enable_command_started = True
             enabled = self.robot.activate_physical_control(commissioned=True)
         try:
             if stop_coord is not None and stop_generation != stop_coord.generation:
@@ -678,7 +704,8 @@ class HardwareManager(VisualPickModes):
         saved_path = self.perspective_path
         self.camera_calibration_ready = False
         self.camera_calibration_source = "UNAVAILABLE"
-        recalibrate = bool(getattr(self.config, "RECALIBRATE_CAMERA", False))
+        recalibrate = (bool(getattr(self.config, "RECALIBRATE_CAMERA", False))
+                       and not getattr(self, "camera_calibration_handoff_ready", False))
         saved, error = load_saved_perspective(saved_path)
         if saved is not None and not recalibrate:
             self.camera_calibration_ready = True
@@ -755,13 +782,18 @@ class HardwareManager(VisualPickModes):
             if cancelled is not None and cancelled.is_set():
                 raise RuntimeError("Startup cancelled")
             requested_index = int(os.environ.get("VIDEO_INDEX", str(self.config.VIDEO_SOURCE)))
-            candidates = [requested_index] + [index for index in range(3) if index != requested_index]
+            startup_index = getattr(self, "startup_camera_index", None)
+            candidates = ([startup_index] if type(startup_index) is int else
+                          [requested_index] + [index for index in range(3) if index != requested_index])
             errors = []
             for cam_index in candidates:
                 if cancelled is not None and cancelled.is_set():
                     raise RuntimeError("Startup cancelled")
                 try:
-                    self.cap = open_validated_camera(cam_index)
+                    factory = lambda index=cam_index: open_validated_camera(index)
+                    owner = getattr(self, "physical_startup_owner", None)
+                    self.cap = (owner.acquire("camera", factory, lambda capture: capture.release())
+                                if owner is not None else factory())
                 except RuntimeError as exc:
                     errors.append(f"index {cam_index}: {exc}")
                     print(f"[CAMERA] {errors[-1]}")
@@ -771,7 +803,8 @@ class HardwareManager(VisualPickModes):
                 raise RuntimeError("Cannot read any camera; " + "; ".join(errors))
             self.camera_selected_index = cam_index
             self.actual_camera_index = cam_index
-            if cam_index != requested_index:
+            if (cam_index != requested_index
+                    and not getattr(self, "camera_calibration_handoff_ready", False)):
                 print(f"[CAMERA] Requested {requested_index}; using {cam_index}. "
                       "Check board calibration for this camera before enabling motion.")
             print(f"[INIT] Camera VIDEO_INDEX={cam_index}: valid BGR frame received")
@@ -779,7 +812,9 @@ class HardwareManager(VisualPickModes):
         except Exception as exc:
             self.camera_startup_error = str(exc)
             calibration_reader = getattr(self, "_calibration_capture_thread", None)
-            if self.cap is not None and (calibration_reader is None or not calibration_reader.is_alive()):
+            owner = getattr(self, "physical_startup_owner", None)
+            if (self.cap is not None and not (owner is not None and owner.owns("camera"))
+                    and (calibration_reader is None or not calibration_reader.is_alive())):
                 self.cap.release()
                 self.cap = None
             print(f"[INIT] Camera unavailable: {exc}")
@@ -964,8 +999,17 @@ class HardwareManager(VisualPickModes):
             mirror_stopped = close('mirror', self.close_simulation)
             camera = getattr(self, 'cam_monitor', None)
             camera_stopped = camera is None or close('camera', camera.stop)
+            vsc_session = getattr(self, "vsc_startup_session", None)
+            vsc_camera = getattr(getattr(vsc_session, "hw", None), "cam_monitor", None)
+            vsc_camera_stopped = (vsc_camera is None
+                                  or close('VSC startup camera',
+                                           lambda: vsc_camera.stop(release_capture=False)))
+            if vsc_camera_stopped and vsc_camera is not None:
+                vsc_session.hw.cam_monitor = None
+            camera_stopped = camera_stopped and vsc_camera_stopped
             cap = getattr(self, 'cap', None)
-            if camera_stopped and cap is not None:
+            owner = getattr(self, "physical_startup_owner", None)
+            if camera_stopped and cap is not None and not (owner is not None and owner.owns("camera")):
                 close('camera capture', cap.release)
             robot = getattr(self, 'robot', None)
             if mirror_stopped and robot is not None and not getattr(self, 'dry_run', True):
@@ -976,9 +1020,12 @@ class HardwareManager(VisualPickModes):
                     if not close('disable owned control', robot.deactivate_physical_control):
                         raise RuntimeError('; '.join(failures))
                 rpc = getattr(robot, 'robot', None)
-                if callable(getattr(rpc, 'CloseRPC', None)):
+                if (callable(getattr(rpc, 'CloseRPC', None))
+                        and not (owner is not None and owner.owns("robot"))):
                     close('controller connection', rpc.CloseRPC)
                 robot.connected = False
+            if mirror_stopped and camera_stopped and owner is not None and owner.resources:
+                close('physical startup owner', owner.cleanup)
         controller = getattr(self, 'ai_ctrl', None)
         for engine in (getattr(controller, 'local_engine', None), getattr(controller, 'cloud_engine', None),
                        getattr(self, 'engine', None)):

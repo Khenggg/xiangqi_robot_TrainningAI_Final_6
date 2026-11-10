@@ -34,16 +34,23 @@ except ImportError as exc:
 
 class HardwareManager:
     """Manages Robot, Camera (Vision), and AI Engine connections."""
-    def __init__(self, config, project_dir):
+    def __init__(self, config, project_dir, *, physical_startup_owner=None):
         self.config = config
         self.project_dir = project_dir
         self.dry_run = config.DRY_RUN
+        from src.hardware.physical_startup import PhysicalStartupOwner, PhysicalStartupPolicy
+        self.physical_startup_owner = physical_startup_owner or PhysicalStartupOwner(
+            PhysicalStartupPolicy(camera_required=True))
         
         # Hardware instances
         fixed_points = getattr(config, 'PHYSICAL_TEACHING_POINTS_FILE', None)
         fixed_points = Path(project_dir) / fixed_points if fixed_points else None
-        self.robot = FR5Robot(ip=getattr(config, 'ROBOT_IP', None), dry_run=self.dry_run,
-                              teaching_points_path=fixed_points)
+        self.robot = (self.physical_startup_owner.acquire(
+            "robot", lambda: FR5Robot(ip=getattr(config, 'ROBOT_IP', None), dry_run=self.dry_run,
+                                      teaching_points_path=fixed_points),
+            self._close_owned_robot) if not self.dry_run else
+            FR5Robot(ip=getattr(config, 'ROBOT_IP', None), dry_run=True,
+                     teaching_points_path=fixed_points))
         self.engine = None
         self.ai_ctrl = None
         self.cap = None
@@ -87,6 +94,16 @@ class HardwareManager:
             raise RuntimeError("Startup cancelled")
         # Same driver/profile as all other modes; no donor pin swap, HOME or grip.
         self.robot.activate_physical_control(commissioned=True)
+
+    @staticmethod
+    def _close_owned_robot(robot):
+        rpc = getattr(robot, "robot", None)
+        close_rpc = getattr(rpc, "CloseRPC", None)
+        if rpc is not None and not callable(close_rpc):
+            raise RuntimeError("SDK has no CloseRPC; controller owner retained")
+        if callable(close_rpc):
+            close_rpc()
+        robot.connected = False
 
     def _calibrate_robot(self):
         if not self.robot.connected:
@@ -200,8 +217,11 @@ class HardwareManager:
             if cancelled is not None and cancelled.is_set():
                 raise RuntimeError("Startup cancelled")
             try:
-                self.cap = open_validated_camera(
-                    idx, backend=getattr(self.config, "VIDEO_BACKEND", "auto"), frame_size=frame_size)
+                factory = lambda index=idx: open_validated_camera(
+                    index, backend=getattr(self.config, "VIDEO_BACKEND", "auto"), frame_size=frame_size)
+                owner = getattr(self, "physical_startup_owner", None)
+                self.cap = (owner.acquire("camera", factory, lambda capture: capture.release())
+                            if owner is not None else factory())
                 self.actual_camera_index = idx
                 print(f"✅ Camera opened at index {idx}")
                 break
@@ -318,11 +338,11 @@ class HardwareManager:
             raise RuntimeError("Calibration reader still running; capture retained")
         camera = getattr(self, 'cam_monitor', None)
         if camera is not None:
-            camera.stop()  # Must prove readers stopped before releasing capture/SDK.
+            camera.stop(release_capture=not getattr(self, "_preserve_camera_capture", False))
             self.cam_monitor = None
-            self.cap = None
         cap = getattr(self, 'cap', None)
-        if cap is not None:
+        owner = getattr(self, "physical_startup_owner", None)
+        if cap is not None and not (owner is not None and owner.owns("camera")):
             cap.release()
             self.cap = None
         control = getattr(self, 'ai_ctrl', None)
@@ -341,13 +361,17 @@ class HardwareManager:
             if robot.connected:
                 robot.deactivate_physical_control()
             rpc = getattr(robot, 'robot', None)
-            if rpc is not None and not getattr(self, '_sdk_closed', False):
+            if rpc is not None and not getattr(self, '_sdk_closed', False) and not (
+                    owner is not None and owner.owns("robot")):
                 close = getattr(rpc, 'CloseRPC', None)
                 if not callable(close):
                     raise RuntimeError('SDK has no CloseRPC; controller owner retained')
                 close()
                 self._sdk_closed = True
             robot.connected = False
+        if owner is not None and owner.resources:
+            owner.cleanup()
+            self.cap = None
 
     # --- WRAPPER VISION UTILS ---
     def _top_face_enabled(self):
