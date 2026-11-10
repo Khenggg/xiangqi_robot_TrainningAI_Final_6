@@ -11,7 +11,7 @@ import queue
 import config
 
 
-def calibrate_perspective_camera(cap, save_path, *, cancel_event=None, capture_owner=None):
+def calibrate_perspective_camera(cap, save_path, *, cancel_event=None, capture_owner=None, dry_run=None):
     """Hiệu chỉnh perspective camera bằng cách click 4 góc bàn cờ.
     
     Args:
@@ -21,7 +21,9 @@ def calibrate_perspective_camera(cap, save_path, *, cancel_event=None, capture_o
     Returns:
         M: perspective transform matrix (3x3), hoặc None nếu hủy
     """
-    if config.DRY_RUN:
+    if dry_run is None:
+        dry_run = config.DRY_RUN
+    if dry_run:
         print("[CALIBRATE] DRY_RUN: bỏ qua calibration.")
         return None
 

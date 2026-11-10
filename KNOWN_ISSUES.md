@@ -998,3 +998,7 @@ The 2026-09-09 quickstart did not match current final: it described calibration 
 21 deterministic failures reproduce on a clean `9b4c515` worktree: 15 across `test_camera_game_pipeline`, `test_camera_startup_and_health`, `test_visual_selective_integration`, `test_game_twin_integration` and `test_visual_v2_simulation`; 2 in `test_physical_ui_latency` ("Viewer startup did not finish"); 4 across `test_arm_reconnect_qa`, `test_viewer_startup` and `test_ai_home_approach_recovery`. One further hover test (`test_visual_v2_simulation::test_hover_rotated_r1_r4_uses_guard_and_preserves_pieces`) passes in isolation and fails only under full-suite load.
 
 These predate the 2026-11-09 session and remain OPEN. Do not report a green focused run as a green branch, and do not attribute these to the placement/telemetry change without re-running the HEAD comparison.
+
+## 2026-11-10 fix/fix-capsule — physical camera acceptance still open
+
+The missing source weights and gripper viewer exception are addressed locally and verified offline. The latest physical VS ROBOT log selected index 0 after index 2 failed. The local source runtime now verifies CUDA vision inference offline. The current identity of the board camera, live grid alignment, sustained feed, gameplay latency and controller behavior remain unverified. Source checkouts still need the three ignored vision weights. See the scoped evidence in `CURRENT_STATE.md`.

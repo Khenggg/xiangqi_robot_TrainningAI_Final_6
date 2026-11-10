@@ -5,7 +5,7 @@ import { validateLivePacket, validateWorldStatePacket, stabilizeJointTarget, cre
 import { fetchPhysicalGeometry } from "./geometry.mjs";
 import { nearestBoardIntersection } from "./board_picker.mjs";
 import { fetchVirtualGripperProfile } from "./gripper_profile.mjs";
-import { fetchGripperVisualAsset, fingerClosedShift, fingerDirection, fingerOffsetCadMm, fingerOpenShift, heldContactCadMm, isFingerPartName } from "./gripper_asset.mjs";
+import { fetchGripperVisualAsset, fingerClosedShift, fingerDirection, fingerOffsetCadMm, fingerOpenShift, heldContactCadMm, isFingerPartName, VIRTUAL_CLOSED_CONTACT_CAD_MM } from "./gripper_asset.mjs";
 import { fetchStartLayout } from "./layout.mjs";
 import {
   buildBoardGrid,
@@ -1786,7 +1786,7 @@ function initJointControlPanelEvents() {
     const badge = document.getElementById("diagStatusBadge");
     if (badge) {
       badge.className = closed ? "badge-running" : "badge-safe";
-      badge.textContent = closed ? "ĐANG KẸP (DO0)" : "ĐÃ NHẢ KẸP (DO1)";
+      badge.textContent = closed ? "Clamping" : "Releasing";
     }
   }
 

@@ -97,7 +97,7 @@ def test_actual_menu_routes_hvr_to_private_loop_and_cleans_up(monkeypatch, tmp_p
 
 
 def test_retained_startup_owner_blocks_every_new_mode_until_close_succeeds():
-    owner = SimpleNamespace(close=Mock())
+    owner = SimpleNamespace(close=Mock(), close_display=Mock())
     worker = SimpleNamespace(busy=False, start=Mock(return_value=True))
     namespace = dict(vsc_retained_session=None, startup_worker=worker,
                      config=SimpleNamespace(GAME_MODE='HUMAN_VS_HUMAN_ROBOT'),
@@ -117,6 +117,12 @@ def test_retained_startup_owner_blocks_every_new_mode_until_close_succeeds():
     assert namespace['vsc_retained_session'] is None
     namespace.update(vsc_session=owner, vsc_retiring=False)
     worker.start.reset_mock()
+
+    def start_after_display_closes(*_):
+        owner.close_display.assert_called_once()
+        return True
+
+    worker.start.side_effect = start_after_display_closes
     namespace['_retire_vsc_session']()
     _, retiring_callback = worker.start.call_args.args
     retiring_callback(None, RuntimeError('close failed'))

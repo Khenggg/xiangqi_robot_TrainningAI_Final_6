@@ -388,6 +388,7 @@ def _retire_vsc_session():
     global vsc_retiring
     if vsc_retiring or startup_worker.busy:
         return
+    vsc_session.close_display()
     def completed(result, error):
         global vsc_session, vsc_retiring, home_screen_active, startup_message
         vsc_retiring = False

@@ -1150,3 +1150,17 @@ TEST_EVIDENCE
 NOT RUN: physical FR3/camera/gripper acceptance, clean second PC, full browser game session end to end.
 
 OPEN: the 21 baseline failures above. `final` was already red before this session; a green focused run is not a green branch.
+
+## 2026-11-10 fix/fix-capsule — VS ROBOT camera and viewer
+
+Scope is the working tree at `3fd13f9`. The November 10 source logs showed missing ONNX and YOLO weights, manual calibration fallback, and physical VS ROBOT entering gameplay without a camera monitor. Restored the three Git-ignored model blobs from `18e67fc^` and verified their Git hashes.
+
+VERIFIED_FIXED (offline): physical VS ROBOT validates the weights and gets grid approval before robot enable. The calibration checkbox selects manual mode, and the default path tries the automatic preview. The gameplay camera window closes on its UI thread before worker teardown. The viewer imports the virtual contact constant and uses semantic gripper labels.
+
+TEST_EVIDENCE (Windows, .venv312 Python 3.12.10, DRY_RUN=1): `tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_vsc_v3_lifecycle.py,tests/unit/test_vsc_v3_namespace.py,tests/unit/test_vsc_v3_session.py,tests/unit/test_hvr_mode_dispatch.py,tests/unit/test_camera_calibration_startup.py,tests/unit/test_f2_camera_and_frame_restart.py` PASS, exit 0, 59 parallel + 1 serial. Eight gripper tests passed via Node. Recorded-frame camera workflow PASS, exit 0, in `logs/camera-workflow-offline-20261110.log` using the restored weights and mocked camera/HighGUI. Headless Edge reproduced the viewer error on HEAD and loaded both CAD fingers on the patched tree.
+
+NOT RUN: live camera, controller, physical motion, full regression and packaged release validation. The existing perspective artifact was preserved. `LAST_REVIEWED_HEAD` remains the historical whole-branch baseline.
+
+Local source runtime follow-up: `.venv312` uses PyTorch 2.14.0+cu132, torchvision 0.29.0+cu132 and ONNX Runtime GPU 1.30.0. `VISION_DEVICE=auto` is the existing default. Offline recorded-frame inference verified that VS ROBOT's YOLO predictor uses CUDA and both ONNX sessions retain CUDA as their first provider. Five warmed runs per model gave CPU → GPU median latency of 230.2 → 28.8 ms for YOLO, 287.3 → 26.3 ms for layout and 9.3 → 9.7 ms for pose. This checks local model execution only. Live game latency and physical hardware acceptance are still open.
+
+Stash integration at `42877e9`: kept the incoming English viewer controls and removed obsolete tool-output labels. The stashed camera changes and gripper timings were preserved. Windows Python 3.12.10 in dry-run passed 24 tests (23 parallel + 1 serial, exit 0) via `tools/test_fast.ps1 -Workers 2 -Tests tests/unit/test_hvr_mode_dispatch.py,tests/unit/test_vsc_v3_lifecycle.py,tests/unit/test_camera_calibration_startup.py,tests/unit/test_offline_mouse_confirmation.py`. Nine focused Node viewer tests and the headless Edge CAD gripper probe also passed. Physical acceptance remains open.

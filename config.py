@@ -52,22 +52,39 @@ GRIPPER_CLOSE_DO_ID = 1
 GRIPPER_IDLE_STATUS = 0
 GRIPPER_ACTIVE_STATUS = 1
 
-# Motor không có công tắc hành trình: chỉ cấp điện theo xung ngắn rồi tắt cả hai DO.
-# Tinh chỉnh từng xung riêng với tay robot đứng yên.
+# Each gripper command runs in three steps (all durations are in seconds).
+# Both outputs off (deadtime) -> power one direction (pulse) -> both off (settle).
+# There is no jaw-position feedback. Tune one pulse at a time with the arm stationary.
+
+# Before every pulse, wait this long with both outputs off, even if the direction stays the same.
 GRIPPER_DIRECTION_DEADTIME_SEC = 0.10
-# Open fully before each pick and when releasing a piece.
-# Tune this to the shortest pulse that reaches the physical open limit.
+
+# PREPOSITION / RELEASE: drive the jaws fully open before approaching a pick,
+# and again to release a piece onto the board or into the capture bin.
+# Use the shortest pulse that reaches full opening.
 GRIPPER_OPEN_MAX_PULSE_SEC = 0.25
-# Short-opening action for callers that request it explicitly.
+
+# Short opening pulse used only when a caller explicitly requests the "release"
+# action. Standard board and capture-bin releases use OPEN_MAX_PULSE_SEC above.
 GRIPPER_RELEASE_PULSE_SEC = 0.06
-# Final grip pulse starts from the pre-pick gap, after descent to PICK_Z.
-GRIPPER_CLOSE_PULSE_SEC = 0.20
-# Starting from fully open, close only to the travelling/pre-pick safe gap.
-# Increase to narrow the gap; decrease to widen it. Do not drive into hard stop.
-GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC = 0.06
+
+# GRIP: after descending to PICK_Z, close from the pre-pick gap onto the piece
+# before lifting it.
+GRIPPER_CLOSE_PULSE_SEC = 0.06
+
+# PREPOSITION / SETTLE: close partway from fully open. This sets the gap before
+# the pick approach and restores it after lifting clear of a board release or
+# returning home from the capture bin.
+# A longer pulse narrows the gap. Keep the jaws clear of the hard stop.
+GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC = 0.05
+
+# Motor-off wait after either opening pulse. The next stage waits for this delay.
 GRIPPER_OPEN_SETTLE_SEC = 0.25
+# Motor-off wait after either closing pulse (safe gap or final grip).
 GRIPPER_CLOSE_SETTLE_SEC = 0.25
-MOVE_SPEED = 50 #Percentage based; visual-correction-v2@fb0598d
+
+# Default robot arm movement speed in percent (visual-correction-v2@fb0598d).
+MOVE_SPEED = 50
 
 # --- ROBOT FRAME POLICY ---
 # Toàn bộ teaching point và lệnh chuyển động phải dùng robot base (user 0).

@@ -56,6 +56,7 @@ class CameraMonitor:
         self.cchess_recognizer = cchess_recognizer
         self.perspective_path = str(perspective_path) if perspective_path else None
         self.window_name = window_name
+        self._display_thread_id = None
         self.conf = conf
 
         self._M = None  # perspective matrix (camera → grid)
@@ -525,13 +526,21 @@ class CameraMonitor:
             self.cap = None
             print("[CAM MONITOR] ✅ Camera released.")
         
-        # 4. Đóng cửa sổ OpenCV
+        self.close_display()
+        print("[CAM MONITOR] ✅ Camera Monitor stopped.")
+
+    def close_display(self):
+        """Close the HighGUI window on the thread that displayed it."""
+        owner = getattr(self, "_display_thread_id", None)
+        if owner is None:
+            return
+        if owner != threading.get_ident():
+            raise RuntimeError("Camera display must close on its UI thread")
         try:
             cv2.destroyWindow(self.window_name)
         except cv2.error:
             pass  # Window may not exist yet
-        
-        print("[CAM MONITOR] ✅ Camera Monitor stopped.")
+        self._display_thread_id = None
 
     def update_display(self):
         """Gọi mỗi frame trong game loop — hiển thị camera window.
@@ -547,6 +556,7 @@ class CameraMonitor:
             debug = getattr(self, "pick_debug_frame", None)
             display = debug.copy() if debug is not None else self._draw_overlay(frame, detections)
             cv2.imshow(self.window_name, display)
+            self._display_thread_id = threading.get_ident()
 
         return cv2.waitKey(1)
 

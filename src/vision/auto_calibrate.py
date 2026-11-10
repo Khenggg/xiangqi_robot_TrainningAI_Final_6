@@ -174,7 +174,7 @@ def _choose_calibration_preview(window, preview, cancel_event):
 
 
 def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_model_path=None, preview_sec=2.0,
-                         *, cancel_event=None, capture_owner=None, manual_only=False):
+                         *, cancel_event=None, capture_owner=None, manual_only=False, dry_run=None):
     """Quy trình hiệu chỉnh Camera tích hợp:
     
     1. Warm-up camera một lần duy nhất (tránh race condition).
@@ -189,7 +189,9 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
         pose_model_path: (Legacy/unused) Giữ lại cho tương thích API cũ
         preview_sec: Legacy compatibility; preview now waits for explicit acceptance.
     """
-    if getattr(config, "DRY_RUN", False):
+    if dry_run is None:
+        dry_run = getattr(config, "DRY_RUN", False)
+    if dry_run:
         print("[CALIBRATE] DRY_RUN: bo qua calibration.")
         return None
 
@@ -198,7 +200,8 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
         if cancel_event is not None and cancel_event.is_set():
             raise RuntimeError("Camera calibration cancelled")
         matrix = calibrate_perspective_camera(
-            cap, str(perspective_path), cancel_event=cancel_event, capture_owner=capture_owner)
+            cap, str(perspective_path), cancel_event=cancel_event, capture_owner=capture_owner,
+            dry_run=dry_run)
         if matrix is None:
             raise RuntimeError("Camera calibration cancelled or failed")
         return matrix
@@ -315,7 +318,8 @@ def run_calibration_flow(cap, perspective_path, cchess_recognizer=None, pose_mod
     if cancel_event is not None and cancel_event.is_set():
         raise RuntimeError("Camera calibration cancelled")
     matrix = calibrate_perspective_camera(cap, str(perspective_path),
-                                          cancel_event=cancel_event, capture_owner=capture_owner)
+                                          cancel_event=cancel_event, capture_owner=capture_owner,
+                                          dry_run=dry_run)
     if matrix is None:
         raise RuntimeError("Camera calibration cancelled or failed")
     return matrix

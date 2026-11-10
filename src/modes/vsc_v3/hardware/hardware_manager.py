@@ -11,7 +11,6 @@ from src.modes.vsc_v3.ai.moonfish_engine import MoonfishEngine
 from src.modes.vsc_v3.ai.cloud_engine import CloudEngine
 from src.modes.vsc_v3.ai.ai_controller import AIController
 from src.modes.vsc_v3.vision.camera_monitor import CameraMonitor
-from src.modes.vsc_v3.vision.camera_source import open_camera
 from src.modes.vsc_v3.vision.snapshot_detector import SnapshotDetector as YoloSnapshotDetector
 from src.modes.vsc_v3.vision.visual_pick_estimator import VisualPickEstimator, GridTarget
 from src.modes.vsc_v3.vision.pick_geometry import PickGeometry
@@ -23,8 +22,8 @@ from src.modes.vsc_v3.vision.ring_pick_estimator import (
 )
 from src.modes.vsc_v3.vision.pick_consensus import select_consensus, FreshPickTransientError, require_pick_target
 from src.modes.vsc_v3.vision.board_reconciler import BoardReconciler
-from src.modes.vsc_v3.vision.calibrate_camera import calibrate_perspective_camera
-from src.modes.vsc_v3.vision.auto_calibrate import run_calibration_flow
+from src.vision.auto_calibrate import run_calibration_flow
+from src.vision.camera_startup import load_saved_perspective, open_validated_camera, validate_perspective
 
 _YOLO_IMPORT_ERROR = None
 try:
@@ -66,10 +65,13 @@ class HardwareManager:
         }
 
     def initialize_all(self):
-        """Khởi tạo toàn bộ Robot, AI, Camera theo đúng thứ tự."""
+        """Prepare the camera before enabling physical robot control."""
         self._init_ai()
-        self._init_robot()
         self._init_camera()
+        cancelled = getattr(self, "startup_cancelled", None)
+        if cancelled is not None and cancelled.is_set():
+            raise RuntimeError("Startup cancelled")
+        self._init_robot()
         return self
 
     def _init_robot(self):
@@ -80,6 +82,9 @@ class HardwareManager:
         self.robot.dry = False
         self.robot.connect()
         self._calibrate_robot()
+        cancelled = getattr(self, "startup_cancelled", None)
+        if cancelled is not None and cancelled.is_set():
+            raise RuntimeError("Startup cancelled")
         # Same driver/profile as all other modes; no donor pin swap, HOME or grip.
         self.robot.activate_physical_control(commissioned=True)
 
@@ -170,143 +175,147 @@ class HardwareManager:
         print(f"[GAME] {message}")
         return True, message
 
-    def _init_camera(self):
-        # Initialize CChessRecognizer (ONNX)
-        if getattr(self.config, "CCHESS_RECOGNITION_ENABLED", True):
-            try:
-                from src.modes.vsc_v3.vision.cchess_recognizer import CChessRecognizer
-                pose_onnx = Path(self.project_dir) / "models" / "cchess" / "pose_4_v6.onnx"
-                layout_onnx = Path(self.project_dir) / "models" / "cchess" / "layout_nano_v3.onnx"
-                if pose_onnx.exists() and layout_onnx.exists():
-                    self.cchess_recognizer = CChessRecognizer(
-                        pose_onnx, layout_onnx,
-                        use_gpu=getattr(self.config, 'VISION_DEVICE', 'auto') != 'cpu')
-                    print("[INIT] [CChess] CChessRecognizer loaded successfully (pose + layout ONNX).")
-                else:
-                    print("[INIT] [CChess] ONNX models not found in models/cchess/.")
-            except Exception as e:
-                print(f"[INIT] [CChess] Could not initialize CChessRecognizer: {e}")
+    def _prepare_perspective_calibration(self):
+        # An index alone does not identify the camera or prove the mount stayed fixed.
+        # Keep grid approval before enabling physical control.
+        matrix = run_calibration_flow(
+            self.cap, str(self.perspective_path), cchess_recognizer=self.cchess_recognizer,
+            cancel_event=getattr(self, "startup_cancelled", None), capture_owner=self,
+            manual_only=getattr(self.config, "CAMERA_CALIBRATION_MANUAL_ONLY", False),
+            dry_run=self.dry_run)
+        saved, _ = load_saved_perspective(self.perspective_path)
+        if not validate_perspective(matrix) or saved is None or not np.allclose(matrix, saved):
+            raise RuntimeError("Fresh camera calibration was not accepted and saved.")
 
+    def _init_camera(self):
         if self.dry_run:
             return
 
-        model_path = str(Path(self.project_dir) / "models" / "best.pt")
-        try:
-            if YOLO is not None:
-                self.model = YOLO(model_path)
-                print(f"✅ Model loaded: {model_path}")
-            else:
-                print(f"⚠️ Warning: Không import được YOLO: {_YOLO_IMPORT_ERROR}. "
-                      "Chạy lại SETUP_WINDOWS.bat và xem log setup.")
-        except Exception as e:
-            print(f"⚠️ Warning: Could not load YOLO model: {e}")
-            
+        self._load_vision_models()
+        cancelled = getattr(self, "startup_cancelled", None)
         cam_index = int(os.environ.get("VIDEO_INDEX", str(self.config.VIDEO_SOURCE)))
-        for idx in [cam_index] + [i for i in [0, 1, 2] if i != cam_index]:
+        frame_size = (getattr(self.config, "VIDEO_FRAME_WIDTH", 640),
+                      getattr(self.config, "VIDEO_FRAME_HEIGHT", 480))
+        for idx in [cam_index] + [i for i in range(3) if i != cam_index]:
+            if cancelled is not None and cancelled.is_set():
+                raise RuntimeError("Startup cancelled")
             try:
-                self.cap = open_camera(idx, getattr(self.config, "VIDEO_BACKEND", "auto"))
+                self.cap = open_validated_camera(
+                    idx, backend=getattr(self.config, "VIDEO_BACKEND", "auto"), frame_size=frame_size)
                 self.actual_camera_index = idx
                 print(f"✅ Camera opened at index {idx}")
                 break
             except RuntimeError as exc:
                 print(f"[CAMERA] {exc}")
-                
-        if self.cap is None:
-            print("❌ Lỗi: Không mở được Camera!")
+        else:
             raise RuntimeError("VSC-v3 camera unavailable after trying configured index and 0-2")
-            
-        frame_width = getattr(self.config, "VIDEO_FRAME_WIDTH", 640)
-        frame_height = getattr(self.config, "VIDEO_FRAME_HEIGHT", 480)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
-        print(f"[CAMERA] RUN requested {frame_width}x{frame_height}; "
-              "actual snapshot resolution is checked against intrinsics before picking.")
 
-        # Calibrate Vision (RTMPose ONNX thay cho YOLO-Pose cũ)
-        print("\n" + "=" * 60)
-        print("  CAMERA CALIBRATION - BAT BUOC KHI KHOI DONG")
-        print("=" * 60)
-        run_calibration_flow(self.cap, str(self.perspective_path), cchess_recognizer=self.cchess_recognizer)
-        
-        if not os.path.exists(str(self.perspective_path)):
-            print("❌ Chưa có perspective.npy! Không thể detect nước đi.")
-            raise RuntimeError("VSC-v3 camera calibration did not produce perspective.npy")
+        if self.actual_camera_index != cam_index:
+            print(f"[CAMERA] Requested {cam_index}; using {self.actual_camera_index}. "
+                  "Confirm board calibration for this camera before play.")
+        self._prepare_perspective_calibration()
+        self._start_camera_monitor()
 
-        # Start Monitor (Ưu tiên CChessRecognizer ONNX)
-        if self.model is not None or self.cchess_recognizer is not None:
-            self.cam_monitor = CameraMonitor(
-                self.cap,
-                model=self.model,
-                perspective_path=self.perspective_path,
-                cchess_recognizer=self.cchess_recognizer,
-            )
-            self.cam_monitor.start()
-            self.yolo_detector = YoloSnapshotDetector(self.perspective_path, self.class_id_to_name)
-            print("[INIT] SnapshotDetector & CameraMonitor initialized (CChess ONNX enabled).")
-            if (pvp_pick_enabled(self.config) or getattr(self.config, "VISUAL_PICK_ENABLED", False)
-                    or ring_pick_enabled(self.config)
-                    or getattr(self.config, "VISUAL_BOARD_SYNC_REQUIRED", True)):
-                try:
-                    self.pick_estimator = VisualPickEstimator(
-                        self.perspective_path,
-                        min_confidence=self.config.VISUAL_PICK_MIN_CONFIDENCE,
-                        max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
-                        foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
-                        board_mm=getattr(self.config, "VISUAL_HEIGHT_BOARD_MM", None),
-                        outside_margin_mm=getattr(self.config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", None),
-                    )
-                    # Box center remains occupancy evidence and the explicitly
-                    # selected legacy path, never a top-face fallback.
-                    self.center_pick_estimator = VisualPickEstimator(
-                        self.perspective_path,
-                        min_confidence=self.config.VISUAL_PICK_MIN_CONFIDENCE,
-                        max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
-                        foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
-                        point_mode="center",
-                        board_mm=getattr(self.config, "VISUAL_HEIGHT_BOARD_MM", None),
-                        outside_margin_mm=getattr(self.config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", None),
-                    )
-                    self.board_reconciler = BoardReconciler(self.pick_estimator)
-                    print("[INIT] ✅ Visual pick / board reconciliation initialized.")
-                    if pvp_pick_enabled(self.config):
-                        print("[PVP PICK] Enabled: bbox foot -> table homography; logical-cell fallback.")
-                    elif getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False):
-                        intrinsic_path = Path(self.project_dir) / self.config.VISUAL_CAMERA_INTRINSICS_PATH
-                        if not intrinsic_path.exists():
-                            print("[HEIGHT PICK] Camera intrinsics missing. Run CALIBRATE_CAMERA_INTRINSICS.bat "
-                                  "--square-mm MEASURED_VALUE with RUN closed. Height-mode picks are blocked until ready.")
-                        else:
-                            print(f"[HEIGHT PICK] Enabled; piece height={self.config.VISUAL_HEIGHT_PIECE_MM}mm. "
-                                  "Camera pose will be rebuilt from current board calibration before picking.")
-                except Exception as e:
-                    print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
-            if self._top_face_enabled():
-                try:
-                    geometry = PickGeometry.load(Path(self.project_dir) / self.config.VISUAL_PICK_GEOMETRY_PATH)
-                    frame, _ = self.cam_monitor.get_fresh_pick_snapshot()
-                    geometry.validate_context(
-                        self.actual_camera_index, frame.shape[1::-1],
-                        (self.config.VISUAL_BOARD_WIDTH_MM, self.config.VISUAL_BOARD_HEIGHT_MM),
-                        self.config.VISUAL_PIECE_HEIGHT_MM, np.load(self.perspective_path),
-                        self.config.VISUAL_GEOMETRY_CORNER_TOLERANCE_PX)
-                    self.top_face_pick_estimator = TopFacePickEstimator(
-                        geometry, self.config.VISUAL_PICK_MIN_CONFIDENCE,
-                        self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
-                        self.config.VISUAL_TOP_MAX_RESIDUAL, self.config.VISUAL_TOP_MIN_COVERAGE,
-                        self.config.VISUAL_TOP_MIN_BOX_FRACTION, self.config.VISUAL_TOP_RADIUS_MM,
-                        self.config.VISUAL_TOP_AMBIGUITY_MM,
-                        max_enclosing_area_ratio=self.config.VISUAL_TOP_MAX_ENCLOSING_AREA_RATIO,
-                        annulus_offset_mm=self.config.VISUAL_TOP_ANNULUS_OFFSET_MM,
-                        min_white_annulus_fraction=self.config.VISUAL_TOP_MIN_WHITE_ANNULUS_FRACTION,
-                        max_white_saturation=self.config.VISUAL_TOP_MAX_WHITE_SATURATION,
-                        min_white_value=self.config.VISUAL_TOP_MIN_WHITE_VALUE)
-                    print(f"[TOP PICK] Calibrated profile {geometry.profile_id} loaded.")
-                except Exception as exc:
-                    self.top_face_pick_estimator = None
-                    print(f"[TOP PICK] BLOCKED: {exc}. Run CALIBRATE_PICK_GEOMETRY.bat with RUN closed.")
+    def _load_vision_models(self):
+        models = Path(self.project_dir) / "models"
+        yolo_path = models / "best.pt"
+        pose_path = models / "cchess" / "pose_4_v6.onnx"
+        layout_path = models / "cchess" / "layout_nano_v3.onnx"
+        missing = [str(path.relative_to(self.project_dir)) for path in (yolo_path, pose_path, layout_path)
+                   if not path.is_file()]
+        if missing:
+            raise RuntimeError("Camera recognition unavailable. Missing model files: " + ", ".join(missing))
+        if YOLO is None:
+            raise RuntimeError(f"Camera recognition unavailable. Cannot import ultralytics: {_YOLO_IMPORT_ERROR}")
+        if not getattr(self.config, "CCHESS_RECOGNITION_ENABLED", True):
+            raise RuntimeError("Camera recognition unavailable. CChess recognition is disabled.")
+        try:
+            from src.modes.vsc_v3.vision.cchess_recognizer import CChessRecognizer
+
+            self.cchess_recognizer = CChessRecognizer(
+                pose_path, layout_path, use_gpu=getattr(self.config, "VISION_DEVICE", "auto") != "cpu")
+            self.model = YOLO(str(yolo_path))
+        except Exception as exc:
+            raise RuntimeError(f"Camera recognition unavailable. Cannot load vision models: {exc}") from exc
+        print("[INIT] CChess ONNX and YOLO models loaded.")
+
+    def _start_camera_monitor(self):
+        self.cam_monitor = CameraMonitor(
+            self.cap,
+            model=self.model,
+            perspective_path=self.perspective_path,
+            cchess_recognizer=self.cchess_recognizer,
+        )
+        self.cam_monitor.start()
+        self.yolo_detector = YoloSnapshotDetector(self.perspective_path, self.class_id_to_name)
+        print("[INIT] SnapshotDetector & CameraMonitor initialized (CChess ONNX enabled).")
+        if (pvp_pick_enabled(self.config) or getattr(self.config, "VISUAL_PICK_ENABLED", False)
+                or ring_pick_enabled(self.config)
+                or getattr(self.config, "VISUAL_BOARD_SYNC_REQUIRED", True)):
+            try:
+                self.pick_estimator = VisualPickEstimator(
+                    self.perspective_path,
+                    min_confidence=self.config.VISUAL_PICK_MIN_CONFIDENCE,
+                    max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
+                    foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
+                    board_mm=getattr(self.config, "VISUAL_HEIGHT_BOARD_MM", None),
+                    outside_margin_mm=getattr(self.config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", None),
+                )
+                # Box center remains occupancy evidence and the explicitly
+                # selected legacy path, never a top-face fallback.
+                self.center_pick_estimator = VisualPickEstimator(
+                    self.perspective_path,
+                    min_confidence=self.config.VISUAL_PICK_MIN_CONFIDENCE,
+                    max_offset_cells=self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
+                    foot_ratio=self.config.VISUAL_PICK_FOOT_RATIO,
+                    point_mode="center",
+                    board_mm=getattr(self.config, "VISUAL_HEIGHT_BOARD_MM", None),
+                    outside_margin_mm=getattr(self.config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", None),
+                )
+                self.board_reconciler = BoardReconciler(self.pick_estimator)
+                print("[INIT] ✅ Visual pick / board reconciliation initialized.")
+                if pvp_pick_enabled(self.config):
+                    print("[PVP PICK] Enabled: bbox foot -> table homography; logical-cell fallback.")
+                elif getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False):
+                    intrinsic_path = Path(self.project_dir) / self.config.VISUAL_CAMERA_INTRINSICS_PATH
+                    if not intrinsic_path.exists():
+                        print("[HEIGHT PICK] Camera intrinsics missing. Run CALIBRATE_CAMERA_INTRINSICS.bat "
+                              "--square-mm MEASURED_VALUE with RUN closed. Height-mode picks are blocked until ready.")
+                    else:
+                        print(f"[HEIGHT PICK] Enabled; piece height={self.config.VISUAL_HEIGHT_PIECE_MM}mm. "
+                              "Camera pose will be rebuilt from current board calibration before picking.")
+            except Exception as e:
+                print(f"[INIT] ⚠️ Visual pick disabled: cannot initialize estimator: {e}")
+        if self._top_face_enabled():
+            try:
+                geometry = PickGeometry.load(Path(self.project_dir) / self.config.VISUAL_PICK_GEOMETRY_PATH)
+                frame, _ = self.cam_monitor.get_fresh_pick_snapshot()
+                geometry.validate_context(
+                    self.actual_camera_index, frame.shape[1::-1],
+                    (self.config.VISUAL_BOARD_WIDTH_MM, self.config.VISUAL_BOARD_HEIGHT_MM),
+                    self.config.VISUAL_PIECE_HEIGHT_MM, np.load(self.perspective_path),
+                    self.config.VISUAL_GEOMETRY_CORNER_TOLERANCE_PX)
+                self.top_face_pick_estimator = TopFacePickEstimator(
+                    geometry, self.config.VISUAL_PICK_MIN_CONFIDENCE,
+                    self.config.VISUAL_PICK_MAX_OFFSET_CELLS,
+                    self.config.VISUAL_TOP_MAX_RESIDUAL, self.config.VISUAL_TOP_MIN_COVERAGE,
+                    self.config.VISUAL_TOP_MIN_BOX_FRACTION, self.config.VISUAL_TOP_RADIUS_MM,
+                    self.config.VISUAL_TOP_AMBIGUITY_MM,
+                    max_enclosing_area_ratio=self.config.VISUAL_TOP_MAX_ENCLOSING_AREA_RATIO,
+                    annulus_offset_mm=self.config.VISUAL_TOP_ANNULUS_OFFSET_MM,
+                    min_white_annulus_fraction=self.config.VISUAL_TOP_MIN_WHITE_ANNULUS_FRACTION,
+                    max_white_saturation=self.config.VISUAL_TOP_MAX_WHITE_SATURATION,
+                    min_white_value=self.config.VISUAL_TOP_MIN_WHITE_VALUE)
+                print(f"[TOP PICK] Calibrated profile {geometry.profile_id} loaded.")
+            except Exception as exc:
+                self.top_face_pick_estimator = None
+                print(f"[TOP PICK] BLOCKED: {exc}. Run CALIBRATE_PICK_GEOMETRY.bat with RUN closed.")
 
     def cleanup(self):
         """Retain owners on any shutdown failure; allow safe explicit retry."""
+        reader = getattr(self, "_calibration_capture_thread", None)
+        if reader is not None and reader.is_alive():
+            raise RuntimeError("Calibration reader still running; capture retained")
         camera = getattr(self, 'cam_monitor', None)
         if camera is not None:
             camera.stop()  # Must prove readers stopped before releasing capture/SDK.

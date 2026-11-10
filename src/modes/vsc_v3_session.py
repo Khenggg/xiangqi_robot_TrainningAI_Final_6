@@ -210,6 +210,7 @@ class VscV3Session:
                 raise RuntimeError('Startup cancelled')
             self.state = GameState(allow_mouse_move=self.config.DRY_RUN)
             self.hw = HardwareManager(self.config, str(self.root))
+            self.hw.startup_cancelled = self.cancelled
             self.hw.initialize_all()
             self.input = InputHandler(self.state, self.hw)
             if self.cancelled is not None and self.cancelled.is_set():
@@ -294,6 +295,10 @@ class VscV3Session:
         if state.turn == 'b' and not state.game_over and not state.physical_sync_fault:
             self._tick_ai()
         self.showcase.tick()
+
+    def close_display(self):
+        if self.hw.cam_monitor is not None:
+            self.hw.cam_monitor.close_display()
 
     def _tick_ai(self):
         from src.modes.vsc_v3.core import xiangqi
