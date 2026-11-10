@@ -462,7 +462,7 @@ class BoardRenderer:
                     if game_state.get("physical_enable_pending"):
                         message = "Press F10 to enable the robot (F9 to cancel)"
                     else:
-                        message = "Robot READ-ONLY. Press F9 then F10 to enable the robot!"
+                        message = "Robot READ-ONLY. Check the auto-enable state; F9/F10 to retry."
                     accent = AMBER_COLOR
                 else:
                     message = "Robot turn — waiting to execute the move"
