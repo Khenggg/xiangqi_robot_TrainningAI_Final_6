@@ -588,12 +588,16 @@ class FR5Robot:
         }
 
 
+    def _outside_grid_margin_limits_mm(self):
+        return getattr(config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", 0.0), 6.0
+
     def board_to_pose_bilinear(self, col, row, z_height, rotation=None):
         if not all(math.isfinite(float(v)) for v in (col, row, z_height)):
             raise ValueError("Grid target must be finite")
-        margin = float(getattr(config, "VISUAL_PICK_OUTSIDE_MARGIN_MM", 0.0))
-        if not math.isfinite(margin) or not 0 <= margin <= 6:
-            raise ValueError("Outside-grid margin must be within 0..6 mm")
+        configured_margin, max_margin = self._outside_grid_margin_limits_mm()
+        margin = float(configured_margin)
+        if not math.isfinite(margin) or not 0 <= margin <= max_margin:
+            raise ValueError(f"Outside-grid margin must be within 0..{max_margin:g} mm")
         corners = self._validated_corners()
         width = min(np.linalg.norm(corners[1]-corners[0]), np.linalg.norm(corners[2]-corners[3]))
         height = min(np.linalg.norm(corners[3]-corners[0]), np.linalg.norm(corners[2]-corners[1]))

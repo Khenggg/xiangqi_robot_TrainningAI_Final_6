@@ -1,0 +1,1 @@
+{"event": "Stop", "session_id": "01a1c40e-9ebc-74f1-a7e4-9280d4ac1d7f", "turn_id": "01a1c40e-a087-7ea2-b25a-3a4e2fe1e9ff", "cwd": "C:\\New get real\\OJT Xiangqi robot arm project\\xiangqi_robot_TrainningAI_Final_6", "transcript_path": null, "saved_at": 1794290692}

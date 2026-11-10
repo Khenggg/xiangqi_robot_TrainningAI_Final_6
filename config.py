@@ -66,17 +66,17 @@ GRIPPER_OPEN_MAX_PULSE_SEC = 0.25
 
 # Short opening pulse used only when a caller explicitly requests the "release"
 # action. Standard board and capture-bin releases use OPEN_MAX_PULSE_SEC above.
-GRIPPER_RELEASE_PULSE_SEC = 0.06
+GRIPPER_RELEASE_PULSE_SEC = 0.05
 
 # GRIP: after descending to PICK_Z, close from the pre-pick gap onto the piece
 # before lifting it.
-GRIPPER_CLOSE_PULSE_SEC = 0.06
+GRIPPER_CLOSE_PULSE_SEC = 0.08
 
 # PREPOSITION / SETTLE: close partway from fully open. This sets the gap before
 # the pick approach and restores it after lifting clear of a board release or
 # returning home from the capture bin.
 # A longer pulse narrows the gap. Keep the jaws clear of the hard stop.
-GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC = 0.05
+GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC = 0.055
 
 # Motor-off wait after either opening pulse. The next stage waits for this delay.
 GRIPPER_OPEN_SETTLE_SEC = 0.25
@@ -109,7 +109,7 @@ ALLOW_IDENTITY_WOBJ_AS_BASE = True
 # Đây là profile ứng viên, CHƯA đo trên robot hiện tại.
 MOTION_PROFILE_SOURCE = "origin/feature/visual-correction-v2@fb0598d"
 MOTION_PROFILE_VERIFIED = False
-ROTATION = [180, 0, -73.2]
+ROTATION = [180, 0, -110]
 
 # --- PHYSICAL PICK / PLACE MOTION PROFILE ---
 # Các pose Cartesian FR5 gồm [X, Y, Z, Rx, Ry, Rz]. XY được nội suy từ R1-R4;

@@ -1002,3 +1002,5 @@ These predate the 2026-11-09 session and remain OPEN. Do not report a green focu
 ## 2026-11-10 fix/fix-capsule — physical camera acceptance still open
 
 The missing source weights and gripper viewer exception are addressed locally and verified offline. The latest physical VS ROBOT log selected index 0 after index 2 failed. The local source runtime now verifies CUDA vision inference offline. The current identity of the board camera, live grid alignment, sustained feed, gameplay latency and controller behavior remain unverified. Source checkouts still need the three ignored vision weights. See the scoped evidence in `CURRENT_STATE.md`.
+
+VS ROBOT's 10 mm edge-pick margin is aligned across camera and robot code. Physical clearance in the additional 6–10 mm band remains open.

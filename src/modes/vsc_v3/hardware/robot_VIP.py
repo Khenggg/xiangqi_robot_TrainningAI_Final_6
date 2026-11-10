@@ -8,6 +8,9 @@ from src.vision.pick_consensus import PickTargetUnavailable as CurrentPickUnavai
 from src.modes.vsc_v3.vision.pick_consensus import PickTargetUnavailable as DonorPickUnavailable
 
 class FR5Robot(CurrentFR5Robot):
+    def _outside_grid_margin_limits_mm(self):
+        return config.VISUAL_PICK_OUTSIDE_MARGIN_MM, 10.0
+
     def move_piece(self, *args, require_visual_target=False, **kwargs):
         for name in ('refresh_moving_visual_target', 'verify_capture_cleared'):
             callback = kwargs.get(name)

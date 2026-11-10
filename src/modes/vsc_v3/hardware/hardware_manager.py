@@ -469,7 +469,21 @@ class HardwareManager:
         """
         if pvp_pick_enabled(getattr(self, "config", None)):
             print("[PVP PICK] Using legacy PvP foot-point/table-plane picker.")
-            return self.get_visual_pick_targets(expected_cells)
+            targets = self.get_visual_pick_targets(expected_cells)
+            for name, target in targets.items():
+                if target is None:
+                    continue
+                # Use the same taught geometry and bounds as pick_at. Turning a
+                # rejected measurement into None would enable logical fallback.
+                try:
+                    self.robot.board_to_pose_bilinear(
+                        target.col, target.row, self.config.PICK_Z,
+                        rotation=getattr(self.config, "PICK_TOOL_ROTATION", None))
+                except ValueError as exc:
+                    message = f"{exc}: {name} pick at grid ({target.col:.3f}, {target.row:.3f})"
+                    print(f"[PVP PICK] Blocked: {message}")
+                    raise ValueError(message) from exc
+            return targets
         if ring_pick_enabled(getattr(self, "config", None)):
             return resolve_ring_pick_targets(self, expected_cells)
         if not current_pick_enabled(getattr(self, "config", None)):

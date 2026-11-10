@@ -8,6 +8,8 @@ The outer application still owns the home menu, window scaling and exit confirma
 
 Physical VS ROBOT needs `models/best.pt` and both ONNX weights in `models/cchess/`. Startup checks the models, opens the camera and asks for grid approval before enabling the robot. By default it tries the automatic corner preview and offers manual four-corner calibration if it cannot find a stable grid. The launcher checkbox requests manual calibration directly. The live Camera Monitor opens during gameplay.
 
+VS ROBOT uses a 10 mm margin per board axis beyond the outer intersections for measured pickup points. The same mode setting feeds the camera filter and the robot pose check. The robot prechecks the selected PvP target using the taught R1–R4 geometry. Other modes use the shared 6 mm limit. The wider edge clearance still needs physical verification.
+
 The 3D showcase is an observational adapter, not part of donor decisions. Physical display borrows the existing SDK connection for arm telemetry and observes gripper commands; it never opens another robot connection. Committed board positions, including reset/rollback/scans, are projected with stable piece identities. Simulation replays AI motion after the donor commits. Projection errors cannot turn hardware failure into success, reject a successful move, or commit a FEN. Board-only and --no-viewer do not open the showcase.
 
 This preserves the vsc-v3 in-memory gameplay model; it does not add the shared runtime's durable journal/typed transaction semantics to the donor. Hardware absence never counts as successful physical motion. Actual camera/FR3 acceptance and visual inspection of an entire 3D game remain required; automated checks use mocked physical IO.

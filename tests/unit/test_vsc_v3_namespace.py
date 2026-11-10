@@ -1,6 +1,10 @@
 """Mode-local donor logic; physical commands are mocked throughout."""
 from types import SimpleNamespace
 from unittest.mock import Mock
+from pathlib import Path
+import json
+
+import numpy as np
 import pytest
 import config as shared_config
 from src.modes.vsc_v3 import config as scoped_config
@@ -8,6 +12,7 @@ from src.modes.vsc_v3.adapter_config import configure
 from src.modes.vsc_v3.hardware.hardware_manager import HardwareManager
 from src.modes.vsc_v3.hardware.robot_VIP import FR5Robot
 from src.hardware.robot_VIP import FR5Robot as CurrentRobot, RobotCommandError
+from src.modes.vsc_v3.vision.visual_pick_estimator import GridTarget, VisualPickEstimator
 
 
 def test_donor_modules_and_config_are_distinct_from_other_modes(tmp_path):
@@ -36,6 +41,46 @@ def test_current_hardware_profile_and_wiring_override_donor_values(tmp_path):
     assert scoped_config.GRIPPER_OPEN_DO_ID == 0
     assert scoped_config.GRIPPER_CLOSE_DO_ID == 1
     assert issubclass(FR5Robot, CurrentRobot)
+
+
+@pytest.mark.parametrize("row", [-0.201, -0.25, None])
+def test_pvp_candidate_uses_wider_robot_boundary_without_falling_back_on_rejection(tmp_path, row):
+    profile_path = Path(__file__).resolve().parents[2] / shared_config.PHYSICAL_TEACHING_POINTS_FILE
+    robot = FR5Robot(dry_run=True)
+    robot.teaching_points = json.loads(profile_path.read_text(encoding="utf-8"))["points"]
+
+    hw = HardwareManager.__new__(HardwareManager)
+    hw.robot = robot
+    hw.config = SimpleNamespace(VISUAL_PVP_PICK_ENABLED=True, PICK_Z=shared_config.PICK_Z)
+    perspective = tmp_path / "perspective.npy"
+    # Test homography maps a 40 px grid pitch with origin at image (80, 80).
+    np.save(perspective, [[0.025, 0, -2], [0, 0.025, -2], [0, 0, 1]])
+    hw.pick_estimator = VisualPickEstimator(
+        perspective, board_mm=scoped_config.VISUAL_HEIGHT_BOARD_MM,
+        outside_margin_mm=scoped_config.VISUAL_PICK_OUTSIDE_MARGIN_MM)
+    detections = []
+    if row is not None:
+        x = (7.768 + 2) / 0.025
+        y = (row + 2) / 0.025
+        detections = [(0, 0.81, (x - 10, y - 17, x + 10, y + 3))]
+    hw.cam_monitor = Mock(get_fresh_snapshot=Mock(return_value=(object(), detections)))
+    expected = {"moving": (8, 0)}
+
+    if row == -0.25:
+        # Exercise the authoritative precheck even if vision supplies a
+        # candidate beyond its own search bounds.
+        hw.get_visual_pick_targets = Mock(return_value={"moving": GridTarget(7.768, row, 0.81, 0.34)})
+        with pytest.raises(ValueError, match=r"Grid target outside board: moving pick at grid \(7.768, -0.250\)"):
+            hw.get_robot_center_pick_targets(expected)
+    elif row is None:
+        assert hw.get_robot_center_pick_targets(expected) == {"moving": None}
+    else:
+        target = hw.get_robot_center_pick_targets(expected)["moving"]
+        assert target.row == pytest.approx(row, abs=1e-6)
+        shared_robot = CurrentRobot(dry_run=True)
+        shared_robot.teaching_points = robot.teaching_points
+        with pytest.raises(ValueError, match="Grid target outside board"):
+            shared_robot.board_to_pose_bilinear(target.col, target.row, shared_config.PICK_Z)
 
 
 def test_real_manager_constructor_selects_fixed_profile_without_sdk_calls(tmp_path):

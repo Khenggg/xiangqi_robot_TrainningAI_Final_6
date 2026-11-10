@@ -106,8 +106,8 @@ VISUAL_RING_PICK_ENABLED = False  # Ring priority applies only when PvP mode is 
 VISUAL_CURRENT_PICK_ENABLED = True  # With PvP disabled, Ring=False/Current=False blocks picking.
 VISUAL_PICK_MIN_CONFIDENCE = 0.45
 VISUAL_PICK_MAX_OFFSET_CELLS = 0.25
-# Extra pick area beyond each playing-grid edge, including corners; keep R1-R4 unchanged.
-# Converted to grid units using VISUAL_HEIGHT_BOARD_MM. This is a limit, not an XY offset.
+# VS ROBOT camera and robot use the same limit beyond the outer intersections.
+# Robot validation uses the taught R1-R4 geometry and preserves measured XY.
 VISUAL_PICK_OUTSIDE_MARGIN_MM = 10.0
 VISUAL_PICK_FOOT_RATIO = 0.85
 VISUAL_PICK_SAMPLE_COUNT = 3
