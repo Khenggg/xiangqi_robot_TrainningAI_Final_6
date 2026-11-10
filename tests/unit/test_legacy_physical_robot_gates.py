@@ -66,12 +66,25 @@ def test_land_failure_stops_before_grip_and_reports_stage():
     assert result.failed_stage==MotionStage.LAND
     assert result.last_completed_stage==MotionStage.APPROACH
     assert result.backend_code==112
-    arm.robot.SetToolDO.assert_not_called()
+    # Only the pre-approach open-max and safe-gap pulses ran; the grip close never did.
+    active=[c for c in arm.robot.SetToolDO.call_args_list
+            if c.kwargs.get("status")==config.GRIPPER_ACTIVE_STATUS]
+    assert [c.kwargs["id"] for c in active]==[config.GRIPPER_OPEN_DO_ID, config.GRIPPER_CLOSE_DO_ID]
     assert arm.robot.MoveCart.call_count==2
 
 
-def test_gripper_failure_stops_before_lift_or_place():
+def test_preposition_gripper_failure_stops_before_any_motion():
     arm=ready_robot(); arm.robot.SetToolDO.return_value=77
+    with patch("src.hardware.robot_VIP.time.sleep"):
+        result=arm.move_piece(0,0,0,1,False)
+    assert not result; assert result.failed_stage==MotionStage.PREPOSITION
+    arm.robot.MoveCart.assert_not_called()
+
+
+def test_gripper_failure_stops_before_lift_or_place():
+    arm=ready_robot()
+    # Open-max and safe-gap pulses (5 SetToolDO calls each) succeed; the grip close fails.
+    arm.robot.SetToolDO.side_effect=[0]*10+[77]*20
     with patch("src.hardware.robot_VIP.time.sleep"):
         result=arm.move_piece(0,0,0,1,False)
     assert not result; assert result.failed_stage==MotionStage.GRIP

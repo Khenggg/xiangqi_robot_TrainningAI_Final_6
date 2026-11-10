@@ -11,10 +11,10 @@ $closePattern = '(?m)^(GRIPPER_CLOSE_DO_ID\s*=\s*)\d+'
 if ([regex]::Matches($text, $openPattern).Count -ne 1 -or [regex]::Matches($text, $closePattern).Count -ne 1) {
     throw 'Expected exactly one open/close DO assignment; config.py was not changed.'
 }
-$updated = [regex]::Replace($text, $openPattern, '${1}1')
-$updated = [regex]::Replace($updated, $closePattern, '${1}0')
+$updated = [regex]::Replace($text, $openPattern, '${1}0')
+$updated = [regex]::Replace($updated, $closePattern, '${1}1')
 if ($updated -eq $text) {
-    Write-Host 'Already configured: DO1 OPEN, DO0 CLOSE.'
+    Write-Host 'Already configured: DO0 OPEN, DO1 CLOSE.'
     return
 }
 $backup = $config + '.before-do-swap-' + [guid]::NewGuid().ToString('N')
@@ -22,6 +22,6 @@ Copy-Item -LiteralPath $config -Destination $backup
 $temporary = $config + '.do-patch-' + [guid]::NewGuid().ToString('N')
 [IO.File]::WriteAllText($temporary, $updated, (New-Object Text.UTF8Encoding($false)))
 Move-Item -LiteralPath $temporary -Destination $config -Force
-Write-Host 'Applied: DO1 OPEN, DO0 CLOSE. Pulse timings, camera/IP and GPU runtime are unchanged.'
+Write-Host 'Applied: DO0 OPEN, DO1 CLOSE. Pulse timings, camera/IP and GPU runtime are unchanged.'
 Write-Host ('Config backup: ' + $backup)
 Write-Host 'Open start.bat again. No GPU reinstallation needed.'

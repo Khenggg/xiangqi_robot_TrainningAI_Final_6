@@ -1,17 +1,25 @@
-# Bản vá DO1 mở / DO0 đóng
+# Bản vá DO0 mở / DO1 đóng
 
-Dùng cho `xiangqi.zip` Windows GPU light ngày 09/11/2026. Bản ZIP đầy đủ cũ chưa có thay đổi này; cập nhật source bằng Git không tự sửa các bản ZIP đã tải.
+Chiều kẹp chuẩn của project là **DO0 mở, DO1 đóng** — khớp lần thử từng chân trên robot sau khi đổi dây ngày 02/11/2026 (xem `CURRENT_STATE.md`, `KNOWN_ISSUES.md`). Bản vá cũ `xiangqi-do1-open-do0-close-patch.zip` đảo ngược chiều này: **không dùng nữa**.
+
+Cách khuyến nghị: tải bản ZIP đầy đủ mới ở đầu `README.md`; bản đó đã có chiều DO và luồng kẹp mới, không cần vá.
+
+Nếu máy đang chạy capsule cũ (đã bị đổi sang DO1 mở) và chỉ muốn sửa chiều DO:
 
 1. Thoát hẳn Xiangqi.
-2. Tải [xiangqi-do1-open-do0-close-patch.zip](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-do1-open-do0-close-patch.zip).
-3. Giải nén **vào thư mục đang có `start.bat` và `app/`**. Hai file `APPLY_DO_PATCH.bat` và `apply_do_patch.ps1` phải nằm cạnh `start.bat`, không nằm trong một thư mục con mới.
-4. Mở **APPLY_DO_PATCH.bat**. Chờ dòng `Applied: DO1 OPEN, DO0 CLOSE` hoặc `Already configured`.
-5. Mở lại **start.bat**. Không chạy lại INSTALL hay tải lại thư viện GPU.
+2. Chép `tools/capsule/APPLY_DO_PATCH.bat` và `tools/capsule/apply_do_patch.ps1` của nhánh này vào **thư mục đang có `start.bat` và `app/`** (nằm cạnh `start.bat`, không trong thư mục con).
+3. Mở **APPLY_DO_PATCH.bat**. Chờ dòng `Applied: DO0 OPEN, DO1 CLOSE` hoặc `Already configured`.
+4. Mở lại **start.bat**. Không chạy lại INSTALL hay tải lại thư viện GPU.
 
-Bản vá chỉ sửa hai giá trị trong `app/config.py`: `GRIPPER_OPEN_DO_ID = 1`, `GRIPPER_CLOSE_DO_ID = 0`. Nó giữ camera/IP, profile tọa độ, thời gian xung, dữ liệu ván và runtime. Có bản sao lưu `app/config.py.before-do-swap-...`; chạy lại bản vá khi đã đúng cấu hình sẽ không thay đổi file.
+Bản vá chỉ sửa hai giá trị trong `app/config.py`: `GRIPPER_OPEN_DO_ID = 0`, `GRIPPER_CLOSE_DO_ID = 1`, có sao lưu `app/config.py.before-do-swap-...`; chạy lại khi đã đúng sẽ không đổi file. Bản vá **không** cập nhật luồng gắp/đặt và thời gian xung mới bên dưới — muốn có những thay đổi đó thì dùng ZIP đầy đủ mới.
 
-Thời gian giữ nguyên: mở tối đa 0,30s; đóng gắp 0,80s; mở nhả 0,06s; khép khe di chuyển 0,06s; deadtime 0,10s; chờ ổn định 0,25s. Hai DO luôn được đưa về OFF trước/sau mỗi xung. Chiều điều khiển phải khớp dây thực tế; chưa nghiệm thu bản đổi chân trên robot thật.
+## Luồng kẹp hiện tại
 
-Bản vá này độc lập với [bản vá R1–R4](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-r1-r4-fix.zip). Nếu chưa áp dụng R1–R4 thì vẫn cần làm riêng; hai bản vá không thay thế nhau. `--check` so cấu hình với bản đóng gói gốc nên có thể báo config đã thay đổi; khởi động bình thường cho phép sửa file này.
+- Trước **mỗi** lần gắp (kể cả hai lần gắp trong nước ăn quân): mở tối đa rồi khép về khe an toàn, sau đó mới tiếp cận, hạ xuống và đóng kẹp.
+- Đặt quân: hạ xuống, mở tối đa, nhấc lên, rồi khép về khe an toàn.
+- Thả quân bị ăn vào khay: mở tối đa, về vị trí phục vụ, rồi khép về khe an toàn.
+- Không gắp khi phần mềm đang tin là kẹp còn đóng (có thể còn giữ quân).
+
+Thời gian xung: mở tối đa 0,25s; đóng gắp 0,20s (bắt đầu từ khe an toàn); khép khe an toàn 0,06s; mở nhả ngắn 0,06s (chỉ khi được gọi riêng); deadtime 0,10s; chờ ổn định 0,25s. Hai DO luôn về OFF trước/sau mỗi xung. Xung đóng 0,20s cần được kiểm tra lực kẹp trên robot thật.
 
 Máy chạy source: cập nhật nhánh `fix/fix-capsule` bằng Git, không dùng script dành cho thư mục capsule. Nếu đã chỉnh config tại máy đó, kiểm tra hai giá trị DO sau khi cập nhật.

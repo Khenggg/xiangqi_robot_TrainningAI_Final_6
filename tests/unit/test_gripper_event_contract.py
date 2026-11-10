@@ -61,7 +61,7 @@ def test_short_release_opens_only_then_leaves_both_outputs_off():
     assert robot.gripper_command_known and not robot.gripper_closed_estimate
 
 
-def test_board_place_releases_before_lift_without_reclosing():
+def test_board_place_opens_fully_lifts_then_returns_to_safe_gap():
     robot = FR5Robot()
     robot.dry = True
     robot.board_to_pose = Mock(side_effect=lambda col, row, z, **kw: [col, row, z, 180, 0, 0])
@@ -70,8 +70,24 @@ def test_board_place_releases_before_lift_without_reclosing():
     robot.movel_pose = Mock(side_effect=lambda pose: calls.append(pose[2]))
     robot.gripper_ctrl = Mock(side_effect=lambda action: calls.append(action))
     robot.place_at(4, 2)
-    assert calls == ["approach", config.PLACE_Z, config.GRIPPER_ACTION_RELEASE, config.SAFE_Z]
-    robot.gripper_ctrl.assert_called_once_with(config.GRIPPER_ACTION_RELEASE)
+    assert calls == ["approach", config.PLACE_Z, config.GRIPPER_ACTION_OPEN_MAX, config.SAFE_Z,
+                     config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP]
+
+
+def test_every_pick_reestablishes_safe_gap_before_approach():
+    robot = FR5Robot()
+    robot.dry = True
+    robot.gripper_command_known = True
+    robot.gripper_closed_estimate = False
+    robot.board_to_pose = Mock(side_effect=lambda col, row, z, **kw: [col, row, z, 180, 0, 0])
+    robot.board_to_pose_bilinear = robot.board_to_pose
+    calls = []
+    robot.move_safe_pose = Mock(side_effect=lambda *a, **kw: calls.append("approach"))
+    robot.movel_pose = Mock(side_effect=lambda pose: calls.append(pose[2]))
+    robot.gripper_ctrl = Mock(side_effect=lambda action: calls.append(action))
+    robot.pick_at(4, 2)
+    assert calls[:5] == [config.GRIPPER_ACTION_OPEN_MAX, config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP,
+                         "approach", config.PICK_Z, config.GRIPPER_ACTION_CLOSE]
 
 
 def test_failed_release_blocks_lift_and_attempts_both_outputs_off():

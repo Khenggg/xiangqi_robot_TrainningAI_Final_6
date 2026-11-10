@@ -33,8 +33,8 @@ def test_current_hardware_profile_and_wiring_override_donor_values(tmp_path):
     for name in ('GRIPPER_OPEN_DO_ID','GRIPPER_CLOSE_DO_ID','PHYSICAL_TEACHING_POINTS_FILE',
                  'ROBOT_FRAME_POLICY','SAFE_Z','PICK_Z','PLACE_Z','ROTATION','MOVE_SPEED'):
         assert getattr(scoped_config, name) == getattr(shared_config, name)
-    assert scoped_config.GRIPPER_OPEN_DO_ID == 1
-    assert scoped_config.GRIPPER_CLOSE_DO_ID == 0
+    assert scoped_config.GRIPPER_OPEN_DO_ID == 0
+    assert scoped_config.GRIPPER_CLOSE_DO_ID == 1
     assert issubclass(FR5Robot, CurrentRobot)
 
 

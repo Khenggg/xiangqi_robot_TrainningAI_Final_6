@@ -1,14 +1,14 @@
-# [⬇ TẢI XIANGQI.ZIP — WINDOWS X64, ƯU TIÊN GPU](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109-fixed/xiangqi.zip)
+# [⬇ TẢI XIANGQI.ZIP — WINDOWS X64, ƯU TIÊN GPU](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261110-do0/xiangqi.zip)
 
-**Bản ZIP hoàn chỉnh mới đã tích hợp cả sửa lỗi R1–R4 và DO1 mở / DO0 đóng. Không cần tải hoặc chạy bản vá riêng.** Giữ nguyên thời gian xung và các luồng hiện tại.
+**Bản ZIP hoàn chỉnh mới (10/11/2026) dùng chiều kẹp DO0 mở / DO1 đóng và luồng kẹp mới:** mở tối đa rồi khép về khe an toàn trước mỗi lần gắp, đặt quân bằng mở tối đa rồi khép lại khe an toàn sau khi nhấc. Thời gian xung mới: mở tối đa 0,25s, đóng gắp 0,20s. Đã gồm sửa lỗi R1–R4 và các sửa lỗi mô phỏng/web 3D mới nhất. Không cần bản vá riêng. Chi tiết: [luồng kẹp](docs/GRIPPER_DO_PATCH.md).
 
-Máy đang dùng ZIP cũ có thể tiếp tục dùng [bản vá R1–R4](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-r1-r4-fix.zip) và [bản vá DO](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-do1-open-do0-close-patch.zip), hoặc tải bản đầy đủ mới. [Hướng dẫn vá cho bản cũ](docs/GRIPPER_DO_PATCH.md).
+**Không dùng bản vá `xiangqi-do1-open-do0-close-patch.zip` cũ** — nó đổi sang DO1 mở, ngược với dây thực tế. Máy đang dùng ZIP cũ chưa có R1–R4 vẫn có thể dùng [bản vá R1–R4](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-r1-r4-fix.zip), nhưng nên tải bản đầy đủ mới.
 
-**Cập nhật máy đã dùng bản cũ:** thoát ứng dụng và sao lưu `app/config.py` nếu đã chỉnh riêng. Có thể giải nén ZIP mới chồng lên đúng thư mục cũ để giữ `runtime/`, `state/` và dữ liệu ván; sau đó chỉ khôi phục các giá trị camera/IP riêng nếu cần, không chép lại nguyên config cũ vì sẽ đảo chiều DO trở lại. Bản mới không yêu cầu chạy hai bản vá riêng.
+**Cập nhật máy đã dùng bản cũ:** thoát ứng dụng và sao lưu `app/config.py` nếu đã chỉnh riêng. Có thể giải nén ZIP mới chồng lên đúng thư mục cũ để giữ `runtime/`, `state/` và dữ liệu ván; sau đó chỉ khôi phục các giá trị camera/IP riêng nếu cần, không chép lại nguyên config cũ vì sẽ đảo chiều DO và thời gian xung trở lại.
 
 Giải nén **toàn bộ ZIP** → lần đầu mở **INSTALL.bat** (cần Internet để cài thư viện GPU/CPU) → những lần sau mở **start.bat**. ZIP khoảng **274 MiB**; lúc cài cần thêm vài GB dung lượng.
 
-Bản mới từ `fix/fix-capsule`: camera thử 0–2, tự enable khi kiểm tra đạt, Player vs Robot dùng logic `vsc-v3` riêng và giữ cấu hình phần cứng hiện tại; web 3D tiếp tục hiển thị. Đã kiểm tra YOLO và ONNX chạy CUDA trên GTX 1650. Xem [hướng dẫn capsule](docs/CAPSULE_OPERATOR.md), [luồng Player vs Robot](docs/HVR_VSC_V3.md) và [SHA256](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109-fixed/xiangqi.zip.sha256).
+Bản mới từ `fix/fix-capsule`: camera thử 0–2, tự enable khi kiểm tra đạt, Player vs Robot dùng logic `vsc-v3` riêng và giữ cấu hình phần cứng hiện tại; web 3D tiếp tục hiển thị. Đã kiểm tra YOLO và ONNX chạy CUDA trên GTX 1650. Xem [hướng dẫn capsule](docs/CAPSULE_OPERATOR.md), [luồng Player vs Robot](docs/HVR_VSC_V3.md) và [SHA256](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261110-do0/xiangqi.zip.sha256).
 
 # Xiangqi Robot — Sổ tay sử dụng
 

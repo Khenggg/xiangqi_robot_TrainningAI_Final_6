@@ -20,13 +20,13 @@ def test_real_patch_preserves_local_settings_and_is_idempotent(tmp_path):
     config = root / 'app/config.py'
     config.parent.mkdir(parents=True)
     before = ('# Cấu hình riêng\r\nROBOT_IP = "192.168.58.9"\r\nVIDEO_SOURCE = 1\r\n'
-              'GRIPPER_OPEN_DO_ID = 0  # mở\r\nGRIPPER_CLOSE_DO_ID = 1  # đóng\r\n'
+              'GRIPPER_OPEN_DO_ID = 1  # mở\r\nGRIPPER_CLOSE_DO_ID = 0  # đóng\r\n'
               'GRIPPER_CLOSE_PULSE_SEC = 0.8\r\n')
     config.write_bytes(before.encode('utf-8'))
     result = run_patch(root)
     assert result.returncode == 0, result.stderr
-    expected = before.replace('GRIPPER_OPEN_DO_ID = 0', 'GRIPPER_OPEN_DO_ID = 1').replace(
-        'GRIPPER_CLOSE_DO_ID = 1', 'GRIPPER_CLOSE_DO_ID = 0')
+    expected = before.replace('GRIPPER_OPEN_DO_ID = 1', 'GRIPPER_OPEN_DO_ID = 0').replace(
+        'GRIPPER_CLOSE_DO_ID = 0', 'GRIPPER_CLOSE_DO_ID = 1')
     assert config.read_bytes() == expected.encode('utf-8')
     backups = list(config.parent.glob('config.py.before-do-swap-*'))
     assert len(backups) == 1 and backups[0].read_bytes() == before.encode('utf-8')
