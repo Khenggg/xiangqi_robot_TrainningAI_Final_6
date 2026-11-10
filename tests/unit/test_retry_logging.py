@@ -70,7 +70,7 @@ def test_retry_rejected_logs_pvp_mode(caplog):
     from src.ui.input_handler import InputHandler
 
     state = SimpleNamespace(
-        session_profile=SimpleNamespace(game_mode="HUMAN_VS_HUMAN"),
+        session_profile=SimpleNamespace(game_mode="HUMAN_VS_HUMAN_ROBOT"),
         game_epoch=1,
         board_revision=0,
         pending_ai_move=None,
@@ -89,25 +89,9 @@ def test_retry_rejected_logs_pvp_mode(caplog):
         handler._retry_visual_pick(source="Y")
 
     record = next(r for r in _events(caplog) if r.event == "ui.retry_rejected")
-    assert record.event_data["mode"] == "HUMAN_VS_HUMAN"
+    assert record.event_data["mode"] == "HUMAN_VS_HUMAN_ROBOT"
     assert record.event_data["source"] == "Y"
     assert record.event_data["reason"] == "NO_PENDING_MOVE"
-
-
-def test_self_play_retry_rejected_logs(caplog):
-    from src.core.self_play_controller import SelfPlayController
-
-    state = SimpleNamespace(session_profile=SimpleNamespace(game_mode="ROBOT_VS_ROBOT"))
-    hw = SimpleNamespace(motion_worker=SimpleNamespace(busy=False))
-    controller = SelfPlayController(state, hw)
-
-    with caplog.at_level("WARNING", logger="xiangqi"):
-        assert controller.retry_visual_pick(source="Y") is False
-
-    record = next(r for r in _events(caplog) if r.event == "ui.retry_rejected")
-    assert record.event_data["mode"] == "ROBOT_VS_ROBOT"
-    assert record.event_data["source"] == "Y"
-    assert record.event_data["reason"] == "NOT_PICK_PAUSED"
 
 
 def test_hvr_retry_requested_logs(caplog, monkeypatch):

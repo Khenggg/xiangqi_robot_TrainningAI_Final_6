@@ -64,10 +64,8 @@ HOME_MODE_PHYSICAL_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 180, 500, 300, 96)
 # four-corner camera calibration window when the session starts.
 HOME_PHYSICAL_CAMERA_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 160, 600, 340, 28)
 HOME_VS_ROBOT_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 240, 650, 480, 104)
-HOME_SELF_PLAY_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 310, 810, 300, 58)
-HOME_HUMAN_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 10, 810, 300, 58)
-HOME_ROBOT_PVP_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 310, 878, 300, 52)
-HOME_JOIN_PVP_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 10, 878, 300, 52)
+HOME_ROBOT_PVP_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 310, 810, 300, 58)
+HOME_JOIN_PVP_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 10, 810, 300, 58)
 HOME_SETTINGS_RECT = pygame.Rect(SCREEN_WIDTH - 230, 42, 180, 58)
 SETTINGS_BACK_RECT = pygame.Rect(48, 42, 168, 58)
 DEBUG_STATUS_RECT = pygame.Rect(886, 330, 320, 70)
@@ -283,13 +281,10 @@ class BoardRenderer:
         camera = bool(game_state.get("camera_enabled", True))
         robot_moves = bool(game_state.get("robot_moves_enabled", True))
         simulation = bool(game_state.get("simulation_enabled", True))
-        self_play_mode = game_state.get("game_mode") == "ROBOT_VS_ROBOT"
         robot_pvp = game_state.get("game_mode") == "HUMAN_VS_HUMAN_ROBOT"
         allow_mouse = bool(game_state.get("allow_mouse", False))
         confirm_label = (("ĐI CHUỘT", "TỰ XÁC NHẬN") if allow_mouse
                          else ("XÁC NHẬN", "NƯỚC ĐI"))
-        if self_play_mode:
-            confirm_label = ("NƯỚC TIẾP", "ROBOT VS ROBOT")
 
         actions = []
         if camera:
@@ -358,8 +353,6 @@ class BoardRenderer:
             key = {pygame.K_v: "V", pygame.K_SPACE: "SPACE", pygame.K_m: "M",
                    pygame.K_z: "Z", pygame.K_t: "T", pygame.K_h: "H",
                    pygame.K_F12: "F12", pygame.K_o: "O"}.get(key_code, "?")
-            if key_code == pygame.K_SPACE and game_state.get("game_mode") == "ROBOT_VS_ROBOT":
-                key = "F7"
             button_color = (139, 48, 38) if key_code == pygame.K_m and emergency_active else color
             pygame.draw.rect(self.screen, button_color, rect, border_radius=12)
             key_surf = self.ui_font.render(key, True, (255, 255, 255))
@@ -455,10 +448,7 @@ class BoardRenderer:
             accent = AMBER_COLOR
         else:
             mode = game_state.get("game_mode", "HUMAN_VS_ROBOT")
-            if mode == "ROBOT_VS_ROBOT":
-                message = "Robot vs robot — Continuous, F8: dừng"
-                accent = JADE_COLOR
-            elif mode == "HUMAN_VS_HUMAN_ROBOT":
+            if mode == "HUMAN_VS_HUMAN_ROBOT":
                 room = game_state.get("pvp_room") or {}
                 side = "Đỏ (máy chủ)" if game_state.get("turn") == "r" else "Đen (cửa sổ riêng)"
                 message = f"Phòng {room.get('code', '...')} · Lượt {side} — chọn nước bằng chuột"
@@ -665,10 +655,6 @@ class BoardRenderer:
         detail = self.log_font.render("Choose the robot difficulty next", True, (227, 245, 237))
         self.screen.blit(detail, detail.get_rect(center=(SCREEN_WIDTH // 2, HOME_VS_ROBOT_RECT.centery + 32)))
 
-        for rect, label in ((HOME_SELF_PLAY_RECT, "ROBOT VS ROBOT"),):
-            self._draw_panel(rect, fill=(249, 245, 232), border=GOLD_COLOR, radius=12)
-            text = self.log_font.render(label, True, JADE_DARK)
-            self.screen.blit(text, text.get_rect(center=rect.center))
         for rect, label in ((HOME_ROBOT_PVP_RECT, "2 NGƯỜI + ROBOT"), (HOME_JOIN_PVP_RECT, "VÀO PHÒNG / NGƯỜI ĐEN")):
             self._draw_panel(rect, fill=(232,245,238), border=JADE_COLOR, radius=12)
             text = self.log_font.render(label, True, JADE_DARK)
@@ -727,8 +713,6 @@ class BoardRenderer:
     def home_action_from_pixel(px, py):
         if HOME_VS_ROBOT_RECT.collidepoint(px, py):
             return "vs_robot"
-        if HOME_SELF_PLAY_RECT.collidepoint(px, py):
-            return "self_play"
         if HOME_ROBOT_PVP_RECT.collidepoint(px, py):
             return "robot_pvp"
         if HOME_JOIN_PVP_RECT.collidepoint(px, py):

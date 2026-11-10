@@ -184,11 +184,12 @@ def test_pre_motion_camera_failure_preserves_same_move_for_host_v_retry(game):
 def test_dedicated_profile_keeps_robot_execution_and_disables_ai(environment):
     p = make_profile(ROBOT_PVP_MODE, environment)
     assert p.robot_moves_enabled and p.mouse_input == 'ROBOT_COMMANDS'
-    assert not p.ai_enabled and not p.self_play_enabled
+    assert not p.ai_enabled
     assert p.physical_robot_enabled is (environment == 'PHYSICAL')
     assert p.match_names == ('Người chơi Đỏ','Người chơi Đen')
-    old = make_profile('HUMAN_VS_HUMAN','PHYSICAL')
-    assert old.dry_run and not old.robot_moves_enabled
+    for removed in ('HUMAN_VS_HUMAN', 'ROBOT_VS_ROBOT'):
+        with pytest.raises(ValueError):
+            make_profile(removed, environment)
     with pytest.raises(ValueError):
         make_profile(ROBOT_PVP_MODE, environment, simulation_enabled=False)
 

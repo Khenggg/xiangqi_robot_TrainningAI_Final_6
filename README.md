@@ -78,18 +78,16 @@ Mất kết nối robot trong phiên thật là sự cố cần xử lý. Phần
 | Nút | Ai chọn nước? | Robot làm gì? |
 |---|---|---|
 | **VS ROBOT** | Người Đỏ; AI Đen | Trong mô phỏng/physical, executor thực hiện nước AI; với physical, người tự đi quân Đỏ trên bàn thật |
-| **HUMAN VS HUMAN** | Hai người lần lượt bấm chuột trên cùng bàn 2D | Không điều khiển robot thật, kể cả trước đó chọn môi trường ROBOT THẬT |
-| **ROBOT VS ROBOT** | AI chọn nước cho cả Đỏ và Đen | Một executor/robot dùng chung thực hiện cả hai màu |
 | **2 NGƯỜI + ROBOT** | Đỏ trên máy chủ, Đen trên cửa sổ riêng | Một executor/robot thực hiện nước cho cả hai; không AI |
 | **VÀO PHÒNG / NGƯỜI ĐEN** | Mở client Đen của phòng đã có | Không tạo thêm chủ điều khiển robot |
 
-**2 NGƯỜI + ROBOT** cần **MÔ PHỎNG 3D** hoặc **ROBOT THẬT**; menu từ chối nếu đang chọn CHƠI TRÊN MÁY. HUMAN VS HUMAN có thể vẫn mở mô phỏng/viewer theo môi trường đã chọn, nhưng không sở hữu robot thật.
+**2 NGƯỜI + ROBOT** cần **MÔ PHỎNG 3D** hoặc **ROBOT THẬT**; menu từ chối nếu đang chọn CHƠI TRÊN MÁY.
 
 ### Độ khó AI
 
-Sau VS ROBOT hoặc ROBOT VS ROBOT, chọn **Easy / Medium / Hard / Impossible** bằng chuột hoặc phím **1 / 2 / 3 / 4** tại màn hình chọn độ khó. Tất cả dùng **Moonfish local**; các mức đầu giới hạn tìm kiếm khác nhau. Impossible dùng cấu hình Moonfish gốc, tên mức này không có nghĩa AI bất bại. Tốc độ tính tùy máy và thế cờ.
+Sau VS ROBOT, chọn **Easy / Medium / Hard / Impossible** bằng chuột hoặc phím **1 / 2 / 3 / 4** tại màn hình chọn độ khó. Tất cả dùng **Moonfish local**; các mức đầu giới hạn tìm kiếm khác nhau. Impossible dùng cấu hình Moonfish gốc, tên mức này không có nghĩa AI bất bại. Tốc độ tính tùy máy và thế cờ.
 
-Hai chế độ dành cho hai người không có bước chọn độ khó. **SETTINGS** hiện có công tắc debug dashboard; không phải màn hình cấu hình đầy đủ camera, IP và robot.
+Chế độ 2 NGƯỜI + ROBOT không có bước chọn độ khó. **SETTINGS** hiện có công tắc debug dashboard; không phải màn hình cấu hình đầy đủ camera, IP và robot.
 
 <a id="giao-dien"></a>
 ## 3. Nhận biết cửa sổ, trạng thái và lượt
@@ -145,27 +143,7 @@ Sau khi hoàn thành [chuẩn bị robot thật](#robot-that):
 
 Tự xác nhận ổn định không phải hệ thống bảo vệ phát hiện mọi bàn tay/vật cản. Người vận hành phải giữ vùng chuyển động thông thoáng. Nếu SPACE báo không có nước mới, không đi thêm quân để “kích hoạt”; xem [lỗi camera/nước người](#loi-camera).
 
-### 4.3. Hai người trên cùng bàn ảo
-
-1. Chọn **HUMAN VS HUMAN**; CHƠI TRÊN MÁY là lựa chọn gọn nhất.
-2. Đỏ bấm quân và đích; sau đó Đen thao tác trên cùng cửa sổ.
-3. Đúng lượt mới đi được. Không cần phòng, camera, SPACE hoặc F9/F10.
-
-Muốn robot gắp cho cả hai người, chọn **2 NGƯỜI + ROBOT** thay vì chế độ này.
-
-### 4.4. Hai AI đấu nhau
-
-1. Chọn môi trường → **ROBOT VS ROBOT** → độ khó chung cho hai AI.
-2. Ở mô phỏng, khi executor sẵn sàng, chọn độ khó xong có thể bắt đầu chạy liên tục ngay. Chuẩn bị trước khi vào chế độ.
-3. Ở physical, hoàn tất kiểm tra/bật quyền robot; **F6** bắt đầu self-play liên tục khi đủ điều kiện.
-4. **F8** yêu cầu dừng. Chờ trạng thái dừng và đối soát nếu có nước đang dở. F8 không thay E-stop.
-5. Sau khi phục hồi, chỉ khởi động lại bằng F6 khi không còn nước/checkpoint/test chưa giải quyết.
-
-Nếu self-play đang **PICK_PAUSED**, dùng Y/V để đo lại hoặc F8 để dừng và xử lý pending. Nút đầu hàng không được nhận ở mọi trạng thái của self-play; nếu bấm chưa có tác dụng, đọc trạng thái thay vì bấm liên tục.
-
-**F7 / NƯỚC TIẾP** yêu cầu một nước khi controller đang READY; hữu ích nếu phiên đã được cấu hình ở step mode. Menu hiện tại khởi chạy continuous; không có nút chọn step mode trên màn hình đầu, và F7 không tự chuyển continuous sang step.
-
-### 4.5. Hai người chọn nước, một robot thực hiện
+### 4.3. Hai người chọn nước, một robot thực hiện
 
 1. Chọn **MÔ PHỎNG 3D** hoặc **ROBOT THẬT** → **2 NGƯỜI + ROBOT**.
 2. Máy chủ là **Đỏ**. Ghi mã phòng **6 ký tự** ở đầu bàn.
@@ -188,7 +166,7 @@ Nếu self-play đang **PICK_PAUSED**, dùng Y/V để đo lại hoặc F8 để
 
 SPACE, M, Z, T/H không dùng để đi tay, rollback hoặc test trong chế độ này. Chi tiết: [Hai người + robot](docs/TWO_HUMAN_ROBOT_MODE.md).
 
-### 4.6. Khi ván kết thúc
+### 4.4. Khi ván kết thúc
 
 Game hiển thị bên thắng và không nhận thêm nước trong ván đã kết thúc. Muốn chơi lại, dùng **NEW GAME** và làm theo bước dừng/đối soát; với physical, người vận hành xếp lại quân thật. Nếu kết quả hoặc thế cuối không đúng, giữ log/journal và chụp bàn trước khi tạo ván mới để team kiểm tra.
 
@@ -212,7 +190,7 @@ Phần này dành cho người vận hành **bộ FR3 đã được hiệu chu�
 3. Đọc Camera Monitor và bàn 2D. Nếu báo bàn ban đầu chưa xác nhận, kiểm tra bố trí quân rồi **V** đối soát; xử lý mọi lỗi còn lại trước.
 4. Khởi tạo chỉ đọc: chưa tự Enable/HOME. Chỉ sau kiểm tra thực tế, bấm **F9**, rồi **F10 trong 30 giây**. F9 lần nữa hủy yêu cầu; hết hạn thì bắt đầu lại từ F9.
 5. Đợi thông báo đã bật quyền chuyển động. Việc bật có thể cấp quyền/cấp enable controller; sẵn sàng cho nước phát sinh khi đủ lượt.
-6. VS ROBOT: người Đỏ đi theo mục 4.2. ROBOT VS ROBOT: F6. Hai người + robot: kết nối client rồi chọn nước.
+6. VS ROBOT: người Đỏ đi theo mục 4.2. Hai người + robot: kết nối client rồi chọn nước.
 
 F9/F10 có thể bị chặn bởi controller lỗi, telemetry cũ/chưa idle, calibration không hợp lệ, bàn chưa khớp hoặc giao dịch chưa giải quyết. **Không lặp F9/F10 để vượt lỗi**; sửa đúng nguyên nhân trong [mục 9](#xu-ly-loi).
 
@@ -285,7 +263,7 @@ Trong nước ăn, checkpoint có thể đã ghi nhận việc lấy quân bị 
 
 ### 8.2. Đã chạy nhưng kết quả chưa được xác nhận
 
-1. Không đi nước mới, không bấm liên tục F5/F6/F9/F10 hoặc chọn lại cùng nước.
+1. Không đi nước mới, không bấm liên tục F5/F9/F10 hoặc chọn lại cùng nước.
 2. Xác minh trạng thái cơ khí/controller trước; giữ quân đang kẹp theo quy trình của team. Dùng luồng dừng và Ctrl+F8 khi UI yêu cầu và đã kiểm tra thực tế.
 3. **V** đối chiếu toàn bàn với thế trước hoặc thế sau nước chờ. Nếu camera khớp nhưng robot còn lỗi, xử lý lỗi controller; FEN đúng chưa đủ.
 4. Nếu thế sau được xác nhận, hệ thống có thể ghi nhận nước đã xong thay vì chạy lại. Nếu thế trước được xác nhận, việc thử tiếp vẫn phụ thuộc gate và thông báo hiện tại; không mặc định robot chắc chắn chưa chuyển động.
@@ -370,7 +348,7 @@ Log đánh số **hàng 0–9, cột 0–8**. Ô `b9` nghĩa cột `b = 1`, hàn
 
 ### 9.4. AI không đi
 
-Kiểm tra đang đúng lượt AI, đã chọn độ khó, không pause/recovery/test và physical đã được bật quyền. Với **ENGINE_FAILED / Engine failed; board unchanged**, kiểm tra engine Moonfish rồi **F5** khi không có lỗi đồng bộ. F5 không sửa lỗi robot/camera. Với ROBOT VS ROBOT, kiểm tra F8 đã dừng trước đó hay chưa và dùng F6 khi đủ điều kiện. Với 2 NGƯỜI + ROBOT/HUMAN VS HUMAN không có AI tự đi.
+Kiểm tra đang đúng lượt AI, đã chọn độ khó, không pause/recovery/test và physical đã được bật quyền. Với **ENGINE_FAILED / Engine failed; board unchanged**, kiểm tra engine Moonfish rồi **F5** khi không có lỗi đồng bộ. F5 không sửa lỗi robot/camera. Với 2 NGƯỜI + ROBOT không có AI tự đi.
 
 <a id="phim-tat"></a>
 ## 10. Bảng nút và phím tắt
@@ -387,9 +365,7 @@ Phím game áp dụng khi **cửa sổ game chính** được chọn; các thao 
 | 1 / 2 | Chỉ khi được hỏi lượt sau quét | Đỏ / Đen. Tại menu độ khó, 1–4 có nghĩa chọn độ khó |
 | O / MỞ NGƯỜI ĐEN | Host 2 người + robot | Mở client Đen cùng PC |
 | F5 | Lỗi AI, không lỗi đồng bộ | Yêu cầu AI tính lại |
-| F6 | ROBOT VS ROBOT | Bắt đầu self-play continuous khi đủ điều kiện |
-| F7 / NƯỚC TIẾP | Self-play READY | Yêu cầu nước tiếp; không phải nút chọn step mode |
-| F8 | Phiên đang mở | Dừng self-play hoặc yêu cầu pause/controlled stop; không phải E-stop |
+| F8 | Phiên đang mở | Yêu cầu pause/controlled stop; không phải E-stop |
 | F9 → F10 | Physical sau kiểm tra | Bắt đầu/xác nhận quyền chuyển động trong 30 giây |
 | Ctrl+F8 | Phục hồi stop khi được yêu cầu | Xác nhận đã kiểm tra tay/kẹp dừng; đọc lại bằng chứng dừng |
 | Ctrl+F9 | Chỉ khi UI yêu cầu sau disable chưa rõ | Xác nhận controller đã được disable trên pendant |
@@ -448,7 +424,7 @@ GPU được ưu tiên khi runtime CUDA và driver phù hợp; `VISION_DEVICE=cp
 - Dự án còn ghi nhận vấn đề physical sau gián đoạn nguồn/đường tiếp cận, lỗi controller/tool context và kiểm chứng nhả kẹp có tải. **V/F12/F9/F10 không chứng minh đường đi sau sự cố đã an toàn**. Khi gặp các tình huống đó, dừng vận hành physical và để team kiểm tra trước khi chạy tiếp.
 - Kẹp dùng điều khiển theo xung, không có cảm biến vị trí ngàm; hình kẹp trên viewer không chứng minh đã gắp/nhả đúng ngoài đời.
 - Digital twin physical có thể hiển thị tay khi mirror bàn chưa được hiệu chuẩn đầy đủ. Mô phỏng không thay nghiệm thu hình học/va chạm thực tế.
-- Phòng Đỏ–Đen chỉ localhost cùng PC. Menu chưa có tiếp tục nguyên ván cũ hoặc lựa chọn step mode cho self-play.
+- Phòng Đỏ–Đen chỉ localhost cùng PC. Menu chưa có tiếp tục nguyên ván cũ.
 
 Chi tiết trạng thái: [KNOWN_ISSUES.md](KNOWN_ISSUES.md). Cẩm nang cũ tại `docs/USER_MANUAL_QUICKSTART.md` đã được chuyển hướng về README này; các tài liệu kỹ thuật có ngày cũ cần đối chiếu code/config hiện tại khi vận hành.
 
@@ -504,7 +480,6 @@ Kết quả portable/ZIP/checksum tại `dist/`. Build và kiểm chứng bộ m
 | V/Y/F4/F12, emergency, rollback, test | [input_handler.py](src/ui/input_handler.py), [game_state.py](src/core/game_state.py), [recovery_status.py](src/ui/recovery_status.py) |
 | Dừng, đổi phiên, New Game, đầu hàng | [session_control.py](src/core/session_control.py), [controlled_stop.py](src/hardware/controlled_stop.py) |
 | Hai người + robot và client Đen | [TWO_HUMAN_ROBOT_MODE.md](docs/TWO_HUMAN_ROBOT_MODE.md), [robot_pvp.py](src/core/robot_pvp.py), [pvp_client.py](src/ui/pvp_client.py) |
-| Self-play | [self_play_controller.py](src/core/self_play_controller.py) |
 | Kiểm tra bàn/điểm gắp, bật physical | [hardware_manager.py](src/hardware/hardware_manager.py), [board_diagnostics.py](src/vision/board_diagnostics.py) |
 | Chấm góc camera | [calibrate_camera.py](src/vision/calibrate_camera.py), [camera_startup.py](src/vision/camera_startup.py) |
 | Ethernet và frame robot | [ROBOT_CONNECTION.md](ROBOT_CONNECTION.md), [ROBOT_FRAME_BASE_ONLY.md](docs/ROBOT_FRAME_BASE_ONLY.md), [BRD_XY_CALIBRATION.md](docs/BRD_XY_CALIBRATION.md) |

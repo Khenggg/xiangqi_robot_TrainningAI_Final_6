@@ -64,17 +64,13 @@ def test_manager_rejects_sdk_failure_instead_of_reporting_success_or_verifying()
         manager.execute_pick_place_test((4,6), (4,5), move_context=context)
     manager.verify_visual_move.assert_not_called()
 
-def test_manual_mode_blocks_direct_game_and_selfplay_entry_points():
+def test_manual_mode_blocks_direct_game_entry_points():
     from src.core.ai_execution import execute_ai_move
-    from src.core.self_play_controller import SelfPlayController, SelfPlayStatus
     state, hw, _ = fixture()
     fen = state.current_fen
     assert not state.process_human_move((4,6),(4,5),'r_P')
     assert not state.process_emergency_move((4,6),(4,5),'r_P')
     assert not execute_ai_move(state,hw,((4,6),(4,5)))
-    controller = SelfPlayController(state,hw)
-    controller.status = SelfPlayStatus.READY
-    assert not controller.request_next_move()
     assert state.current_fen == fen and state.pending_move is None
     hw.execute_piece_move.assert_not_called()
 

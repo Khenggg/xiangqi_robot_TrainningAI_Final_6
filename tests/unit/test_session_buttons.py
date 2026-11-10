@@ -10,7 +10,6 @@ from src.core.game_state import GameState
 from src.core.motion_worker import MotionWorker
 from src.core.session_control import SessionControl
 from src.core.session_profile import make_profile
-from src.core.self_play_controller import SelfPlayController
 from src.hardware.controlled_stop import ControlledStopCoordinator, StopRequest, StopResult
 from src.ui.input_handler import InputHandler
 from src.ui.board_renderer import BTN_SURRENDER_RECT
@@ -32,7 +31,7 @@ def session(monkeypatch,tmp_path):
         connected=True,joints_valid=True,measurement_timestamp=time.time(),motion_state='IDLE')))
     hw.stop_coordinator=ControlledStopCoordinator(hw)
     hw.request_controlled_stop=hw.stop_coordinator.begin
-    ctl=SessionControl(s,hw,SelfPlayController(s,hw))
+    ctl=SessionControl(s,hw,None)
     yield s,hw,ctl
     hw.motion_worker.close()
     if hw.stop_coordinator.request and hw.stop_coordinator.request.thread:

@@ -157,34 +157,6 @@ def test_confirmed_board_recovery_clears_old_retry_gating(monkeypatch):
     assert state.visual_pick_retry is None and state.visual_capture_checkpoint is None and state.test_pick_retry is None
 
 
-@pytest.mark.parametrize('color,move',[('r',((4,6),(4,5))),('b',((4,3),(4,4)))])
-def test_self_play_camera_retry_preserves_actor(monkeypatch,color,move):
-    from src.core.self_play_controller import SelfPlayController,SelfPlayStatus
-    state,hw=fixture(monkeypatch)
-    hw.config.GAME_MODE='ROBOT_VS_ROBOT'
-    state.turn=color
-    hw.cam_monitor=object()
-    hw.capture_baseline_if_needed=Mock(return_value=True)
-    hw.ai_ctrl=SimpleNamespace(pick_move=lambda *a,**kw:move)
-    controller=SelfPlayController(state,hw)
-    assert controller.start('easy','easy')
-    hw.get_robot_center_pick_targets.side_effect=PickTargetUnavailable('missing center')
-    assert controller.request_next_move()
-    controller._thread.join(3)
-    controller.tick()
-    controller._thread.join(3)
-    controller.tick()
-    assert controller.status is SelfPlayStatus.PICK_PAUSED and retry_is_current(state)
-    identity=state.pending_move.move_id
-    hw.execute_piece_move.assert_not_called()
-    hw.get_robot_center_pick_targets.side_effect=lambda cells:{k:GridTarget(*v,.9,0) for k,v in cells.items()}
-    assert controller.retry_visual_pick()
-    controller._thread.join(3)
-    controller.tick()
-    assert controller.status is SelfPlayStatus.READY
-    assert len(state.move_history)==1 and state.last_committed_move.move_id==identity
-
-
 def test_real_robot_stops_before_grip_when_first_sdk_motion_fails(monkeypatch):
     from src.hardware.robot_VIP import FR5Robot
     import config

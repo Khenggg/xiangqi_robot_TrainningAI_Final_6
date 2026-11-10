@@ -97,12 +97,9 @@ def test_unknown_mode_is_rejected():
         configure_session(_config(), parse_options([]), mode="not-a-mode")
 
 
-def test_human_vs_human_never_claims_physical_robot_capability():
+@pytest.mark.parametrize("removed", ["HUMAN_VS_HUMAN", "ROBOT_VS_ROBOT"])
+def test_removed_game_modes_are_rejected(removed):
     cfg = _config()
-    cfg.GAME_MODE = "HUMAN_VS_HUMAN"
-    profile = configure_session(cfg, parse_options([]), mode="PHYSICAL")
-    assert profile.physical_robot_enabled is False
-    assert profile.camera_enabled is False
-    assert profile.simulation_enabled is True
-    assert cfg.DRY_RUN is True
-    assert cfg.ROBOT_BACKEND == "VIRTUAL"
+    cfg.GAME_MODE = removed
+    with pytest.raises(ValueError):
+        configure_session(cfg, parse_options([]), mode="SIMULATION")

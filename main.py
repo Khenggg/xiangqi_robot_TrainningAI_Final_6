@@ -49,7 +49,6 @@ import pygame  # type: ignore
 from src.core import xiangqi  # type: ignore
 
 from src.core.ai_execution import execute_ai_move
-from src.core.self_play_controller import SelfPlayController
 from src.hardware.telemetry_publisher import TelemetryPublisher
 from src.core.game_state import GameState  # type: ignore
 from src.hardware.hardware_manager import HardwareManager  # type: ignore
@@ -99,7 +98,6 @@ vsc_session = None
 vsc_retiring = False
 vsc_retained_session = None
 telemetry = None
-self_play = None
 input_mgr = None
 session_control = None
 quit_requested = False
@@ -159,26 +157,22 @@ def _start_selected_game():
         return
     if config.ROBOT_BACKEND == "PHYSICAL" and not hw.is_robot_ready:
         hint = ("O mở người Đen; hai bên chọn nước bằng chuột." if config.GAME_MODE == "HUMAN_VS_HUMAN_ROBOT"
-                else "F6 bắt đầu self-play.")
+                else "")
         enable_hint = ("Đang chờ kiểm tra để tự bật robot; "
                        if getattr(config, "AUTO_ENABLE_PHYSICAL_ON_STARTUP", True)
                        else "Bấm F9 rồi F10 để bật robot; ")
-        state.set_status("FR3 đã kết nối chỉ đọc. " + enable_hint + hint, duration=30)
-    if config.GAME_MODE == "ROBOT_VS_ROBOT" and self_play is not None and hw.is_robot_ready:
-        difficulty = getattr(config, "AI_DIFFICULTY", "medium")
-        if self_play.start(difficulty, difficulty, run_mode="continuous"):
-            state.set_status("Robot vs robot: continuous / F8 stop", duration=30)
+        state.set_status(("FR3 đã kết nối chỉ đọc. " + enable_hint + hint).strip(), duration=30)
     if state.api_client.token and not state.recovery_required:
         state.ensure_spectator_match()
 
 def _retain_startup_failure(error):
     """Do not launch a second session above resources whose close failed."""
-    global hw, telemetry, viewer_server, self_play, input_mgr, session_control
+    global hw, telemetry, viewer_server, input_mgr, session_control
     global mode_disposal, mode_switch_failed, home_screen_active, difficulty_menu_active
     from src.core.session_control import SessionControl
     from src.core.session_disposal import SessionDisposal
     hw, telemetry, viewer_server = error.manager, error.telemetry, error.viewer
-    self_play = input_mgr = None
+    input_mgr = None
     session_control = SessionControl(state, hw, None) if hw is not None else None
     mode_disposal = SessionDisposal(state, hw, None, telemetry, viewer_server, debug_dashboard,
                                    require_settled=False, publish_end=False)
@@ -194,7 +188,7 @@ def _retain_startup_failure(error):
 
 
 def _finish_startup(result, error):
-    global hw, telemetry, viewer_server, self_play, input_mgr, home_screen_active, state
+    global hw, telemetry, viewer_server, input_mgr, home_screen_active, state
     global difficulty_menu_active, startup_message, mirror_error, session_control
     if error:
         from src.core.session_startup import StartupRollbackError
@@ -230,7 +224,6 @@ def _finish_startup(result, error):
     if not callable(getattr(manager, "request_controlled_stop", None)):
         manager.request_controlled_stop = manager.stop_coordinator.begin
     try:
-        controller = SelfPlayController(state, manager)
         handler = InputHandler(state, manager)
         if manager.profile.game_mode == "HUMAN_VS_HUMAN_ROBOT":
             from src.core.robot_pvp import RobotPvPController
@@ -242,21 +235,20 @@ def _finish_startup(result, error):
         except StartupRollbackError as cleanup_error:
             _retain_startup_failure(cleanup_error)
             return
-        hw = telemetry = viewer_server = self_play = input_mgr = None
+        hw = telemetry = viewer_server = input_mgr = None
         home_screen_active = True
         difficulty_menu_active = False
         _finish_startup(None, exc)
         return
     hw, telemetry, viewer_server, mirror_error = manager, publisher, server, reason
-    self_play, input_mgr = controller, handler
+    input_mgr = handler
     profile = manager.profile
-    caption = ("Người vs Người — Chuột, không Camera/FR3" if profile.game_mode == "HUMAN_VS_HUMAN"
-               else ("ẢO / bộ nhập test" if profile.dry_run else "THẬT / Camera & FR3"))
+    caption = "ẢO / bộ nhập test" if profile.dry_run else "THẬT / Camera & FR3"
     if profile.game_mode == "HUMAN_VS_HUMAN_ROBOT":
         caption = "2 người + robot — " + ("Mô phỏng" if profile.dry_run else "Camera & FR3 thật")
     pygame.display.set_caption(f"Xiangqi Robot — {caption}")
     from src.core.session_control import SessionControl
-    session_control = SessionControl(state, manager, controller)
+    session_control = SessionControl(state, manager, None)
     handler.session_control = session_control
     from src.core.automatic_physical_startup import AutomaticPhysicalStartup
     manager.automatic_startup = AutomaticPhysicalStartup(state, manager)
@@ -264,7 +256,7 @@ def _finish_startup(result, error):
         state.set_status(mirror_error, duration=30)
     home_screen_active = False
     startup_message = ""
-    difficulty_menu_active = config.GAME_MODE not in {"HUMAN_VS_HUMAN", "HUMAN_VS_HUMAN_ROBOT"}
+    difficulty_menu_active = config.GAME_MODE != "HUMAN_VS_HUMAN_ROBOT"
     if debug_dashboard is not None:
         debug_dashboard.robot, debug_dashboard.backend = hw.robot, hw.backend
     if not difficulty_menu_active:
@@ -415,7 +407,7 @@ def _begin_mode_disposal():
         return
     if mode_disposal is None:
         from src.core.session_disposal import SessionDisposal
-        mode_disposal = SessionDisposal(state, hw, self_play, telemetry, viewer_server, debug_dashboard)
+        mode_disposal = SessionDisposal(state, hw, None, telemetry, viewer_server, debug_dashboard)
     mode_switching = True
     mode_switch_failed = False
     state.set_status("Đang đóng phiên cũ; chưa mở camera/robot của chế độ mới.", duration=60)
@@ -427,7 +419,7 @@ def _begin_mode_disposal():
 
 
 def _finish_mode_disposal(result, error):
-    global mode_disposal, mode_switching, mode_switch_failed, state, hw, telemetry, self_play
+    global mode_disposal, mode_switching, mode_switch_failed, state, hw, telemetry
     global viewer_server, input_mgr, session_control, debug_dashboard, home_screen_active
     global difficulty_menu_active, settings_menu_active, startup_message, startup_cancelled
     global physical_enable_pending, physical_camera_recalibration_requested
@@ -439,7 +431,7 @@ def _finish_mode_disposal(result, error):
         state.set_status(f"Chưa đổi chế độ: {reason}. F2 thử lại sau khi xử lý; Ctrl+F9 chỉ khi đã tắt controller trên pendant.", duration=60)
         return
     # All old actor/read/projection owners are closed before replacing globals.
-    hw = telemetry = self_play = viewer_server = input_mgr = session_control = debug_dashboard = None
+    hw = telemetry = viewer_server = input_mgr = session_control = debug_dashboard = None
     mode_disposal = None
     mode_switch_failed = False
     physical_enable_pending = False
@@ -482,14 +474,13 @@ def _cleanup_all():
     if _cleanup_disposal is None:
         from src.core.session_disposal import SessionDisposal
         _cleanup_disposal = mode_disposal or SessionDisposal(
-            state, hw, self_play, telemetry, viewer_server, debug_dashboard, require_settled=False)
+            state, hw, None, telemetry, viewer_server, debug_dashboard, require_settled=False)
     # Once disposal has proved stop and frozen dispatch, SDK closure must not
     # force another telemetry read or replay controller stop/disable on retry.
     if hw is not None and not _cleanup_disposal._stop_proved:
         try:
             stop = hw.request_controlled_stop("Shutdown", workers_finished=lambda:
-                (self_play is None or self_play._thread is None or not self_play._thread.is_alive())
-                and (state.ai_thread is None or not state.ai_thread.is_alive())
+                (state.ai_thread is None or not state.ai_thread.is_alive())
                 and all(not thread.is_alive() for thread in state._retired_ai_threads))
             if not stop.done.wait(7.0) or not stop.result.safe:
                 raise RuntimeError("Chưa xác nhận robot dừng; giữ camera/controller/phiên")
@@ -576,11 +567,6 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
                         worker.poll()
                     except Exception as callback_error:
                         log_event("app.recovery_callback_failed", str(callback_error), level=logging.ERROR)
-            if self_play is not None and not cleanup_retry:
-                try:
-                    self_play.tick()
-                except Exception as controller_error:
-                    self_play._fault(f"RECOVERY_REQUIRED: {controller_error}")
             # F2 retries cleanup from either recovery phase. Cleanup itself still
             # enforces the robot/camera stop barrier; F2 is not a force-kill.
             if (retry_requested and not operator_worker.busy and not startup_worker.running
@@ -712,7 +698,7 @@ try:
                   and not mode_switching and not mode_switch_failed
                   and not home_screen_active and not settings_menu_active and not difficulty_menu_active
                   and BTN_SURRENDER_RECT.collidepoint(event.pos)
-                  and not state.game_over and not (self_play is not None and self_play.active)):
+                  and not state.game_over):
                 input_mgr.handle_mouse_down(*event.pos)
                 continue
             elif (event.type == pygame.MOUSEBUTTONDOWN and session_control is not None
@@ -724,16 +710,13 @@ try:
                 if getattr(event, "mod", 0) & pygame.KMOD_CTRL:
                     verifier_worker = startup_worker if mode_switch_failed or getattr(hw, "_closing", False) else hw.motion_worker
                     verifier_worker.start(lambda: hw.confirm_operator_stop(approved=True), _job_completed)
-                elif self_play is not None and self_play.active:
-                    self_play.end_match()
                 elif session_control is not None:
                     session_control.request("pause")
                 continue
             elif (event.type == pygame.MOUSEBUTTONDOWN and session_control is not None
                   and not mode_switching and not mode_switch_failed
                   and not home_screen_active and not settings_menu_active and not difficulty_menu_active
-                  and (input_mgr is None or (hw is not None and hw.motion_worker.busy)
-                       or (self_play is not None and self_play.human_input_disabled and not self_play.recovery_input_allowed))
+                  and (input_mgr is None or (hw is not None and hw.motion_worker.busy))
                   and BTN_NEW_GAME_RECT.collidepoint(event.pos)):
                 session_control.request("reset")
                 continue
@@ -766,21 +749,20 @@ try:
                         startup_message = ""
                         continue
                     home_action = renderer.home_action_from_pixel(event.pos[0], event.pos[1])
-                    start_vs_robot = home_action in ("vs_robot", "self_play", "robot_pvp")
+                    start_vs_robot = home_action in ("vs_robot", "robot_pvp")
                     if home_action == "join_pvp":
                         from src.core.robot_pvp import launch_client
                         launch_client()
                         continue
                 if start_vs_robot:
-                    config.GAME_MODE = {"self_play": "ROBOT_VS_ROBOT",
-                                        "robot_pvp": "HUMAN_VS_HUMAN_ROBOT"}.get(home_action, "HUMAN_VS_ROBOT")
+                    config.GAME_MODE = ("HUMAN_VS_HUMAN_ROBOT" if home_action == "robot_pvp"
+                                        else "HUMAN_VS_ROBOT")
                     if home_action == "robot_pvp" and home_mode == "BOARD_ONLY":
                         startup_message = "Hai người + robot cần chọn MÔ PHỎNG 3D hoặc ROBOT THẬT trước."
                         continue
                     selected_mode = home_mode
                     camera_recalibration = bool(
                         selected_mode == "PHYSICAL"
-                        and config.GAME_MODE != "HUMAN_VS_HUMAN"
                         and physical_camera_recalibration_requested)
                     physical_camera_recalibration_requested = False
                     _launch_session_mode(selected_mode, camera_recalibration=camera_recalibration)
@@ -836,53 +818,14 @@ try:
                     continue
                 if hw.motion_worker.busy:
                     continue
-                if (self_play is not None and config.GAME_MODE == "ROBOT_VS_ROBOT"
-                        and (event.key == pygame.K_y or
-                             (event.key == pygame.K_v and self_play.status.value == "pick_paused"))):
-                    self_play.retry_visual_pick(source="V" if event.key == pygame.K_v else "Y")
-                    continue
                 if event.key == pygame.K_F5 and not state.physical_sync_fault and not state.move_sync_error:
                     state.ai_retry_requested = True
-                elif (event.key == pygame.K_F6 and config.GAME_MODE == "ROBOT_VS_ROBOT"
-                      and self_play is not None and not state.ai_thinking):
-                    difficulty = getattr(config, "AI_DIFFICULTY", "medium")
-                    hw.motion_worker.start(lambda: self_play.start(difficulty, difficulty, run_mode="continuous"), _job_completed)
-                elif event.key == pygame.K_F7 and self_play is not None:
-                    self_play.request_next_move()
-                elif event.key == pygame.K_F8 and self_play is not None:
-                    self_play.end_match()
-                elif self_play is not None and self_play.recovery_input_allowed:
-                    if event.key in (pygame.K_v, pygame.K_F4, pygame.K_1, pygame.K_2):
-                        input_mgr.handle_keyboard(event.key)
-                elif self_play is None or not self_play.human_input_disabled:
+                else:
                     input_mgr.handle_keyboard(event.key)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if hw.motion_worker.busy:
                     continue
-                from src.ui.board_renderer import BTN_CONTINUE_RECT
-                if self_play is not None and self_play.status.value == "pick_paused":
-                    from src.ui.board_renderer import BoardRenderer, BTN_SCAN_FEN_RECT
-                    render_state = state.get_render_state()
-                    retry_rect = BoardRenderer.client_continue_rect(render_state)
-                    if retry_rect.collidepoint(event.pos) or BTN_SCAN_FEN_RECT.collidepoint(event.pos):
-                        self_play.retry_visual_pick(source=("V" if BTN_SCAN_FEN_RECT.collidepoint(event.pos) else "CONTINUE"))
-                        continue
-                if self_play is not None and self_play.recovery_input_allowed:
-                    from src.ui.board_renderer import BTN_NEW_GAME_RECT, BTN_SCAN_FEN_RECT
-                    if BTN_NEW_GAME_RECT.collidepoint(event.pos) or BTN_SCAN_FEN_RECT.collidepoint(event.pos) or BTN_CONTINUE_RECT.collidepoint(event.pos):
-                        input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
-                    continue
-                if self_play is not None and self_play.human_input_disabled:
-                    from src.ui.board_renderer import BTN_CONFIRM_MOVE_RECT, BTN_SURRENDER_RECT
-                    if BTN_CONFIRM_MOVE_RECT.collidepoint(event.pos):
-                        self_play.request_next_move()
-                    elif BTN_SURRENDER_RECT.collidepoint(event.pos):
-                        # Accept the click during thinking/motion. The controller
-                        # commits an in-flight piece before recording resignation.
-                        if self_play.accepts_surrender:
-                            winner = 'b' if state.turn == 'r' else 'r'
-                            self_play.request_surrender(winner='BLACK' if winner == 'b' else 'RED')
-                elif input_mgr is not None:
+                if input_mgr is not None:
                     input_mgr.handle_mouse_down(event.pos[0], event.pos[1])
 
         if not running:
@@ -898,10 +841,6 @@ try:
             pvp = getattr(hw, "pvp_controller", None)
             if pvp is not None:
                 pvp.tick()
-        if self_play is not None and not mode_switching and not mode_switch_failed:
-            self_play.finish_recovery()
-        if self_play is not None and not mode_switching and not mode_switch_failed:
-            self_play.tick()
         if session_control is not None and not mode_switching and not mode_switch_failed:
             control_action = session_control.poll()
             if control_action == "quit":
@@ -927,8 +866,7 @@ try:
         if (getattr(config, "AUTO_MOVE_CONFIRM_ENABLED", False)
                 and not mode_switching and not mode_switch_failed
                 and input_mgr is not None and not home_screen_active and not settings_menu_active
-                and not difficulty_menu_active and state.is_human_turn and not state.game_over
-                and (self_play is None or not self_play.human_input_disabled)):
+                and not difficulty_menu_active and state.is_human_turn and not state.game_over):
             input_mgr.poll_board_stability()
 
         # 2d. Xử lý AI Turn (Non-blocking)
@@ -939,8 +877,7 @@ try:
                 and config.GAME_MODE == "HUMAN_VS_ROBOT"
                 and not hw.motion_worker.busy and not getattr(state, "visual_pick_retry", None)
                 and not state.physical_sync_fault and not state.move_sync_error
-                and not state.emergency_mode and not state.manual_override_active
-                and (self_play is None or not self_play.human_input_disabled)):
+                and not state.emergency_mode and not state.manual_override_active):
             
             # --- Khởi động Thread suy nghĩ ---
             if state.can_start_ai_turn():
@@ -1024,7 +961,7 @@ try:
                                 state.publish_match_end(winner="BLACK", reason="CHECKMATE")
                             else:
                                 hw.capture_baseline_if_needed(force_delay=0.0)
-                                state.set_status("Your turn! F6: self-play, F7: next, F8: stop", duration=8)
+                                state.set_status("Your turn!", duration=8)
                     elif result_is_current:
                         if not xiangqi.find_all_valid_moves("b", state.board):
                             state.handle_game_over("r")

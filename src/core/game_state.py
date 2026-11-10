@@ -541,7 +541,7 @@ class GameState(GamePersistence):
             return False
         mode = getattr(getattr(self, "session_profile", None), "game_mode",
                        getattr(config, "GAME_MODE", "HUMAN_VS_ROBOT"))
-        return mode == "HUMAN_VS_HUMAN" or (mode == "HUMAN_VS_ROBOT" and self.turn == "r")
+        return mode == "HUMAN_VS_ROBOT" and self.turn == "r"
 
     @durable_transition
     def process_human_move(self, src, dst, p_name):
@@ -554,8 +554,7 @@ class GameState(GamePersistence):
             return False
         moving_color = self.turn
         print(f"[HUMAN] ✅ Moved: {p_name} {xiangqi.format_move(src, dst)}")
-        self.set_status("✅ Đã nhận nước đi." if config.GAME_MODE == "HUMAN_VS_HUMAN"
-                        else "✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
+        self.set_status("✅  Move accepted — AI thinking...", color=(0, 120, 0), duration=5.0)
         
         previous_rollback = self._pre_space_state or {}
         self.save_rollback_state(previous_rollback.get("baseline_occ"),

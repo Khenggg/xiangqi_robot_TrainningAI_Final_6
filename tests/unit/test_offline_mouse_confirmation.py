@@ -38,17 +38,6 @@ def test_mouse_then_space_and_button_commit_once_without_camera(offline):
     observer.assert_called_once_with(state.piece_ids)
 
 
-def test_offline_human_vs_human_can_confirm_both_colors_without_camera(offline, monkeypatch):
-    monkeypatch.setattr(config, "GAME_MODE", "HUMAN_VS_HUMAN")
-    state, handler, observer = offline
-    move_mouse(handler, (4, 6), (4, 5))
-    handler.handle_keyboard(pygame.K_SPACE)
-    move_mouse(handler, (0, 3), (0, 4))
-    handler.handle_keyboard(pygame.K_SPACE)
-    assert state.board[4][0] == "b_P" and state.turn == "r"
-    assert len(state.move_log) == 2 and observer.call_count == 2
-
-
 def test_space_preserves_sync_fault(offline):
     state, handler, _ = offline
     state.physical_sync_fault = True

@@ -8,7 +8,7 @@ import sys
 import pytest
 
 
-@pytest.mark.parametrize('mode', ['HUMAN_VS_ROBOT', 'HUMAN_VS_HUMAN', 'HUMAN_VS_HUMAN_ROBOT', 'ROBOT_VS_ROBOT'])
+@pytest.mark.parametrize('mode', ['HUMAN_VS_ROBOT', 'HUMAN_VS_HUMAN_ROBOT'])
 def test_only_hvr_dispatches_to_scoped_donor_runtime(monkeypatch, mode):
     from src.core import session_startup
     module = ModuleType('src.modes.vsc_v3_session')
@@ -100,7 +100,7 @@ def test_retained_startup_owner_blocks_every_new_mode_until_close_succeeds():
     owner = SimpleNamespace(close=Mock())
     worker = SimpleNamespace(busy=False, start=Mock(return_value=True))
     namespace = dict(vsc_retained_session=None, startup_worker=worker,
-                     config=SimpleNamespace(GAME_MODE='ROBOT_VS_ROBOT'),
+                     config=SimpleNamespace(GAME_MODE='HUMAN_VS_HUMAN_ROBOT'),
                      log_event=Mock(), logging=SimpleNamespace(ERROR=40))
     source = ast.parse((Path(__file__).resolve().parents[2]/'main.py').read_text(encoding='utf-8-sig'))
     names = {'_retain_vsc_startup', '_retry_retained_vsc', '_launch_session_mode', '_retire_vsc_session'}

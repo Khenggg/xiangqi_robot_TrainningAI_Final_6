@@ -14,13 +14,14 @@ import pytest
 import config
 from src.core import xiangqi
 from src.core.game_state import GameState
+from src.core.ai_execution import execute_ai_move
 from src.core.human_move_commit_coordinator import HumanMoveCommitCoordinator
 from src.domain.game_move import piece_symbol_for_identity
 
 
 @pytest.fixture
 def state(monkeypatch):
-    monkeypatch.setattr(config,'GAME_MODE','HUMAN_VS_HUMAN')
+    monkeypatch.setattr(config,'GAME_MODE','HUMAN_VS_ROBOT')
     monkeypatch.setattr('src.core.game_state.TuongKyDaiSuClient',lambda *a:Mock(room_id=None))
     return GameState(allow_mouse_move=True)
 
@@ -45,7 +46,7 @@ def install_mate_board(state, color='r', capture=False):
     return ((4,7),(4,9)) if capture else ((0,7),(4,7))
 
 
-@pytest.mark.parametrize('color',['r','b'])
+@pytest.mark.parametrize('color',['r'])
 @pytest.mark.parametrize('capture',[False,True])
 def test_human_terminal_move_finishes_and_publishes_after_fen(state,color,capture):
     move=install_mate_board(state,color,capture)
@@ -65,11 +66,11 @@ def test_human_terminal_move_finishes_and_publishes_after_fen(state,color,captur
 
 def test_rollback_then_undo_cannot_restore_a_cancelled_future(state):
     hw=SimpleNamespace(config=SimpleNamespace(GAME_ONLY=True,ROBOT_BACKEND='VIRTUAL'),dry_run=True,
-                       simulation_runtime=None)
+                       simulation_runtime=None,is_robot_ready=True)
     assert state.process_human_move((4,6),(4,5),'r_P')
     before=deepcopy(state.history_snapshots)
     state.save_rollback_state()
-    assert state.process_human_move((0,3),(0,4),'b_P')
+    assert execute_ai_move(state,hw,((0,3),(0,4)),dry_run=True)
     state.handle_rollback(hw)
     assert state.history_snapshots==before
     assert state.undo_round(hw)

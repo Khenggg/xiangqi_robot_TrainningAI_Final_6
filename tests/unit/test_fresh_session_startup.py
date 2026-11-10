@@ -20,7 +20,7 @@ from src.domain.game_move import MoveActor
 @pytest.fixture
 def states(monkeypatch):
     monkeypatch.setattr(config, "SIMULATION_TOKEN", "")
-    monkeypatch.setattr(config, "GAME_MODE", "HUMAN_VS_HUMAN")
+    monkeypatch.setattr(config, "GAME_MODE", "HUMAN_VS_ROBOT")
     opened = []
 
     def create():
@@ -38,7 +38,7 @@ def states(monkeypatch):
 @pytest.mark.parametrize("environment", ["VIRTUAL", "PHYSICAL"])
 def test_new_launch_starts_initial_fen_and_archives_previous_board(states, tmp_path, environment):
     old = states()
-    old.attach_journal(tmp_path, environment, "HUMAN_VS_HUMAN")
+    old.attach_journal(tmp_path, environment, "HUMAN_VS_ROBOT")
     assert old.process_human_move((6, 6), (6, 5), "r_P")
     old_id, old_fen = old._journal.session_id, old.current_fen
     old.close_journal(clean=True)
@@ -91,7 +91,7 @@ def test_interrupted_physical_command_is_archived_without_replay_or_old_fen(stat
 
 def test_failed_fresh_start_keeps_previous_session_and_archive_atomic(states, tmp_path):
     old = states()
-    old.attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_HUMAN")
+    old.attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_ROBOT")
     assert old.process_human_move((6, 6), (6, 5), "r_P")
     old_id, old_fen = old._journal.session_id, old.current_fen
     old._journal._db.execute("""CREATE TRIGGER reject_new_session BEFORE INSERT ON current_session
@@ -100,20 +100,20 @@ def test_failed_fresh_start_keeps_previous_session_and_archive_atomic(states, tm
     old.close_journal()
     new = states()
     with pytest.raises(JournalError, match="injected write failure"):
-        new.attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_HUMAN", fresh_start=True)
+        new.attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_ROBOT", fresh_start=True)
     assert new._journal is None
     restored = states()
-    restored.attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_HUMAN")
+    restored.attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_ROBOT")
     assert restored._journal.session_id == old_id and restored.current_fen == old_fen
     assert restored._journal._db.execute("SELECT count(*) FROM session_archive").fetchone()[0] == 0
 
 
 def test_fresh_start_cannot_replace_an_open_session_lease(states, tmp_path):
     old = states()
-    old.attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_HUMAN")
+    old.attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_ROBOT")
     old_id = old._journal.session_id
     with pytest.raises(JournalError):
-        states().attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_HUMAN", fresh_start=True)
+        states().attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_ROBOT", fresh_start=True)
     assert old._journal.session_id == old_id
 
 
@@ -121,7 +121,7 @@ def test_launcher_requests_fresh_journal_before_opening_devices(states, tmp_path
     from src.core import session_startup
     from src.core.launch_options import parse_options
     old = states()
-    old.attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_HUMAN")
+    old.attach_journal(tmp_path, "VIRTUAL", "HUMAN_VS_ROBOT")
     assert old.process_human_move((6, 6), (6, 5), "r_P")
     old_id = old._journal.session_id
     old.close_journal(clean=True)
@@ -133,11 +133,11 @@ def test_launcher_requests_fresh_journal_before_opening_devices(states, tmp_path
     manager.initialize_all.return_value = manager
     def construct(*args):
         state.attach_journal.assert_called_once_with(
-            tmp_path, "VIRTUAL", "HUMAN_VS_HUMAN", fresh_start=True)
+            tmp_path, "VIRTUAL", "HUMAN_VS_ROBOT", fresh_start=True)
         return manager
     monkeypatch.setattr(session_startup, "HardwareManager", construct)
     monkeypatch.setattr(session_startup, "TelemetryPublisher", Mock())
-    cfg = SimpleNamespace(GAME_MODE="HUMAN_VS_HUMAN", GAME_ONLY=False,
+    cfg = SimpleNamespace(GAME_MODE="HUMAN_VS_ROBOT", GAME_ONLY=False,
                           ROBOT_BACKEND="VIRTUAL", DRY_RUN=True,
                           TELEMETRY_HOST="127.0.0.1", TELEMETRY_PORT=8765)
     session_startup.build_session(cfg, parse_options(["--board-only"]), tmp_path, state)

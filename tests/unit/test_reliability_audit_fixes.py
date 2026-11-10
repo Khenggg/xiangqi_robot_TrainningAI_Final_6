@@ -7,7 +7,6 @@ from unittest.mock import Mock
 import pytest
 from src.ai.moonfish_engine import MoonfishEngine
 from src.core.game_state import GameState
-from src.core.self_play_controller import SelfPlayController, SelfPlayStatus
 from src.hardware.rpc_transport import BoundedRPCProxy, RpcOutcomeUnknown, wait_for_reconnect
 from src.vision.snapshot_detector import SnapshotDetector
 from src.core import xiangqi
@@ -127,19 +126,6 @@ def test_rescan_reaps_live_ai_job_before_new_engine_request(monkeypatch):
         assert state.can_start_ai_turn()
     finally:
         released.set(); worker.join(1)
-
-
-def test_recovery_does_not_allow_moves_until_sync_complete(monkeypatch):
-    monkeypatch.setattr('src.core.game_state.TuongKyDaiSuClient', lambda *a: Mock(room_id=None))
-    state = GameState()
-    controller = SelfPlayController(state, SimpleNamespace())
-    controller.status = SelfPlayStatus.FAULTED
-    state.physical_sync_fault = True
-    assert controller.recovery_input_allowed
-    assert not controller.finish_recovery()
-    state.physical_sync_fault = False
-    assert controller.finish_recovery()
-    assert controller.status == SelfPlayStatus.IDLE
 
 
 def test_auto_detector_rejects_low_confidence_legal_move(tmp_path):

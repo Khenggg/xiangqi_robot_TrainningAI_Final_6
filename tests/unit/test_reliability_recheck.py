@@ -12,7 +12,6 @@ import pytest
 import config
 from src.core import xiangqi
 from src.core.game_state import GameState
-from src.core.self_play_controller import SelfPlayController, SelfPlayStatus
 from src.domain.game_move import MoveActor
 from src.ui.input_handler import InputHandler
 
@@ -89,26 +88,9 @@ def test_physical_continue_rejects_low_confidence_legal_successor(state):
     assert state.manual_override_active and state.snapshot_continue_required
 
 
-def test_selfplay_explicit_stop_ends_spectator_once(state):
-    hw = SimpleNamespace()
-    ctrl = SelfPlayController(state,hw)
-    ctrl.status = SelfPlayStatus.READY
-    assert ctrl.end_match()
-    assert not ctrl.end_match()
-    state.api_client.end_match.assert_called_once_with(winner='DRAW',reason='OTHER')
-    assert ctrl.status is SelfPlayStatus.ENDED
-
-
-def test_dormant_selfplay_stop_does_not_end_human_game(state):
-    ctrl=SelfPlayController(state,SimpleNamespace())
-    assert not ctrl.end_match()
-    assert ctrl.status is SelfPlayStatus.IDLE
-    state.api_client.end_match.assert_not_called()
-
-
-@pytest.mark.parametrize('color,move', [('r',((4,6),(4,5))),('b',((4,3),(4,4)))])
+@pytest.mark.parametrize('color,move', [('r',((4,6),(4,5)))])
 def test_physical_continue_accepts_verified_current_color(state,monkeypatch,color,move):
-    monkeypatch.setattr(config,'GAME_MODE','HUMAN_VS_HUMAN')
+    monkeypatch.setattr(config,'GAME_MODE','HUMAN_VS_ROBOT')
     state.turn=color
     after, _ = xiangqi.make_temp_move(state.board,move)
     hw=SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND='PHYSICAL'),dry_run=False,
@@ -120,41 +102,6 @@ def test_physical_continue_accepts_verified_current_color(state,monkeypatch,colo
     assert state.board==after and len(state.move_history)==1
     assert not state.snapshot_continue_required and not state.manual_override_active
     assert hw.cam_monitor.get_fresh_snapshot.call_count==2
-
-
-def test_selfplay_no_legal_move_terminal_ends_spectator(state,monkeypatch):
-    ctrl=SelfPlayController(state,SimpleNamespace())
-    ctrl.status=SelfPlayStatus.THINKING
-    ctrl._token=ctrl._current_token()
-    ctrl._thread=SimpleNamespace(is_alive=lambda:False)
-    ctrl._result=(ctrl._token,[row[:] for row in state.board],state.turn,None,None)
-    monkeypatch.setattr(xiangqi,'find_all_valid_moves',lambda *a:[])
-    ctrl.tick()
-    assert ctrl.status is SelfPlayStatus.FINISHED and state.game_over
-    state.api_client.end_match.assert_called_once_with(winner='BLACK',reason='CHECKMATE')
-
-
-def test_selfplay_stop_during_motion_and_resign_publish_once(state):
-    from src.motion.result import MotionExecutionResult
-    alive = [True]
-    ctrl=SelfPlayController(state,SimpleNamespace())
-    move=((0,6),(0,5))
-    after,captured=xiangqi.make_temp_move(state.board,move)
-    state.mark_move_pending(state.create_move_context(*move,MoveActor.ROBOT))
-    state.set_pending_physical_move(move,after,captured,state.turn)
-    ctrl.status=SelfPlayStatus.MOVING
-    ctrl._token=ctrl._current_token()
-    ctrl._moving_before_board=[row[:] for row in state.board]
-    ctrl._result=(ctrl._token,after,state.turn,MotionExecutionResult.ok(),None)
-    ctrl._thread=SimpleNamespace(is_alive=lambda:alive[0])
-    assert ctrl.end_match(winner='BLACK',reason='RESIGN')
-    assert ctrl.status is SelfPlayStatus.ENDING
-    assert not ctrl.end_match()
-    state.api_client.end_match.assert_not_called()
-    alive[0]=False
-    ctrl.tick()
-    assert ctrl.status is SelfPlayStatus.ENDED
-    state.api_client.end_match.assert_called_once_with(winner='BLACK',reason='RESIGN')
 
 
 @pytest.mark.parametrize('color', ['r','b'])

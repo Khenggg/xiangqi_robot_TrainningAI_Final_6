@@ -17,7 +17,7 @@ from src.ui.input_handler import InputHandler
 
 @pytest.fixture
 def camera_game(monkeypatch):
-    monkeypatch.setattr("config.GAME_MODE", "HUMAN_VS_HUMAN")
+    monkeypatch.setattr("config.GAME_MODE", "HUMAN_VS_ROBOT")
     state = GameState()
     state.api_client.send_move_update_board = Mock()
     backend = PhysicalFR3Backend(dry_run=True)
@@ -46,40 +46,6 @@ def _scan(handler, results, board, *, quality=True, second=None):
     results.extend([{"success": True, "quality_ok": quality, "board": board},
                     {"success": True, "quality_ok": quality, "board": second if second is not None else board}])
     return handler._handle_space_key()
-
-
-@pytest.mark.parametrize("start_black,move,captured", [
-    (False, ((1, 7), (1, 0)), "black_knight_0"),
-    (True, ((1, 2), (1, 9)), "red_knight_0"),
-])
-def test_camera_capture_either_color_removes_actual_body_and_viewer_piece(camera_game, start_black, move, captured):
-    state, bridge, telemetry, handler, results, commands = camera_game
-    if start_black:
-        state.turn = "b"
-    expected, _ = xiangqi.make_temp_move(state.board, move)
-    assert _scan(handler, results, expected)
-    assert state.board == expected
-    assert captured not in bridge.world.pieces
-    assert captured not in {piece["id"] for piece in telemetry._latest_world_state["pieces"]}
-    assert len(bridge.world.pieces) == 31
-    assert state.turn == ("r" if start_black else "b")
-    commands.assert_not_called()
-
-
-def test_camera_moves_both_colors_and_rejects_flicker_or_extra_board_changes(camera_game):
-    state, bridge, telemetry, handler, results, commands = camera_game
-    for move in [((0, 6), (0, 5)), ((0, 3), (0, 4))]:
-        expected, _ = xiangqi.make_temp_move(state.board, move)
-        before = deepcopy(state.board)
-        assert not _scan(handler, results, expected, second=before)
-        assert state.board == before
-        assert _scan(handler, results, expected)
-        assert state.board == expected
-    assert state.piece_ids[(4, 0)] == "black_pawn_0"
-    assert bridge.world.pieces["black_pawn_0"].get_nearest_intersection()[:2] == (4, 0)
-    assert any(p["id"] == "black_pawn_0" and p["nearest_row"] == 4
-               for p in telemetry._latest_world_state["pieces"])
-    commands.assert_not_called()
 
 
 def test_explicit_full_scan_recovers_moved_and_captured_board_without_arm_motion(camera_game):

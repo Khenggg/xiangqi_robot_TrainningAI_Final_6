@@ -10,7 +10,6 @@ from src.core.game_state import GameState
 from src.core.ai_execution import execute_ai_move
 from src.core.human_move_commit_coordinator import HumanMoveCommitCoordinator
 from src.hardware.hardware_manager import HardwareManager
-from src.core.self_play_controller import SelfPlayController
 
 
 @pytest.mark.parametrize("argv,backend,dry,game_only", [
@@ -101,25 +100,6 @@ def test_game_only_self_play_motion_adapter_never_uses_robot():
     hw.config.ROBOT_BACKEND = "PHYSICAL"
     assert not HardwareManager.execute_piece_move(hw).success
     hw.robot.move_piece.assert_not_called()
-
-
-def test_game_only_self_play_commits_without_a_simulator():
-    state = GameState()
-    state.api_client.send_move_update_board = Mock()
-    hw = SimpleNamespace(config=SimpleNamespace(GAME_ONLY=True, ROBOT_BACKEND="VIRTUAL", GAME_MODE="ROBOT_VS_ROBOT"),
-                         dry_run=True, is_robot_ready=True, simulation_runtime=None,
-                         difficulty_availability=lambda: {"easy": True},
-                         ai_ctrl=SimpleNamespace(pick_move=lambda board, **kw: ((0, 6), (0, 5))))
-    hw.execute_piece_move = lambda **kwargs: HardwareManager.execute_piece_move(hw, **kwargs)
-    controller = SelfPlayController(state, hw)
-    assert controller.start("easy", "easy", run_mode="step")
-    assert controller.request_next_move()
-    controller._thread.join(2)
-    controller.tick()
-    controller._thread.join(2)
-    controller.tick()
-    assert state.board[5][0] == "r_P" and state.turn == "b"
-    assert not state.physical_sync_fault and not state.move_sync_error
 
 
 def test_human_sync_failure_is_not_reported_as_accepted():

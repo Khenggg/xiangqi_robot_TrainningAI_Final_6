@@ -467,7 +467,7 @@ class InputHandler:
     def _toggle_pick_test(self):
         profile = getattr(self.hw, "profile", None)
         if profile is not None and not profile.robot_moves_enabled:
-            self.state.set_status("Người vs Người chỉ đi bằng chuột; không có chức năng gắp/hover.", duration=15)
+            self.state.set_status("Phiên này không có chức năng gắp/hover.", duration=15)
             return
         if self.state.pending_test_motion is not None:
             self.state.set_status("Test đang dở: Ctrl+F8 kiểm tra dừng rồi V đối soát; không bật/tắt để chạy lại.", duration=30)
@@ -694,20 +694,6 @@ class InputHandler:
             self.state.set_status("Full board synchronized." if captured else "Board synchronized; capture a fresh baseline before continuing.", duration=10.0)
         return True
 
-    def _confirm_human_camera_move(self):
-        from src.vision.move_observation import derive_move_observation
-        if getattr(self.state, "physical_sync_fault", False) or getattr(self.state, "move_sync_error", None):
-            return False
-        layout = self._fresh_confirmed_layout()
-        if layout is None:
-            return False
-        observation = derive_move_observation(self.state.board, layout, player_color=self.state.turn)
-        if not observation.success:
-            return False
-        expected, _ = xiangqi.make_temp_move(self.state.board, (observation.src, observation.dst))
-        if expected != layout:
-            return False
-        return self._commit_human_move(observation.src, observation.dst, observation.piece, source="CAMERA_HUMAN_VS_HUMAN")
 
     def _physical_recovery_required(self):
         cfg = getattr(self.hw, "config", None)
@@ -1080,9 +1066,6 @@ class InputHandler:
                     color=(0, 100, 180), duration=5.0,
                 )
             return False
-        if str(getattr(config, "GAME_MODE", "HUMAN_VS_ROBOT")).upper() == "HUMAN_VS_HUMAN":
-            self.state.set_status("Hai người chơi đi bằng chuột; không dùng camera hoặc SPACE.", duration=10)
-            return False
         if self._player_turn_mode == PlayerTurnMode.UNIFIED:
             self.state.set_status("⚠️ UNIFIED: SPACE chỉ yêu cầu poll state-machine.", color=(180, 100, 0))
             return False
@@ -1336,7 +1319,7 @@ class InputHandler:
         if self._motion_busy() or getattr(self.state, "visual_pick_retry", None):
             return False
         """Commit one legal Red move after repeated stable board observations."""
-        if ((self.state.turn != "r" and getattr(config, 'GAME_MODE', '') != 'HUMAN_VS_HUMAN') or self.state.game_over
+        if (self.state.turn != "r" or self.state.game_over
                 or getattr(self.state, "pick_test_mode", False) or getattr(self.state, "pick_test_resume_required", False)
                 or getattr(self.state, "manual_override_active", False)):
             self._board_stability_monitor.reset()
@@ -1418,15 +1401,9 @@ class InputHandler:
             if self._player_turn_mode == PlayerTurnMode.UNIFIED:
                 return False
 
-        if getattr(config, 'GAME_MODE', '') == 'HUMAN_VS_HUMAN':
-            from src.vision.move_observation import derive_move_observation
-            observed = derive_move_observation(self.state.board, cchess_result.get('board') if cchess_result else None,
-                player_color=self.state.turn, confidence_grid=cchess_result.get('confidence') if cchess_result else None)
-            src, dst, piece = observed.as_tuple() if observed.success else (None, None, None)
-        else:
-            src, dst, piece = self.hw.yolo_detector.detect_move(
-                frame, detections, self.state.board, cchess_result=cchess_result
-            )
+        src, dst, piece = self.hw.yolo_detector.detect_move(
+            frame, detections, self.state.board, cchess_result=cchess_result
+        )
         candidate = None
         rejection_reason = None
         if src is None:

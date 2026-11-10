@@ -46,8 +46,7 @@ class HardwareManager(VisualPickModes):
         self.robot = (FR5Robot(ip=getattr(config, "ROBOT_IP", None), dry_run=self.profile.dry_run,
                               teaching_points_path=fixed_points)
                       if (self.profile.physical_robot_enabled or
-                          (self.profile.game_mode != "HUMAN_VS_HUMAN"
-                           and str(getattr(config, "ROBOT_BACKEND", "VIRTUAL")).upper() == "PHYSICAL"))
+                          str(getattr(config, "ROBOT_BACKEND", "VIRTUAL")).upper() == "PHYSICAL")
                       else None)
         self.backend = None
         self.simulation_runtime = None
@@ -103,21 +102,7 @@ class HardwareManager(VisualPickModes):
                     raise RuntimeError("Startup cancelled")
                 started = time.monotonic()
                 event("startup.component_started", "Khởi tạo thành phần", component=component)
-                try:
-                    initialize()
-                except Exception as component_error:
-                    if component != "robot" or profile is None or profile.game_mode != "HUMAN_VS_HUMAN":
-                        raise
-                    # PvP has no robot executor. A failed optional virtual scene
-                    # cannot become a fake successful robot move or block mouse play.
-                    self.close_simulation()
-                    self.backend = self.board_pose_provider = self.robot = None
-                    from dataclasses import replace
-                    self.profile = replace(profile, simulation_enabled=False, viewer_enabled=False)
-                    self.config.SESSION_PROFILE = self.profile
-                    self.config.GAME_ONLY = True
-                    event("startup.optional_scene_failed", "PvP tiếp tục bằng chuột; mô phỏng chưa khởi tạo",
-                          level=logging.WARNING, reason=str(component_error))
+                initialize()
                 event("startup.component_returned", "Hàm khởi tạo đã kết thúc", component=component,
                       duration_s=round(time.monotonic() - started, 3))
         except Exception:
@@ -166,10 +151,7 @@ class HardwareManager(VisualPickModes):
         profile = getattr(self, "profile", None)
         if profile is not None and not profile.physical_robot_enabled and profile.backend != "VIRTUAL":
             raise RuntimeError("Session has no physical robot capability")
-        if profile is not None and profile.game_mode == "HUMAN_VS_HUMAN":
-            mode = profile.backend
-        else:
-            mode = str(getattr(self.config, "ROBOT_BACKEND", profile.backend if profile else "VIRTUAL")).upper()
+        mode = str(getattr(self.config, "ROBOT_BACKEND", profile.backend if profile else "VIRTUAL")).upper()
         if mode == "VIRTUAL":
             from src.simulation.runtime import VirtualXiangqiSimulation
             from src.simulation.virtual_fr3_backend import VirtualFR3Backend
@@ -315,12 +297,10 @@ class HardwareManager(VisualPickModes):
             return None
         try:
             runtime = self.simulation_runtime
-            controller = getattr(getattr(self, "session_control", None), "self_play", None)
             allowed = (runtime is not None and not getattr(self, "_closing", False)
                        and not self.stop_coordinator.blocked
                        and state.pending_move is None and state.pending_ai_move is None
-                       and state.pending_test_motion is None and not state.ai_thinking
-                       and not (controller is not None and controller.active))
+                       and state.pending_test_motion is None and not state.ai_thinking)
             journal = state._journal
             return dict(session_id=journal.session_id if journal is not None else state._local_session_id,
                         board_revision=state.board_revision, game_epoch=state.game_epoch,
@@ -359,7 +339,7 @@ class HardwareManager(VisualPickModes):
             return rejected("Session is closing; no new piece movement")
         profile = getattr(self, "profile", None)
         if profile is not None and not profile.robot_moves_enabled:
-            return rejected("Người vs Người chỉ nhập nước bằng chuột; không có lệnh robot")
+            return rejected("Session profile does not allow robot moves")
         stop_coord = getattr(self, "stop_coordinator", None)
         if stop_coord is not None and stop_coord.blocked:
             return rejected("RECOVERY_REQUIRED: session stop latched; no new piece move")
@@ -1158,7 +1138,7 @@ class HardwareManager(VisualPickModes):
         if getattr(self, "_closing", False):
             raise RuntimeError("Session is closing; hover is unavailable")
         if self.profile is not None and not self.profile.robot_moves_enabled:
-            raise RuntimeError("Robot tests are unavailable in Người vs Người")
+            raise RuntimeError("Robot tests are unavailable in this session profile")
         if not self._piece_move_lock.acquire(blocking=False):
             raise RuntimeError("Another robot operation is active")
         try:

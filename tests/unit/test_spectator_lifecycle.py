@@ -9,7 +9,6 @@ import pytest
 
 from src.api.simulation_client import TuongKyDaiSuClient
 from src.core.game_state import GameState
-from src.core.self_play_controller import SelfPlayController, SelfPlayStatus
 
 
 @pytest.fixture
@@ -42,14 +41,14 @@ def controller(monkeypatch, client):
     state = GameState()
     settled = threading.Event()
     settled.set()
-    hw = SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND='PHYSICAL', GAME_MODE='ROBOT_VS_ROBOT'), dry_run=False,
+    hw = SimpleNamespace(config=SimpleNamespace(ROBOT_BACKEND='PHYSICAL', GAME_MODE='HUMAN_VS_ROBOT'), dry_run=False,
                          request_controlled_stop=lambda *a,**kw: SimpleNamespace(done=settled,result=SimpleNamespace(safe=True)),
                          stop_coordinator=SimpleNamespace(safe_for_release=lambda **kw:True),
                          simulation_runtime=None, is_robot_ready=True, cam_monitor=object(),
                          verify_physical_board=Mock(return_value=True),
                          capture_baseline_if_needed=Mock(return_value=True),
                          execute_piece_move=Mock())
-    return SelfPlayController(state, hw)
+    return SimpleNamespace(state=state, hw=hw)
 
 
 def test_repeated_ensure_opens_one_room_with_current_fen(spectator):
@@ -61,65 +60,6 @@ def test_repeated_ensure_opens_one_room_with_current_fen(spectator):
         ('matches', {'redPlayerName': 'Người chơi Đỏ', 'blackPlayerName': 'Robot AI'}),
         ('fen', {'fen': 'current-fen'}),
     ]
-
-
-def test_selfplay_stop_and_restart_reopens_spectator_even_while_end_pending(spectator, monkeypatch):
-    api, calls = spectator
-    ctrl = controller(monkeypatch, api)
-    assert ctrl.start()
-    drain(api)
-    entered, release = threading.Event(), threading.Event()
-    end = api._end_match
-    def delayed_end(*args):
-        entered.set()
-        assert release.wait(2)
-        return end(*args)
-    monkeypatch.setattr(api, '_end_match', delayed_end)
-    try:
-        assert ctrl.end_match()
-        assert entered.wait(1)
-        assert ctrl.finish_recovery()  # GUI tick erases ENDED, so status alone is insufficient.
-        # Ending a business match requires New Game before a fresh self-play run.
-        assert not ctrl.start()
-        ctrl.hw.dry_run = True
-        ctrl.hw.simulation_runtime = object()
-        ctrl.state.reset_game(ctrl.hw)
-        assert ctrl.start()
-        assert api.ensure_match(initial_fen=ctrl.state.current_fen)  # outer startup path
-        release.set()
-        drain(api)
-        assert [u.removeprefix(api.base_url) for u, _ in calls] == [
-            '/api/simulation/matches', '/api/simulation/matches/1/end',
-            '/api/simulation/matches',
-        ]
-        assert api._last_fen_ack == (str(api.room_id), ctrl.state.current_fen)
-    finally:
-        release.set()
-
-
-def test_new_game_room_is_reused_by_next_selfplay_start(spectator, monkeypatch):
-    import config
-    api, calls = spectator
-    ctrl = controller(monkeypatch, api)
-    monkeypatch.setattr(config, 'DRY_RUN', False)
-    ctrl.hw.simulation_runtime = object()
-    ctrl.state.set_board_observer(Mock(return_value=True))
-    assert ctrl.start()
-    assert ctrl.end_match()
-    ctrl.state.reset_game(ctrl.hw)
-    assert ctrl.start()
-    drain(api)
-    assert sum(u.endswith('/matches') for u, _ in calls) == 2
-
-
-def test_finished_game_cannot_start_selfplay_or_verify_camera(spectator, monkeypatch):
-    api, calls = spectator
-    ctrl = controller(monkeypatch, api)
-    ctrl.state.game_over = True
-    assert not ctrl.start()
-    assert ctrl.status is SelfPlayStatus.FINISHED
-    ctrl.hw.verify_physical_board.assert_not_called()
-    assert calls == []
 
 
 def test_failed_create_can_be_retried_without_sending_fen_to_old_room(spectator, monkeypatch):
@@ -143,25 +83,6 @@ def test_closed_room_rejects_new_fen_and_duplicate_end(spectator):
     assert not api.send_move_update_board('after-end')
     drain(api)
     assert len(calls) == 2
-
-
-def test_offline_selfplay_does_not_open_spectator(spectator, monkeypatch):
-    api, calls = spectator
-    ctrl = controller(monkeypatch, api)
-    ctrl.hw.dry_run = True
-    api.token = ''
-    assert ctrl.start()
-    assert calls == []
-
-
-def test_spectator_disabled_does_not_block_selfplay(monkeypatch):
-    client = TuongKyDaiSuClient('https://unused.test', '')
-    ctrl = controller(monkeypatch, client)
-    try:
-        assert ctrl.start()
-        assert not client.pending
-    finally:
-        client.close()
 
 
 def test_older_failed_create_cannot_cancel_newer_queued_session(spectator, monkeypatch):
@@ -217,7 +138,7 @@ def test_queue_full_does_not_change_session_state_and_close_rejects_ensure(spect
     assert calls == []
 
 
-@pytest.mark.parametrize('mode', ['HUMAN_VS_HUMAN', 'HUMAN_VS_ROBOT', 'ROBOT_VS_ROBOT'])
+@pytest.mark.parametrize('mode', ['HUMAN_VS_ROBOT', 'HUMAN_VS_HUMAN_ROBOT'])
 def test_main_startup_uses_single_room_for_each_mode(spectator, monkeypatch, mode):
     # Execute the actual helper in isolation; importing main launches the UI loop.
     # This is a wiring test, not a GUI or physical acceptance test.
@@ -226,7 +147,7 @@ def test_main_startup_uses_single_room_for_each_mode(spectator, monkeypatch, mod
     source = Path(__file__).resolve().parents[2] / 'main.py'
     tree = ast.parse(source.read_text(encoding='utf-8'))
     fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_start_selected_game')
-    env = dict(hw=ctrl.hw, state=ctrl.state, self_play=ctrl,
+    env = dict(hw=ctrl.hw, state=ctrl.state,
                config=SimpleNamespace(DRY_RUN=False, ROBOT_BACKEND='PHYSICAL', GAME_MODE=mode))
     exec(compile(ast.Module(body=[fn], type_ignores=[]), str(source), 'exec'), env)
     env['_start_selected_game']()
@@ -236,19 +157,4 @@ def test_main_startup_uses_single_room_for_each_mode(spectator, monkeypatch, mod
     # that unchanged board is rejected by the remote server.
     assert len(calls) == 1
     assert api._last_fen_ack == (str(api.room_id), ctrl.state.current_fen)
-    assert (ctrl.status is SelfPlayStatus.READY) == (mode == 'ROBOT_VS_ROBOT')
 
-
-def test_main_startup_preserves_selfplay_failure_message(spectator, monkeypatch):
-    api, _ = spectator
-    ctrl = controller(monkeypatch, api)
-    ctrl.hw.verify_physical_board.return_value = False
-    source = Path(__file__).resolve().parents[2] / 'main.py'
-    tree = ast.parse(source.read_text(encoding='utf-8'))
-    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_start_selected_game')
-    env = dict(hw=ctrl.hw, state=ctrl.state, self_play=ctrl,
-               config=SimpleNamespace(DRY_RUN=False, ROBOT_BACKEND='PHYSICAL', GAME_MODE='ROBOT_VS_ROBOT'))
-    exec(compile(ast.Module(body=[fn], type_ignores=[]), str(source), 'exec'), env)
-    env['_start_selected_game']()
-    assert ctrl.status is SelfPlayStatus.FAULTED
-    assert 'Camera board check failed' in ctrl.state.status_message

@@ -10,7 +10,6 @@ import numpy as np
 import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
-from src.core.self_play_controller import SelfPlayController, SelfPlayStatus
 from src.motion.result import MotionExecutionResult
 from src.core.motion_worker import MotionWorker
 from src.ui.input_handler import InputHandler
@@ -72,68 +71,12 @@ def test_optional_command_metadata_failure_keeps_readonly_arm_packet():
     assert packet['command_context'] is None
 
 
-def virtual_controller(state):
-    settled = threading.Event()
-    settled.set()
-    hardware = SimpleNamespace(dry_run=True, simulation_runtime=object(),
-        config=SimpleNamespace(ROBOT_BACKEND='VIRTUAL', GAME_MODE='ROBOT_VS_ROBOT'),
-        execute_piece_move=Mock(),
-        request_controlled_stop=lambda *a, **kw: SimpleNamespace(done=settled, result=SimpleNamespace(safe=True)),
-        stop_coordinator=SimpleNamespace(safe_for_release=lambda **kw: True))
-    return SelfPlayController(state, hardware)
-
-
-def test_surrender_during_thinking_waits_for_worker_without_dispatch(session):
-    state, _ = session
-    ctrl = virtual_controller(state)
-    release = threading.Event()
-    ctrl._thread = threading.Thread(target=release.wait)
-    ctrl._thread.start()
-    ctrl.status = SelfPlayStatus.THINKING
-    try:
-        assert ctrl.request_surrender(winner='BLACK')
-        assert ctrl.status is SelfPlayStatus.ENDING and not state.game_over
-        ctrl.tick()
-        assert not state.game_over
-    finally:
-        release.set(); ctrl._thread.join(2)
-    ctrl.tick()
-    assert ctrl.status is SelfPlayStatus.ENDED
-    assert state.game_over and state.winner == 'b' and state.game_over_reason == 'RESIGN'
-    assert not state.move_history
-    ctrl.hw.execute_piece_move.assert_not_called()
-
-
-def test_surrender_during_motion_commits_once_before_ending(session):
-    state, _ = session
-    ctrl = virtual_controller(state)
-    move = ((4, 6), (4, 5))
-    context = state.create_move_context(*move, MoveActor.ROBOT)
-    state.mark_move_pending(context)
-    expected, _ = xiangqi.make_temp_move(state.board, move)
-    state.set_pending_physical_move(move, expected, '.', 'r')
-    ctrl._token = ctrl._current_token()
-    ctrl._moving_before_board = [row[:] for row in state.board]
-    ctrl._result = (ctrl._token, expected, 'r', MotionExecutionResult.ok(), None)
-    ctrl._thread = threading.Thread(target=lambda: None)
-    ctrl._thread.start(); ctrl._thread.join(2)
-    ctrl.status = SelfPlayStatus.MOVING
-    assert ctrl.request_surrender(winner='BLACK')
-    assert not state.game_over and ctrl.status is SelfPlayStatus.MOVING
-    ctrl.tick()
-    assert len(state.move_history) == 1 and not state.game_over
-    ctrl.tick()
-    assert state.game_over and state.winner == 'b'
-    assert state.pending_move is None and len(state.move_history) == 1
-    ctrl.hw.execute_piece_move.assert_not_called()
-
-
 @pytest.fixture
 def session(monkeypatch, tmp_path):
     monkeypatch.setattr(config, 'SIMULATION_TOKEN', '')
-    monkeypatch.setattr(config, 'GAME_MODE', 'HUMAN_VS_HUMAN')
+    monkeypatch.setattr(config, 'GAME_MODE', 'HUMAN_VS_ROBOT')
     state = GameState()
-    state.attach_journal(tmp_path, 'VIRTUAL', 'HUMAN_VS_HUMAN')
+    state.attach_journal(tmp_path, 'VIRTUAL', 'HUMAN_VS_ROBOT')
     yield state, tmp_path
     state.api_client.close()
     state.close_journal()
@@ -151,7 +94,7 @@ def test_home_then_other_mode_starts_new_game_and_keeps_retired_outbox(session):
     assert state.process_human_move((4, 6), (4, 5), 'r_P')
     state.publish_match_end(reason='OTHER')
     state.close_journal(clean=True)
-    new = reopen(root, 'HUMAN_VS_ROBOT')
+    new = reopen(root, 'HUMAN_VS_HUMAN_ROBOT')
     try:
         assert new._journal.session_id != old_session
         assert not new.recovery_required and not new.mode_change_pending
@@ -167,7 +110,7 @@ def test_clean_close_without_retirement_preserves_saved_game(session):
     assert state.process_human_move((4, 6), (4, 5), 'r_P')
     old_session = state._journal.session_id
     state.close_journal(clean=True)
-    new = reopen(root, 'HUMAN_VS_ROBOT')
+    new = reopen(root, 'HUMAN_VS_HUMAN_ROBOT')
     try:
         assert new._journal.session_id == old_session
         assert new.recovery_required and new.mode_change_pending
@@ -182,7 +125,7 @@ def test_clean_close_with_recovery_latch_cannot_retire_uncertain_game(session):
     state.publish_match_end(reason='OTHER')
     old_session = state._journal.session_id
     state.close_journal(clean=True)
-    new = reopen(root, 'ROBOT_VS_ROBOT')
+    new = reopen(root, 'HUMAN_VS_HUMAN_ROBOT')
     try:
         assert new._journal.session_id == old_session
         assert new.recovery_required and new.mode_change_pending
@@ -202,7 +145,7 @@ def test_retirement_intent_never_discards_dispatched_robot_move(session):
     state.publish_match_end(reason='OTHER')
     old_session = state._journal.session_id
     state.close_journal(clean=True)
-    new = reopen(root, 'ROBOT_VS_ROBOT')
+    new = reopen(root, 'HUMAN_VS_HUMAN_ROBOT')
     try:
         assert new.recovery_required and new.mode_change_pending
         assert new._journal.session_id == old_session
@@ -225,7 +168,7 @@ def test_emergency_replacement_does_not_inherit_robot_execution_binding(session,
     assert state.last_execution_binding is None
     assert state.pending_move is None and state.pending_execution_binding is None
     state.close_journal()
-    new = reopen(root, 'HUMAN_VS_ROBOT')
+    new = reopen(root, 'HUMAN_VS_HUMAN_ROBOT')
     try:
         assert new.last_execution_binding is None
         assert new.last_committed_move.move_id == state.last_committed_move.move_id

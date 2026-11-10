@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 
 
-GAME_MODES = {"HUMAN_VS_HUMAN", "HUMAN_VS_ROBOT", "ROBOT_VS_ROBOT", "HUMAN_VS_HUMAN_ROBOT"}
+GAME_MODES = {"HUMAN_VS_ROBOT", "HUMAN_VS_HUMAN_ROBOT"}
 
 
 @dataclass(frozen=True)
@@ -15,7 +15,6 @@ class SessionProfile:
     physical_robot_enabled: bool
     robot_moves_enabled: bool
     ai_enabled: bool
-    self_play_enabled: bool
     simulation_enabled: bool
     viewer_enabled: bool
     mouse_input: str
@@ -30,10 +29,8 @@ class SessionProfile:
 
     @property
     def match_names(self):
-        if self.game_mode in {"HUMAN_VS_HUMAN", "HUMAN_VS_HUMAN_ROBOT"}:
+        if self.game_mode == "HUMAN_VS_HUMAN_ROBOT":
             return ("Người chơi Đỏ", "Người chơi Đen")
-        if self.game_mode == "ROBOT_VS_ROBOT":
-            return ("AI Đỏ (một FR3)", "AI Đen (một FR3)")
         return ("Người chơi", "Robot AI")
 
 
@@ -44,27 +41,25 @@ def make_profile(game_mode, requested_environment, *, simulation_enabled=True, v
     requested = str(requested_environment).upper()
     if requested not in {"VIRTUAL", "PHYSICAL"}:
         raise ValueError("Unsupported execution environment")
-    pvp = mode == "HUMAN_VS_HUMAN"
     robot_pvp = mode == "HUMAN_VS_HUMAN_ROBOT"
     if robot_pvp and not simulation_enabled:
         raise ValueError("Two-human robot mode requires simulation or physical robot mode")
-    physical = requested == "PHYSICAL" and not pvp
+    physical = requested == "PHYSICAL"
     environment = "PHYSICAL" if physical else "VIRTUAL"
     return SessionProfile(
         game_mode=mode, requested_environment=requested, execution_environment=environment,
         backend=environment, camera_enabled=physical, physical_robot_enabled=physical,
-        robot_moves_enabled=not pvp, ai_enabled=not (pvp or robot_pvp),
-        self_play_enabled=mode == "ROBOT_VS_ROBOT",
+        robot_moves_enabled=True, ai_enabled=not robot_pvp,
         simulation_enabled=simulation_enabled,
         viewer_enabled=simulation_enabled and viewer_enabled,
-        mouse_input="ROBOT_COMMANDS" if robot_pvp else ("BOTH_PLAYERS" if pvp else ("VIRTUAL_TEST_ADAPTER" if not physical and mode == "HUMAN_VS_ROBOT" else "NONE")))
+        mouse_input="ROBOT_COMMANDS" if robot_pvp else ("VIRTUAL_TEST_ADAPTER" if not physical else "NONE"))
 
 
 def profile_from_config(config):
     requested = ("PHYSICAL" if str(getattr(config, "ROBOT_BACKEND", "VIRTUAL")).upper() == "PHYSICAL"
                  and not getattr(config, "DRY_RUN", True) else "VIRTUAL")
     mode = str(getattr(config, "GAME_MODE", "HUMAN_VS_ROBOT")).upper()
-    if requested == "PHYSICAL" and getattr(config, "GAME_ONLY", False) and mode != "HUMAN_VS_HUMAN":
+    if requested == "PHYSICAL" and getattr(config, "GAME_ONLY", False):
         raise ValueError("Game-only cannot enable physical hardware")
     return make_profile(mode, requested, simulation_enabled=not getattr(config, "GAME_ONLY", False))
 

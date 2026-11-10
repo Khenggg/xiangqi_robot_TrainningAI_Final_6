@@ -5,7 +5,6 @@ import pytest
 import config
 from src.core.game_state import GameState
 from src.core import xiangqi
-from src.core.self_play_controller import SelfPlayController, SelfPlayStatus
 from src.domain.game_move import MoveActor
 from src.motion.result import MotionExecutionResult
 
@@ -62,21 +61,3 @@ def test_terminal_human_commit_is_processed_despite_mirror_failure(state):
     assert state.game_over and state.winner == 'r'
     state.api_client.end_match.assert_called_once_with(winner='RED',reason='CHECKMATE')
 
-
-def test_terminal_rvr_commit_is_processed_despite_mirror_failure(state, monkeypatch):
-    monkeypatch.setattr(config,'GAME_MODE','ROBOT_VS_ROBOT')
-    move = king_capture(state)
-    context = state.create_move_context(*move,MoveActor.ROBOT)
-    state.mark_move_pending(context)
-    after,captured = xiangqi.make_temp_move(state.board,move)
-    state.set_pending_physical_move(move,after,captured,'r')
-    ctrl = SelfPlayController(state,SimpleNamespace(config=SimpleNamespace(GAME_MODE='ROBOT_VS_ROBOT'),dry_run=True))
-    ctrl.status = SelfPlayStatus.MOVING
-    ctrl._token = ctrl._current_token()
-    ctrl._moving_before_board = [row[:] for row in state.board]
-    ctrl._result = (ctrl._token,after,'r',MotionExecutionResult.ok(),None)
-    ctrl._thread = Mock(is_alive=Mock(return_value=False))
-    ctrl.tick()
-    assert state.game_over and state.winner == 'r' and ctrl.status == SelfPlayStatus.FINISHED
-    assert not state.physical_sync_fault
-    state.api_client.end_match.assert_called_once_with(winner='RED',reason='CHECKMATE')

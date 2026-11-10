@@ -51,7 +51,7 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
         from src.core.session_profile import configure_session
         profile = configure_session(config, options, mode=mode)
         state.session_profile = profile
-        state.allow_mouse_move = profile.mouse_input in {"BOTH_PLAYERS", "VIRTUAL_TEST_ADAPTER"}
+        state.allow_mouse_move = profile.mouse_input == "VIRTUAL_TEST_ADAPTER"
         event("session.capabilities", "Quyền vận hành của chế độ đã chọn", game_mode=profile.game_mode,
               requested_environment=profile.requested_environment, environment=profile.execution_environment,
               camera=profile.camera_enabled, physical_robot=profile.physical_robot_enabled,

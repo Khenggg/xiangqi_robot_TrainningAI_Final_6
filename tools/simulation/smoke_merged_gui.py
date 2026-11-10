@@ -7,7 +7,7 @@ os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["SDL_AUDIODRIVER"] = "dummy"
 os.environ["ROBOT_BACKEND"] = "VIRTUAL"; os.environ["DRY_RUN"] = "1"
 parser = argparse.ArgumentParser()
-parser.add_argument("--mode", choices=("HUMAN_VS_ROBOT", "HUMAN_VS_HUMAN", "ROBOT_VS_ROBOT"), default="HUMAN_VS_ROBOT")
+parser.add_argument("--mode", choices=("HUMAN_VS_ROBOT",), default="HUMAN_VS_ROBOT")
 args = parser.parse_args()
 import config
 config.ROBOT_BACKEND = "VIRTUAL"; config.DRY_RUN = True
@@ -24,16 +24,10 @@ def pump():
         time.sleep(.1)
     time.sleep(.5)
     pygame.image.save(pygame.display.get_surface(), str(out / "gui-home.png"))
-    if args.mode == "HUMAN_VS_ROBOT":
-        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN))
-    else:
-        from src.ui.board_renderer import HOME_SELF_PLAY_RECT, HOME_HUMAN_RECT
-        rect = HOME_SELF_PLAY_RECT if args.mode == "ROBOT_VS_ROBOT" else HOME_HUMAN_RECT
-        pygame.event.post(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=rect.center))
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN))
     time.sleep(9)
     pygame.image.save(pygame.display.get_surface(), str(out / "gui-difficulty.png"))
-    if args.mode != "HUMAN_VS_HUMAN":
-        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_1))
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_1))
     time.sleep(3)
     pygame.image.save(pygame.display.get_surface(), str(out / "gui-game.png"))
     pygame.event.post(pygame.event.Event(pygame.QUIT))
@@ -47,8 +41,6 @@ try:
     assert result["state"]._board_observer is not None
     assert not result["difficulty_menu_active"], "Difficulty selection failed"
     assert config.GAME_MODE == args.mode
-    if args.mode == "ROBOT_VS_ROBOT":
-        assert result["self_play"].human_input_disabled
     print("MERGED_GUI_SMOKE_OK: visual game, virtual runtime, twin and telemetry initialized")
 finally:
     result["_cleanup_all"]()
