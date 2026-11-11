@@ -216,7 +216,7 @@ class FR5Robot:
         if not self.connected or self.robot is None:
             raise RobotCommandError("Cannot confirm controller disable: robot disconnected")
         if self._disable_outcome_unknown:
-            raise RobotCommandError("Disable reply unknown; disable on the pendant, then confirm with Ctrl+F9. No RPC replay.")
+            raise RobotCommandError("Disable reply unknown; disable on pendant and Ctrl+F9 confirm. No RPC replay.")
         from src.hardware.rpc_transport import RpcOutcomeUnknown
         try:
             code = self.robot.RobotEnable(0)
@@ -348,15 +348,15 @@ class FR5Robot:
             if use_current:
                 code, current_user = self.robot.GetActualWObjNum()
                 if int(code) != 0:
-                    raise RobotCommandError(f"Could not read the selected WObj: {code}", code)
+                    raise RobotCommandError(f"Không đọc được WObj đang chọn: {code}", code)
                 if parse_frame_identifier(current_user) != source_user:
                     raise RobotCommandError(
-                        f"Select User/WObj {source_user} on the pendant, then restart the session to verify again. "
-                        f"Firmware can only read the selected WObj (current: {current_user}).")
+                        f"Chọn User/WObj {source_user} trên pendant rồi F9/F10 để xác minh lại. "
+                        f"Firmware chỉ đọc được WObj đang chọn (hiện tại: {current_user}).")
                 code, wobj_offset = self.robot.GetCurWObjCoord()
                 after_code, after_user = self.robot.GetActualWObjNum()
                 if after_code != 0 or parse_frame_identifier(after_user) != source_user:
-                    raise RobotCommandError("WObj changed while reading; keep the frame and restart the session to retry")
+                    raise RobotCommandError("WObj thay đổi trong lúc đọc; giữ nguyên frame rồi F9/F10 thử lại")
                 verification_source = "GetCurWObjCoord"
             if code != 0:
                 raise RobotCommandError(f"WObj {source_user} query failed: {code}", code)
@@ -940,17 +940,6 @@ class FR5Robot:
                         else MotionFailureCategory.MOTION_COMMAND_FAILED)
             retry_stage = exc.stage if isinstance(exc, PickTargetUnavailable) else None
             metadata = {}
-            # The donor adapter wraps MotionResult as RobotCommandError. Keep
-            # transport uncertainty so recovery cannot mistake it for a known
-            # rejected command and dispatch HOME automatically.
-            from src.hardware.rpc_transport import RpcOutcomeUnknown
-            transport_error, visited = exc, set()
-            while isinstance(transport_error, BaseException) and id(transport_error) not in visited:
-                visited.add(id(transport_error))
-                if isinstance(transport_error, (RpcOutcomeUnknown, OSError)):
-                    metadata["rpc_outcome_unknown"] = True
-                    break
-                transport_error = transport_error.__cause__ or transport_error.__context__
             if retry_stage:
                 metadata["visual_retry_stage"] = retry_stage
                 metadata["pick_resolution"] = getattr(exc, "resolution", {})
@@ -1060,7 +1049,7 @@ class FR5Robot:
     def pixel_to_grid(self, px, py):
         """Convert tọa độ pixel ảnh → (col, row) bàn cờ."""
         if self.perspective_matrix is None:
-            raise RuntimeError("No perspective_matrix yet — calibrate the camera first.")
+            raise RuntimeError("Chưa có perspective_matrix — hãy calibrate camera trước.")
         src = np.array([[[float(px), float(py)]]], dtype=np.float32)
         dst = cv2.perspectiveTransform(src, self.perspective_matrix)[0][0]
         col = max(0, min(8, int(round(dst[0]))))

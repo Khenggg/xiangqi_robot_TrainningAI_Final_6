@@ -73,7 +73,7 @@ def test_multi_change_rescan_requires_operator_to_confirm_turn(camera_game):
     assert state.board == observed
     assert state.turn_confirmation_required
     assert state.move_sync_error
-    assert "key 1" in state.status_message
+    assert "phím 1" in state.status_message
     assert not state.process_human_move((2, 6), (2, 5), "r_P")
     handler.handle_keyboard(pygame.K_2)
     assert state.turn == "b"

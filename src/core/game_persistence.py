@@ -264,13 +264,13 @@ class GamePersistence:
                         self.manual_override_active = True
                         self.snapshot_continue_required = True
                         self.set_status(
-                            "New session, opening FEN. Check the arm/gripper, then V to confirm the new board.",
+                            "Phiên mới, FEN khai cuộc. Kiểm tra tay/kẹp rồi V xác nhận bàn mới.",
                             duration=60)
                     previous_session = journal.session_id
                     journal.new_session(self.persistence_snapshot(), archive_previous=True)
                     journal.loaded = None
                     from src.core.project_logging import event
-                    event("session.started_fresh", "New session created; previous game FEN not loaded",
+                    event("session.started_fresh", "Đã tạo phiên mới; không nạp FEN ván trước",
                           session_id=journal.session_id, previous_session_id=previous_session,
                           environment=environment, fen=self.current_fen,
                           operator_inspection_required=inspection_required)
@@ -302,7 +302,7 @@ class GamePersistence:
                     journal.loaded["phase"], journal)
                 if self.pending_test_motion is not None:
                     self.pending_test_motion["verified_outcome"] = None
-                    self.pick_test_fault = "Test was sent before closing; check the arm/gripper has stopped, then V to confirm and reconcile. Do not re-run."
+                    self.pick_test_fault = "Test đã gửi trước khi đóng; Ctrl+F8 kiểm tra dừng, V đối soát. Không chạy lại."
                 if self.pending_move is not None and self.pending_ai_move is None:
                     # IDENTIFIED was saved before PREPARED; no automatic dispatch on restore.
                     from src.core.xiangqi import make_temp_move
@@ -325,21 +325,21 @@ class GamePersistence:
                 if self.visual_capture_checkpoint:
                     from src.core.visual_move_coordinator import signature
                     self.visual_capture_checkpoint["signature"] = signature(self)
-                self.set_status("Saved session restored; check the arm/gripper and press V to reconcile. Do not re-run automatically.", duration=60)
+                self.set_status("Đã phục hồi phiên lưu; kiểm tra tay/kẹp và bấm V đối soát. Không tự chạy lại.", duration=60)
                 if self.mode_change_pending:
-                    self.set_status("A different mode was selected. Resolve the pending session, then New Game; the old game is not kept when switching modes.", duration=60)
+                    self.set_status("Đã chọn chế độ khác. Xử lý phiên đang dở rồi New Game; không giữ ván cũ khi đổi chế độ.", duration=60)
                 from src.core.project_logging import event
-                event("session.restored", "Saved state loaded; waiting for operator reconciliation",
+                event("session.restored", "Đã nạp trạng thái lưu; chờ người vận hành đối soát",
                       session_id=journal.session_id, environment=environment,
                       saved_mode=journal.loaded["game_mode"], selected_mode=game_mode,
                       revision=self.board_revision, phase=journal.loaded["phase"],
                       move_id=getattr(self.pending_move, "move_id", None))
                 if discarded_pre_dispatch_ai:
                     event("session.discarded_pre_dispatch_ai",
-                          "Failed AI transaction dropped before sending the command; board confirmation still required",
+                          "Đã bỏ giao dịch AI lỗi trước khi gửi lệnh; vẫn yêu cầu xác nhận bàn",
                           level=logging.INFO, environment=environment)
                     self.set_status(
-                        "Old failed AI transaction dropped. Confirm the board with V/F4 before playing.",
+                        "Đã bỏ giao dịch AI lỗi cũ. Xác nhận bàn bằng V/F4 trước khi chơi.",
                         duration=60)
             self._journal = journal
             if journal.loaded is None:
@@ -367,7 +367,7 @@ class GamePersistence:
         try:
             self.bind_spectator_session(restore=not new)
             profile = getattr(self, "session_profile", None)
-            names = profile.match_names if profile is not None else ("Player", "Robot AI")
+            names = profile.match_names if profile is not None else ("Người chơi", "Robot AI")
             operation = self.api_client.create_match if new else self.api_client.ensure_match
             return operation(red_name=names[0], black_name=names[1], initial_fen=self.current_fen)
         except Exception as exc:
@@ -490,7 +490,7 @@ class GamePersistence:
         self.pending_test_motion = None
         self.test_pick_retry = None
         self.pick_test_resume_required = True
-        self.pick_test_fault = "Test reconciled; restore the board, then New Game" if operator_recovery else None
+        self.pick_test_fault = "Test đã đối soát; khôi phục bàn rồi New Game" if operator_recovery else None
         if operator_recovery:
             self.pick_test_mode = False
         self.persist_checkpoint("TEST_OPERATOR_RESOLVED" if operator_recovery else "TEST_COMPLETED")
@@ -510,7 +510,7 @@ class GamePersistence:
     def approve_recovery_after_verification(self, hardware):
         self.hardware_recovery_reason = None
         if self.mode_change_pending:
-            self.set_status("Changing mode requires New Game after resolving the pending move.", duration=30)
+            self.set_status("Đổi chế độ cần New Game sau khi xử lý nước đang dở.", duration=30)
             # Camera recovery may resolve an existing pending transaction, but
             # it must not authorize new actor dispatch in the newly selected mode.
         if not self.recovery_required and not self.physical_sync_fault:
@@ -520,13 +520,13 @@ class GamePersistence:
                          or not hardware.stop_coordinator.safe_for_release(ignore_current_worker=True)):
             explain = getattr(hardware, "physical_recovery_block_reason", None)
             reason = explain() if callable(explain) else None
-            reason = reason or "Arm/gripper stop not confirmed. Check the robot has stopped, then V to confirm and reconcile."
+            reason = reason or "Chưa xác nhận dừng tay/kẹp. Kiểm tra robot, Ctrl+F8 xác nhận rồi V đối soát."
             self.hardware_recovery_reason = reason
             from src.core.project_logging import event
-            event("recovery.hardware_blocked", f"Camera confirmed the board; {reason}",
+            event("recovery.hardware_blocked", f"Camera đã xác nhận bàn; {reason}",
                   level=logging.WARNING, code="ROBOT_NOT_READY",
                   board_verified=True, robot_reason=reason)
-            self.set_status(f"Camera confirmed the board; {reason}", duration=60)
+            self.set_status(f"Camera đã xác nhận bàn; {reason}", duration=60)
             return False
         self.recovery_required = False
         try:

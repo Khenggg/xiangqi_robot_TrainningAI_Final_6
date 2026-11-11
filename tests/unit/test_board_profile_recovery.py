@@ -105,7 +105,7 @@ def test_recovery_explains_fault_pending_and_turn_without_mutation():
     assert "(0, 4)" in report["pending"]
     assert "F4" in report["action"]
     assert state == before
-    assert "key 1" in describe_recovery({**state, "turn_confirmation_required": True})["action"]
+    assert "phím 1" in describe_recovery({**state, "turn_confirmation_required": True})["action"]
     assert "NEW GAME" in describe_recovery({**state, "pick_test_fault": "Motion blocked"})["action"]
     assert describe_recovery({}) is None
     report = describe_recovery({**state, "pending_ai_move": {"move": ((0, 3), (0, 4)), "expected_board": [["secret-board"]]}})

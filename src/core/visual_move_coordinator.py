@@ -47,7 +47,7 @@ def acquire_pick_targets(hw, expected_cells, stage, cfg, *, attempts=None, inter
         except PickTargetUnavailable as exc:
             last = exc
             event("vision.pick_retry",
-                  f"Piece-center measurement not reached, retrying {attempt}/{attempts} ({stage})",
+                  f"Đo tâm quân chưa đạt, thử lại {attempt}/{attempts} ({stage})",
                   level=logging.INFO, attempt=attempt, attempts=attempts, stage=stage,
                   reason=str(exc), resolution=getattr(exc, "resolution", {}))
             if attempt >= attempts:
@@ -72,8 +72,8 @@ def pause_visual_pick(state, exc):
     state.visual_pick_retry = dict(pending=state.pending_ai_move, context=state.pending_move,
                                    signature=signature(state), stage=exc.stage, reason=str(exc),
                                    resolution=resolution)
-    state.set_status(f"{named_target}. Camera is not ready: {exc}. Y/V: re-measure the exact pending move.", duration=60)
-    event("vision.retry_paused", f"{named_target}. Waiting for piece-center re-measure ({exc.stage}): {exc}",
+    state.set_status(f"{named_target}. Camera chưa đủ điều kiện: {exc}. Y/V: đo lại đúng nước đang chờ.", duration=60)
+    event("vision.retry_paused", f"{named_target}. Chờ đo lại tâm quân ({exc.stage}): {exc}",
           stage=exc.stage, reason=str(exc), move_id=getattr(state.pending_move, "move_id", None),
           resolution=resolution, expected_pick_cells=cells, expected_pick_description=named_target)
 

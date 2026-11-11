@@ -4,7 +4,7 @@
 def describe_recovery(state):
     if state.get("hardware_recovery_reason"):
         reason = "The camera confirmed the board; " + state["hardware_recovery_reason"]
-        action = "Resolve the robot state in the WebApp/controller. Inspect the stopped arm/gripper, then V to confirm and verify the board."
+        action = "Resolve the robot state in the WebApp/controller. When the fault clears and the arm/gripper has stopped, press Ctrl+F8 to confirm, then V to verify."
     elif state.get("pick_test_fault") or state.get("pick_test_resume_required"):
         reason = state.get("pick_test_fault") or "The game is paused for the pick/release test."
         action = "If the test moved pieces, restore the start position. Press NEW GAME. A real robot still needs its own board verification and enable step."

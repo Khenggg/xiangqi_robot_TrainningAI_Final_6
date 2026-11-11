@@ -460,9 +460,9 @@ class BoardRenderer:
                     accent = JADE_COLOR
                 elif game_state.get("robot_backend") == "PHYSICAL" and not game_state.get("is_robot_ready", True):
                     if game_state.get("physical_enable_pending"):
-                        message = "Enabling the robot automatically..."
+                        message = "Press F10 to enable the robot (F9 to cancel)"
                     else:
-                        message = "Robot not enabled yet; the app retries automatically."
+                        message = "Robot READ-ONLY. Check the auto-enable state; F9/F10 to retry."
                     accent = AMBER_COLOR
                 else:
                     message = "Robot turn — waiting to execute the move"

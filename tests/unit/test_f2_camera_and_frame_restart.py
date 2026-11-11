@@ -92,7 +92,7 @@ def test_old_firmware_enable_retry_refreshes_metadata_after_operator_selects_fra
     robot, sdk, _ = mixed_frame_robot(monkeypatch)
     sdk.GetWObjCoordWithID.side_effect = Fault(-506, "Method 'GetWObjCoordWithID' not defined")
     assert robot.connect()
-    assert 'Select User/WObj 1' in robot.teaching_points_error
+    assert 'Chọn User/WObj 1' in robot.teaching_points_error
     sdk.RobotEnable.assert_not_called()
     sdk.GetCurWObjCoord.assert_not_called()  # User 0 is not proof of frame 1.
     sdk.GetActualWObjNum.return_value = (0, 1)  # Operator selection, no SDK write.
@@ -190,7 +190,7 @@ def test_actual_f2_disposal_returns_to_menu_with_gui_owned_window(monkeypatch):
     namespace = dict(state=state, hw=hw, self_play=None, telemetry=None, viewer_server=None,
         debug_dashboard=None, mode_disposal=None, mode_switching=False, mode_switch_failed=False,
         startup_worker=worker, quit_requested=False, home_screen_active=False,
-        threading=threading, logging=logging, log_event=Mock(),
+        physical_enable_pending=True, threading=threading, logging=logging, log_event=Mock(),
         GameState=Mock(return_value=object()), pygame=SimpleNamespace(display=SimpleNamespace(set_caption=Mock())))
     exec(main_functions('_begin_mode_disposal', '_finish_mode_disposal'), namespace)
     try:
@@ -201,29 +201,18 @@ def test_actual_f2_disposal_returns_to_menu_with_gui_owned_window(monkeypatch):
             time.sleep(.005)
         assert namespace['home_screen_active']
         assert not namespace['mode_switching'] and not namespace['mode_switch_failed']
-        assert namespace['hw'] is None
+        assert namespace['hw'] is None and not namespace['physical_enable_pending']
         assert native_calls == [threading.get_ident()]
         state.close_journal.assert_called_once_with(clean=True)
     finally:
         worker.close(2)
 
 
-def test_automatic_enable_failure_is_reported_with_the_actual_reason():
-    from src.core.automatic_physical_startup import AutomaticPhysicalStartup
-
-    state = SimpleNamespace(set_status=Mock())
-    hw = SimpleNamespace(
-        config=SimpleNamespace(AUTO_ENABLE_PHYSICAL_ON_STARTUP=True),
-        profile=SimpleNamespace(physical_robot_enabled=True), dry_run=False,
-        stop_coordinator=SimpleNamespace(generation=0, blocked=False),
-        session_control=SimpleNamespace(action=None), is_robot_ready=False,
-        motion_worker=SimpleNamespace(busy=False, start=Mock(return_value=True)),
-        activate_physical_game=Mock(return_value=True))
-    startup = AutomaticPhysicalStartup(state, hw)
-    startup.baseline_checked = True
-    startup.tick()
-    _, completed = hw.motion_worker.start.call_args.args
+def test_async_enable_failure_is_logged_with_the_actual_reason():
+    namespace = dict(state=SimpleNamespace(set_status=Mock()), log_event=Mock(), logging=logging)
+    exec(main_functions('enabled'), namespace)
     error = RuntimeError('R1-R4 frame could not be verified')
-    completed(None, error)
-    assert str(error) in state.set_status.call_args.args[0]
-    assert not startup.finished
+    namespace['enabled'](None, error)
+    assert namespace['log_event'].call_args.args[:2] == ('physical.enable_failed', str(error))
+    assert namespace['log_event'].call_args.kwargs['code'] == 'PHYSICAL_ENABLE_FAILED'
+    assert str(error) in namespace['state'].set_status.call_args.args[0]

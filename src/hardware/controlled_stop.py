@@ -18,8 +18,6 @@ class StopRequest:
         self.result = None
         self.thread = None
         self.requires_measurements = False
-        self.observation_only = False
-        self.observed_generation = None
 
     def finish(self, result):
         self.result = result
@@ -39,15 +37,7 @@ class ControlledStopCoordinator:
 
     @property
     def blocked(self):
-        """True only while the stop attempt itself is still running.
-
-        The request used to stay latched after the attempt finished, so a single
-        stop paused the game until an operator confirmed recovery. The pause now
-        lasts exactly as long as the stop takes; ``request`` remains for
-        diagnostics and for callers that inspect its result.
-        """
-        request = self.request
-        return request is not None and not request.done.is_set()
+        return self.request is not None
 
     def workers_idle(self, *, ignore_current_worker=False):
         hw = self.hardware
@@ -64,7 +54,7 @@ class ControlledStopCoordinator:
             if workers_finished is not None:
                 self._worker_checks.append(workers_finished)
             # A repeated click observes the original request. It never replays StopMotion.
-            if self.request is not None and not getattr(self.request, 'observation_only', False):
+            if self.request is not None:
                 return self.request
             request = self.request = StopRequest(reason)
             robot = self.hardware.robot
@@ -92,43 +82,6 @@ class ControlledStopCoordinator:
 
     def _all_workers_finished(self):
         return all(check() for check in tuple(self._worker_checks))
-
-    def observe_operator_idle(self, *, approved=False, timeout=2.0):
-        """Temporary measured proof for explicit V, without issuing a stop.
-
-        A completed game command may fail camera verification with no stop RPC
-        ever requested. Prove idle outside the lock so an urgent real stop can
-        still supersede this observation. The caller must discard the receipt.
-        """
-        if not approved:
-            raise RuntimeError('Explicit operator recovery approval required')
-        with self._lock:
-            if self.request is not None:
-                return None  # Preserve the existing real-stop recovery path.
-            generation = self.generation
-        physical = self.hardware.simulation_runtime is None and not self.hardware.dry_run
-        if not physical:
-            return None
-        self._wait_idle(timeout, True, self._all_workers_finished, ignore_current_worker=True)
-        with self._lock:
-            if self.generation != generation or self.request is not None:
-                raise RuntimeError('Stop changed during operator observation; verify again')
-            if (not self.workers_idle(ignore_current_worker=True) or not self._all_workers_finished()
-                    or getattr(self.hardware.robot, '_gripper_pulse_active', False) is True):
-                raise RuntimeError('Worker or gripper changed during operator observation')
-            request = StopRequest('Operator observed stopped arm/gripper for board reconciliation')
-            request.requires_measurements = request.observation_only = True
-            request.observed_generation = generation
-            request.finish(StopResult(True, False, 'Fresh idle observed; no stop command sent'))
-            self.request = request
-            return request
-
-    def discard_operator_observation(self, request):
-        """Remove only this scoped proof; never erase a newer real stop."""
-        with self._lock:
-            if (request is not None and request.observation_only
-                    and self.request is request and self.generation == request.observed_generation):
-                self.request = None
 
     def safe_for_release(self, *, ignore_current_worker=False):
         request = self.request
@@ -189,11 +142,11 @@ class ControlledStopCoordinator:
             try:
                 workers_ready = self.workers_idle() and self._all_workers_finished()
             except Exception as exc:
-                self.last_settle_diagnostic = f'Could not determine the worker state: {exc}'
+                self.last_settle_diagnostic = f'Chưa xác định được trạng thái worker: {exc}'
                 self._settle_probe = None
                 return False
             if (not workers_ready or getattr(self.hardware.robot, '_gripper_pulse_active', False) is True):
-                self.last_settle_diagnostic = "Worker or gripper pulse has not finished"
+                self.last_settle_diagnostic = 'Worker hoặc xung kẹp chưa kết thúc'
                 self._settle_probe = None
                 return False
             probe = self._settle_probe
@@ -206,9 +159,9 @@ class ControlledStopCoordinator:
                          and measured > probe['since'] and 0 <= time.time()-measured <= .5
                          and snapshot.motion_state in {'IDLE','READY'})
                 self.last_settle_diagnostic = (None if fresh else
-                    f'Invalid stop telemetry: {snapshot.motion_state}; {getattr(snapshot, "stale/no measurement image", None) or "ảnh đo cũ/thiếu dữ liệu"}')
+                    f'Telemetry dừng chưa hợp lệ: {snapshot.motion_state}; {getattr(snapshot, "last_error", None) or "ảnh đo cũ/thiếu dữ liệu"}')
             except Exception as exc:
-                self.last_settle_diagnostic = f'Could not read robot state: {exc}'
+                self.last_settle_diagnostic = f'Không đọc được trạng thái robot: {exc}'
                 fresh = False
             if not fresh:
                 probe['count'] = 0
@@ -274,23 +227,10 @@ class ControlledStopCoordinator:
             request.finish(StopResult(True, request.result.acknowledged, "Operator confirmed stopped"))
             return True
 
-    def clear_after_recovery(self, *, ignore_current_worker=False, expected_generation=None,
-                             force=False):
-        """Drop the finished stop request.
-
-        ``force`` skips the verification gate for the automatic re-enable path:
-        the app no longer asks an operator to confirm recovery, so a stop whose
-        reply was unconfirmed must not keep the game paused. The caller is
-        expected to log that the stop was not verified.
-        """
+    def clear_after_recovery(self, *, ignore_current_worker=False, expected_generation=None):
         with self._lock:
             request = self.request
-            if request is None:
-                return
-            if force:
-                if not request.done.is_set() or expected_generation is not None and                         expected_generation != self.generation:
-                    raise RuntimeError("Stop still running; cannot clear the request")
-            elif (not request.done.is_set() or not request.result.safe
+            if (request is None or not request.done.is_set() or not request.result.safe
                     or not self.safe_for_release(ignore_current_worker=ignore_current_worker)
                     or (expected_generation is not None and expected_generation != self.generation)):
                 raise RuntimeError("Verified stop and finished workers required before recovery")

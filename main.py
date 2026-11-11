@@ -118,6 +118,8 @@ settings_menu_active = False
 difficulty_menu_message = ""
 debug_dashboard = None
 viewer_server = None
+physical_enable_pending = False
+physical_enable_deadline = 0.0
 from src.core.motion_worker import MotionWorker
 startup_worker = MotionWorker()
 startup_cancelled = threading.Event()
@@ -407,19 +409,13 @@ def _begin_mode_disposal():
     if mode_disposal is None:
         from src.core.session_disposal import SessionDisposal
         mode_disposal = SessionDisposal(state, hw, None, telemetry, viewer_server, debug_dashboard)
-    operator_retry = mode_switch_failed
     mode_switching = True
     mode_switch_failed = False
     state.set_status("Closing the previous session; the new mode's camera/robot is not open yet.", duration=60)
     camera = getattr(hw, "cam_monitor", None)
     if callable(getattr(camera, "close_display", None)):
         camera.close_display()
-    def dispose():
-        stop = getattr(getattr(hw, 'stop_coordinator', None), 'request', None)
-        if operator_retry and stop is not None and stop.done.is_set() and not stop.result.safe:
-            hw.confirm_operator_stop(approved=True)
-        return mode_disposal.run()
-    if not startup_worker.start(dispose, _finish_mode_disposal):
+    if not startup_worker.start(mode_disposal.run, _finish_mode_disposal):
         mode_switching = False
 
 
@@ -427,7 +423,7 @@ def _finish_mode_disposal(result, error):
     global mode_disposal, mode_switching, mode_switch_failed, state, hw, telemetry
     global viewer_server, input_mgr, session_control, debug_dashboard, home_screen_active
     global difficulty_menu_active, settings_menu_active, startup_message, startup_cancelled
-    global physical_camera_recalibration_requested
+    global physical_enable_pending, physical_camera_recalibration_requested
     mode_switching = False
     if error or result is not True:
         mode_switch_failed = True
@@ -439,6 +435,7 @@ def _finish_mode_disposal(result, error):
     hw = telemetry = viewer_server = input_mgr = session_control = debug_dashboard = None
     mode_disposal = None
     mode_switch_failed = False
+    physical_enable_pending = False
     physical_camera_recalibration_requested = False
     difficulty_menu_active = settings_menu_active = False
     if not quit_requested:
@@ -531,7 +528,7 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
     except Exception as persist_error:
         log_event("session.persistence_failed", str(persist_error), level=logging.ERROR,
                   code="SESSION_PERSISTENCE_FAILED")
-    message = f"RECOVERY REQUIRED: {type(exc).__name__}. Inspect the stopped arm/gripper, then F2 to retry cleanup."
+    message = f"RECOVERY REQUIRED: {type(exc).__name__}. Inspect arm/gripper on pendant, then Ctrl+F8."
     log_event("app.recovery_wait", message, level=logging.ERROR)
     recovery_clock = pygame.time.Clock()
     # Startup/hardware workers may already be closed by a partial teardown.
@@ -555,10 +552,10 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
                         return
                 if item.type == pygame.KEYDOWN and item.key == pygame.K_F2:
                     retry_requested = True
-                    stop = getattr(getattr(hw, 'stop_coordinator', None), 'request', None)
-                    if (stop is not None and stop.done.is_set() and not stop.result.safe
-                            and not hw.motion_worker.running):
-                        operator_worker.start(lambda: hw.confirm_operator_stop(approved=True), _job_completed)
+                if (item.type == pygame.KEYDOWN and item.key == pygame.K_F8
+                        and getattr(item, "mod", 0) & pygame.KMOD_CTRL
+                        and hw is not None and not hw.motion_worker.running):
+                    operator_worker.start(lambda: hw.confirm_operator_stop(approved=True), _job_completed)
                 if (item.type == pygame.KEYDOWN and item.key == pygame.K_F9
                         and getattr(item, "mod", 0) & pygame.KMOD_CTRL
                         and hw is not None and not hw.motion_worker.running):
@@ -592,8 +589,9 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
                 font = pygame.font.Font(None, 24)
                 for index, line in enumerate(("RECOVERY REQUIRED - project is paused", str(exc)[:100],
                                               "Inspect/stop the arm and gripper on the pendant.",
+                                              "Ctrl+F8: approve read-only stop verification.",
                                               "Ctrl+F9: confirm controller disabled on pendant (lost disable ACK).",
-                                              "F2: after arm/gripper inspection, verify stop and retry closing resources.",
+                                              "F2: retry closing unfinished resources.",
                                               "Close window / Ctrl+C: confirm once to exit immediately.",
                                               "Camera/controller and pending transaction are retained.")):
                     surface.blit(font.render(line, True, (255, 220, 200)), (20, 25 + index * 30))
@@ -662,6 +660,7 @@ try:
             renderer.draw_home_screen(startup_message)
         else:
             state.is_robot_ready = hw.is_robot_ready if hw is not None else False
+            state.physical_enable_pending = physical_enable_pending
             renderer.draw_ui(state.get_render_state())
             renderer.draw_pieces(state.pick_test_board if state.pick_test_mode else state.board)
             renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
@@ -708,15 +707,12 @@ try:
                   and BTN_MODE_SELECT_RECT.collidepoint(event.pos)):
                 _request_mode_menu()
                 continue
-            elif (event.type == pygame.KEYDOWN and event.key == pygame.K_F8 and hw is not None
-                  and not getattr(event, 'mod', 0) & pygame.KMOD_CTRL):
-                if session_control is not None:
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_F8 and hw is not None:
+                if getattr(event, "mod", 0) & pygame.KMOD_CTRL:
+                    verifier_worker = startup_worker if mode_switch_failed or getattr(hw, "_closing", False) else hw.motion_worker
+                    verifier_worker.start(lambda: hw.confirm_operator_stop(approved=True), _job_completed)
+                elif session_control is not None:
                     session_control.request("pause")
-                continue
-            elif (event.type == pygame.KEYDOWN and event.key == pygame.K_v
-                  and mode_switch_failed and input_mgr is not None):
-                if not startup_worker.busy:
-                    startup_worker.start(input_mgr._reconcile_physical_sync_fault, _job_completed)
                 continue
             elif (event.type == pygame.MOUSEBUTTONDOWN and session_control is not None
                   and not mode_switching and not mode_switch_failed
@@ -790,6 +786,33 @@ try:
                 if choice:
                     _select_difficulty(choice)
             elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_F9 and config.ROBOT_BACKEND == "PHYSICAL":
+                    automatic_startup = getattr(hw, "automatic_startup", None)
+                    if automatic_startup is not None:
+                        automatic_startup.cancel()
+                    physical_enable_pending = not physical_enable_pending
+                    physical_enable_deadline = time.monotonic() + 30.0
+                    state.set_status("Have you checked the setup and the emergency stop? F10 enables the robot for 30 s; F9 cancels."
+                                     if physical_enable_pending else "Robot enable request cancelled.", duration=30)
+                    continue
+                if event.key == pygame.K_F10 and physical_enable_pending:
+                    physical_enable_pending = False
+                    try:
+                        if time.monotonic() > physical_enable_deadline:
+                            raise RuntimeError("Confirmation expired; press F9 to start again")
+                        def enabled(result, error):
+                            if error:
+                                log_event("physical.enable_failed", str(error), level=logging.ERROR,
+                                          code="PHYSICAL_ENABLE_FAILED",
+                                          exc_info=(type(error), error, error.__traceback__))
+                            state.set_status(f"Could not enable the robot: {error}" if error else
+                                             "The robot is now allowed to move for the game.", duration=60)
+                        hw.motion_worker.start(lambda: hw.activate_physical_game(state, commissioned=True), enabled)
+                    except Exception as exc:
+                        log_event("physical.enable_failed", str(exc), level=logging.ERROR,
+                              code="PHYSICAL_ENABLE_FAILED", exc_info=True)
+                        state.set_status(f"Could not enable the robot: {exc}", duration=30)
+                    continue
                 if hw.motion_worker.busy:
                     continue
                 if event.key == pygame.K_F5 and not state.physical_sync_fault and not state.move_sync_error:

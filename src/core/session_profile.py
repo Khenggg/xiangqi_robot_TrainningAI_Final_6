@@ -30,8 +30,8 @@ class SessionProfile:
     @property
     def match_names(self):
         if self.game_mode == "HUMAN_VS_HUMAN_ROBOT":
-            return ("Red player", "Black player")
-        return ("Player", "Robot AI")
+            return ("Người chơi Đỏ", "Người chơi Đen")
+        return ("Người chơi", "Robot AI")
 
 
 def make_profile(game_mode, requested_environment, *, simulation_enabled=True, viewer_enabled=True):
