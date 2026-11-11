@@ -61,7 +61,7 @@ class RobotPvPController:
         if stop is not None and stop.blocked:
             return "Robot is stopping; recovery required first"
         if not hw.is_robot_ready:
-            return "Robot not ready; check and press F9/F10 on the host"
+            return "Robot is not ready yet; the host is enabling it automatically"
         return None
 
     def _reply(self, request_id, accepted, reason):

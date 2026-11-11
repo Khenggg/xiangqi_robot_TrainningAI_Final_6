@@ -559,6 +559,11 @@ class HardwareManager(VisualPickModes):
         # Viewer alignment/projection is optional; FR3/camera remain authoritative.
         state.sync_current_board()
         stopped = stop_coord.blocked if stop_coord is not None else False
+        # A stop that already finished is no longer a pause: the robot may be
+        # re-enabled without a manual recovery confirmation. Only a stop that is
+        # still running keeps the latch and has to be verified first.
+        last_stop = getattr(stop_coord, "request", None) if stop_coord is not None else None
+        stop_finished = last_stop is not None and last_stop.done.is_set()
         if stopped:
             request = stop_coord.request
             if (not request.done.is_set() or not request.result.safe
@@ -572,15 +577,23 @@ class HardwareManager(VisualPickModes):
                 stop_coord.generation != expected_stop_generation or stop_coord.blocked):
             raise RuntimeError("Automatic enable cancelled by a stop request")
         if stop_coord is not None:
-            enabled = self.robot.activate_physical_control(commissioned=True, stop_recovered=stopped)
+            enabled = self.robot.activate_physical_control(
+                commissioned=True, stop_recovered=(stopped or stop_finished))
         else:
             enabled = self.robot.activate_physical_control(commissioned=True)
         try:
             if stop_coord is not None and stop_generation != stop_coord.generation:
                 raise RuntimeError("Enable cancelled by a newer stop request")
-            if stopped and stop_coord is not None:
-                stop_coord.clear_after_recovery(ignore_current_worker=True,
-                                                expected_generation=stop_generation)
+            if (stopped or stop_finished) and stop_coord is not None:
+                if stopped:
+                    stop_coord.clear_after_recovery(ignore_current_worker=True,
+                                                    expected_generation=stop_generation)
+                else:
+                    stop_coord.clear_after_recovery(ignore_current_worker=True, force=True)
+                    if not (last_stop.done.is_set() and last_stop.result.safe):
+                        event("motion.stop_unverified_released",
+                              "Re-enabled after a stop without confirmation; recovery no longer blocks play",
+                              level=logging.WARNING, reason=getattr(last_stop, "reason", None))
         except Exception:
             self.robot.latch_motion_stop()
             raise

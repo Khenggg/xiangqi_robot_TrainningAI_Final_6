@@ -38,8 +38,6 @@ class SessionControl:
             self._reported = None
         self.action = action
         self._reported = None
-        self.state.manual_override_active = True
-        self.state.snapshot_continue_required = True
         if self.self_play is not None and self.self_play.active:
             self.self_play.end_match()
         else:
@@ -47,7 +45,7 @@ class SessionControl:
         self.stop = self.hardware.request_controlled_stop(
             action, workers_finished=self.workers_finished)
         event("session.stop_requested", "Request accepted; waiting for the robot to stop", action=action)
-        self.state.set_status("Stopping the robot; board and held piece are kept as is.", duration=30)
+        self.state.set_status("Stopping the robot; play resumes when it has stopped.", duration=30)
         return True
 
     def request_surrender(self, winner):
@@ -151,7 +149,7 @@ class SessionControl:
         if self.action == "quit":
             return "quit"
         if self.action == "pause":
-            self._report("Stopped; V to reconcile the board. F9/F10 to re-enable the robot after recovery.")
+            self._report("Robot stopped; play resumes when the arm reports idle.")
             self.action = None
             return None
         if self._reset_done and self.action == "reset":

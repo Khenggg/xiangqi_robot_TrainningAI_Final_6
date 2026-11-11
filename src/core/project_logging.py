@@ -24,7 +24,7 @@ ERRORS = {
     "STOP_RECOVERY_REQUIRED": ("Chưa xác nhận được robot và kẹp đã dừng", "Giữ phiên, camera và controller; không tự gửi lại lệnh", "Kiểm tra/dừng tay và kẹp trên pendant rồi V xác nhận và đối soát bàn"),
     "ENGINE_FAILED": ("AI không tạo được nước đi hợp lệ", "Bàn chưa thay đổi và chưa gửi lệnh robot", "Đối chiếu lượt, FEN và trạng thái engine trước khi yêu cầu tính lại"),
     "PROJECTION_FAILED": ("Chưa cập nhật được viewer hoặc spectator", "Nước đã commit vẫn được giữ nguyên; hình ảnh có thể cũ", "Kiểm tra kết nối/dịch vụ và nhật ký projection; không phát lại lệnh robot để đồng bộ hình ảnh"),
-    "ROBOT_NOT_READY": ("Robot chưa sẵn sàng nhận nước đi", "Nước đi chưa được thực hiện", "Kiểm tra kết nối, chế độ backend và quyền chuyển động; với FR3 thật dùng F9 rồi F10 sau khi kiểm tra setup"),
+    "ROBOT_NOT_READY": ("Robot chưa sẵn sàng nhận nước đi", "Nước đi chưa được thực hiện", "Kiểm tra kết nối, chế độ backend và quyền chuyển động; app tự bật lại quyền chuyển động khi robot sẵn sàng"),
     "MOVE_REJECTED": ("Nước đi hoặc chuyển động bị từ chối", "Không thể xác nhận hoàn tất nước đi", "Đọc chi tiết nguyên nhân và bước dừng; kiểm tra bàn thật trước khi tiếp tục, không tắt chống va chạm"),
     "TWIN_UNAVAILABLE": ("Mô phỏng không nhận được trạng thái hợp lệ", "Viewer có thể đang hiển thị trạng thái cũ", "Kiểm tra kết nối, độ mới telemetry, trạng thái idle và phiên calibration"),
     "PHYSICAL_ENABLE_FAILED": ("Không bật được quyền điều khiển FR3", "Robot chưa được phép chạy qua game", "Kiểm tra camera, telemetry idle, calibration và lỗi đồng bộ; xử lý nguyên nhân rồi xác nhận lại"),

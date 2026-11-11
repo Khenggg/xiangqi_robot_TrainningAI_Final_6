@@ -64,12 +64,10 @@ def test_fault_or_pending_motion_cancels_without_rearming(flag):
     assert startup.finished
 
 
-@pytest.mark.parametrize("reason", ["stop", "stopped", "closing", "surrender", "virtual", "disabled", "dry", "manual"])
+@pytest.mark.parametrize("reason", ["closing", "surrender", "virtual", "disabled", "dry", "manual"])
 def test_no_automatic_enable_for_retired_or_ineligible_session(reason):
     startup, state, hw = setup_startup()
     startup.baseline_checked = True
-    if reason == "stop": hw.stop_coordinator.generation = 1
-    if reason == "stopped": hw.stop_coordinator.blocked = True
     if reason == "closing": hw._closing = True
     if reason == "surrender": hw.session_control.action = "surrender"
     if reason == "virtual": hw.profile.physical_robot_enabled = False
@@ -96,16 +94,46 @@ def test_busy_or_rejected_worker_submission_does_not_consume_attempt():
     assert startup.finished
 
 
+def test_stop_in_progress_delays_the_attempt_instead_of_retiring_it():
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    hw.stop_coordinator.blocked = True
+    startup.tick()
+    hw.motion_worker.start.assert_not_called()
+    assert not startup.finished
+    hw.stop_coordinator.blocked = False
+    hw.stop_coordinator.generation = 3
+    startup.tick()
+    hw.motion_worker.start.assert_called_once()
+    operation, _ = hw.motion_worker.start.call_args.args
+    operation()
+    assert hw.activate_physical_game.call_args.kwargs["expected_stop_generation"] == 3
+
+
 @pytest.mark.parametrize("result,error", [(None, RuntimeError("camera mismatch")), (False, None)])
-def test_failed_enable_is_reported_without_automatic_retry(result, error):
+def test_failed_enable_retries_instead_of_asking_for_a_key(result, error):
     startup, state, hw = setup_startup()
     startup.baseline_checked = True
     startup.tick()
     _, completed = hw.motion_worker.start.call_args.args
     completed(result, error)
+    assert not startup.finished
+    assert "Retrying" in state.set_status.call_args.args[0]
     startup.tick()
-    hw.motion_worker.start.assert_called_once()
-    assert "F9/F10" in state.set_status.call_args.args[0]
+    assert hw.motion_worker.start.call_count == 2
+
+
+def test_failed_enable_stops_retrying_after_the_attempt_cap():
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    for _ in range(startup.MAX_ATTEMPTS):
+        startup.finished = False
+        startup.tick()
+        _, completed = hw.motion_worker.start.call_args.args
+        completed(False, None)
+    assert startup.finished
+    startup.tick()
+    assert hw.motion_worker.start.call_count == startup.MAX_ATTEMPTS
 
 
 @pytest.mark.parametrize("reason", ["stop", "cancel"])

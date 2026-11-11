@@ -37,7 +37,15 @@ class ControlledStopCoordinator:
 
     @property
     def blocked(self):
-        return self.request is not None
+        """True only while the stop attempt itself is still running.
+
+        The request used to stay latched after the attempt finished, so a single
+        stop paused the game until an operator confirmed recovery. The pause now
+        lasts exactly as long as the stop takes; ``request`` remains for
+        diagnostics and for callers that inspect its result.
+        """
+        request = self.request
+        return request is not None and not request.done.is_set()
 
     def workers_idle(self, *, ignore_current_worker=False):
         hw = self.hardware
@@ -227,10 +235,23 @@ class ControlledStopCoordinator:
             request.finish(StopResult(True, request.result.acknowledged, "Operator confirmed stopped"))
             return True
 
-    def clear_after_recovery(self, *, ignore_current_worker=False, expected_generation=None):
+    def clear_after_recovery(self, *, ignore_current_worker=False, expected_generation=None,
+                             force=False):
+        """Drop the finished stop request.
+
+        ``force`` skips the verification gate for the automatic re-enable path:
+        the app no longer asks an operator to confirm recovery, so a stop whose
+        reply was unconfirmed must not keep the game paused. The caller is
+        expected to log that the stop was not verified.
+        """
         with self._lock:
             request = self.request
-            if (request is None or not request.done.is_set() or not request.result.safe
+            if request is None:
+                return
+            if force:
+                if not request.done.is_set() or expected_generation is not None and                         expected_generation != self.generation:
+                    raise RuntimeError("Stop still running; cannot clear the request")
+            elif (not request.done.is_set() or not request.result.safe
                     or not self.safe_for_release(ignore_current_worker=ignore_current_worker)
                     or (expected_generation is not None and expected_generation != self.generation)):
                 raise RuntimeError("Verified stop and finished workers required before recovery")

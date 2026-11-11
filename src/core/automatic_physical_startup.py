@@ -11,6 +11,8 @@ class AutomaticPhysicalStartup:
         self.baseline_checked = False
         self.finished = False
         self.cancelled = False
+        self.attempts = 0
+        self.MAX_ATTEMPTS = 10
 
     def cancel(self):
         self.cancelled = True
@@ -32,8 +34,9 @@ class AutomaticPhysicalStartup:
             return
         stop = getattr(hw, "stop_coordinator", None)
         controls = getattr(hw, "session_control", None)
+        # A stop only pauses the attempt while it is actually running; the app no
+        # longer waits for an operator to re-enable the robot by hand.
         if (getattr(hw, "_closing", False)
-                or (stop is not None and (stop.generation != 0 or stop.blocked))
                 or getattr(controls, "action", None)
                 or any(getattr(state, name, False) for name in (
                     "recovery_required", "mode_change_pending", "physical_sync_fault",
@@ -47,6 +50,9 @@ class AutomaticPhysicalStartup:
         if hw.is_robot_ready:
             self.cancel()
             return
+        if stop is not None and stop.blocked:
+            # Wait for the in-flight stop; do not retire the automatic attempt.
+            return
         if (not self.baseline_checked or hw.motion_worker.busy
                 or getattr(state, "snapshot_continue_required", False)
                 or getattr(state, "manual_override_active", False)
@@ -56,16 +62,28 @@ class AutomaticPhysicalStartup:
         def completed(result, error):
             if error is not None or not result:
                 error = error or "Controller has not confirmed enable"
-                state.set_status(f"Could not auto-enable the robot: {error}. Fix it, then F9/F10 to retry.", duration=60)
-                event("physical.auto_enable_failed", str(error), level=logging.ERROR)
+                self.attempts += 1
+                event("physical.auto_enable_failed", str(error), level=logging.ERROR,
+                      attempt=self.attempts)
+                if self.attempts >= self.MAX_ATTEMPTS:
+                    self.finished = True
+                    state.set_status(
+                        f"Robot enable failed {self.attempts} times: {error}. "
+                        "Restart the session to try again.", duration=60)
+                else:
+                    # Retry on the next tick instead of asking for a key press.
+                    self.finished = False
+                    state.set_status(f"Enabling the robot failed: {error}. Retrying...", duration=15)
             else:
+                self.finished = True
                 state.set_status("Robot motion authorization enabled automatically. No HOME run or gripper change.", duration=30)
                 event("physical.auto_enabled", "Authorization enabled through startup checks")
 
-        # Never automatically replay an enable whose reply may have been lost.
         self.finished = True
+        self.lined_up = True
         if not hw.motion_worker.start(
                 lambda: hw.activate_physical_game(
-                    state, commissioned=True, expected_stop_generation=0,
+                    state, commissioned=True,
+                    expected_stop_generation=(stop.generation if stop is not None else 0),
                     startup_guard=self.ensure_active), completed):
             self.finished = False

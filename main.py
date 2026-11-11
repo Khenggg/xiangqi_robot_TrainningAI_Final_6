@@ -118,8 +118,6 @@ settings_menu_active = False
 difficulty_menu_message = ""
 debug_dashboard = None
 viewer_server = None
-physical_enable_pending = False
-physical_enable_deadline = 0.0
 from src.core.motion_worker import MotionWorker
 startup_worker = MotionWorker()
 startup_cancelled = threading.Event()
@@ -429,7 +427,7 @@ def _finish_mode_disposal(result, error):
     global mode_disposal, mode_switching, mode_switch_failed, state, hw, telemetry
     global viewer_server, input_mgr, session_control, debug_dashboard, home_screen_active
     global difficulty_menu_active, settings_menu_active, startup_message, startup_cancelled
-    global physical_enable_pending, physical_camera_recalibration_requested
+    global physical_camera_recalibration_requested
     mode_switching = False
     if error or result is not True:
         mode_switch_failed = True
@@ -441,7 +439,6 @@ def _finish_mode_disposal(result, error):
     hw = telemetry = viewer_server = input_mgr = session_control = debug_dashboard = None
     mode_disposal = None
     mode_switch_failed = False
-    physical_enable_pending = False
     physical_camera_recalibration_requested = False
     difficulty_menu_active = settings_menu_active = False
     if not quit_requested:
@@ -665,7 +662,6 @@ try:
             renderer.draw_home_screen(startup_message)
         else:
             state.is_robot_ready = hw.is_robot_ready if hw is not None else False
-            state.physical_enable_pending = physical_enable_pending
             renderer.draw_ui(state.get_render_state())
             renderer.draw_pieces(state.pick_test_board if state.pick_test_mode else state.board)
             renderer.draw_highlight(state.last_move, state.selected_pos, state.invalid_flash_pos, state.invalid_flash_expiry)
@@ -794,33 +790,6 @@ try:
                 if choice:
                     _select_difficulty(choice)
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_F9 and config.ROBOT_BACKEND == "PHYSICAL":
-                    automatic_startup = getattr(hw, "automatic_startup", None)
-                    if automatic_startup is not None:
-                        automatic_startup.cancel()
-                    physical_enable_pending = not physical_enable_pending
-                    physical_enable_deadline = time.monotonic() + 30.0
-                    state.set_status("Have you checked the setup and the emergency stop? F10 enables the robot for 30 s; F9 cancels."
-                                     if physical_enable_pending else "Robot enable request cancelled.", duration=30)
-                    continue
-                if event.key == pygame.K_F10 and physical_enable_pending:
-                    physical_enable_pending = False
-                    try:
-                        if time.monotonic() > physical_enable_deadline:
-                            raise RuntimeError("Confirmation expired; press F9 to start again")
-                        def enabled(result, error):
-                            if error:
-                                log_event("physical.enable_failed", str(error), level=logging.ERROR,
-                                          code="PHYSICAL_ENABLE_FAILED",
-                                          exc_info=(type(error), error, error.__traceback__))
-                            state.set_status(f"Could not enable the robot: {error}" if error else
-                                             "The robot is now allowed to move for the game.", duration=60)
-                        hw.motion_worker.start(lambda: hw.activate_physical_game(state, commissioned=True), enabled)
-                    except Exception as exc:
-                        log_event("physical.enable_failed", str(exc), level=logging.ERROR,
-                              code="PHYSICAL_ENABLE_FAILED", exc_info=True)
-                        state.set_status(f"Could not enable the robot: {exc}", duration=30)
-                    continue
                 if hw.motion_worker.busy:
                     continue
                 if event.key == pygame.K_F5 and not state.physical_sync_fault and not state.move_sync_error:

@@ -216,7 +216,7 @@ class FR5Robot:
         if not self.connected or self.robot is None:
             raise RobotCommandError("Cannot confirm controller disable: robot disconnected")
         if self._disable_outcome_unknown:
-            raise RobotCommandError("Disable reply unknown; disable on pendant and Ctrl+F9 confirm. No RPC replay.")
+            raise RobotCommandError("Disable reply unknown; disable on the pendant, then confirm with Ctrl+F9. No RPC replay.")
         from src.hardware.rpc_transport import RpcOutcomeUnknown
         try:
             code = self.robot.RobotEnable(0)
@@ -351,12 +351,12 @@ class FR5Robot:
                     raise RobotCommandError(f"Could not read the selected WObj: {code}", code)
                 if parse_frame_identifier(current_user) != source_user:
                     raise RobotCommandError(
-                        f"Select User/WObj {source_user} on the pendant, then F9/F10 to verify again. "
+                        f"Select User/WObj {source_user} on the pendant, then restart the session to verify again. "
                         f"Firmware can only read the selected WObj (current: {current_user}).")
                 code, wobj_offset = self.robot.GetCurWObjCoord()
                 after_code, after_user = self.robot.GetActualWObjNum()
                 if after_code != 0 or parse_frame_identifier(after_user) != source_user:
-                    raise RobotCommandError("WObj changed while reading; keep the frame and press F9/F10 to retry")
+                    raise RobotCommandError("WObj changed while reading; keep the frame and restart the session to retry")
                 verification_source = "GetCurWObjCoord"
             if code != 0:
                 raise RobotCommandError(f"WObj {source_user} query failed: {code}", code)
