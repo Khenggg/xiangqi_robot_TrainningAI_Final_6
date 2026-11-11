@@ -417,7 +417,7 @@ def _begin_mode_disposal():
     def dispose():
         stop = getattr(getattr(hw, 'stop_coordinator', None), 'request', None)
         if operator_retry and stop is not None and stop.done.is_set() and not stop.result.safe:
-            hw.confirm_operator_stop(approved=True)
+            hw.refresh_stop_state()
         return mode_disposal.run()
     if not startup_worker.start(dispose, _finish_mode_disposal):
         mode_switching = False
@@ -531,11 +531,11 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
     except Exception as persist_error:
         log_event("session.persistence_failed", str(persist_error), level=logging.ERROR,
                   code="SESSION_PERSISTENCE_FAILED")
-    message = f"RECOVERY REQUIRED: {type(exc).__name__}. Inspect the stopped arm/gripper, then F2 to retry cleanup."
+    message = f"RECOVERY REQUIRED: {type(exc).__name__}: {exc}. F2 retries cleanup with an automatic controller-state check."
     log_event("app.recovery_wait", message, level=logging.ERROR)
     recovery_clock = pygame.time.Clock()
     # Startup/hardware workers may already be closed by a partial teardown.
-    # This worker performs operator-approved read-only confirmation only.
+    # This worker refreshes controller state without a manual confirmation.
     operator_worker = MotionWorker()
     retry_requested = False
     while True:
@@ -558,7 +558,7 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
                     stop = getattr(getattr(hw, 'stop_coordinator', None), 'request', None)
                     if (stop is not None and stop.done.is_set() and not stop.result.safe
                             and not hw.motion_worker.running):
-                        operator_worker.start(lambda: hw.confirm_operator_stop(approved=True), _job_completed)
+                        operator_worker.start(hw.refresh_stop_state, _job_completed)
                 if (item.type == pygame.KEYDOWN and item.key == pygame.K_F9
                         and getattr(item, "mod", 0) & pygame.KMOD_CTRL
                         and hw is not None and not hw.motion_worker.running):
@@ -591,9 +591,9 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
                 surface.fill((35, 20, 20))
                 font = pygame.font.Font(None, 24)
                 for index, line in enumerate(("RECOVERY REQUIRED - project is paused", str(exc)[:100],
-                                              "Inspect/stop the arm and gripper on the pendant.",
+                                              "Resolve the controller error shown above before retrying.",
                                               "Ctrl+F9: confirm controller disabled on pendant (lost disable ACK).",
-                                              "F2: after arm/gripper inspection, verify stop and retry closing resources.",
+                                              "F2: retry closing resources; controller state is checked automatically.",
                                               "Close window / Ctrl+C: confirm once to exit immediately.",
                                               "Camera/controller and pending transaction are retained.")):
                     surface.blit(font.render(line, True, (255, 220, 200)), (20, 25 + index * 30))

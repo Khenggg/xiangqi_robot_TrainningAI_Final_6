@@ -288,13 +288,13 @@ Không đi thêm nước hoặc chọn lại nước đang chờ. Kiểm tra tay
 
 | Tình trạng thực tế | Cách tiếp tục |
 |---|---|
-| Gắp hụt, toàn bàn vẫn như trước nước lỗi | V xác nhận bàn cũ, hủy nước lỗi và giữ nguyên lượt. Kiểm tra tay/kẹp, nhấn V lần nữa để hết pause; khi giao diện cho phép, chọn lại nước |
+| Gắp hụt, toàn bàn vẫn như trước nước lỗi | V xác nhận bàn cũ, hủy nước lỗi và giữ nguyên lượt. Khi controller và baseline camera đạt, chọn lại nước ngay; không cần xác nhận tay/kẹp hoặc nhấn V lần hai |
 | Quân đã đi đúng, camera nhận sai hoặc bị che | Sửa ánh sáng/vật che, chờ ảnh ổn định rồi V. Khi xác nhận đúng toàn bàn sau nước đi, phần mềm ghi nhận nước đúng một lần, chuyển lượt và không chạy lại robot |
 | Nước đi dang dở, quân lệch hoặc ăn quân chưa xong | Sau khi tay/kẹp dừng, khôi phục **toàn bộ bàn trước nước lỗi**, gồm quân bị ăn, rồi V như trường hợp gắp hụt |
 
 Nếu camera báo bàn cũ nhưng mắt thấy quân đã đi, giữ pause và sửa nhận diện trước; không nhấn tiếp để chọn lại nước dựa trên kết quả sai. Nếu không xác nhận được thế trước hoặc thế sau, hệ thống tiếp tục khóa. F4 có thể đổi thế/lịch sử/lượt; không dùng tùy tiện thay V.
 
-V kiểm tra telemetry idle mới và worker/kẹp đã kết thúc, kể cả khi trước đó chưa có yêu cầu StopMotion. Bản thân bước đối soát này không gửi lệnh dừng, HOME, kẹp hoặc enable. Lỗi controller hoặc thiếu bằng chứng dừng vẫn chặn tiếp tục. **R/H phục hồi HOMECHESS chỉ áp dụng cho VS ROBOT physical**, chưa áp dụng cho Hai người + robot.
+Không còn bước yêu cầu người chơi xác nhận tay/kẹp an toàn. V/Continue tự đọc trạng thái controller, worker và xung kẹp, kể cả khi trước đó chưa có yêu cầu StopMotion. Bản thân bước đối soát này không gửi lệnh dừng, HOME, kẹp hoặc enable. Nếu controller báo lỗi, mất kết nối hoặc chưa có dữ liệu mới, giao diện hiển thị nguyên nhân cụ thể thay vì yêu cầu xác nhận. Lệnh dừng đã gửi nhưng chưa biết kết quả không được tự gửi lại. **R/H phục hồi HOMECHESS chỉ áp dụng cho VS ROBOT physical**, chưa áp dụng cho Hai người + robot.
 
 **Ctrl+F9** chỉ dùng khi UI báo kết quả disable controller chưa rõ và người vận hành **đã tắt controller trên pendant**. Phím này ghi nhận xác nhận đó; không phải nút tự tắt controller hay sửa mất mạng.
 
@@ -363,15 +363,15 @@ Log đánh số **hàng 0–9, cột 0–8**. Ô `b9` nghĩa cột `b = 1`, hàn
 | `READ-ONLY`, `ROBOT_NOT_READY` | Hoàn tất kiểm tra setup/bàn/controller rồi V đối soát nếu UI yêu cầu; auto-enable tiếp tục khi đủ điều kiện. Nếu vẫn chờ, đọc `physical.auto_enable_waiting` để biết cờ đang chặn |
 | `PHYSICAL_ENABLE_FAILED`, `Fresh idle robot telemetry required` | Kiểm tra telemetry mới, idle/ready, controller, camera và mọi pending/recovery; không dùng F12 thay kiểm tra thiết bị |
 | `Robot SDK not connected`, RPC timeout, `outcome unknown, do not resend` | Kiểm tra tay/kẹp trước; không gửi lại lệnh chưa rõ kết quả. Kiểm tra cáp/adapter/IP/subnet trên đúng đường Ethernet; xem ROBOT_CONNECTION.md |
-| Camera đã xác nhận bàn nhưng “Robot đang lỗi” | Xử lý lỗi trên WebApp/pendant. VS ROBOT theo yêu cầu HOMECHESS trên UI; Hai người + robot dùng V sau khi đã kiểm tra tay/kẹp dừng. FEN/V/F12 không xóa lỗi controller |
+| Camera đã xác nhận bàn nhưng “Robot đang lỗi” | Xem mã lỗi controller trên UI và xử lý trên WebApp/pendant. V/Continue tự đọc lại trạng thái; không có bước xác nhận tay/kẹp. FEN/V/F12 không xóa lỗi controller |
 | `No stable box centre`, pick retry, offset vượt giới hạn | Xem đúng quân/ô, độ lệch và jitter. Giới hạn mặc định hiện tại là **6 mm** trong config; kiểm tra quân/ảnh/calibration rồi dùng Y/V đúng trạng thái. Không tăng ngưỡng để ép gắp |
-| `RECOVERY_REQUIRED`, `STOP_RECOVERY_REQUIRED` | Chưa có đủ bằng chứng dừng; xem worker, tay/kẹp và telemetry. VS ROBOT giữ nước đi chờ phục hồi HOMECHESS. Khi lỗi đóng tài nguyên, kiểm tra tay/kẹp đã dừng rồi F2 xác nhận và thử đóng lại |
+| `RECOVERY_REQUIRED`, `STOP_RECOVERY_REQUIRED` | Xem nguyên nhân cụ thể: lỗi controller, worker/xung kẹp còn chạy, telemetry cũ hoặc kết quả lệnh dừng chưa rõ. VS ROBOT giữ nước đi chờ phục hồi HOMECHESS. F2 thử đóng lại và tự kiểm tra controller; không yêu cầu xác nhận tay/kẹp |
 | `MoveCart`, IK, mã `14` hoặc `112` | Dừng và giữ log/trạng thái. Team kiểm tra pose hiện tại, tool/frame, mục tiêu và đường đi. Không coi lệnh lỗi là thành công; không tự gửi Home, kéo tay hoặc tắt/bật nguồn để thử lại theo sổ tay |
 | Robot đã gắp/ăn nhưng chưa đặt đúng | Đây là thao tác có thể đã chạy một phần; theo mục 8.2. Không gọi lại cả nước và không thả kẹp mù |
 | Kẹp không mở/đóng, không nhả quân | Dừng dùng physical, kiểm tra thực tế với team. Hình kẹp trên viewer không chứng minh độ mở/giữ quân thật; không tự đảo DO hoặc tăng xung trong phiên |
 | `BOARD_SYNC_FAILED`, `PROJECTION_FAILED` sau commit | Bàn/nước đã lưu có thể đúng nhưng viewer/spectator cũ; kiểm tra log/kết nối. Không thực hiện lại nước để sửa hình ảnh |
 | `SESSION_PERSISTENCE_FAILED` | Kiểm tra quyền ghi/dung lượng, giữ nguyên journal/bàn; không tiếp tục gửi motion khi chưa lưu được trạng thái |
-| “Chưa đổi chế độ”, New Game/đầu hàng chờ mãi | Đọc lý do dừng và nước chờ. Nếu pending còn giữ, V đối soát sau xác nhận dừng. Ctrl+F9 chỉ khi đã thực sự disable trên pendant và UI yêu cầu |
+| “Chưa đổi chế độ”, New Game/đầu hàng chờ mãi | Đọc lý do controller và nước chờ. Nếu pending còn giữ, V tự kiểm tra trạng thái và đối soát bàn. Ctrl+F9 chỉ khi đã thực sự disable trên pendant và UI yêu cầu |
 
 ### 9.4. AI không đi
 

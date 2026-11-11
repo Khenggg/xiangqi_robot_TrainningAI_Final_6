@@ -119,14 +119,14 @@ class SessionControl:
             self.state.physical_sync_fault = True
             self.state.snapshot_continue_can_commit_pending = False
             detail = getattr(self.hardware.stop_coordinator, 'last_settle_diagnostic', None) or self.stop.result.reason
-            self._report(f"Stop not confirmed: {detail}. Check the arm/gripper and controller have stopped, then V to confirm.")
+            self._report(f"Controller recovery pending: {detail}. V refreshes controller state and reconciles the board.")
             return None
         if not self.workers_finished() or self.hardware.motion_worker.busy:
             return None
         if self.self_play is not None and self.self_play.status.value == "ending":
             return None
         if not self.hardware.stop_coordinator.safe_for_release():
-            self._report("RECOVERY_REQUIRED: the stop state is stale; re-check on the pendant, then V to confirm.")
+            self._report("Robot telemetry is not current. V refreshes controller state and reconciles the board.")
             return None
         if self.action == 'surrender':
             if (self.state.pending_move is not None or self.state.pending_ai_move is not None

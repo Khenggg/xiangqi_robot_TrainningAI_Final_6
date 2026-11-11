@@ -1,7 +1,8 @@
-"""Single-attempt controlled stop; an unknown reply requires operator recovery."""
+"""Single-attempt stop with automatic measured state checks and no motion replay."""
 from dataclasses import dataclass
 import threading
 import time
+import math
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class StopRequest:
         self.requires_measurements = False
         self.observation_only = False
         self.observed_generation = None
+        self.stop_dispatched = False
 
     def finish(self, result):
         self.result = result
@@ -93,37 +95,44 @@ class ControlledStopCoordinator:
     def _all_workers_finished(self):
         return all(check() for check in tuple(self._worker_checks))
 
-    def observe_operator_idle(self, *, approved=False, timeout=2.0):
-        """Temporary measured proof for explicit V, without issuing a stop.
+    def observe_idle(self, *, timeout=2.0):
+        """Automatically read current idle state without issuing a command.
 
-        A completed game command may fail camera verification with no stop RPC
-        ever requested. Prove idle outside the lock so an urgent real stop can
-        still supersede this observation. The caller must discard the receipt.
+        A read-only startup stop can settle without an operator confirmation.
+        A dispatched stop with an unsuccessful reply is never replayed or
+        declared recovered here. Observe outside the lock so a real stop wins.
+        New temporary receipts must be discarded by the caller.
         """
-        if not approved:
-            raise RuntimeError('Explicit operator recovery approval required')
         with self._lock:
-            if self.request is not None:
-                return None  # Preserve the existing real-stop recovery path.
+            request = self.request
             generation = self.generation
+            if request is not None:
+                if not request.done.is_set():
+                    raise RuntimeError('Stop request is still running')
+                if request.stop_dispatched and not request.result.acknowledged:
+                    raise RuntimeError(f'Stop command did not succeed: {request.result.reason}')
         physical = self.hardware.simulation_runtime is None and not self.hardware.dry_run
         if not physical:
             return None
         self._wait_idle(timeout, True, self._all_workers_finished, ignore_current_worker=True)
         with self._lock:
-            if self.generation != generation or self.request is not None:
-                raise RuntimeError('Stop changed during operator observation; verify again')
+            if self.generation != generation or self.request is not request:
+                raise RuntimeError('A new stop request interrupted the state check')
             if (not self.workers_idle(ignore_current_worker=True) or not self._all_workers_finished()
                     or getattr(self.hardware.robot, '_gripper_pulse_active', False) is True):
-                raise RuntimeError('Worker or gripper changed during operator observation')
-            request = StopRequest('Operator observed stopped arm/gripper for board reconciliation')
+                raise RuntimeError('Worker or gripper pulse is still running')
+            if request is not None:
+                request.requires_measurements = True
+                request.finish(StopResult(True, request.result.acknowledged, 'Fresh idle telemetry received'))
+                return None
+            request = StopRequest('Idle telemetry for board reconciliation')
             request.requires_measurements = request.observation_only = True
             request.observed_generation = generation
             request.finish(StopResult(True, False, 'Fresh idle observed; no stop command sent'))
             self.request = request
             return request
 
-    def discard_operator_observation(self, request):
+    def discard_idle_observation(self, request):
         """Remove only this scoped proof; never erase a newer real stop."""
         with self._lock:
             if (request is not None and request.observation_only
@@ -147,6 +156,7 @@ class ControlledStopCoordinator:
             measured = snapshot.measurement_timestamp
             return (snapshot.connected and snapshot.joints_valid and measured is not None
                     and 0 <= time.time() - measured <= .5
+                    and not getattr(snapshot, 'last_error', None)
                     and snapshot.motion_state in {"IDLE", "READY"})
         except Exception:
             return False
@@ -158,6 +168,7 @@ class ControlledStopCoordinator:
             physical = hw.simulation_runtime is None and not hw.dry_run
             if physical and owned:
                 # Separate bounded transport: a blocking MoveCart owns the SDK lock.
+                request.stop_dispatched = True
                 code = hw.robot.send_controlled_stop(timeout=min(2.0, timeout))
                 if isinstance(code, bool) or code != 0:
                     raise RuntimeError(f"Controller rejected stop: {code}")
@@ -204,9 +215,10 @@ class ControlledStopCoordinator:
                 measured = snapshot.measurement_timestamp
                 fresh = (snapshot.connected and snapshot.joints_valid and measured is not None
                          and measured > probe['since'] and 0 <= time.time()-measured <= .5
+                         and not getattr(snapshot, 'last_error', None)
                          and snapshot.motion_state in {'IDLE','READY'})
                 self.last_settle_diagnostic = (None if fresh else
-                    f'Invalid stop telemetry: {snapshot.motion_state}; {getattr(snapshot, "stale/no measurement image", None) or "ảnh đo cũ/thiếu dữ liệu"}')
+                    f'Invalid stop telemetry: {snapshot.motion_state}; {getattr(snapshot, "last_error", None) or "stale or missing measurements"}')
             except Exception as exc:
                 self.last_settle_diagnostic = f'Could not read robot state: {exc}'
                 fresh = False
@@ -229,10 +241,15 @@ class ControlledStopCoordinator:
         quiescent_since = None
         last_measurement = None
         samples = 0
+        reason = 'Waiting for fresh robot telemetry'
         while time.monotonic() < deadline:
             if (not self.workers_idle(ignore_current_worker=ignore_current_worker)
-                    or (workers_finished is not None and not workers_finished())
-                    or getattr(self.hardware.robot, "_gripper_pulse_active", False) is True):
+                    or (workers_finished is not None and not workers_finished())):
+                reason = 'Robot operation worker is still running'
+                quiescent_since = None
+                samples = 0
+            elif getattr(self.hardware.robot, "_gripper_pulse_active", False) is True:
+                reason = 'Gripper pulse has not finished'
                 quiescent_since = None
                 samples = 0
             elif not require_measurements:
@@ -243,10 +260,22 @@ class ControlledStopCoordinator:
                     quiescent_since = time.time()
                 snapshot = self.hardware.backend.get_state_snapshot()
                 measured = snapshot.measurement_timestamp
-                fresh_idle = (snapshot.connected and snapshot.joints_valid
-                              and measured is not None and measured > quiescent_since
-                              and 0 <= time.time() - measured <= .5
-                              and snapshot.motion_state in {"IDLE", "READY"})
+                if not snapshot.connected:
+                    reason = 'Robot telemetry is disconnected'
+                elif getattr(snapshot, 'last_error', None):
+                    reason = f'Controller error: {snapshot.last_error}'
+                elif not snapshot.joints_valid:
+                    reason = 'Robot joint measurements are invalid'
+                elif (isinstance(measured, bool) or not isinstance(measured, (int, float))
+                      or not math.isfinite(measured) or not 0 <= time.time() - measured <= .5):
+                    reason = 'Robot telemetry is stale or missing'
+                elif snapshot.motion_state not in {'IDLE', 'READY'}:
+                    reason = f'Controller state: {snapshot.motion_state}'
+                elif measured <= quiescent_since:
+                    reason = 'Waiting for a new robot telemetry sample'
+                else:
+                    reason = None
+                fresh_idle = reason is None
                 if not fresh_idle:
                     samples = 0
                 elif last_measurement is None or measured > last_measurement:
@@ -254,25 +283,11 @@ class ControlledStopCoordinator:
                     last_measurement = measured
                     if samples >= 2:
                         return
+                    reason = 'Waiting for a second fresh robot telemetry sample'
+                else:
+                    reason = 'Waiting for a new robot telemetry sample'
             time.sleep(.025)
-        raise RuntimeError("RECOVERY_REQUIRED: stop/idle evidence incomplete; verify pendant, no automatic retry")
-
-    def confirm_operator_stop(self, *, approved=False, timeout=2.0):
-        """Read-only recheck after an operator has stopped/inspected the robot."""
-        with self._lock:
-            request = self.request
-            if not approved or request is None or not request.done.is_set():
-                raise RuntimeError("Operator approval and completed stop request required")
-            if not self.workers_idle(ignore_current_worker=True) or not self._all_workers_finished():
-                raise RuntimeError("Wait for local workers before operator recovery")
-            # Approval includes inspection of the arm and gripper on the pendant.
-            # This is operator evidence, not a measured gripper-state claim.
-            self.hardware.robot._gripper_pulse_active = False
-            physical = self.hardware.simulation_runtime is None and not self.hardware.dry_run
-            self._wait_idle(timeout, physical, self._all_workers_finished, ignore_current_worker=True)
-            request.requires_measurements = physical
-            request.finish(StopResult(True, request.result.acknowledged, "Operator confirmed stopped"))
-            return True
+        raise RuntimeError(reason or 'Waiting for fresh robot telemetry')
 
     def clear_after_recovery(self, *, ignore_current_worker=False, expected_generation=None,
                              force=False):

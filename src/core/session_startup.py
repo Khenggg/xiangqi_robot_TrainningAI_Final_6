@@ -87,7 +87,7 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
         state.session_profile = profile
         manager.game_state = state
         if getattr(state, "recovery_required", False) and hasattr(manager, "request_controlled_stop"):
-            manager.request_controlled_stop("Restored session requires operator verification")
+            manager.request_controlled_stop("Restored session: checking controller state")
         if cancelled is not None and cancelled.is_set():
             raise RuntimeError('Startup cancelled')
         telemetry = TelemetryPublisher(host=config.TELEMETRY_HOST, port=config.TELEMETRY_PORT, robot_model='FR3')

@@ -59,10 +59,8 @@ def failed_pvp(monkeypatch, tmp_path):
         capture_baseline_if_needed=Mock(return_value=True),
         yolo_detector=SimpleNamespace(), cam_monitor=SimpleNamespace())
     coordinator = hardware.stop_coordinator = ControlledStopCoordinator(hardware)
-    observe = getattr(coordinator, 'observe_operator_idle', None)
-    if callable(observe):
-        coordinator.observe_operator_idle = lambda **kwargs: observe(timeout=.2, **kwargs)
-    hardware.confirm_operator_stop = lambda **kwargs: coordinator.confirm_operator_stop(timeout=.15, **kwargs)
+    observe = coordinator.observe_idle
+    coordinator.observe_idle = lambda: observe(timeout=.2)
     hardware.physical_telemetry_ready = lambda **kwargs: HardwareManager.physical_telemetry_ready(hardware, **kwargs)
     hardware.physical_recovery_block_reason = lambda: HardwareManager.physical_recovery_block_reason(hardware)
     physical = {'board': deepcopy(state.board)}
@@ -113,23 +111,66 @@ def assert_no_actuation(recovery):
     robot.activate_physical_control.assert_not_called()
 
 
-def test_old_board_recovery_retires_pending_then_second_v_allows_red_reselection(failed_pvp):
+def test_one_v_on_old_board_retires_pending_and_allows_red_reselection(failed_pvp):
     r = failed_pvp
     before, fen, ids = deepcopy(r.state.board), r.state.current_fen, dict(r.state.piece_ids)
     press_v(r)
     assert r.state.pending_move is None and r.state.pending_ai_move is None
     assert r.state.board == before and r.state.current_fen == fen and r.state.piece_ids == ids
     assert r.state.turn == 'r' and r.state.board_revision == 0 and not r.state.move_history
-    assert r.state.physical_sync_fault and r.state.snapshot_continue_required
-    assert not r.pvp.handle_click(4, 6)  # A second deliberate operator recovery is required.
-    assert r.coordinator.request is None
-    press_v(r)
     assert not r.state.recovery_required and not r.state.physical_sync_fault
     assert not r.state.snapshot_continue_required and not r.state.manual_override_active
     assert r.state.move_sync_error is None
     assert r.pvp.handle_click(4, 6) and r.state.selected_pos == (4, 6)
     assert r.state.board_revision == 0 and not r.state.move_history
     assert r.coordinator.request is None
+    assert_no_actuation(r)
+
+
+def test_old_board_match_does_not_resume_play_when_the_camera_baseline_fails(failed_pvp):
+    r = failed_pvp
+    before = deepcopy(r.state.board)
+    r.hw.capture_baseline_if_needed.return_value = False
+    press_v(r)
+    assert r.state.pending_move is None and r.state.pending_ai_move is None
+    assert r.state.board == before and r.state.turn == 'r'
+    assert r.state.board_revision == 0 and not r.state.move_history
+    assert r.state.physical_sync_fault and r.state.snapshot_continue_required
+    assert r.state.manual_override_active
+    assert not r.pvp.handle_click(4, 6)
+    assert r.coordinator.request is None
+    assert_no_actuation(r)
+
+
+def test_failed_resume_checkpoint_restores_error_fields_and_keeps_pvp_locked(failed_pvp):
+    r = failed_pvp
+    r.state.clear_pending_ai_move()
+    r.state.move_sync_error = 'Previous post-motion verification failure'
+    r.state.move_execution_status = 'FAILED'
+    r.state.move_execution_error = 'Previous execution error'
+    r.state.physical_sync_fault = r.state.snapshot_continue_required = True
+    r.state.manual_override_active = True
+    fields = ('manual_override_active', 'emergency_mode', 'snapshot_continue_required',
+              'snapshot_continue_can_commit_pending', 'physical_sync_fault', 'move_sync_error',
+              'move_execution_status', 'move_execution_error')
+    before = {name: getattr(r.state, name) for name in fields}
+    persist = r.state.persist_checkpoint
+
+    def save_checkpoint(name):
+        if name == 'OPERATOR_RESUMED_ROBOT_PVP_CAMERA':
+            raise OSError('Simulated journal write failure')
+        return persist(name)
+
+    r.state.persist_checkpoint = Mock(side_effect=save_checkpoint)
+    press_v(r)
+    assert any(call.args == ('OPERATOR_RESUMED_ROBOT_PVP_CAMERA',)
+               for call in r.state.persist_checkpoint.call_args_list)
+    assert {name: getattr(r.state, name) for name in fields} == before
+    assert r.state.physical_sync_fault and r.state.snapshot_continue_required
+    assert 'Could not save the session resume' in r.state.status_message
+    assert not r.pvp.handle_click(4, 6)
+    assert r.coordinator.request is None
+    assert r.state.turn == 'r' and r.state.board_revision == 0
     assert_no_actuation(r)
 
 
@@ -170,7 +211,7 @@ def test_untrusted_robot_measurements_cannot_retire_pending_or_clear_recovery(fa
     assert_no_actuation(r)
 
 
-def test_direct_reconciliation_does_not_create_operator_idle_approval(failed_pvp):
+def test_direct_reconciliation_does_not_fabricate_an_idle_observation(failed_pvp):
     r = failed_pvp
     pending = r.state.pending_ai_move
     r.handler._reconcile_physical_sync_fault()

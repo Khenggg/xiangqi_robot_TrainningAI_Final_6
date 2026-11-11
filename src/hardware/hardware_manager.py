@@ -227,8 +227,12 @@ class HardwareManager(VisualPickModes):
     def request_controlled_stop(self, reason="Operator stop", *, workers_finished=None):
         return self.stop_coordinator.begin(reason, workers_finished)
 
-    def confirm_operator_stop(self, *, approved=False):
-        return self.stop_coordinator.confirm_operator_stop(approved=approved)
+    def refresh_stop_state(self):
+        """Refresh an existing stop from telemetry without operator approval."""
+        if self.stop_coordinator.request is not None:
+            receipt = self.stop_coordinator.observe_idle()
+            if receipt is not None:
+                self.stop_coordinator.discard_idle_observation(receipt)
 
     def confirm_operator_controller_disabled(self, *, approved=False):
         if not approved or not self.stop_coordinator.workers_idle():

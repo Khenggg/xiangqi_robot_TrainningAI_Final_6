@@ -230,28 +230,28 @@ class InputHandler:
             self.state.set_status("Robot operation in progress; wait for it to finish.", duration=8)
 
     def _queue_operator_recovery(self, operation):
-        """Scope read-only idle evidence to an explicit V/Continue action."""
-        return self._queue_or_run(lambda: self._with_operator_idle_observation(operation))
+        """Check controller state automatically before board reconciliation."""
+        return self._queue_or_run(lambda: self._with_idle_observation(operation))
 
-    def _with_operator_idle_observation(self, operation):
+    def _with_idle_observation(self, operation):
         coordinator = getattr(self.hw, 'stop_coordinator', None)
-        observe = getattr(coordinator, 'observe_operator_idle', None)
+        observe = getattr(coordinator, 'observe_idle', None)
         if not self._physical_recovery_required() or not callable(observe):
             return operation()
         try:
-            receipt = observe(approved=True)
+            receipt = observe()
         except Exception as exc:
             self.state.physical_sync_fault = self.state.snapshot_continue_required = True
             self.state.manual_override_active = True
             self.state.snapshot_continue_can_commit_pending = False
             event('recovery.idle_observation_blocked', str(exc), level=logging.WARNING)
-            self.state.set_status(f'Arm/gripper idle not confirmed: {exc}. Inspect the robot, then V.', duration=60)
+            self.state.set_status(f'Cannot continue: {exc}.', duration=60)
             return False
         try:
             return operation()
         finally:
             if receipt is not None:
-                coordinator.discard_operator_observation(receipt)
+                coordinator.discard_idle_observation(receipt)
 
     def _retry_visual_pick(self, source="UNKNOWN"):
         from src.core.visual_move_coordinator import retry_is_current
@@ -494,7 +494,7 @@ class InputHandler:
             self.state.set_status("This session has no pick/hover function.", duration=15)
             return
         if self.state.pending_test_motion is not None:
-            self.state.set_status("Test in progress: check the arm/gripper has stopped, then V to confirm and reconcile; do not toggle to re-run.", duration=30)
+            self.state.set_status("Test in progress: V reconciles the board; controller state is checked automatically.", duration=30)
             return
         if getattr(self.state, "pick_test_mode", False):
             self.state.test_pick_retry = None
@@ -613,11 +613,9 @@ class InputHandler:
         if self.hw.dry_run:
             self.state.set_status("Virtual test in progress: New Game after stopping to change turn.", duration=30)
             return
-        if not self._confirm_stopped_for_operator():
-            return
         if (not self.hw.physical_telemetry_ready(require_idle=True)
                 or not self.hw.stop_coordinator.safe_for_release(ignore_current_worker=True)):
-            self.state.set_status("Check on the pendant that the arm/gripper has stopped, then V to confirm and reconcile.", duration=30)
+            self.state.set_status("V reconciles the board and automatically checks controller state.", duration=30)
             return
         from src.core.fen_utils import INITIAL_FEN, fen_to_board_array
         candidates = (("completed", test["expected_board"]), ("unchanged", test["before_board"]),
@@ -820,7 +818,8 @@ class InputHandler:
         updates = {"manual_override_active": False, "emergency_mode": False}
         if robot_pvp:
             updates.update(snapshot_continue_required=False, snapshot_continue_can_commit_pending=False,
-                           physical_sync_fault=False)
+                           physical_sync_fault=False, move_sync_error=None,
+                           move_execution_status='IDLE', move_execution_error=None)
         before = {name: getattr(self.state, name) for name in updates} if robot_pvp else {}
         for name, value in updates.items():
             setattr(self.state, name, value)
@@ -970,24 +969,8 @@ class InputHandler:
         elif key == pygame.K_SPACE:
             self._queue_or_run(self._handle_space_key)
 
-    def _confirm_stopped_for_operator(self):
-        """V includes explicit arm/gripper inspection; keep measured stop gates."""
-        coordinator = getattr(self.hw, 'stop_coordinator', None)
-        request = getattr(coordinator, 'request', None)
-        if (not self._physical_recovery_required() or request is None
-                or (request.done.is_set() and request.result.safe)):
-            return True
-        try:
-            self.hw.confirm_operator_stop(approved=True)
-            return True
-        except Exception as exc:
-            self.state.set_status(f'Could not confirm the arm/gripper has stopped: {exc}. Resolve the controller, then V.', duration=60)
-            return False
-
     def _reconcile_physical_sync_fault(self):
         """Supervised recovery for a stopped physical-board synchronization."""
-        if not self._confirm_stopped_for_operator():
-            return
         pending = self.state.pending_ai_move
         if not pending and self._physical_recovery_required():
             if not self._verify_recovery_board(self.state.board):
@@ -1020,10 +1003,14 @@ class InputHandler:
                 self.state.manual_override_active = True
                 self.state.snapshot_continue_required = True
                 robot_pvp = getattr(getattr(self.hw, 'profile', None), 'game_mode', None) == 'HUMAN_VS_HUMAN_ROBOT'
-                message = ("Verified old board; failed move cancelled, same turn. Check the stopped arm/gripper, "
-                           "then V to resume and select the move again." if robot_pvp else
-                           "Verified old board. Physical retry remains paused; inspect the arm before restarting.")
-                self.state.set_status(message, color=(180, 100, 0), duration=30.0)
+                if robot_pvp:
+                    if self.resume_automatic_scanning():
+                        self.state.clear_move_sync_error()
+                        self.state.set_status("Old board verified; failed move cancelled, same turn. Select the move again.",
+                                              color=(0, 100, 180), duration=30.0)
+                else:
+                    self.state.set_status("Old board verified; V resumes scanning when controller and camera are ready.",
+                                          color=(180, 100, 0), duration=30.0)
                 return
             retry = getattr(self.state, "prepare_ai_retry_after_physical_miss", None)
             if callable(retry) and retry():

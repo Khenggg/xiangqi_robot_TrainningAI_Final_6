@@ -264,7 +264,7 @@ class GamePersistence:
                         self.manual_override_active = True
                         self.snapshot_continue_required = True
                         self.set_status(
-                            "New session, opening FEN. Check the arm/gripper, then V to confirm the new board.",
+                            "New session, opening FEN. V verifies the board and automatically checks controller state.",
                             duration=60)
                     previous_session = journal.session_id
                     journal.new_session(self.persistence_snapshot(), archive_previous=True)
@@ -302,7 +302,7 @@ class GamePersistence:
                     journal.loaded["phase"], journal)
                 if self.pending_test_motion is not None:
                     self.pending_test_motion["verified_outcome"] = None
-                    self.pick_test_fault = "Test was sent before closing; check the arm/gripper has stopped, then V to confirm and reconcile. Do not re-run."
+                    self.pick_test_fault = "Test was sent before closing; V checks controller state and reconciles the board. Do not re-run."
                 if self.pending_move is not None and self.pending_ai_move is None:
                     # IDENTIFIED was saved before PREPARED; no automatic dispatch on restore.
                     from src.core.xiangqi import make_temp_move
@@ -325,7 +325,7 @@ class GamePersistence:
                 if self.visual_capture_checkpoint:
                     from src.core.visual_move_coordinator import signature
                     self.visual_capture_checkpoint["signature"] = signature(self)
-                self.set_status("Saved session restored; check the arm/gripper and press V to reconcile. Do not re-run automatically.", duration=60)
+                self.set_status("Saved session restored; V checks controller state and reconciles the board. No automatic replay.", duration=60)
                 if self.mode_change_pending:
                     self.set_status("A different mode was selected. Resolve the pending session, then New Game; the old game is not kept when switching modes.", duration=60)
                 from src.core.project_logging import event
@@ -520,7 +520,7 @@ class GamePersistence:
                          or not hardware.stop_coordinator.safe_for_release(ignore_current_worker=True)):
             explain = getattr(hardware, "physical_recovery_block_reason", None)
             reason = explain() if callable(explain) else None
-            reason = reason or "Arm/gripper stop not confirmed. Check the robot has stopped, then V to confirm and reconcile."
+            reason = reason or "Controller state is not ready for recovery; waiting for current idle telemetry."
             self.hardware_recovery_reason = reason
             from src.core.project_logging import event
             event("recovery.hardware_blocked", f"Camera confirmed the board; {reason}",
