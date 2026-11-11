@@ -229,6 +229,30 @@ class InputHandler:
                 f"Motion worker failed: {error}", duration=30) if error else None):
             self.state.set_status("Robot operation in progress; wait for it to finish.", duration=8)
 
+    def _queue_operator_recovery(self, operation):
+        """Scope read-only idle evidence to an explicit V/Continue action."""
+        return self._queue_or_run(lambda: self._with_operator_idle_observation(operation))
+
+    def _with_operator_idle_observation(self, operation):
+        coordinator = getattr(self.hw, 'stop_coordinator', None)
+        observe = getattr(coordinator, 'observe_operator_idle', None)
+        if not self._physical_recovery_required() or not callable(observe):
+            return operation()
+        try:
+            receipt = observe(approved=True)
+        except Exception as exc:
+            self.state.physical_sync_fault = self.state.snapshot_continue_required = True
+            self.state.manual_override_active = True
+            self.state.snapshot_continue_can_commit_pending = False
+            event('recovery.idle_observation_blocked', str(exc), level=logging.WARNING)
+            self.state.set_status(f'Arm/gripper idle not confirmed: {exc}. Inspect the robot, then V.', duration=60)
+            return False
+        try:
+            return operation()
+        finally:
+            if receipt is not None:
+                coordinator.discard_operator_observation(receipt)
+
     def _retry_visual_pick(self, source="UNKNOWN"):
         from src.core.visual_move_coordinator import retry_is_current
         mode = getattr(getattr(self.state, "session_profile", None), "game_mode",
@@ -371,7 +395,7 @@ class InputHandler:
             if control is not None and control.resume_virtual():
                 return
             if getattr(self.state, "snapshot_continue_required", False) and not self.state.game_over:
-                self._queue_or_run(self._continue_after_snapshot_pause)
+                self._queue_operator_recovery(self._continue_after_snapshot_pause)
             return
 
         # Surrender Button
@@ -827,7 +851,7 @@ class InputHandler:
         control = getattr(self, 'session_control', None)
         if (key == pygame.K_v and control is not None and control.action in {'reset','surrender'}
                 and (self.state.pending_move is not None or self.state.pending_ai_move is not None)):
-            self._queue_or_run(self._reconcile_physical_sync_fault)
+            self._queue_operator_recovery(self._reconcile_physical_sync_fault)
             return
         if control is not None and control.action in {'reset','surrender'}:
             self.state.set_status("Resigning/changing game in progress. V to reconcile the pending move; do not replay it.", duration=20)
@@ -862,7 +886,7 @@ class InputHandler:
             self.state.set_status("This mode has no camera/viewer to sync.", duration=10)
             return
         if key == pygame.K_v and getattr(self.state, "pending_test_motion", None) is not None:
-            self._queue_or_run(self._reconcile_pick_test)
+            self._queue_operator_recovery(self._reconcile_pick_test)
             return
         if (key == pygame.K_v and getattr(self.state, "visual_pick_retry", None)
                 and not getattr(self.state, "physical_sync_fault", False)
@@ -917,9 +941,9 @@ class InputHandler:
                     self.state.set_status("Game → viewer sync requested; this session does not use the camera.", duration=15)
                 return
             if self.state.physical_sync_fault:
-                self._queue_or_run(self._reconcile_physical_sync_fault)
+                self._queue_operator_recovery(self._reconcile_physical_sync_fault)
             else:
-                self._queue_or_run(self.resume_automatic_scanning)
+                self._queue_operator_recovery(self.resume_automatic_scanning)
             return
 
         # Z KEY: Rollback
@@ -995,7 +1019,11 @@ class InputHandler:
                 self.state.physical_sync_fault = True
                 self.state.manual_override_active = True
                 self.state.snapshot_continue_required = True
-                self.state.set_status("Verified old board. Physical retry remains paused; inspect the arm before restarting.", color=(180, 100, 0), duration=15.0)
+                robot_pvp = getattr(getattr(self.hw, 'profile', None), 'game_mode', None) == 'HUMAN_VS_HUMAN_ROBOT'
+                message = ("Verified old board; failed move cancelled, same turn. Check the stopped arm/gripper, "
+                           "then V to resume and select the move again." if robot_pvp else
+                           "Verified old board. Physical retry remains paused; inspect the arm before restarting.")
+                self.state.set_status(message, color=(180, 100, 0), duration=30.0)
                 return
             retry = getattr(self.state, "prepare_ai_retry_after_physical_miss", None)
             if callable(retry) and retry():
@@ -1025,8 +1053,8 @@ class InputHandler:
         if pending.get("captured_piece") != ".":
             # Occupancy alone cannot prove captured identity or the rest of the board.
             self.state.set_status(
-                "⚠️ Capture move incomplete: move the Black piece "
-                f"({src[0]},{src[1]})→({dst[0]},{dst[1]}) then press V.",
+                "⚠️ Capture move incomplete: after the arm stops, restore the full board before the move "
+                "including the captured piece, then V to reconcile.",
                 color=(180, 100, 0), duration=20.0,
             )
         else:
@@ -1039,6 +1067,9 @@ class InputHandler:
         """Commit the one pending AI move after a verified recovery path."""
         if not self.state.commit_pending_ai_move():
             return False
+        if getattr(getattr(self.hw, 'profile', None), 'game_mode', None) == 'HUMAN_VS_HUMAN_ROBOT':
+            side = 'Red' if self.state.turn == 'r' else 'Black'
+            status_message = f'Move confirmed and recorded once. {side} to move.'
         self.state.snapshot_continue_required = False
         self.state.publish_committed_fen()
         if (xiangqi.get_king_pos(self.state.turn, self.state.board) is None

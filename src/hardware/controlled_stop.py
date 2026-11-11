@@ -18,6 +18,8 @@ class StopRequest:
         self.result = None
         self.thread = None
         self.requires_measurements = False
+        self.observation_only = False
+        self.observed_generation = None
 
     def finish(self, result):
         self.result = result
@@ -62,7 +64,7 @@ class ControlledStopCoordinator:
             if workers_finished is not None:
                 self._worker_checks.append(workers_finished)
             # A repeated click observes the original request. It never replays StopMotion.
-            if self.request is not None:
+            if self.request is not None and not getattr(self.request, 'observation_only', False):
                 return self.request
             request = self.request = StopRequest(reason)
             robot = self.hardware.robot
@@ -90,6 +92,43 @@ class ControlledStopCoordinator:
 
     def _all_workers_finished(self):
         return all(check() for check in tuple(self._worker_checks))
+
+    def observe_operator_idle(self, *, approved=False, timeout=2.0):
+        """Temporary measured proof for explicit V, without issuing a stop.
+
+        A completed game command may fail camera verification with no stop RPC
+        ever requested. Prove idle outside the lock so an urgent real stop can
+        still supersede this observation. The caller must discard the receipt.
+        """
+        if not approved:
+            raise RuntimeError('Explicit operator recovery approval required')
+        with self._lock:
+            if self.request is not None:
+                return None  # Preserve the existing real-stop recovery path.
+            generation = self.generation
+        physical = self.hardware.simulation_runtime is None and not self.hardware.dry_run
+        if not physical:
+            return None
+        self._wait_idle(timeout, True, self._all_workers_finished, ignore_current_worker=True)
+        with self._lock:
+            if self.generation != generation or self.request is not None:
+                raise RuntimeError('Stop changed during operator observation; verify again')
+            if (not self.workers_idle(ignore_current_worker=True) or not self._all_workers_finished()
+                    or getattr(self.hardware.robot, '_gripper_pulse_active', False) is True):
+                raise RuntimeError('Worker or gripper changed during operator observation')
+            request = StopRequest('Operator observed stopped arm/gripper for board reconciliation')
+            request.requires_measurements = request.observation_only = True
+            request.observed_generation = generation
+            request.finish(StopResult(True, False, 'Fresh idle observed; no stop command sent'))
+            self.request = request
+            return request
+
+    def discard_operator_observation(self, request):
+        """Remove only this scoped proof; never erase a newer real stop."""
+        with self._lock:
+            if (request is not None and request.observation_only
+                    and self.request is request and self.generation == request.observed_generation):
+                self.request = None
 
     def safe_for_release(self, *, ignore_current_worker=False):
         request = self.request

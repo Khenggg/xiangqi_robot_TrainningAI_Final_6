@@ -282,13 +282,19 @@ Luồng này áp dụng ở chế độ **robot thật / PHYSICAL**, khi thao t�
 
 Mất kết nối, kết quả lệnh trước chưa rõ, sai hệ tọa độ, telemetry cũ, khóa dừng hoặc xung kẹp chưa kết thúc có thể chặn tự về. Lỗi ngắt xung kẹp vẫn cần kiểm tra controller và ngõ ra kẹp; H không tự xóa trạng thái chưa xác định. Chưa kiểm chứng đường về HOME trên robot thật. `Ctrl+F8` đã bỏ.
 
-**Hai người + robot — đối soát giữ nguyên luồng hiện có:**
+**Hai người + robot — gắp hụt hoặc camera chưa xác nhận nước đi:**
 
-1. Không đi nước mới, không bấm liên tục F5 hoặc chọn lại cùng nước.
-2. Xác minh trạng thái cơ khí/controller trước; giữ quân đang kẹp theo quy trình của team. VS ROBOT yêu cầu về HOMECHESS khi thao tác gắp/đặt lỗi; chờ tay dừng trước khi lấy quân ra.
-3. **V** đối chiếu toàn bàn với thế trước hoặc thế sau nước chờ. Nếu camera khớp nhưng robot còn lỗi, xử lý lỗi controller; FEN đúng chưa đủ.
-4. Nếu thế sau được xác nhận, hệ thống có thể ghi nhận nước đã xong thay vì chạy lại. Nếu thế trước được xác nhận, việc thử tiếp vẫn phụ thuộc gate và thông báo hiện tại; không mặc định robot chắc chắn chưa chuyển động.
-5. Nếu không khớp cả hai, nhờ người vận hành chỉnh bàn theo hướng dẫn cụ thể. F4 là lựa chọn quét nhận thế khác, có thể đổi lịch sử/lượt; không dùng tùy tiện thay V.
+Không đi thêm nước hoặc chọn lại nước đang chờ. Kiểm tra tay/kẹp đã dừng trước khi can thiệp bàn thật; rút tay khỏi vùng robot rồi nhấn **V trên cửa sổ Đỏ/host** để đối soát toàn bàn.
+
+| Tình trạng thực tế | Cách tiếp tục |
+|---|---|
+| Gắp hụt, toàn bàn vẫn như trước nước lỗi | V xác nhận bàn cũ, hủy nước lỗi và giữ nguyên lượt. Kiểm tra tay/kẹp, nhấn V lần nữa để hết pause; khi giao diện cho phép, chọn lại nước |
+| Quân đã đi đúng, camera nhận sai hoặc bị che | Sửa ánh sáng/vật che, chờ ảnh ổn định rồi V. Khi xác nhận đúng toàn bàn sau nước đi, phần mềm ghi nhận nước đúng một lần, chuyển lượt và không chạy lại robot |
+| Nước đi dang dở, quân lệch hoặc ăn quân chưa xong | Sau khi tay/kẹp dừng, khôi phục **toàn bộ bàn trước nước lỗi**, gồm quân bị ăn, rồi V như trường hợp gắp hụt |
+
+Nếu camera báo bàn cũ nhưng mắt thấy quân đã đi, giữ pause và sửa nhận diện trước; không nhấn tiếp để chọn lại nước dựa trên kết quả sai. Nếu không xác nhận được thế trước hoặc thế sau, hệ thống tiếp tục khóa. F4 có thể đổi thế/lịch sử/lượt; không dùng tùy tiện thay V.
+
+V kiểm tra telemetry idle mới và worker/kẹp đã kết thúc, kể cả khi trước đó chưa có yêu cầu StopMotion. Bản thân bước đối soát này không gửi lệnh dừng, HOME, kẹp hoặc enable. Lỗi controller hoặc thiếu bằng chứng dừng vẫn chặn tiếp tục. **R/H phục hồi HOMECHESS chỉ áp dụng cho VS ROBOT physical**, chưa áp dụng cho Hai người + robot.
 
 **Ctrl+F9** chỉ dùng khi UI báo kết quả disable controller chưa rõ và người vận hành **đã tắt controller trên pendant**. Phím này ghi nhận xác nhận đó; không phải nút tự tắt controller hay sửa mất mạng.
 
