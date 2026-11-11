@@ -409,13 +409,19 @@ def _begin_mode_disposal():
     if mode_disposal is None:
         from src.core.session_disposal import SessionDisposal
         mode_disposal = SessionDisposal(state, hw, None, telemetry, viewer_server, debug_dashboard)
+    operator_retry = mode_switch_failed
     mode_switching = True
     mode_switch_failed = False
     state.set_status("Closing the previous session; the new mode's camera/robot is not open yet.", duration=60)
     camera = getattr(hw, "cam_monitor", None)
     if callable(getattr(camera, "close_display", None)):
         camera.close_display()
-    if not startup_worker.start(mode_disposal.run, _finish_mode_disposal):
+    def dispose():
+        stop = getattr(getattr(hw, 'stop_coordinator', None), 'request', None)
+        if operator_retry and stop is not None and stop.done.is_set() and not stop.result.safe:
+            hw.confirm_operator_stop(approved=True)
+        return mode_disposal.run()
+    if not startup_worker.start(dispose, _finish_mode_disposal):
         mode_switching = False
 
 
@@ -528,7 +534,7 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
     except Exception as persist_error:
         log_event("session.persistence_failed", str(persist_error), level=logging.ERROR,
                   code="SESSION_PERSISTENCE_FAILED")
-    message = f"RECOVERY REQUIRED: {type(exc).__name__}. Inspect arm/gripper on pendant, then Ctrl+F8."
+    message = f"RECOVERY REQUIRED: {type(exc).__name__}. Inspect the stopped arm/gripper, then F2 to retry cleanup."
     log_event("app.recovery_wait", message, level=logging.ERROR)
     recovery_clock = pygame.time.Clock()
     # Startup/hardware workers may already be closed by a partial teardown.
@@ -552,10 +558,10 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
                         return
                 if item.type == pygame.KEYDOWN and item.key == pygame.K_F2:
                     retry_requested = True
-                if (item.type == pygame.KEYDOWN and item.key == pygame.K_F8
-                        and getattr(item, "mod", 0) & pygame.KMOD_CTRL
-                        and hw is not None and not hw.motion_worker.running):
-                    operator_worker.start(lambda: hw.confirm_operator_stop(approved=True), _job_completed)
+                    stop = getattr(getattr(hw, 'stop_coordinator', None), 'request', None)
+                    if (stop is not None and stop.done.is_set() and not stop.result.safe
+                            and not hw.motion_worker.running):
+                        operator_worker.start(lambda: hw.confirm_operator_stop(approved=True), _job_completed)
                 if (item.type == pygame.KEYDOWN and item.key == pygame.K_F9
                         and getattr(item, "mod", 0) & pygame.KMOD_CTRL
                         and hw is not None and not hw.motion_worker.running):
@@ -589,9 +595,8 @@ def _recover_shutdown_after_exception(exc, *, cleanup_retry=False):
                 font = pygame.font.Font(None, 24)
                 for index, line in enumerate(("RECOVERY REQUIRED - project is paused", str(exc)[:100],
                                               "Inspect/stop the arm and gripper on the pendant.",
-                                              "Ctrl+F8: approve read-only stop verification.",
                                               "Ctrl+F9: confirm controller disabled on pendant (lost disable ACK).",
-                                              "F2: retry closing unfinished resources.",
+                                              "F2: after arm/gripper inspection, verify stop and retry closing resources.",
                                               "Close window / Ctrl+C: confirm once to exit immediately.",
                                               "Camera/controller and pending transaction are retained.")):
                     surface.blit(font.render(line, True, (255, 220, 200)), (20, 25 + index * 30))
@@ -707,12 +712,15 @@ try:
                   and BTN_MODE_SELECT_RECT.collidepoint(event.pos)):
                 _request_mode_menu()
                 continue
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_F8 and hw is not None:
-                if getattr(event, "mod", 0) & pygame.KMOD_CTRL:
-                    verifier_worker = startup_worker if mode_switch_failed or getattr(hw, "_closing", False) else hw.motion_worker
-                    verifier_worker.start(lambda: hw.confirm_operator_stop(approved=True), _job_completed)
-                elif session_control is not None:
+            elif (event.type == pygame.KEYDOWN and event.key == pygame.K_F8 and hw is not None
+                  and not getattr(event, 'mod', 0) & pygame.KMOD_CTRL):
+                if session_control is not None:
                     session_control.request("pause")
+                continue
+            elif (event.type == pygame.KEYDOWN and event.key == pygame.K_v
+                  and mode_switch_failed and input_mgr is not None):
+                if not startup_worker.busy:
+                    startup_worker.start(input_mgr._reconcile_physical_sync_fault, _job_completed)
                 continue
             elif (event.type == pygame.MOUSEBUTTONDOWN and session_control is not None
                   and not mode_switching and not mode_switch_failed

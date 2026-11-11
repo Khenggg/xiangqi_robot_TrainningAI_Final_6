@@ -288,15 +288,24 @@ class BoardRenderer:
                 text = self.button_font.render(label, True, (255, 255, 255))
                 self.screen.blit(text, text.get_rect(center=rect.center))
         else:
-            can_continue = game_state.get("snapshot_continue_required", False)
+            recovery = game_state.get('home_recovery')
+            recovery_status = recovery.get('status') if recovery else None
+            can_continue = (recovery_status in {'waiting_manual', 'home_failed'} if recovery
+                            else game_state.get("snapshot_continue_required", False))
             continue_color = JADE_COLOR if can_continue else (121, 116, 100)
             pygame.draw.rect(self.screen, continue_color, BTN_CONTINUE_RECT, border_radius=12)
-            continue_key = self.ui_font.render("▶", True, (255, 255, 255))
-            continue_label = self.ui_font.render("CONTINUE", True, (255, 255, 255))
+            key = 'H' if recovery_status == 'home_failed' else 'R' if recovery else '▶'
+            label = ('HOMECHESS' if recovery_status == 'home_failed' else
+                     'RETRY MOVE' if recovery_status == 'waiting_manual' else
+                     'PLEASE WAIT' if recovery else 'CONTINUE')
+            continue_key = self.ui_font.render(key, True, (255, 255, 255))
+            continue_label = self.ui_font.render(label, True, (255, 255, 255))
             self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 18, BTN_CONTINUE_RECT.y + 17))
             self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 66, BTN_CONTINUE_RECT.y + 17))
 
-        note = ("T: chọn quân → chọn ô trống" if game_state.get("pick_test_mode", False)
+        note = ("H: xử lý lỗi rồi về HOMECHESS" if (game_state.get('home_recovery') or {}).get('status') == 'home_failed' else
+                "R: đã lấy quân, xếp lại bàn" if game_state.get('home_recovery') else
+                "T: chọn quân → chọn ô trống" if game_state.get("pick_test_mode", False)
                 else "M đang bật: đi tay Đỏ / Đen" if emergency_active else "Chọn phím hoặc bấm nút")
         note_surf = self.log_font.render(note, True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(note_surf, note_surf.get_rect(center=(panel.centerx, 816)))

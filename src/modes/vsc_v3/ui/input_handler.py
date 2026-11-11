@@ -1,5 +1,6 @@
 import time
 import math
+from numbers import Integral
 from src.modes.vsc_v3.core import xiangqi  # type: ignore
 from src.modes.vsc_v3.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_RECT, BTN_NEW_GAME_RECT,
                                    BTN_CONTINUE_RECT, BTN_SCAN_FEN_RECT, BTN_CONFIRM_MOVE_RECT,
@@ -7,6 +8,7 @@ from src.modes.vsc_v3.ui.board_renderer import (BoardRenderer, BTN_SURRENDER_REC
 from src.modes.vsc_v3.ui.board_renderer import BTN_PICK_RETRY_RECT, BTN_PICK_CANCEL_RECT
 from src.modes.vsc_v3.core.game_state import GameState
 from src.modes.vsc_v3.core.visual_move_coordinator import execute_pending_ai_motion
+from src.modes.vsc_v3.core.home_recovery import HomeRecoveryRequest
 from src.modes.vsc_v3.vision.pick_consensus import PickTargetUnavailable
 from src.modes.vsc_v3.vision.board_stability_monitor import BoardStabilityMonitor
 from src.modes.vsc_v3.vision.player_turn_arbiter import PlayerTurnArbiter
@@ -213,25 +215,163 @@ class InputHandler:
         if self._defer_motion(self.start_pending_ai_motion):
             return
         source, destination = self.state.pending_ai_move["move"]
+        operation = HomeRecoveryRequest.create(self.state, '')
         try:
             execute_pending_ai_motion(self.state, self.hw, self.hw.config)
             self._finalize_pending_ai_move("Your turn!", (0, 100, 180))
         except PickTargetUnavailable as exc:
-            self.state.pause_visual_pick("ai", source, destination, exc)
+            if exc.stage == 'pre_pick':
+                self.state.pause_visual_pick("ai", source, destination, exc)
+            else:
+                self.begin_home_recovery(exc, operation=operation)
         except Exception as exc:
             if self.state.pending_ai_move is None:
                 self.state.manual_override_active = True
                 self.state.set_status(f"FEN đã cập nhật; lỗi đồng bộ: {exc}. V để lấy lại baseline.", duration=30)
                 return
-            self.state.physical_sync_fault = True
-            self.state.snapshot_continue_required = True
-            self.state.snapshot_continue_can_commit_pending = False
-            self.state.set_status(f"Robot dừng: {exc}. Kiểm tra bàn thật rồi V.",
-                                  color=(180, 0, 0), duration=3600)
+            self.begin_home_recovery(exc, operation=operation)
+
+    def begin_home_recovery(self, error, *, operation=None):
+        """Park once after failure; no release, FEN commit or automatic replay."""
+        if self.state.pending_ai_move is None:
+            self.state.set_status(f'Nước đã cập nhật; lỗi đồng bộ: {error}. Không chạy lại robot.', duration=30)
+            return
+        self.state.physical_sync_fault = True
+        self.state.snapshot_continue_required = True
+        self.state.snapshot_continue_can_commit_pending = False
+        self.state.manual_override_active = True
+        if operation is not None and not operation.is_current(self.state):
+            self.state.home_recovery = operation
+            self.state.set_status('Nước đi đã thay đổi trong lúc lỗi; giữ khóa, không tự đưa tay về HOME.', duration=3600)
+            return
+        request = getattr(self.state, 'home_recovery', None)
+        if request is None:
+            request = self.state.home_recovery = operation or HomeRecoveryRequest.create(self.state, error)
+        request.error = str(error)
+        if not request.is_current(self.state):
+            self.state.set_status('Yêu cầu phục hồi đã hết hiệu lực; giữ khóa, không di chuyển.', duration=3600)
+            return
+        self.state.visual_pick_retry = None
+        self._return_recovery_home(error)
+
+    def _begin_test_home_recovery(self, error, source, destination, *, operation=None):
+        self.state.home_recovery = operation or HomeRecoveryRequest.create_test(self.state, error, source, destination)
+        self.state.pick_test_resume_required = True
+        self.state.manual_override_active = True
+        self.state.visual_pick_retry = None
+        if not self.state.home_recovery.is_current(self.state):
+            self.state.set_status('Test đã thay đổi trong lúc lỗi; giữ khóa, không tự đưa tay về HOME.', duration=3600)
+            return
+        self._return_recovery_home(error)
+
+    def _return_recovery_home(self, failure=None):
+        if self._defer_motion(lambda: self._return_recovery_home(failure)):
+            return
+        from src.hardware.home_chess_recovery import return_to_home_chess
+        request = getattr(self.state, 'home_recovery', None)
+        if request is None or not request.is_current(self.state):
+            return
+        request.status = 'returning_home'
+        self.state.set_status(request.message(), duration=3600)
+        try:
+            result = return_to_home_chess(self.hw.robot, failure=failure,
+                                         is_current=lambda: self._current_home_recovery(request))
+            request.status = 'waiting_manual' if result.at_home else 'home_failed'
+            request.reason = result.reason
+        except Exception as exc:
+            request.status, request.reason = 'home_failed', str(exc)
+        self.state.set_status(request.message(), color=(180, 80, 0), duration=3600)
+
+    def _current_home_recovery(self, request):
+        return self.state.home_recovery is request and request.is_current(self.state)
+
+    def _retry_home_recovery(self):
+        """R is explicit empty-gripper/old-board approval; preserve the exact move."""
+        if self._defer_motion(self._retry_home_recovery):
+            return
+        from src.hardware.home_chess_recovery import check_home_chess
+        request = getattr(self.state, 'home_recovery', None)
+        if request is None or not request.is_current(self.state):
+            self.state.set_status('Nước chờ đã thay đổi; giữ khóa, không chạy lại.', duration=3600)
+            return
+        if request.status != 'waiting_manual':
+            self.state.set_status(request.message(), duration=3600)
+            return
+        try:
+            home = check_home_chess(self.hw.robot, is_current=lambda: self._current_home_recovery(request))
+            if not home.at_home:
+                request.status, request.reason = 'home_failed', home.reason
+                self.state.set_status(request.message(), duration=3600)
+                return
+            if not self.hw.verify_physical_board([list(row) for row in request.board]):
+                self.state.set_status('Bàn chưa khớp trước nước lỗi. Xếp lại cả quân nguồn và quân bị ăn rồi R.',
+                                      color=(180, 0, 0), duration=3600)
+                return
+            if not self._current_home_recovery(request):
+                raise RuntimeError('Nước chờ đã thay đổi trong lúc đối soát')
+            # Board recognition can take seconds; never reuse its earlier arm
+            # snapshot as permission to actuate the gripper or replay the move.
+            home = check_home_chess(self.hw.robot, is_current=lambda: self._current_home_recovery(request))
+            if not home.at_home:
+                request.status, request.reason = 'home_failed', home.reason
+                self.state.set_status(request.message(), duration=3600)
+                return
+            # Manual removal does not establish motor/jaw state. Open the now
+            # acknowledged empty gripper instead of falsifying its estimate.
+            opened = self.hw.robot.gripper_ctrl(self.hw.config.GRIPPER_ACTION_OPEN_MAX)
+            from src.motion.result import MotionExecutionResult
+            accepted = (opened is True
+                        or (isinstance(opened, Integral) and not isinstance(opened, bool) and opened == 0)
+                        or (isinstance(opened, MotionExecutionResult) and opened.success is True))
+            if not accepted:
+                raise RuntimeError(f'Chưa xác nhận mở kẹp trống: {opened!r}')
+            if not self._current_home_recovery(request):
+                raise RuntimeError('Nước chờ đã thay đổi sau xác nhận kẹp')
+            self.state.visual_capture_checkpoint = None
+            self.state.visual_pick_retry = None
+            request.status = 'retrying'
+            self.state.set_status(request.message(), duration=3600)
+            if request.owner == 'test':
+                source, destination = request.test_move
+                def validate_test():
+                    if not self._current_home_recovery(request):
+                        raise RuntimeError('Test đã thay đổi; không chạy lại')
+                self.hw.execute_pick_place_test(source, destination, validate_request=validate_test)
+                validate_test()
+                sc, sr = source
+                dc, dr = destination
+                self.state.pick_test_board[dr][dc] = self.state.pick_test_board[sr][sc]
+                self.state.pick_test_board[sr][sc] = '.'
+                self.state.home_recovery = None
+                self.state.set_status('Đã thực hiện lại test; T để thoát, khôi phục bàn rồi NEW GAME.', duration=30)
+                return
+            execute_pending_ai_motion(self.state, self.hw, self.hw.config)
+            if not self._current_home_recovery(request):
+                raise RuntimeError('Nước chờ đã thay đổi trước cập nhật FEN')
+            self._finalize_pending_ai_move('Đã thực hiện lại nước đi — đến lượt bạn.', (0, 120, 0))
+            if self.state.pending_ai_move is None:
+                self.state.home_recovery = None
+                self.state.manual_override_active = False
+        except Exception as exc:
+            if request.owner == 'test':
+                self._begin_test_home_recovery(exc, *request.test_move, operation=request)
+            elif self.state.pending_ai_move is None:
+                self.state.home_recovery = None
+                self.state.manual_override_active = True
+                self.state.set_status(f'FEN đã cập nhật; lỗi đồng bộ: {exc}. Không chạy lại robot.', duration=3600)
+            else:
+                self.begin_home_recovery(exc, operation=request)
 
     def handle_mouse_down(self, mx, my):
         import pygame  # type: ignore
         if getattr(self.state, "physical_motion_busy", False):
+            return
+        if getattr(self.state, 'home_recovery', None) is not None:
+            if BTN_CONTINUE_RECT.collidepoint(mx, my):
+                self.handle_keyboard(pygame.K_h if self.state.home_recovery.status == 'home_failed'
+                                     else pygame.K_r)
+            else:
+                self.state.set_status(self.state.home_recovery.message(), duration=3600)
             return
         if getattr(self.state, "visual_pick_retry", None):
             if BTN_PICK_RETRY_RECT.collidepoint(mx, my):
@@ -398,6 +538,10 @@ class InputHandler:
             if request is not None and not self.state.visual_pick_retry_is_current(request):
                 raise RuntimeError("Stale test retry; no motion/board update authorized")
 
+        if request is not None and not self.state.visual_pick_retry_is_current(request):
+            self.state.set_status('Yêu cầu test đã hết hiệu lực; không di chuyển.', duration=30)
+            return
+        operation = HomeRecoveryRequest.create_test(self.state, '', source, destination)
         try:
             self.state.set_status("TEST: arm đang gắp/thả...", duration=30)
             validate_request()
@@ -414,14 +558,12 @@ class InputHandler:
             self.state.set_status(f"TEST xong: ({target.col:.3f},{target.row:.3f}) → ({col},{row}). Chọn quân để test tiếp.", duration=20)
         except PickTargetUnavailable as exc:
             if exc.stage != "pre_pick":
-                self.state.visual_pick_retry = None
-                self.state.set_status("TEST dừng sau chuyển động; kiểm tra bàn thật, không tự thử lại.", duration=30)
+                self._begin_test_home_recovery(exc, source, destination, operation=operation)
             else:
                 GameState.pause_visual_pick(self.state, "test", source, destination, exc)
         except Exception as exc:
-            self.state.visual_pick_retry = None
             print(f"[PICK TEST] {exc}")
-            self.state.set_status(f"TEST dừng: {exc}", color=(180, 0, 0), duration=30)
+            self._begin_test_home_recovery(exc, source, destination, operation=operation)
 
     def _retry_visual_pick(self):
         if self._defer_motion(self._retry_visual_pick):
@@ -434,6 +576,7 @@ class InputHandler:
         if request["owner"] == "test":
             self._run_pick_test(request["source"], request["destination"], request)
             return
+        operation = HomeRecoveryRequest.create(self.state, '')
         finalization_started = False
         try:
             execute_pending_ai_motion(self.state, self.hw, self.hw.config, request["stage"])
@@ -442,7 +585,10 @@ class InputHandler:
             finalization_started = True
             self._finalize_pending_ai_move("Đã xác nhận nước đi — đến lượt bạn.", (0, 120, 0))
         except PickTargetUnavailable as exc:
-            self.state.pause_visual_pick("ai", request["source"], request["destination"], exc)
+            if exc.stage == 'pre_pick':
+                self.state.pause_visual_pick("ai", request["source"], request["destination"], exc)
+            else:
+                self.begin_home_recovery(exc, operation=operation)
         except Exception as exc:
             self.state.visual_pick_retry = None
             if finalization_started and self.state.pending_ai_move is None:
@@ -454,10 +600,7 @@ class InputHandler:
                 self.state.manual_override_active = True
                 self.state.set_status(f"Nước đi đã hoàn tất/FEN đã cập nhật; lỗi đồng bộ: {exc}. V để lấy lại baseline.", duration=30)
                 return
-            self.state.physical_sync_fault = True
-            self.state.snapshot_continue_required = True
-            self.state.snapshot_continue_can_commit_pending = False
-            self.state.set_status(f"Thử lại dừng: {exc}. Kiểm tra bàn thật rồi V; FEN giữ nguyên.", duration=3600)
+            self.begin_home_recovery(exc, operation=operation)
 
     def resume_automatic_scanning(self):
         """Install a fresh physical baseline, then re-enable automatic polling.
@@ -511,6 +654,15 @@ class InputHandler:
     def handle_keyboard(self, key):
         import pygame  # type: ignore
         if getattr(self.state, "physical_motion_busy", False):
+            return
+        recovery = getattr(self.state, 'home_recovery', None)
+        if recovery is not None:
+            if key == pygame.K_r:
+                self._retry_home_recovery()
+            elif key == pygame.K_h and recovery.status == 'home_failed':
+                self._return_recovery_home()
+            else:
+                self.state.set_status(recovery.message(), duration=3600)
             return
         if self.state.game_over:
             return
@@ -575,6 +727,9 @@ class InputHandler:
 
     def _reconcile_physical_sync_fault(self):
         """Supervised recovery for a stopped physical-board synchronization."""
+        if getattr(self.state, 'home_recovery', None) is not None:
+            self.state.set_status(self.state.home_recovery.message(), duration=3600)
+            return
         pending = self.state.pending_ai_move
         if not pending or not self.hw.verify_physical_board:
             self.state.set_status("❌ Không có trạng thái đối soát để khôi phục.", color=(180, 0, 0), duration=8.0)
@@ -745,6 +900,9 @@ class InputHandler:
         return committed
 
     def _continue_after_snapshot_pause(self):
+        if getattr(self.state, 'home_recovery', None) is not None:
+            self.state.set_status(self.state.home_recovery.message(), duration=3600)
+            return
         """Apply the operator-approved recovery shown by the Continue button."""
         if (getattr(self.state, "physical_sync_fault", False)
                 and getattr(self.state, "snapshot_continue_can_commit_pending", False)

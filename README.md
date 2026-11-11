@@ -250,7 +250,7 @@ Trước hết đọc **nước chờ và trạng thái thực thi**. Cùng phí
 | Thế thật khác game, muốn nhận lại toàn bộ thế cờ | Sau khi thiết bị/giao dịch đủ điều kiện, **F4** | Hai lần quét nhận diện cùng thế; có thể thay thế cờ/lịch sử và cần xác nhận lượt |
 | Báo chưa biết bên tới lượt sau quét | **1 = Đỏ / 2 = Đen** khi được hỏi | Đúng lượt rồi mới tiếp tục; lựa chọn Đen trong VS ROBOT có thể làm AI được lên lịch |
 | Lỗi phiên còn giữ, đã xác minh bàn đúng FEN hiện tại | **F12 / XÓA PHIÊN LỖI** khi UI cho phép | Retire trạng thái lỗi của ứng dụng; không reset controller, không về Home |
-| Controller/telemetry chưa xác nhận dừng | Kiểm tra WebApp/pendant; khi tay/kẹp đã dừng, **Ctrl+F8**, rồi **V** | Đủ bằng chứng dừng mới gỡ gate. Nếu vẫn lỗi controller thì tiếp tục bị chặn |
+| Controller/telemetry chưa xác nhận dừng | Kiểm tra WebApp/pendant. VS ROBOT theo luồng HOMECHESS. Hai người + robot: sau khi đã kiểm tra tay/kẹp dừng, **V** xác nhận và đối soát | Đủ bằng chứng dừng mới gỡ gate. Nếu vẫn lỗi controller thì tiếp tục bị chặn |
 
 ### 8.1. Chưa gắp được tâm quân
 
@@ -263,8 +263,14 @@ Trong nước ăn, checkpoint có thể đã ghi nhận việc lấy quân bị 
 
 ### 8.2. Đã chạy nhưng kết quả chưa được xác nhận
 
+**VS ROBOT — phục hồi HOMECHESS:** khi gắp/đặt bị lỗi, chương trình giữ nguyên FEN và nước đang chờ, yêu cầu tay nâng thẳng lên độ cao di chuyển rồi về điểm `HOMECHESS` đã dạy. Kẹp giữ nguyên trong lúc về. Chỉ sau khi UI xác nhận tay đã ở HOME và dừng, lấy quân khỏi kẹp, xếp lại toàn bộ bàn như trước nước lỗi (cả quân nguồn và quân bị ăn), rút tay ra rồi nhấn **R / RETRY MOVE**. Chương trình kiểm tra HOME và bàn, mở kẹp trống, đo lại mục tiêu rồi chạy lại đúng nước đó. Không tính nước AI khác.
+
+Nếu không về được HOME, UI giữ khóa và hiện lý do. Sau khi xử lý lỗi controller, dùng **H / HOMECHESS** để yêu cầu lại một lần. Mất phản hồi lệnh, sai frame, telemetry cũ, stop đang khóa hoặc xung kẹp chưa kết thúc sẽ chặn tự về; chương trình không reset/enable controller để ép chạy. Lỗi ngắt xung kẹp vẫn cần kiểm tra controller và ngõ ra kẹp; H không tự xóa trạng thái chưa xác định. Chưa kiểm chứng đường về HOME trên phần cứng. `Ctrl+F8` đã bỏ.
+
+**Hai người + robot — đối soát giữ nguyên luồng hiện có:**
+
 1. Không đi nước mới, không bấm liên tục F5/F9/F10 hoặc chọn lại cùng nước.
-2. Xác minh trạng thái cơ khí/controller trước; giữ quân đang kẹp theo quy trình của team. Dùng luồng dừng và Ctrl+F8 khi UI yêu cầu và đã kiểm tra thực tế.
+2. Xác minh trạng thái cơ khí/controller trước; giữ quân đang kẹp theo quy trình của team. VS ROBOT yêu cầu về HOMECHESS khi thao tác gắp/đặt lỗi; chờ tay dừng trước khi lấy quân ra.
 3. **V** đối chiếu toàn bàn với thế trước hoặc thế sau nước chờ. Nếu camera khớp nhưng robot còn lỗi, xử lý lỗi controller; FEN đúng chưa đủ.
 4. Nếu thế sau được xác nhận, hệ thống có thể ghi nhận nước đã xong thay vì chạy lại. Nếu thế trước được xác nhận, việc thử tiếp vẫn phụ thuộc gate và thông báo hiện tại; không mặc định robot chắc chắn chưa chuyển động.
 5. Nếu không khớp cả hai, nhờ người vận hành chỉnh bàn theo hướng dẫn cụ thể. F4 là lựa chọn quét nhận thế khác, có thể đổi lịch sử/lượt; không dùng tùy tiện thay V.
@@ -336,9 +342,9 @@ Log đánh số **hàng 0–9, cột 0–8**. Ô `b9` nghĩa cột `b = 1`, hàn
 | `READ-ONLY`, `ROBOT_NOT_READY` | Sau khi setup/bàn/controller đã được xác nhận, F9 → F10; nếu bật thất bại, đọc nguyên nhân tiếp theo |
 | `PHYSICAL_ENABLE_FAILED`, `Fresh idle robot telemetry required` | Kiểm tra telemetry mới, idle/ready, controller, camera và mọi pending/recovery; không dùng F12 thay kiểm tra thiết bị |
 | `Robot SDK not connected`, RPC timeout, `outcome unknown, do not resend` | Kiểm tra tay/kẹp trước; không gửi lại lệnh chưa rõ kết quả. Kiểm tra cáp/adapter/IP/subnet trên đúng đường Ethernet; xem ROBOT_CONNECTION.md |
-| Camera đã xác nhận bàn nhưng “Robot đang lỗi” | Xử lý lỗi trên WebApp/pendant theo tài liệu controller; khi tay/kẹp đã dừng và hết lỗi, Ctrl+F8 rồi V theo UI. FEN/V/F12 không xóa lỗi controller |
+| Camera đã xác nhận bàn nhưng “Robot đang lỗi” | Xử lý lỗi trên WebApp/pendant. VS ROBOT theo yêu cầu HOMECHESS trên UI; Hai người + robot dùng V sau khi đã kiểm tra tay/kẹp dừng. FEN/V/F12 không xóa lỗi controller |
 | `No stable box centre`, pick retry, offset vượt giới hạn | Xem đúng quân/ô, độ lệch và jitter. Giới hạn mặc định hiện tại là **6 mm** trong config; kiểm tra quân/ảnh/calibration rồi dùng Y/V đúng trạng thái. Không tăng ngưỡng để ép gắp |
-| `RECOVERY_REQUIRED`, `STOP_RECOVERY_REQUIRED` | Chưa có đủ bằng chứng dừng; xem worker, tay/kẹp và telemetry. Ctrl+F8 chỉ sau kiểm tra thực tế; nếu không đạt thì giữ khóa |
+| `RECOVERY_REQUIRED`, `STOP_RECOVERY_REQUIRED` | Chưa có đủ bằng chứng dừng; xem worker, tay/kẹp và telemetry. VS ROBOT giữ nước đi chờ phục hồi HOMECHESS. Khi lỗi đóng tài nguyên, kiểm tra tay/kẹp đã dừng rồi F2 xác nhận và thử đóng lại |
 | `MoveCart`, IK, mã `14` hoặc `112` | Dừng và giữ log/trạng thái. Team kiểm tra pose hiện tại, tool/frame, mục tiêu và đường đi. Không coi lệnh lỗi là thành công; không tự gửi Home, kéo tay hoặc tắt/bật nguồn để thử lại theo sổ tay |
 | Robot đã gắp/ăn nhưng chưa đặt đúng | Đây là thao tác có thể đã chạy một phần; theo mục 8.2. Không gọi lại cả nước và không thả kẹp mù |
 | Kẹp không mở/đóng, không nhả quân | Dừng dùng physical, kiểm tra thực tế với team. Hình kẹp trên viewer không chứng minh độ mở/giữ quân thật; không tự đảo DO hoặc tăng xung trong phiên |
@@ -367,7 +373,8 @@ Phím game áp dụng khi **cửa sổ game chính** được chọn; các thao 
 | F5 | Lỗi AI, không lỗi đồng bộ | Yêu cầu AI tính lại |
 | F8 | Phiên đang mở | Yêu cầu pause/controlled stop; không phải E-stop |
 | F9 → F10 | Physical sau kiểm tra | Bắt đầu/xác nhận quyền chuyển động trong 30 giây |
-| Ctrl+F8 | Phục hồi stop khi được yêu cầu | Xác nhận đã kiểm tra tay/kẹp dừng; đọc lại bằng chứng dừng |
+| R | VS ROBOT chờ phục hồi tại HOMECHESS | Xác nhận đã lấy quân khỏi kẹp, xếp bàn về trước nước lỗi; kiểm tra bàn rồi thực hiện lại đúng nước đang chờ |
+| H | VS ROBOT chưa về được HOMECHESS | Sau khi xử lý controller, yêu cầu kiểm tra và về HOMECHESS lại một lần; giữ nguyên khóa dừng/kết nối |
 | Ctrl+F9 | Chỉ khi UI yêu cầu sau disable chưa rõ | Xác nhận controller đã được disable trên pendant |
 | F12 / XÓA PHIÊN LỖI | Có lỗi phiên, thỏa đối soát/dừng | Xóa trạng thái lỗi ứng dụng; không reset thiết bị |
 | F2 / CHỌN CHẾ ĐỘ | Trong phiên | Yêu cầu dừng/đóng phiên rồi về menu |

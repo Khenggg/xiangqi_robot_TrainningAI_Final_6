@@ -302,7 +302,7 @@ class GamePersistence:
                     journal.loaded["phase"], journal)
                 if self.pending_test_motion is not None:
                     self.pending_test_motion["verified_outcome"] = None
-                    self.pick_test_fault = "Test đã gửi trước khi đóng; Ctrl+F8 kiểm tra dừng, V đối soát. Không chạy lại."
+                    self.pick_test_fault = "Test đã gửi trước khi đóng; kiểm tra tay/kẹp đã dừng rồi V xác nhận và đối soát. Không chạy lại."
                 if self.pending_move is not None and self.pending_ai_move is None:
                     # IDENTIFIED was saved before PREPARED; no automatic dispatch on restore.
                     from src.core.xiangqi import make_temp_move
@@ -520,7 +520,7 @@ class GamePersistence:
                          or not hardware.stop_coordinator.safe_for_release(ignore_current_worker=True)):
             explain = getattr(hardware, "physical_recovery_block_reason", None)
             reason = explain() if callable(explain) else None
-            reason = reason or "Chưa xác nhận dừng tay/kẹp. Kiểm tra robot, Ctrl+F8 xác nhận rồi V đối soát."
+            reason = reason or "Chưa xác nhận dừng tay/kẹp. Kiểm tra robot đã dừng rồi V xác nhận và đối soát."
             self.hardware_recovery_reason = reason
             from src.core.project_logging import event
             event("recovery.hardware_blocked", f"Camera đã xác nhận bàn; {reason}",

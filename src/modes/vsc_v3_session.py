@@ -255,6 +255,9 @@ class VscV3Session:
         from src.ui.board_renderer import BTN_MODE_SELECT_RECT
         if ((event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE)
                 or (event.type == pygame.MOUSEBUTTONDOWN and BTN_MODE_SELECT_RECT.collidepoint(event.pos))):
+            if getattr(self.state, 'home_recovery', None) is not None:
+                self.state.set_status(self.state.home_recovery.message(), duration=3600)
+                return
             if not getattr(self.state, 'physical_motion_busy', False) and not self.state.ai_thinking:
                 self.wants_home = True
             else:
@@ -341,12 +344,14 @@ class VscV3Session:
         captured = state.board[dst[1]][dst[0]]
         expected, _ = xiangqi.make_temp_move(state.board, (src,dst))
         state.set_pending_ai_move((src,dst), expected, captured)
+        from src.modes.vsc_v3.core.home_recovery import HomeRecoveryRequest
+        operation = HomeRecoveryRequest.create(state, '')
         success = True
         if not self.config.DRY_RUN and not hw.robot.connected:
             success = False
             state.physical_sync_fault = state.snapshot_continue_required = True
             state.snapshot_continue_can_commit_pending = False
-            state.set_status('Robot mất kết nối; FEN giữ nguyên. Kiểm tra bàn thật rồi V.', duration=3600)
+            self.input.begin_home_recovery(RuntimeError('Robot mất kết nối; FEN giữ nguyên'), operation=operation)
         elif not self.config.DRY_RUN and hw.robot.connected:
             try:
                 if getattr(self.config, 'VISUAL_MOTION_ASYNC_ENABLED', False):
@@ -358,12 +363,12 @@ class VscV3Session:
             except Exception as exc:
                 from src.modes.vsc_v3.vision.pick_consensus import PickTargetUnavailable
                 success = False
-                if isinstance(exc, PickTargetUnavailable):
+                if isinstance(exc, PickTargetUnavailable) and exc.stage == 'pre_pick':
                     state.pause_visual_pick('ai',src,dst,exc)
                 else:
                     state.physical_sync_fault = state.snapshot_continue_required = True
                     state.snapshot_continue_can_commit_pending = False
-                    state.set_status(f'Robot dừng: {exc}. Kiểm tra bàn thật rồi V; FEN giữ nguyên.', duration=3600)
+                    self.input.begin_home_recovery(exc, operation=operation)
         if success:
             state.commit_pending_ai_move()
             state.api_client.send_move_update_board(state.current_fen)

@@ -470,7 +470,7 @@ class InputHandler:
             self.state.set_status("Phiên này không có chức năng gắp/hover.", duration=15)
             return
         if self.state.pending_test_motion is not None:
-            self.state.set_status("Test đang dở: Ctrl+F8 kiểm tra dừng rồi V đối soát; không bật/tắt để chạy lại.", duration=30)
+            self.state.set_status("Test đang dở: kiểm tra tay/kẹp đã dừng rồi V xác nhận và đối soát; không bật/tắt để chạy lại.", duration=30)
             return
         if getattr(self.state, "pick_test_mode", False):
             self.state.test_pick_retry = None
@@ -589,9 +589,11 @@ class InputHandler:
         if self.hw.dry_run:
             self.state.set_status("Test ảo đang dở: New Game sau khi dừng để thay phiên.", duration=30)
             return
+        if not self._confirm_stopped_for_operator():
+            return
         if (not self.hw.physical_telemetry_ready(require_idle=True)
                 or not self.hw.stop_coordinator.safe_for_release(ignore_current_worker=True)):
-            self.state.set_status("Kiểm tra tay/kẹp trên pendant, Ctrl+F8 xác nhận dừng rồi V.", duration=30)
+            self.state.set_status("Kiểm tra tay/kẹp trên pendant đã dừng rồi V xác nhận và đối soát.", duration=30)
             return
         from src.core.fen_utils import INITIAL_FEN, fen_to_board_array
         candidates = (("completed", test["expected_board"]), ("unchanged", test["before_board"]),
@@ -825,9 +827,6 @@ class InputHandler:
         control = getattr(self, 'session_control', None)
         if (key == pygame.K_v and control is not None and control.action in {'reset','surrender'}
                 and (self.state.pending_move is not None or self.state.pending_ai_move is not None)):
-            if not self.hw.stop_coordinator.safe_for_release():
-                self.state.set_status('Chờ xác nhận robot dừng trước khi đối soát nước đang dở.', duration=20)
-                return
             self._queue_or_run(self._reconcile_physical_sync_fault)
             return
         if control is not None and control.action in {'reset','surrender'}:
@@ -947,8 +946,24 @@ class InputHandler:
         elif key == pygame.K_SPACE:
             self._queue_or_run(self._handle_space_key)
 
+    def _confirm_stopped_for_operator(self):
+        """V includes explicit arm/gripper inspection; keep measured stop gates."""
+        coordinator = getattr(self.hw, 'stop_coordinator', None)
+        request = getattr(coordinator, 'request', None)
+        if (not self._physical_recovery_required() or request is None
+                or (request.done.is_set() and request.result.safe)):
+            return True
+        try:
+            self.hw.confirm_operator_stop(approved=True)
+            return True
+        except Exception as exc:
+            self.state.set_status(f'Chưa xác nhận được tay/kẹp đã dừng: {exc}. Xử lý controller rồi V.', duration=60)
+            return False
+
     def _reconcile_physical_sync_fault(self):
         """Supervised recovery for a stopped physical-board synchronization."""
+        if not self._confirm_stopped_for_operator():
+            return
         pending = self.state.pending_ai_move
         if not pending and self._physical_recovery_required():
             if not self._verify_recovery_board(self.state.board):

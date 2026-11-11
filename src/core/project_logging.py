@@ -21,7 +21,7 @@ ERRORS = {
     "CAMERA_VERIFY_FAILED": ("Camera chưa xác nhận được toàn bộ bàn cờ", "Nước robot chưa được phép thực hiện hoặc chưa được xác nhận", "Kiểm tra ảnh, ánh sáng, vật che camera, calibration và bố trí quân; quét lại bàn"),
     "BOARD_SYNC_FAILED": ("Viewer chưa nhận được bàn đã commit", "Nước đi đã lưu được giữ nguyên; mô phỏng có thể hiển thị trạng thái cũ", "Kiểm tra WebSocket/viewer; không chạy lại robot để sửa hình ảnh"),
     "SESSION_PERSISTENCE_FAILED": ("Không lưu được trạng thái phiên", "Game tạm dừng; chưa được phép phát thêm lệnh robot", "Kiểm tra dung lượng và quyền ghi data/runtime; giữ nguyên bàn rồi dừng/đối soát trước khi tiếp tục"),
-    "STOP_RECOVERY_REQUIRED": ("Chưa xác nhận được robot và kẹp đã dừng", "Giữ phiên, camera và controller; không tự gửi lại lệnh", "Kiểm tra/dừng tay và kẹp trên pendant, Ctrl+F8 xác nhận rồi V đối soát bàn"),
+    "STOP_RECOVERY_REQUIRED": ("Chưa xác nhận được robot và kẹp đã dừng", "Giữ phiên, camera và controller; không tự gửi lại lệnh", "Kiểm tra/dừng tay và kẹp trên pendant rồi V xác nhận và đối soát bàn"),
     "ENGINE_FAILED": ("AI không tạo được nước đi hợp lệ", "Bàn chưa thay đổi và chưa gửi lệnh robot", "Đối chiếu lượt, FEN và trạng thái engine trước khi yêu cầu tính lại"),
     "PROJECTION_FAILED": ("Chưa cập nhật được viewer hoặc spectator", "Nước đã commit vẫn được giữ nguyên; hình ảnh có thể cũ", "Kiểm tra kết nối/dịch vụ và nhật ký projection; không phát lại lệnh robot để đồng bộ hình ảnh"),
     "ROBOT_NOT_READY": ("Robot chưa sẵn sàng nhận nước đi", "Nước đi chưa được thực hiện", "Kiểm tra kết nối, chế độ backend và quyền chuyển động; với FR3 thật dùng F9 rồi F10 sau khi kiểm tra setup"),

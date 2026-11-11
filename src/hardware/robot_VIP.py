@@ -940,6 +940,17 @@ class FR5Robot:
                         else MotionFailureCategory.MOTION_COMMAND_FAILED)
             retry_stage = exc.stage if isinstance(exc, PickTargetUnavailable) else None
             metadata = {}
+            # The donor adapter wraps MotionResult as RobotCommandError. Keep
+            # transport uncertainty so recovery cannot mistake it for a known
+            # rejected command and dispatch HOME automatically.
+            from src.hardware.rpc_transport import RpcOutcomeUnknown
+            transport_error, visited = exc, set()
+            while isinstance(transport_error, BaseException) and id(transport_error) not in visited:
+                visited.add(id(transport_error))
+                if isinstance(transport_error, (RpcOutcomeUnknown, OSError)):
+                    metadata["rpc_outcome_unknown"] = True
+                    break
+                transport_error = transport_error.__cause__ or transport_error.__context__
             if retry_stage:
                 metadata["visual_retry_stage"] = retry_stage
                 metadata["pick_resolution"] = getattr(exc, "resolution", {})

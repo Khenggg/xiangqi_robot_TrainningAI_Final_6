@@ -121,14 +121,14 @@ class SessionControl:
             self.state.physical_sync_fault = True
             self.state.snapshot_continue_can_commit_pending = False
             detail = getattr(self.hardware.stop_coordinator, 'last_settle_diagnostic', None) or self.stop.result.reason
-            self._report(f"Chưa xác nhận dừng: {detail}. Kiểm tra tay/kẹp và controller; Ctrl+F8 xác nhận sau kiểm tra.")
+            self._report(f"Chưa xác nhận dừng: {detail}. Kiểm tra tay/kẹp và controller đã dừng rồi V xác nhận.")
             return None
         if not self.workers_finished() or self.hardware.motion_worker.busy:
             return None
         if self.self_play is not None and self.self_play.status.value == "ending":
             return None
         if not self.hardware.stop_coordinator.safe_for_release():
-            self._report("RECOVERY_REQUIRED: trạng thái dừng không còn mới; Ctrl+F8 kiểm tra lại trên pendant.")
+            self._report("RECOVERY_REQUIRED: trạng thái dừng không còn mới; kiểm tra lại trên pendant rồi V xác nhận.")
             return None
         if self.action == 'surrender':
             if (self.state.pending_move is not None or self.state.pending_ai_move is not None
