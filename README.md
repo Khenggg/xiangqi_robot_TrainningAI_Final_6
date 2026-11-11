@@ -151,7 +151,7 @@ Tự xác nhận ổn định không phải hệ thống bảo vệ phát hiện
 2. Máy chủ là **Đỏ**. Ghi mã phòng **6 ký tự** ở đầu bàn.
 3. Trên máy chủ, bấm **O / MỞ NGƯỜI ĐEN**. Hoặc mở client từ **VÀO PHÒNG / NGƯỜI ĐEN**, nhập mã rồi Enter/kết nối.
 4. Hai cửa sổ phải chạy **trên cùng PC**; phòng hiện chỉ dùng localhost, không có LAN/Internet.
-5. Với physical, người vận hành thực hiện kiểm tra và F9 → F10 **trên máy chủ**. Chỉ mở một host sở hữu robot thật.
+5. Với physical, hoàn tất kiểm tra thực tế trước khi mở phiên. Máy chủ **tự bật quyền điều khiển sau khi đủ điều kiện**. Nếu bàn ban đầu hoặc phiên cũ cần đối soát, dùng **V** theo UI; sau xác minh thành công, auto-enable tiếp tục. Chỉ mở một host sở hữu robot thật.
 6. Đỏ bấm quân và đích trên máy chủ; Đen bấm trên cửa sổ riêng. Cửa sổ Đen xoay bàn 180° để nhìn thuận phía Đen.
 7. Robot thực hiện cho cả hai màu; đợi máy chủ xác nhận và đổi lượt. Trong chế độ này, người chơi không tự dời quân bằng tay thay robot.
 
@@ -190,11 +190,11 @@ Phần này dành cho người vận hành **bộ FR3 đã được hiệu chu�
 1. START.bat → **ROBOT THẬT** → kiểu chơi; chọn độ khó nếu có AI.
 2. Nếu cần chấm lại góc, tick **Chấm lại 4 góc bàn từ camera** trước khi bấm kiểu chơi; làm [mục 6](#camera).
 3. Đọc Camera Monitor và bàn 2D. Nếu báo bàn ban đầu chưa xác nhận, kiểm tra bố trí quân rồi **V** đối soát; xử lý mọi lỗi còn lại trước.
-4. Khởi tạo chỉ đọc: chưa tự Enable/HOME. Chỉ sau kiểm tra thực tế, bấm **F9**, rồi **F10 trong 30 giây**. F9 lần nữa hủy yêu cầu; hết hạn thì bắt đầu lại từ F9.
+4. Source hiện tại đã bỏ bật thủ công F9/F10. Hoàn tất kiểm tra thực tế trước khi chọn phiên physical; quyền điều khiển sẽ tự bật qua các kiểm tra của chế độ đang dùng. Với **Hai người + robot**, auto-enable chờ cờ phục hồi/bàn ban đầu được xác minh, rồi tiếp tục sau **V**. Bật quyền không tự chạy HOME hoặc đổi kẹp trong luồng này.
 5. Đợi thông báo đã bật quyền chuyển động. Việc bật có thể cấp quyền/cấp enable controller; sẵn sàng cho nước phát sinh khi đủ lượt.
 6. VS ROBOT: người Đỏ đi theo mục 4.2. Hai người + robot: kết nối client rồi chọn nước.
 
-F9/F10 có thể bị chặn bởi controller lỗi, telemetry cũ/chưa idle, calibration không hợp lệ, bàn chưa khớp hoặc giao dịch chưa giải quyết. **Không lặp F9/F10 để vượt lỗi**; sửa đúng nguyên nhân trong [mục 9](#xu-ly-loi).
+Auto-enable có thể đang chờ controller, telemetry mới và idle, calibration, bàn khớp hoặc xử lý giao dịch cũ. Đọc lý do trên UI/log rồi xử lý đúng nguyên nhân trong [mục 9](#xu-ly-loi). Log `physical.auto_enable_waiting` ghi điều kiện đang chặn; `physical.auto_enable_started` ghi lần bắt đầu thử, còn `physical.auto_enable_failed` ghi lỗi khi thử. Cờ phục hồi ban đầu không tự hủy vĩnh viễn auto-enable; thay đổi chế độ, kết thúc hoặc đóng phiên vẫn hủy nó. Phản hồi enable không rõ kết quả sẽ chặn tự thử lại.
 
 Profile mặc định là [`calibration/physical_teaching_points_user0.json`](calibration/physical_teaching_points_user0.json), theo robot base/user 0. Luồng hiện tại dùng bộ teaching cố định, không tự đọc lại các teaching point vừa dạy trên controller. Chấm lại camera chỉ sửa ánh xạ ảnh, không cập nhật profile robot. Đổi robot/tool/bàn phải được người phụ trách kiểm chứng riêng.
 
@@ -284,7 +284,7 @@ Mất kết nối, kết quả lệnh trước chưa rõ, sai hệ tọa độ, 
 
 **Hai người + robot — đối soát giữ nguyên luồng hiện có:**
 
-1. Không đi nước mới, không bấm liên tục F5/F9/F10 hoặc chọn lại cùng nước.
+1. Không đi nước mới, không bấm liên tục F5 hoặc chọn lại cùng nước.
 2. Xác minh trạng thái cơ khí/controller trước; giữ quân đang kẹp theo quy trình của team. VS ROBOT yêu cầu về HOMECHESS khi thao tác gắp/đặt lỗi; chờ tay dừng trước khi lấy quân ra.
 3. **V** đối chiếu toàn bàn với thế trước hoặc thế sau nước chờ. Nếu camera khớp nhưng robot còn lỗi, xử lý lỗi controller; FEN đúng chưa đủ.
 4. Nếu thế sau được xác nhận, hệ thống có thể ghi nhận nước đã xong thay vì chạy lại. Nếu thế trước được xác nhận, việc thử tiếp vẫn phụ thuộc gate và thông báo hiện tại; không mặc định robot chắc chắn chưa chuyển động.
@@ -299,7 +299,7 @@ Mất kết nối, kết quả lệnh trước chưa rõ, sai hệ tọa độ, 
 
 ### 8.4. Mất điện hoặc mở lại sau lỗi
 
-Ứng dụng tạo bàn khai cuộc mới, nhưng giữ dấu vết giao dịch chưa giải quyết. Kiểm tra tay/kẹp, controller và đường đi thực tế trước; xử lý dừng theo UI → xếp lại bàn khai cuộc → V xác minh → chỉ F9/F10 khi đủ điều kiện. Mở lại phần mềm không tự phục hồi an toàn đường đi của tay robot. Không xóa dữ liệu phiên hoặc đổi thư mục chạy để tránh khóa phục hồi.
+Ứng dụng tạo bàn khai cuộc mới, nhưng giữ dấu vết giao dịch chưa giải quyết. Kiểm tra tay/kẹp, controller và đường đi thực tế trước; xử lý dừng theo UI → xếp lại bàn khai cuộc → V xác minh → chờ auto-enable khi đủ điều kiện. Mở lại phần mềm không tự phục hồi an toàn đường đi của tay robot. Không xóa dữ liệu phiên hoặc đổi thư mục chạy để tránh khóa phục hồi.
 
 <a id="xu-ly-loi"></a>
 ## 9. Tra lỗi theo hiện tượng/thông báo
@@ -354,7 +354,7 @@ Log đánh số **hàng 0–9, cột 0–8**. Ô `b9` nghĩa cột `b = 1`, hàn
 
 | Hiện tượng/thông báo | Cách xử lý |
 |---|---|
-| `READ-ONLY`, `ROBOT_NOT_READY` | Sau khi setup/bàn/controller đã được xác nhận, F9 → F10; nếu bật thất bại, đọc nguyên nhân tiếp theo |
+| `READ-ONLY`, `ROBOT_NOT_READY` | Hoàn tất kiểm tra setup/bàn/controller rồi V đối soát nếu UI yêu cầu; auto-enable tiếp tục khi đủ điều kiện. Nếu vẫn chờ, đọc `physical.auto_enable_waiting` để biết cờ đang chặn |
 | `PHYSICAL_ENABLE_FAILED`, `Fresh idle robot telemetry required` | Kiểm tra telemetry mới, idle/ready, controller, camera và mọi pending/recovery; không dùng F12 thay kiểm tra thiết bị |
 | `Robot SDK not connected`, RPC timeout, `outcome unknown, do not resend` | Kiểm tra tay/kẹp trước; không gửi lại lệnh chưa rõ kết quả. Kiểm tra cáp/adapter/IP/subnet trên đúng đường Ethernet; xem ROBOT_CONNECTION.md |
 | Camera đã xác nhận bàn nhưng “Robot đang lỗi” | Xử lý lỗi trên WebApp/pendant. VS ROBOT theo yêu cầu HOMECHESS trên UI; Hai người + robot dùng V sau khi đã kiểm tra tay/kẹp dừng. FEN/V/F12 không xóa lỗi controller |
@@ -387,7 +387,7 @@ Phím game áp dụng khi **cửa sổ game chính** được chọn; các thao 
 | O / MỞ NGƯỜI ĐEN | Host 2 người + robot | Mở client Đen cùng PC |
 | F5 | Lỗi AI, không lỗi đồng bộ | Yêu cầu AI tính lại |
 | F8 | Hai người + robot | Yêu cầu pause/controlled stop; không phải E-stop. VS ROBOT hiện chưa hỗ trợ phím này |
-| F9 → F10 | Physical sau kiểm tra | Bắt đầu/xác nhận quyền chuyển động trong 30 giây |
+| F9 / F10 | Đã bỏ trong source hiện tại | Quyền điều khiển physical được bật tự động qua các kiểm tra startup; Ctrl+F9 là thao tác khác ở dòng dưới |
 | R | VS ROBOT với robot thật chờ phục hồi tại HOMECHESS | Xác nhận đã lấy quân khỏi kẹp, xếp bàn về trước nước lỗi; kiểm tra bàn rồi thực hiện lại đúng nước đang chờ |
 | H | VS ROBOT với robot thật chưa về được HOMECHESS | Sau khi xử lý controller, yêu cầu kiểm tra và về HOMECHESS lại một lần; giữ nguyên khóa dừng/kết nối |
 | Ctrl+F9 | Chỉ khi UI yêu cầu sau disable chưa rõ | Xác nhận controller đã được disable trên pendant |
@@ -443,7 +443,7 @@ GPU được ưu tiên khi runtime CUDA và driver phù hợp; `VISION_DEVICE=cp
 
 - **Nhánh source và ZIP là hai bản phát hành khác nhau.** ZIP ở đầu trang là bản `xiangqi-gpu-light-20261109-fixed` từ nhánh `fix/fix-capsule`. Sửa README/source trên GitHub không tự thay file trong ZIP; cần build/nghiệm thu capsule mới để cập nhật bộ đóng gói.
 - Lần cập nhật hướng dẫn này dựa trên đọc code, **chưa nghiệm thu camera/controller/robot thật, Windows sạch thứ hai hoặc cả ván UI/browser**. Kết quả test cũ trong báo cáo chỉ có giá trị trong phạm vi/ngày được ghi; không có tuyên bố toàn bộ bộ test hiện tại xanh.
-- Dự án còn ghi nhận vấn đề physical sau gián đoạn nguồn/đường tiếp cận, lỗi controller/tool context và kiểm chứng nhả kẹp có tải. **V/F12/F9/F10 không chứng minh đường đi sau sự cố đã an toàn**. Khi gặp các tình huống đó, dừng vận hành physical và để team kiểm tra trước khi chạy tiếp.
+- Dự án còn ghi nhận vấn đề physical sau gián đoạn nguồn/đường tiếp cận, lỗi controller/tool context và kiểm chứng nhả kẹp có tải. **V/F12 hoặc auto-enable không chứng minh đường đi sau sự cố đã an toàn**. Khi gặp các tình huống đó, dừng vận hành physical và để team kiểm tra trước khi chạy tiếp.
 - Kẹp dùng điều khiển theo xung, không có cảm biến vị trí ngàm; hình kẹp trên viewer không chứng minh đã gắp/nhả đúng ngoài đời.
 - Digital twin physical có thể hiển thị tay khi mirror bàn chưa được hiệu chuẩn đầy đủ. Mô phỏng không thay nghiệm thu hình học/va chạm thực tế.
 - Phòng Đỏ–Đen chỉ localhost cùng PC. Menu chưa có tiếp tục nguyên ván cũ.
