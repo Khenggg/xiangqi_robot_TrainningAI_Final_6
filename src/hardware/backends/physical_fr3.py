@@ -238,7 +238,7 @@ class PhysicalFR3Backend(RobotBackend):
                 self._command_error = None
                 return True
             else:
-                self._last_error = f"RobotEnable(1) failed with return code {err_en} (Kiểm tra xem nút E-Stop đã xoay nhả chưa)"
+                self._last_error = f" (Check whether the E-Stop button has been released){err_en} (Kiểm tra xem nút E-Stop đã xoay nhả chưa)"
                 return False
         except Exception as exc:
             self._last_error = str(exc)

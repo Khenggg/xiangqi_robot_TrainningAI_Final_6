@@ -41,27 +41,27 @@ class RobotPvPController:
     def _blocked(self, *, in_worker=False):
         s, hw = self.state, self.hw
         if self._closed or getattr(hw, '_closing', False):
-            return 'Phiên đang đóng'
+            return "Session is closing"
         control = getattr(hw, 'session_control', None)
         if control is not None and control.action is not None:
-            return 'Đang dừng/đổi phiên; xử lý yêu cầu hiện tại trước'
+            return "Stopping/switching session; finish the current request first"
         if (s.recovery_required or s.mode_change_pending or s.physical_sync_fault
                 or s.move_sync_error or s.snapshot_continue_required
                 or s.manual_override_active or s.turn_confirmation_required):
-            return 'Phiên cần phục hồi; V đối soát và kiểm tra robot'
+            return "Session needs recovery; V to reconcile and check the robot"
         if s.game_over:
-            return 'Ván đã kết thúc'
+            return "Game is over"
         if (s.pending_move is not None or s.pending_ai_move is not None
                 or s.pending_test_motion is not None or s.visual_pick_retry
                 or s.pick_test_mode or s.pick_test_resume_required):
-            return 'Còn nước/test đang dở; không nhận nước mới'
+            return "A move/test is still pending; no new move accepted"
         if s.ai_thinking or (not in_worker and (self._busy or hw.motion_worker.busy)):
-            return 'Đang thực hiện nước đi'
+            return "Move in progress"
         stop = getattr(hw, 'stop_coordinator', None)
         if stop is not None and stop.blocked:
-            return 'Robot đang dừng; cần phục hồi trước'
+            return "Robot is stopping; recovery required first"
         if not hw.is_robot_ready:
-            return 'Robot chưa sẵn sàng; kiểm tra và F9/F10 trên máy chủ'
+            return "Robot is not ready yet; the host is enabling it automatically"
         return None
 
     def _reply(self, request_id, accepted, reason):
@@ -77,23 +77,23 @@ class RobotPvPController:
         if not isinstance(request_id, str) or not 1 <= len(request_id) <= 64:
             return False
         if request_id in self._seen:
-            return self._reply(request_id, False, 'Yêu cầu đã được xử lý; không lặp lệnh')
+            return self._reply(request_id, False, "Request already handled; do not repeat the command")
         if len(self._seen) >= 10000:
-            return self._reply(request_id, False, 'Phòng đã đạt giới hạn yêu cầu; tạo phiên mới')
+            return self._reply(request_id, False, "Room reached its request limit; create a new session")
         self._seen.add(request_id)
         src, dst = _cell(src), _cell(dst)
         reason = self._blocked()
         if side not in {'r', 'b'} or side != self.state.turn:
-            reason = 'Chưa tới lượt của bạn'
+            reason = "Not your turn yet"
         if (type(revision) is not int or revision != self.state.board_revision
                 or type(epoch) is not int or epoch != self.state.game_epoch):
-            reason = 'Bàn đã thay đổi; chờ trạng thái mới từ máy chủ'
+            reason = "Board changed; wait for the new host state"
         if (not self.room.connected or (side == 'b' and generation != self.room.generation)):
-            reason = 'Người Đen chưa kết nối hoặc kết nối đã đổi'
+            reason = "Black player not connected or the connection changed"
         if src is None or dst is None:
-            reason = 'Ô cờ không hợp lệ'
+            reason = "Invalid square"
         if reason is None and not xiangqi.is_valid_move(src, dst, self.state.board, side):
-            reason = 'Nước đi không hợp lệ'
+            reason = "Invalid move"
         if reason:
             return self._reply(request_id, False, reason)
         token = (self.state.game_epoch, self.state.board_revision, self.state.turn, self.room.generation)
@@ -113,24 +113,24 @@ class RobotPvPController:
                 except Exception as exc:
                     self.state.manual_override_active = self.state.snapshot_continue_required = True
                     event('pvp.post_commit_failed', str(exc), level=logging.WARNING, board_revision=self.state.board_revision)
-                    self.state.set_status(f'Nước đã commit; cập nhật sau nước đi lỗi: {exc}', duration=30)
+                    self.state.set_status(f'Move committed; post-move update failed: {exc}', duration=30)
             return committed
 
         def completed(committed, error):
             self._busy = False
             self.room.send(dict(type='move_finished', request_id=request_id, committed=bool(committed),
-                                reason='Nước đã xác nhận' if committed else 'Nước chưa hoàn tất; xem trạng thái máy chủ'))
+                                reason="Move confirmed" if committed else "Move not finished; check the host state"))
             if error:
-                self.state.set_status(f'Nước dừng: {error}; kiểm tra trạng thái trước khi thử lại.', duration=30)
+                self.state.set_status(f'Move stopped: {error}; check the state before retrying.', duration=30)
             elif not committed and not self.state.visual_pick_retry and not self.state.physical_sync_fault:
-                self.state.set_status('Yêu cầu đã hủy trước khi chạy; chọn lại sau khi kiểm tra kết nối.', duration=20)
+                self.state.set_status("Request cancelled before running; choose again after checking the connection.", duration=20)
             self.publish(force=True)
 
         if not self.hw.motion_worker.start(operation, completed):
             self._busy = False
-            return self._reply(request_id, False, 'Robot đang bận; chọn lại khi sẵn sàng')
+            return self._reply(request_id, False, "Robot is busy; choose again when ready")
         self.state.selected_pos = None
-        self._reply(request_id, True, 'Đã nhận; chỉ đổi lượt khi thực thi được xác nhận')
+        self._reply(request_id, True, "Accepted; the turn changes only when execution is confirmed")
         self.publish(force=True)
         return True
 
@@ -151,7 +151,7 @@ class RobotPvPController:
                 captured = False
             if not captured:
                 s.manual_override_active = s.snapshot_continue_required = True
-                s.set_status('Nước đã commit; baseline chưa sẵn sàng. V đối soát trước lượt tiếp.', duration=30)
+                s.set_status("Move committed; baseline not ready. V to reconcile before the next turn.", duration=30)
 
     def handle_click(self, col, row):
         cell = _cell((col, row))
@@ -159,7 +159,7 @@ class RobotPvPController:
             return False
         reason = self._blocked()
         if reason or self.state.turn != 'r' or not self.room.connected:
-            self.state.set_status(reason or 'Máy chủ chọn quân Đỏ; chờ người Đen kết nối/đi nước.', duration=15)
+            self.state.set_status(reason or "Host selected a Red piece; waiting for Black to connect/move.", duration=15)
             return False
         piece = self.state.board[row][col]
         if piece.startswith('r'):
@@ -175,7 +175,7 @@ class RobotPvPController:
         if self._selected_token != current:
             self.state.selected_pos = None
             self._selected_token = None
-            self.state.set_status('Bàn đã thay đổi; chọn lại quân Đỏ.', duration=15)
+            self.state.set_status("Board changed; select the Red piece again.", duration=15)
             return False
         return self.submit('r', source, cell, revision=self.state.board_revision, epoch=self.state.game_epoch)
 
@@ -197,7 +197,7 @@ class RobotPvPController:
                             revision=packet.get('revision'), epoch=packet.get('epoch'), generation=message['generation'])
             elif message.get('type') == 'disconnected':
                 self.state.selected_pos = None
-                self.state.set_status('Người Đen mất kết nối; không nhận nước mới. Không tự lặp nước đang thực hiện.', duration=30)
+                self.state.set_status("Black player disconnected; no new moves accepted. Do not repeat the move in progress.", duration=30)
         self.publish()
 
     def publish(self, *, force=False):

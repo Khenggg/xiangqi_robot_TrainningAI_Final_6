@@ -211,7 +211,7 @@ class LocalRoomHost:
 class LocalRoomClient:
     def __init__(self, code, registry=None):
         if len(code) != 6 or any(c not in ROOM_ALPHABET for c in code):
-            raise ValueError('Mã phòng phải có 6 ký tự')
+            raise ValueError("Room code must be 6 characters")
         self.code = code
         self.events = queue.Queue(maxsize=128)
         self.connected = False
@@ -227,7 +227,7 @@ class LocalRoomClient:
         try:
             info = json.loads((self._registry/f'{self.code}.json').read_text())
             if info.get('version') != 2 or type(info.get('port')) is not int or not 1 <= info['port'] <= 65535:
-                raise ValueError('Phòng không hợp lệ')
+                raise ValueError("Invalid room")
             sock = self._socket = socket.create_connection(('127.0.0.1',info['port']),timeout=2)
             sock.settimeout(.05)
             sock.sendall(_encode(dict(type='join', code=self.code, session=info['session'])))
@@ -235,7 +235,7 @@ class LocalRoomClient:
                 if packet is not None:
                     if packet.get('type') == 'welcome':
                         if packet.get('session') != info['session'] or packet.get('side') != 'b':
-                            raise ValueError('Sai phiên/phía người chơi')
+                            raise ValueError("Wrong session or player side")
                         self.session, self.generation = packet['session'],packet['generation']
                         self.connected = True
                     self.events.put_nowait(packet)

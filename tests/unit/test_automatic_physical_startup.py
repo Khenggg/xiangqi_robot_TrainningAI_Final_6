@@ -49,10 +49,7 @@ def test_initial_board_pause_can_clear_before_single_attempt(flag):
     hw.motion_worker.start.assert_called_once()
 
 
-@pytest.mark.parametrize("flag", ["recovery_required", "mode_change_pending", "physical_sync_fault",
-                                  "move_sync_error", "game_over", "pick_test_mode", "emergency_mode",
-                                  "pending_move", "pending_ai_move", "pending_test_motion",
-                                  "visual_capture_checkpoint", "visual_pick_retry"])
+@pytest.mark.parametrize("flag", ["mode_change_pending", "game_over"])
 def test_fault_or_pending_motion_cancels_without_rearming(flag):
     startup, state, hw = setup_startup()
     startup.baseline_checked = True
@@ -64,12 +61,134 @@ def test_fault_or_pending_motion_cancels_without_rearming(flag):
     assert startup.finished
 
 
-@pytest.mark.parametrize("reason", ["stop", "stopped", "closing", "surrender", "virtual", "disabled", "dry", "manual"])
+@pytest.mark.parametrize("flag", ["recovery_required", "physical_sync_fault", "move_sync_error",
+                                  "pick_test_mode", "pick_test_fault", "pick_test_resume_required",
+                                  "emergency_mode", "pending_move", "pending_ai_move",
+                                  "pending_test_motion", "visual_capture_checkpoint", "visual_pick_retry"])
+def test_initial_recovery_waits_and_can_resume_after_verified_state_clear(flag):
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    setattr(state, flag, True)
+    startup.tick()
+    assert not startup.finished and not startup.cancelled
+    assert startup.last_wait_reason == flag
+    hw.motion_worker.start.assert_not_called()
+    setattr(state, flag, None)
+    startup.tick()
+    hw.motion_worker.start.assert_called_once()
+
+
+def test_wait_reason_is_logged_once_until_the_prerequisite_changes(monkeypatch):
+    events = Mock()
+    monkeypatch.setattr('src.core.automatic_physical_startup.event', events)
+    startup, state, hw = setup_startup()
+    state.recovery_required = state.physical_sync_fault = True
+    for _ in range(5):
+        startup.tick()
+    assert events.call_count == 1
+    assert events.call_args.args[0] == 'physical.auto_enable_waiting'
+    assert events.call_args.kwargs['reason'] == 'recovery_required'
+    assert events.call_args.kwargs['waiting_flags'] == ['recovery_required', 'physical_sync_fault']
+    state.recovery_required = False
+    startup.tick()
+    assert events.call_count == 2
+    assert events.call_args.kwargs['reason'] == 'physical_sync_fault'
+
+
+def test_completed_unverified_stop_is_not_auto_enabled_even_if_blocked_is_false():
+    import threading
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    done = threading.Event()
+    done.set()
+    hw.stop_coordinator.request = SimpleNamespace(done=done, result=SimpleNamespace(safe=False))
+    hw.stop_coordinator.safe_for_release = Mock(return_value=False)
+    startup.tick()
+    assert startup.last_wait_reason == 'stop_unverified'
+    assert not startup.finished
+    hw.motion_worker.start.assert_not_called()
+
+
+def test_verified_stop_is_checked_again_by_scheduled_enable_guard():
+    import threading
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    done = threading.Event()
+    done.set()
+    hw.stop_coordinator.request = SimpleNamespace(done=done, result=SimpleNamespace(safe=True))
+    hw.stop_coordinator.safe_for_release = Mock(return_value=True)
+    startup.tick()
+    hw.stop_coordinator.safe_for_release.return_value = False
+    with pytest.raises(RuntimeError, match='stop_evidence_incomplete'):
+        startup.ensure_active()
+
+
+def test_stop_generation_is_frozen_before_worker_dispatch():
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    startup.tick()
+    operation, _ = hw.motion_worker.start.call_args.args
+    hw.stop_coordinator.generation = 1
+    operation()
+    assert hw.activate_physical_game.call_args.kwargs['expected_stop_generation'] == 0
+    with pytest.raises(RuntimeError, match='newer stop'):
+        startup.ensure_active()
+
+
+def test_recovery_flag_set_after_submission_is_rechecked_before_enable():
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    startup.tick()
+    state.recovery_required = True
+    with pytest.raises(RuntimeError, match='recovery_required'):
+        startup.ensure_active()
+
+
+def test_cancel_during_worker_is_terminal_after_its_error_callback():
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    startup.tick()
+    _, completed = hw.motion_worker.start.call_args.args
+    startup.cancel()
+    completed(None, RuntimeError('Automatic enable cancelled'))
+    assert startup.finished and startup.cancelled
+    startup.tick()
+    hw.motion_worker.start.assert_called_once()
+
+
+def test_cancelled_startup_cannot_be_revived_by_finished_flag_alone():
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    startup.cancel()
+    startup.finished = False
+    startup.tick()
+    assert startup.finished
+    hw.motion_worker.start.assert_not_called()
+
+
+@pytest.mark.parametrize('kind', ['rpc', 'wrapped_rpc', 'socket'])
+def test_unknown_enable_result_never_automatically_replays(kind):
+    from src.hardware.rpc_transport import RpcOutcomeUnknown
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    startup.tick()
+    _, completed = hw.motion_worker.start.call_args.args
+    error = RpcOutcomeUnknown('Reply lost') if kind != 'socket' else OSError('Connection lost')
+    if kind == 'wrapped_rpc':
+        wrapped = RuntimeError('Enable failed')
+        wrapped.__cause__ = error
+        error = wrapped
+    completed(None, error)
+    startup.tick()
+    assert startup.finished and startup.cancelled
+    hw.motion_worker.start.assert_called_once()
+    assert 'Automatic retry blocked' in state.set_status.call_args.args[0]
+
+
+@pytest.mark.parametrize("reason", ["closing", "surrender", "virtual", "disabled", "dry", "manual"])
 def test_no_automatic_enable_for_retired_or_ineligible_session(reason):
     startup, state, hw = setup_startup()
     startup.baseline_checked = True
-    if reason == "stop": hw.stop_coordinator.generation = 1
-    if reason == "stopped": hw.stop_coordinator.blocked = True
     if reason == "closing": hw._closing = True
     if reason == "surrender": hw.session_control.action = "surrender"
     if reason == "virtual": hw.profile.physical_robot_enabled = False
@@ -96,16 +215,46 @@ def test_busy_or_rejected_worker_submission_does_not_consume_attempt():
     assert startup.finished
 
 
+def test_stop_in_progress_delays_the_attempt_instead_of_retiring_it():
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    hw.stop_coordinator.blocked = True
+    startup.tick()
+    hw.motion_worker.start.assert_not_called()
+    assert not startup.finished
+    hw.stop_coordinator.blocked = False
+    hw.stop_coordinator.generation = 3
+    startup.tick()
+    hw.motion_worker.start.assert_called_once()
+    operation, _ = hw.motion_worker.start.call_args.args
+    operation()
+    assert hw.activate_physical_game.call_args.kwargs["expected_stop_generation"] == 3
+
+
 @pytest.mark.parametrize("result,error", [(None, RuntimeError("camera mismatch")), (False, None)])
-def test_failed_enable_is_reported_without_automatic_retry(result, error):
+def test_failed_enable_retries_instead_of_asking_for_a_key(result, error):
     startup, state, hw = setup_startup()
     startup.baseline_checked = True
     startup.tick()
     _, completed = hw.motion_worker.start.call_args.args
     completed(result, error)
+    assert not startup.finished
+    assert "Retrying" in state.set_status.call_args.args[0]
     startup.tick()
-    hw.motion_worker.start.assert_called_once()
-    assert "F9/F10" in state.set_status.call_args.args[0]
+    assert hw.motion_worker.start.call_count == 2
+
+
+def test_failed_enable_stops_retrying_after_the_attempt_cap():
+    startup, state, hw = setup_startup()
+    startup.baseline_checked = True
+    for _ in range(startup.MAX_ATTEMPTS):
+        startup.finished = False
+        startup.tick()
+        _, completed = hw.motion_worker.start.call_args.args
+        completed(False, None)
+    assert startup.finished
+    startup.tick()
+    assert hw.motion_worker.start.call_count == startup.MAX_ATTEMPTS
 
 
 @pytest.mark.parametrize("reason", ["stop", "cancel"])

@@ -67,10 +67,10 @@ DIFFICULTY_OPTIONS = (
     ("impossible", "IMPOSSIBLE", pygame.Rect(760, 680, 560, 210), (109, 56, 51)),
 )
 DIFFICULTY_PRESENTATION = {
-    "easy": ("兵", "TỐT", "Calm practice"),
-    "medium": ("馬", "MÃ", "Balanced strategy"),
+    "easy": ("兵", "PAWN", "Calm practice"),
+    "medium": ("馬", "HORSE", "Balanced strategy"),
     "hard": ("車", "XE", "Tactical pressure"),
-    "impossible": ("將", "TƯỚNG", "Master level"),
+    "impossible": ("將", "GENERAL", "Master level"),
 }
 
 PIECE_DISPLAY_NAMES = {
@@ -81,8 +81,8 @@ PIECE_DISPLAY_NAMES = {
 }
 
 PIECE_LOG_NAMES = {
-    "K": "Tướng", "A": "Sĩ", "E": "Tượng", "N": "Mã",
-    "R": "Xe", "C": "Pháo", "P": "Tốt",
+    "K": "General", "A": "Advisor", "E": "Elephant", "N": "Horse",
+    "R": "Xe", "C": "Cannon", "P": "Pawn",
 }
 
 UNSUPPORTED_UI_GLYPHS = {
@@ -259,11 +259,11 @@ class BoardRenderer:
         self.screen.blit(title, title.get_rect(center=(panel.centerx, 274)))
 
         actions = (
-            (BTN_SCAN_FEN_RECT, "V", ("QUÉT / ĐỐI SOÁT FEN",), JADE_COLOR),
-            (BTN_CONFIRM_MOVE_RECT, "SPACE", ("XÁC NHẬN", "NƯỚC ĐỎ"), JADE_DARK),
+            (BTN_SCAN_FEN_RECT, "V", ("SCAN / RECONCILE FEN",), JADE_COLOR),
+            (BTN_CONFIRM_MOVE_RECT, "SPACE", ("CONFIRM", "RED MOVE"), JADE_DARK),
             (BTN_EMERGENCY_RECT, "M", ("EMERGENCY MODE",), VERMILION_COLOR),
             (BTN_ROLLBACK_RECT, "Z", ("ROLLBACK",), AMBER_COLOR),
-            (BTN_PICK_TEST_RECT, "T", ("TEST GẮP / THẢ",), JADE_COLOR),
+            (BTN_PICK_TEST_RECT, "T", ("PICK / RELEASE TEST",), JADE_COLOR),
         )
         emergency_active = game_state.get("emergency_mode", False)
         for rect, key, label_lines, color in actions:
@@ -282,22 +282,31 @@ class BoardRenderer:
                     self.screen.blit(label_surf, (label_x, rect.y + 9 + line_index * 25))
 
         if game_state.get("visual_pick_retry"):
-            for rect, label, color in ((BTN_PICK_RETRY_RECT, "R: THỬ LẠI", JADE_COLOR),
-                                       (BTN_PICK_CANCEL_RECT, "X: HỦY", VERMILION_COLOR)):
+            for rect, label, color in ((BTN_PICK_RETRY_RECT, "R: RETRY", JADE_COLOR),
+                                       (BTN_PICK_CANCEL_RECT, "X: CANCEL", VERMILION_COLOR)):
                 pygame.draw.rect(self.screen, color, rect, border_radius=12)
                 text = self.button_font.render(label, True, (255, 255, 255))
                 self.screen.blit(text, text.get_rect(center=rect.center))
         else:
-            can_continue = game_state.get("snapshot_continue_required", False)
+            recovery = game_state.get('home_recovery')
+            recovery_status = recovery.get('status') if recovery else None
+            can_continue = (recovery_status in {'waiting_manual', 'home_failed'} if recovery
+                            else game_state.get("snapshot_continue_required", False))
             continue_color = JADE_COLOR if can_continue else (121, 116, 100)
             pygame.draw.rect(self.screen, continue_color, BTN_CONTINUE_RECT, border_radius=12)
-            continue_key = self.ui_font.render("▶", True, (255, 255, 255))
-            continue_label = self.ui_font.render("CONTINUE", True, (255, 255, 255))
+            key = 'H' if recovery_status == 'home_failed' else 'R' if recovery else '▶'
+            label = ('HOMECHESS' if recovery_status == 'home_failed' else
+                     'RETRY MOVE' if recovery_status == 'waiting_manual' else
+                     'PLEASE WAIT' if recovery else 'CONTINUE')
+            continue_key = self.ui_font.render(key, True, (255, 255, 255))
+            continue_label = self.ui_font.render(label, True, (255, 255, 255))
             self.screen.blit(continue_key, (BTN_CONTINUE_RECT.x + 18, BTN_CONTINUE_RECT.y + 17))
             self.screen.blit(continue_label, (BTN_CONTINUE_RECT.x + 66, BTN_CONTINUE_RECT.y + 17))
 
-        note = ("T: chọn quân → chọn ô trống" if game_state.get("pick_test_mode", False)
-                else "M đang bật: đi tay Đỏ / Đen" if emergency_active else "Chọn phím hoặc bấm nút")
+        note = ("H: recover the error, then go to HOMECHESS" if (game_state.get('home_recovery') or {}).get('status') == 'home_failed' else
+                "R: piece taken, reset the board" if game_state.get('home_recovery') else
+                "T: select a piece → select an empty square" if game_state.get("pick_test_mode", False)
+                else "M on: manual Red / Black move" if emergency_active else "Press a key or click a button")
         note_surf = self.log_font.render(note, True, MENU_MUTED_TEXT_COLOR)
         self.screen.blit(note_surf, note_surf.get_rect(center=(panel.centerx, 816)))
 
@@ -339,7 +348,7 @@ class BoardRenderer:
         """Render one live status, never a historical activity feed."""
         now = time.time()
         if game_state.get("pick_test_mode"):
-            message = display_text(game_state.get("status_message", "")) if now < game_state.get("status_expiry", 0) else "TEST: chọn quân Đỏ/Đen rồi chọn ô trống. T để thoát."
+            message = display_text(game_state.get("status_message", "")) if now < game_state.get("status_expiry", 0) else "TEST: select a Red/Black piece, then an empty square. T to exit."
             accent = AMBER_COLOR
         elif game_state.get("ai_thinking"):
             elapsed = now - game_state.get("ai_think_start", now)

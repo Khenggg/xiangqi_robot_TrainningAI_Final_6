@@ -77,6 +77,10 @@ class GameState:
         self.visual_pick_retry = None
         self.visual_capture_checkpoint = None
 
+        # Failed physical moves retain their exact identity until manual reset
+        # at HOMECHESS and explicit retry approval.
+        self.home_recovery = None
+
     def update_fen_from_board(self):
         """Cập nhật current_fen từ board array hiện tại."""
         self.current_fen = board_array_to_fen(self.board, self.turn, self.move_number)
@@ -94,6 +98,9 @@ class GameState:
             "status_expiry": self.status_expiry,
             "manual_override_active": self.manual_override_active,
             "snapshot_continue_required": self.snapshot_continue_required,
+            "home_recovery": ({"status": self.home_recovery.status,
+                               "message": self.home_recovery.message()}
+                              if self.home_recovery is not None else None),
             "emergency_mode": self.emergency_mode,
             "pick_test_mode": self.pick_test_mode,
             "visual_pick_retry": ({"owner": self.visual_pick_retry["owner"],
@@ -104,6 +111,9 @@ class GameState:
         }
 
     def reset_game(self, hw_manager=None):
+        if self.home_recovery is not None:
+            self.set_status(self.home_recovery.message(), duration=3600)
+            return False
         # [API] Đóng room cũ trước khi tạo game mới
         if self.api_client.room_id:
             print("[GAME] 🔚 Đóng room cũ trước khi tạo game mới...")
@@ -199,6 +209,9 @@ class GameState:
         print("[SPACE] 💾 State saved for rollback (Z to undo).")
 
     def handle_rollback(self, hw_manager=None):
+        if self.home_recovery is not None:
+            self.set_status(self.home_recovery.message(), duration=3600)
+            return False
         """Rollback về trạng thái trước khi bấm SPACE lần cuối (phím Z)."""
         if self._pre_space_state is None:
             print("[ROLLBACK] ⚠️ Không có state để rollback!")
@@ -377,6 +390,7 @@ class GameState:
         self.physical_sync_fault = False
         self.visual_pick_retry = None
         self.visual_capture_checkpoint = None
+        self.home_recovery = None
         return True
 
     def process_human_move(self, src, dst, p_name):

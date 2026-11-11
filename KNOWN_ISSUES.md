@@ -1004,3 +1004,16 @@ These predate the 2026-11-09 session and remain OPEN. Do not report a green focu
 The missing source weights and gripper viewer exception are addressed locally and verified offline. The latest physical VS ROBOT log selected index 0 after index 2 failed. The local source runtime now verifies CUDA vision inference offline. The current identity of the board camera, live grid alignment, sustained feed, gameplay latency and controller behavior remain unverified. Source checkouts still need the three ignored vision weights. See the scoped evidence in `CURRENT_STATE.md`.
 
 VS ROBOT's 10 mm edge-pick margin is aligned across camera and robot code. Physical clearance in the additional 6–10 mm band remains open.
+
+## 2026-11-11 fix/fix-capsule — Ctrl+F8 retired; HOME recovery acceptance pending
+
+The Ctrl+F8 workflow above is intentionally replaced by source HOMECHESS/manual board-reset/R retry for VS ROBOT, with H for a deliberate blocked-HOME recheck. Shared V/F2 retains explicit measured-stop confirmation. Offline checks and review are in `reports/home-chess-recovery-20261111/REPORT.md`. Plain F8 pause in the private VS ROBOT loop remains a pre-existing unsupported control; this change does not add it.
+
+OPEN: live FR3 recovery/clearance and real intervention/camera acceptance. Unresolved controller faults, unknown transport outcomes, latched stops and uncertain gripper safe-idle output can still block parking; no forced enable/reset/latch clearing is implemented. VSC pending recovery remains in memory and does not survive process exit. Full non-slow regression is not reported green; see the report for its separate result. Existing calibration artifacts/configuration are unchanged.
+
+## 2026-11-11 physical PvP auto-enable cancellation latch
+
+FIXED OFFLINE at user baseline `973da04`: initial journal recovery flags permanently cancelled auto-startup, so even successful V resume never submitted enable. Root cause reproduced with actual temporary journal and camera-resume methods; fixed startup now waits for verification. 77 focused tests PASS and scoped review APPROVED. Live restart/enable acceptance remains OPEN; the observed process retained imported old code. Original robot-stop cause is UNKNOWN. User `973da04` global `force=True` stop-release contract remains outside this scoped change; the automatic-startup path independently refuses an unverified completed stop. See `reports/auto-enable-20261111/REPORT.md`.
+## 2026-11-11 physical PvP failed-move V recovery
+
+FIXED OFFLINE at baseline `8255afd`: no prior stop request caused V to remain hardware-blocked after camera success. Explicit V/Continue now supplies scoped measured idle evidence without actuator commands; existing stop and telemetry gates remain. 99 focused tests PASS; see `reports/pvp-move-recovery-20261111/REPORT.md`. OPEN: real missed-pick/vision causes and physical recovery acceptance. Recent logs show both old-board pawn observations and a separate 17-red-pieces recognition failure; neither proves grasp calibration is correct. Existing app must load the correction in a later controlled restart; pending moves are not replayed across restart. Two unrelated PvP name assertions remain inconsistent with the earlier English translation.

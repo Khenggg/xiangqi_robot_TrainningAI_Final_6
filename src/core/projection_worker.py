@@ -67,7 +67,7 @@ class ProjectionWorker:
                 self._retry_after[key] = time.monotonic() + min(30.0, 2.0 ** min(failures, 5))
                 if self._last_errors.get(key) != error:
                     self._last_errors[key] = error
-                    event("projection.pending", "Cập nhật hiển thị đang chờ; Game giữ nước đã commit",
+                    event("projection.pending", "Display update pending; the game keeps the committed move",
                           level=logging.WARNING, channel=entry[2], revision=entry[1], reason=error)
             if entry[0] == self.journal.session_id:
                 pending = self.journal.pending_projections()
@@ -94,7 +94,7 @@ class ProjectionWorker:
                     return
                 observer = self.state._board_observer
                 if observer is None:
-                    event("projection.disabled", "Đồng bộ viewer chưa được cấu hình", channel="twin")
+                    event("projection.disabled", "Viewer sync is not configured", channel="twin")
                     self._completed(entry, True)
                 else:
                     try:
@@ -111,7 +111,7 @@ class ProjectionWorker:
                 # retrying archived terminal states forever; a later startup
                 # enqueues the current snapshot if the service is enabled.
                 if not self._spectator_disabled_logged:
-                    event("projection.disabled", "Spectator chưa được cấu hình token",
+                    event("projection.disabled", "Spectator token is not configured",
                           channel="spectator")
                     self._spectator_disabled_logged = True
                 self._completed(entry, True, None)

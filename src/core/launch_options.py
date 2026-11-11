@@ -84,9 +84,9 @@ def check_viewer_assets(repo):
     missing = [name for name in required if not (root / name).is_file()]
     if missing:
         raise FileNotFoundError(
-            "Viewer thiếu tài nguyên: " + ", ".join(missing)
-            + ". Kiểm tra checkout đầy đủ (index/main/vendor occt) và chạy "
-              "SETUP_WINDOWS.bat hoặc npm ci cho node_modules/three."
+            "Viewer resources missing: " + ", ".join(missing)
+            + ". Check the full checkout (index/main/vendor occt) and run "
+              "SETUP_WINDOWS.bat or npm ci for node_modules/three."
         )
 
 
@@ -142,7 +142,7 @@ class ViewerServer:
                         if self.server.diagnostic_count > 30:
                             self.send_error(429)
                             return
-                    event("viewer.browser_error", str(data.get("message", "Lỗi viewer"))[:1000],
+                    event("viewer.browser_error", str(data.get("message", "Viewer error"))[:1000],
                           level=logging.ERROR, code="VIEWER_FAILED", source="browser",
                           browser_source=str(data.get("source", ""))[:500],
                           stack=str(data.get("stack", ""))[:4000])

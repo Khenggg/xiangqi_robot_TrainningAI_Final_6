@@ -58,11 +58,11 @@ def test_verified_opening_reports_controller_fault_and_preserves_lock(state, ope
         assert not handler._clear_failed_session()
     else:
         assert not handler._rescan_confirmed_board()
-    assert 'Camera đã xác nhận bàn' in state.status_message
+    assert 'camera confirmed the board' in state.status_message
     assert 'FEN đã khớp' not in state.status_message  # F4 can scan a different layout.
     assert 'main=1, sub=29' in state.status_message
     panel = describe_recovery(state.get_render_state())
-    assert 'Camera đã xác nhận bàn' in panel['reason'] and 'sub=29' in panel['reason']
+    assert 'The camera confirmed the board' in panel['reason'] and 'sub=29' in panel['reason']
     assert 'WebApp' in panel['action']
     assert state.recovery_required and state.physical_sync_fault
     assert state.snapshot_continue_required and state.manual_override_active
@@ -86,7 +86,7 @@ def test_verified_pending_board_does_not_prompt_piece_correction_or_retire_move(
     handler = InputHandler(state, hw)
     handler._finalize_pending_ai_move = Mock()
     handler._reconcile_physical_sync_fault()
-    assert 'Camera đã xác nhận bàn' in state.status_message and 'sub=29' in state.status_message
+    assert 'camera confirmed the board' in state.status_message and 'sub=29' in state.status_message
     assert state.pending_move is pending and state.pending_ai_move is not None
     assert state.recovery_required and state.physical_sync_fault
     assert state.board_revision == 0
@@ -106,12 +106,12 @@ def test_enable_reports_fault_before_generic_pending_board_error(state):
     ({'age': 2}, 'đã cũ'),
     ({'connected': False}, 'mất kết nối'),
     ({'motion': 'MOVING', 'error': None}, 'MOVING'),
-    ({'motion': 'IDLE', 'error': None}, 'Ctrl+F8'),
+    ({'motion': 'IDLE', 'error': None}, 'V xác nhận'),
 ])
 def test_other_hardware_blockers_are_distinct_from_board_mismatch(state, kwargs, fragment):
     handler = InputHandler(state, hardware(**kwargs))
     handler._reconcile_physical_sync_fault()
-    assert 'Camera đã xác nhận bàn' in state.status_message and fragment in state.status_message
+    assert 'camera confirmed the board' in state.status_message and fragment in state.status_message
     assert state.recovery_required and state.physical_sync_fault
 
 
