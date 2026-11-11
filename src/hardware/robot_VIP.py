@@ -46,6 +46,11 @@ class GripperCommandError(RuntimeError):
 
 
 class FR5Robot:
+    # Keep active/uncertain holders reachable until both OFF replies succeed.
+    _gripper_hold_registry = set()
+    _gripper_hold_registry_lock = threading.Lock()
+    _gripper_holds_closing = False
+
     def __init__(self, ip=None, *, dry_run=None, teaching_points_path=None):
         if ip is not None and (not isinstance(ip, str) or not ip.strip()):
             raise ValueError("Robot IP must be a nonempty explicit address")
@@ -60,6 +65,11 @@ class FR5Robot:
         self.gripper_closed_estimate = False
         self.gripper_command_known = False
         self._gripper_pulse_active = False
+        self._gripper_hold_active = False
+        self._gripper_hold_cleanup_error = None
+        self._gripper_stop_failure = None
+        self._gripper_stop_inflight = False
+        self._gripper_stop_lock = threading.RLock()
         self.motion_listener = None
         self.telemetry_readiness = None
         self.last_motion_result = None
@@ -196,7 +206,7 @@ class FR5Robot:
         return True
 
     def latch_motion_stop(self):
-        """Block subsequent stages immediately; preserve the held payload."""
+        """Block new stages immediately; stop transport also cuts closing hold."""
         self._motion_stop.set()
 
     def send_controlled_stop(self, timeout=2.0):
@@ -204,12 +214,59 @@ class FR5Robot:
         if self.dry or not (self.physical_motion_authorized or self._activation_owned):
             raise RobotCommandError("Stop requires application-owned physical control")
         from src.hardware.rpc_transport import BoundedRPCProxy
-        proxy = BoundedRPCProxy(f"http://{self.ip}:20003", timeout_s=timeout)
-        return proxy.StopMotion()
+        if not self._gripper_stop_lock.acquire(timeout=timeout):
+            raise RobotCommandError('Another controller stop is still in progress')
+        tracked = False
+        try:
+            previous = getattr(self, '_gripper_stop_failure', None)
+            if previous is not None:
+                try:
+                    self.stop_gripper_hold()
+                except Exception as exc:
+                    raise GripperCommandError(
+                        f'Previous stop remains unresolved ({previous}); gripper OFF failed ({exc})') from previous
+                raise previous
+            tracked = (getattr(self, '_gripper_hold_active', False)
+                       or getattr(self, '_gripper_pulse_active', False))
+            if tracked:
+                with FR5Robot._gripper_hold_registry_lock:
+                    self._gripper_stop_inflight = True
+                    FR5Robot._gripper_hold_registry.add(self)
+            proxy = BoundedRPCProxy(f"http://{self.ip}:20003", timeout_s=timeout)
+            failure = None
+            try:
+                code = proxy.StopMotion()
+                if isinstance(code, bool) or code != 0:
+                    raise RobotCommandError(f'Controller stop rejected: {code!r}', code)
+            except Exception as exc:
+                failure = exc
+                if tracked:
+                    self._gripper_stop_failure = exc
+                    self.latch_motion_stop()
+            try:
+                # StopMotion must run even if gripper OFF cannot be acknowledged.
+                self.stop_gripper_hold(rpc=proxy, timeout=timeout)
+            except Exception as exc:
+                if failure is not None:
+                    raise GripperCommandError(
+                        f"StopMotion failed ({failure}); gripper hold OFF also failed ({exc})") from failure
+                raise
+            if failure is not None:
+                raise failure
+            return code
+        finally:
+            if tracked:
+                with FR5Robot._gripper_hold_registry_lock:
+                    self._gripper_stop_inflight = False
+                    if (not self._gripper_hold_active and not self._gripper_pulse_active
+                            and self._gripper_stop_failure is None):
+                        FR5Robot._gripper_hold_registry.discard(self)
+            self._gripper_stop_lock.release()
 
     def deactivate_physical_control(self):
         """Revoke owned activation without gripper or HOME; leave read-only sessions alone."""
         was_authorized = self.physical_motion_authorized or self._activation_owned
+        self.stop_gripper_for_shutdown()
         self.physical_motion_authorized = False
         if not was_authorized or self.dry:
             return True
@@ -287,21 +344,25 @@ class FR5Robot:
         return corners
 
     def _run_stage(self, stage, operation, *args, **kwargs):
-        self._require_actuation()
-        if self.dispatch_validity is not None:
-            self.dispatch_validity()
-        self._active_stage = stage
-        event("motion.stage_started", "Bắt đầu bước chuyển động", stage=stage.name,
-              operation=getattr(operation, "__name__", str(operation)), **self.motion_trace)
-        value = operation(*args, **kwargs)
-        if self.dispatch_validity is not None:
-            self.dispatch_validity()
-        if isinstance(value, MotionExecutionResult):
-            if not value.success:
-                raise RobotCommandError(value.message, value.backend_code)
-        elif value is False or (isinstance(value, (int, np.integer))
-                               and not isinstance(value, bool) and value != 0):
-            raise RobotCommandError(f"{stage.name} failed: {value}", value)
+        try:
+            self._require_actuation()
+            if self.dispatch_validity is not None:
+                self.dispatch_validity()
+            self._active_stage = stage
+            event("motion.stage_started", "Bắt đầu bước chuyển động", stage=stage.name,
+                  operation=getattr(operation, "__name__", str(operation)), **self.motion_trace)
+            value = operation(*args, **kwargs)
+            if self.dispatch_validity is not None:
+                self.dispatch_validity()
+            if isinstance(value, MotionExecutionResult):
+                if not value.success:
+                    raise RobotCommandError(value.message, value.backend_code)
+            elif value is False or (isinstance(value, (int, np.integer))
+                                   and not isinstance(value, bool) and value != 0):
+                raise RobotCommandError(f"{stage.name} failed: {value}", value)
+        except Exception as exc:
+            self._stop_hold_after_failure(exc)
+            raise
         self._last_completed_stage = stage
         event("motion.stage_completed", "Hoàn tất bước chuyển động", stage=stage.name, **self.motion_trace)
         return value
@@ -755,18 +816,160 @@ class FR5Robot:
 
     def _set_gripper_safe_idle(self):
         """Best-effort all-low state; raise if either DO cannot be reset."""
+        self._write_gripper_idle(self._set_tool_do)
+
+    def _write_gripper_idle(self, write_output):
         failures = []
         for output_id in (self.gripper_open_do_id, self.gripper_close_do_id):
             try:
-                self._set_tool_do(output_id, config.GRIPPER_IDLE_STATUS)
+                write_output(output_id, config.GRIPPER_IDLE_STATUS)
             except Exception as exc:
                 failures.append(exc)
         if failures:
+            self.gripper_command_known = False
+            if (getattr(self, '_gripper_hold_active', False)
+                    or getattr(self, '_gripper_pulse_active', False)):
+                self._gripper_hold_cleanup_error = str(failures[0])
             raise GripperCommandError("Could not force both gripper outputs LOW") from failures[0]
         self._gripper_pulse_active = False
+        self._gripper_hold_active = False
+        self._gripper_hold_cleanup_error = None
+        with FR5Robot._gripper_hold_registry_lock:
+            if (getattr(self, '_gripper_stop_failure', None) is None
+                    and not getattr(self, '_gripper_stop_inflight', False)):
+                FR5Robot._gripper_hold_registry.discard(self)
+
+    def stop_gripper_hold(self, *, rpc=None, timeout=2.0):
+        """OFF-only cancellation, even after authorization/SDK motion fails.
+
+        A separate bounded transport avoids the SDK lock held by a move. An
+        unsuccessful OFF never erases the active/uncertain hold state.
+        """
+        if not (getattr(self, '_gripper_hold_active', False)
+                or getattr(self, '_gripper_pulse_active', False)):
+            return 0
+        self.gripper_command_known = False
+        if not self._gripper_lock.acquire(timeout=timeout):
+            raise GripperCommandError("Gripper command is still running; closing output remains unverified")
+        try:
+            if not (getattr(self, '_gripper_hold_active', False)
+                    or getattr(self, '_gripper_pulse_active', False)):
+                return 0
+            if self.dry:
+                self._set_gripper_safe_idle()
+            else:
+                if rpc is None:
+                    from src.hardware.rpc_transport import BoundedRPCProxy
+                    rpc = BoundedRPCProxy(f"http://{self.ip}:20003", timeout_s=timeout)
+
+                def off(output_id, status):
+                    # Raw XML-RPC takes id, status, smooth, block (SDK schema).
+                    code = rpc.SetToolDO(output_id, status, 0, 0)
+                    if isinstance(code, bool) or code != 0:
+                        raise GripperCommandError(f"Gripper OFF rejected for DO{output_id}: {code!r}")
+
+                self._write_gripper_idle(off)
+            return 0
+        finally:
+            self._gripper_lock.release()
+
+    def stop_gripper_for_shutdown(self, *, latch=True):
+        """Stop owned motion before removing holding force; never replay a stop.
+
+        The closing output is still switched OFF if the stop reply is lost.
+        That loss is retained across subsequent exit/cleanup attempts rather
+        than mistaking acknowledged OFF for proof that the arm has stopped.
+        """
+        if not (getattr(self, '_gripper_hold_active', False)
+                or getattr(self, '_gripper_pulse_active', False)
+                or getattr(self, '_gripper_stop_failure', None) is not None
+                or getattr(self, '_gripper_stop_inflight', False)):
+            return 0
+        if latch:
+            self.latch_motion_stop()
+        if not self._gripper_stop_lock.acquire(timeout=2.0):
+            raise RobotCommandError('Controller stop is still in progress; shutdown is blocked')
+        try:
+            if getattr(self, '_gripper_stop_inflight', False):
+                raise RobotCommandError('Controller stop is still in progress; shutdown is blocked')
+            failure = getattr(self, '_gripper_stop_failure', None)
+            active = (getattr(self, '_gripper_hold_active', False)
+                      or getattr(self, '_gripper_pulse_active', False))
+            if not active and failure is None:
+                return 0
+            if failure is not None:
+                self.stop_gripper_hold()
+                raise failure
+            owned = (getattr(self, 'physical_motion_authorized', False) is True
+                     or getattr(self, '_activation_owned', False) is True)
+            if self.dry or not owned:
+                return self.stop_gripper_hold()
+            try:
+                return self.send_controlled_stop()
+            except Exception:
+                self.latch_motion_stop()
+                raise
+        finally:
+            self._gripper_stop_lock.release()
+
+    @classmethod
+    def stop_all_gripper_holds(cls):
+        """Exit barrier: stop every retained holder before process termination."""
+        with FR5Robot._gripper_hold_registry_lock:
+            FR5Robot._gripper_holds_closing = True
+            holders = tuple(FR5Robot._gripper_hold_registry)
+        for robot in holders:
+            robot.latch_motion_stop()
+        failures = []
+        for robot in holders:
+            try:
+                robot.stop_gripper_for_shutdown()
+            except Exception as exc:
+                failures.append(exc)
+        if failures:
+            raise GripperCommandError(
+                "Cannot exit: closing output OFF is unverified: " + '; '.join(map(str, failures))) from failures[0]
+        return True
+
+    def _stop_hold_after_failure(self, failure):
+        if getattr(self, '_gripper_hold_active', False):
+            self.gripper_command_known = False
+            if (getattr(self, '_gripper_hold_cleanup_error', None)
+                    or getattr(self, '_gripper_stop_failure', None) is not None):
+                return  # An outer error boundary must not repeat an uncertain OFF.
+            from src.hardware.rpc_transport import RpcOutcomeUnknown
+            prior, seen = failure, set()
+            while isinstance(prior, BaseException) and id(prior) not in seen:
+                seen.add(id(prior))
+                if isinstance(prior, (RpcOutcomeUnknown, OSError)):
+                    self.latch_motion_stop()
+                    break
+                prior = prior.__cause__ or prior.__context__
+            try:
+                self.stop_gripper_for_shutdown(latch=False)
+            except Exception as exc:
+                raise GripperCommandError(
+                    f"{failure}; controller stop/gripper cleanup is incomplete: {exc}") from exc
+
+    def _hold_gripper_close(self):
+        """Start one closing command and retain it until release/cancellation."""
+        self._set_gripper_safe_idle()
+        time.sleep(config.GRIPPER_DIRECTION_DEADTIME_SEC)
+        self._require_actuation()
+        with FR5Robot._gripper_hold_registry_lock:
+            if FR5Robot._gripper_holds_closing:
+                raise GripperCommandError("Application is closing; no new gripper hold")
+            self._gripper_hold_active = True  # A lost ON reply may still energize it.
+            FR5Robot._gripper_hold_registry.add(self)
+        self._gripper_pulse_active = True
+        self._set_tool_do(self.gripper_close_do_id, config.GRIPPER_ACTIVE_STATUS)
+        if self._motion_stop.wait(config.GRIPPER_CLOSE_PULSE_SEC):
+            raise GripperCommandError("Closing interrupted by controlled stop")
+        self._gripper_pulse_active = False
+        print(f"[ROBOT] Gripper CLOSE HOLD: DO{self.gripper_close_do_id} ON until release/stop")
 
     def gripper_ctrl(self, action):
-        """Pulse one gripper motor direction, then leave both Tool DO outputs LOW."""
+        """Hold CLOSE continuously; opening and safe-gap remain timed pulses."""
         self._require_actuation()
         self._validate_gripper_config()
         if action == config.GRIPPER_ACTION_OPEN_MAX:
@@ -792,12 +995,20 @@ class FR5Robot:
         else:
             raise GripperCommandError(f"Unknown gripper action: {action!r}")
 
-        with self._gripper_lock:
-            self._pulse_gripper_direction(target_id, pulse_seconds, label)
-            time.sleep(settle_seconds)
-        if self._motion_stop.is_set():
+        try:
+            with self._gripper_lock:
+                if action == config.GRIPPER_ACTION_CLOSE:
+                    self._hold_gripper_close()
+                    self._motion_stop.wait(settle_seconds)
+                else:
+                    self._pulse_gripper_direction(target_id, pulse_seconds, label)
+                    time.sleep(settle_seconds)
+                if self._motion_stop.is_set():
+                    raise GripperCommandError("Gripper interrupted by controlled stop; inspect held payload")
+        except Exception as exc:
             self.gripper_command_known = False
-            raise GripperCommandError("Gripper interrupted by controlled stop; inspect held payload")
+            self._stop_hold_after_failure(exc)
+            raise
         self.gripper_closed_estimate = action == config.GRIPPER_ACTION_CLOSE
         self.gripper_command_known = True
         if callable(self.motion_listener):
@@ -815,7 +1026,11 @@ class FR5Robot:
         try:
             print(f"[ROBOT] Gripper {label}: DO{target_id} ON for {pulse_seconds:.2f}s")
             # Even a lost ON reply may have energized the motor.
-            self._gripper_pulse_active = True
+            with FR5Robot._gripper_hold_registry_lock:
+                if FR5Robot._gripper_holds_closing:
+                    raise GripperCommandError("Application is closing; no new gripper pulse")
+                self._gripper_pulse_active = True
+                FR5Robot._gripper_hold_registry.add(self)
             self._set_tool_do(target_id, config.GRIPPER_ACTIVE_STATUS)
             self._motion_stop.wait(pulse_seconds)
         finally:
@@ -864,11 +1079,9 @@ class FR5Robot:
             visual=visual_target is not None, active=True)
         event("motion.visual_correction", "Bù tâm quân theo camera", correction=self.visual_pick_correction)
         try:
-            # Establish the same jaw gap before every approach, including both picks in a capture.
+            # Approach each piece fully open, including both picks in a capture.
             self._run_stage(MotionStage.PREPOSITION, self.gripper_ctrl,
                             config.GRIPPER_ACTION_OPEN_MAX)
-            self._run_stage(MotionStage.PREPOSITION, self.gripper_ctrl,
-                            config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP)
             self._run_stage(MotionStage.APPROACH, self.move_safe_pose, pose_safe, col=col, row=row)  # Đi đến vị trí an toàn trên ô
             self._run_stage(MotionStage.LAND, self.movel_pose, pose_pick)                # Hạ xuống
             self._run_stage(MotionStage.GRIP, self.gripper_ctrl, config.GRIPPER_ACTION_CLOSE)
@@ -927,6 +1140,10 @@ class FR5Robot:
             self._move_piece_sequence(*args, **kwargs)
             result = MotionResult.ok(payload_state=self._payload_state)
         except Exception as exc:
+            try:
+                self._stop_hold_after_failure(exc)
+            except GripperCommandError as hold_error:
+                exc = hold_error
             from src.vision.pick_consensus import PickTargetUnavailable
             import logging
             event("motion.stage_failed", str(exc), level=logging.ERROR, code="MOVE_REJECTED",
@@ -940,6 +1157,11 @@ class FR5Robot:
                         else MotionFailureCategory.MOTION_COMMAND_FAILED)
             retry_stage = exc.stage if isinstance(exc, PickTargetUnavailable) else None
             metadata = {}
+            if getattr(self, '_gripper_hold_cleanup_error', None):
+                metadata['gripper_output_unknown'] = True
+                metadata['gripper_cleanup_error'] = self._gripper_hold_cleanup_error
+            if getattr(self, '_gripper_stop_failure', None) is not None:
+                metadata['controller_stop_unresolved'] = True
             # The donor adapter wraps MotionResult as RobotCommandError. Keep
             # transport uncertainty so recovery cannot mistake it for a known
             # rejected command and dispatch HOME automatically.

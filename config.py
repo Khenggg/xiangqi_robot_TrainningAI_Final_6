@@ -52,8 +52,8 @@ GRIPPER_CLOSE_DO_ID = 1
 GRIPPER_IDLE_STATUS = 0
 GRIPPER_ACTIVE_STATUS = 1
 
-# Each gripper command runs in three steps (all durations are in seconds).
-# Both outputs off (deadtime) -> power one direction (pulse) -> both off (settle).
+# Opening/safe-gap commands use bounded pulses (all durations are in seconds).
+# Full grip holds CLOSE until release; the opposite direction stays off.
 # There is no jaw-position feedback. Tune one pulse at a time with the arm stationary.
 
 # Before every pulse, wait this long with both outputs off, even if the direction stays the same.
@@ -68,19 +68,19 @@ GRIPPER_OPEN_MAX_PULSE_SEC = 0.25
 # action. Standard board and capture-bin releases use OPEN_MAX_PULSE_SEC above.
 GRIPPER_RELEASE_PULSE_SEC = 0.05
 
-# GRIP: after descending to PICK_Z, close from the pre-pick gap onto the piece
-# before lifting it.
+# GRIP: after descending to PICK_Z, start closing from the fully open jaws.
+# This legacy-named timing is the initial closing dwell, not a hold-off timer.
+# CLOSE remains powered during lift/transport until release, stop or failure.
 GRIPPER_CLOSE_PULSE_SEC = 0.08
 
-# PREPOSITION / SETTLE: close partway from fully open. This sets the gap before
-# the pick approach and restores it after lifting clear of a board release or
-# returning home from the capture bin.
+# SETTLE only: close partway after lifting clear of a board release or returning
+# home from the capture bin. Picks approach with fully open jaws.
 # A longer pulse narrows the gap. Keep the jaws clear of the hard stop.
 GRIPPER_SAFE_GAP_CLOSE_PULSE_SEC = 0.055
 
 # Motor-off wait after either opening pulse. The next stage waits for this delay.
 GRIPPER_OPEN_SETTLE_SEC = 0.25
-# Motor-off wait after either closing pulse (safe gap or final grip).
+# Settling wait after closing; full grip stays powered during this wait.
 GRIPPER_CLOSE_SETTLE_SEC = 0.25
 
 # Default robot arm movement speed in percent (visual-correction-v2@fb0598d).

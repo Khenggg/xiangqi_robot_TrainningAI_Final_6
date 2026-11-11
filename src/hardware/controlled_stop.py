@@ -119,8 +119,10 @@ class ControlledStopCoordinator:
             if self.generation != generation or self.request is not request:
                 raise RuntimeError('A new stop request interrupted the state check')
             if (not self.workers_idle(ignore_current_worker=True) or not self._all_workers_finished()
-                    or getattr(self.hardware.robot, '_gripper_pulse_active', False) is True):
-                raise RuntimeError('Worker or gripper pulse is still running')
+                    or getattr(self.hardware.robot, '_gripper_pulse_active', False) is True
+                    or getattr(self.hardware.robot, '_gripper_hold_active', False) is True
+                    or isinstance(getattr(self.hardware.robot, '_gripper_stop_failure', None), BaseException)):
+                raise RuntimeError('Worker or gripper output is still active')
             if request is not None:
                 request.requires_measurements = True
                 request.finish(StopResult(True, request.result.acknowledged, 'Fresh idle telemetry received'))
@@ -144,7 +146,9 @@ class ControlledStopCoordinator:
         if (request is None or not request.done.is_set() or not request.result.safe
                 or not self.workers_idle(ignore_current_worker=ignore_current_worker)
                 or not self._all_workers_finished()
-                or getattr(self.hardware.robot, "_gripper_pulse_active", False) is True):
+                or getattr(self.hardware.robot, "_gripper_pulse_active", False) is True
+                or getattr(self.hardware.robot, "_gripper_hold_active", False) is True
+                or isinstance(getattr(self.hardware.robot, '_gripper_stop_failure', None), BaseException)):
             return False
         owned_now = (getattr(self.hardware.robot, "physical_motion_authorized", False) is True
                      or getattr(self.hardware.robot, "_activation_owned", False) is True)
@@ -166,6 +170,12 @@ class ControlledStopCoordinator:
         try:
             hw = self.hardware
             physical = hw.simulation_runtime is None and not hw.dry_run
+            retained_failure = getattr(hw.robot, '_gripper_stop_failure', None)
+            if isinstance(retained_failure, BaseException):
+                stop_hold = getattr(hw.robot, 'stop_gripper_hold', None)
+                if callable(stop_hold):
+                    stop_hold()
+                raise RuntimeError(f'Controller stop unresolved: {retained_failure}')
             if physical and owned:
                 # Separate bounded transport: a blocking MoveCart owns the SDK lock.
                 request.stop_dispatched = True
@@ -173,6 +183,9 @@ class ControlledStopCoordinator:
                 if isinstance(code, bool) or code != 0:
                     raise RuntimeError(f"Controller rejected stop: {code}")
                 acknowledged = True
+            stop_hold = getattr(hw.robot, 'stop_gripper_hold', None)
+            if callable(stop_hold):
+                stop_hold()
             # Read-only sessions must never stop a robot controlled by the pendant.
             self._wait_idle(timeout, request.requires_measurements, self._all_workers_finished)
             request.finish(StopResult(True, acknowledged, request.reason))
@@ -203,8 +216,10 @@ class ControlledStopCoordinator:
                 self.last_settle_diagnostic = f'Could not determine the worker state: {exc}'
                 self._settle_probe = None
                 return False
-            if (not workers_ready or getattr(self.hardware.robot, '_gripper_pulse_active', False) is True):
-                self.last_settle_diagnostic = "Worker or gripper pulse has not finished"
+            if (not workers_ready or getattr(self.hardware.robot, '_gripper_pulse_active', False) is True
+                    or getattr(self.hardware.robot, '_gripper_hold_active', False) is True
+                    or isinstance(getattr(self.hardware.robot, '_gripper_stop_failure', None), BaseException)):
+                self.last_settle_diagnostic = "Worker or gripper output has not finished"
                 self._settle_probe = None
                 return False
             probe = self._settle_probe
@@ -250,6 +265,14 @@ class ControlledStopCoordinator:
                 samples = 0
             elif getattr(self.hardware.robot, "_gripper_pulse_active", False) is True:
                 reason = 'Gripper pulse has not finished'
+                quiescent_since = None
+                samples = 0
+            elif getattr(self.hardware.robot, "_gripper_hold_active", False) is True:
+                reason = 'Gripper close output is still active'
+                quiescent_since = None
+                samples = 0
+            elif isinstance(getattr(self.hardware.robot, '_gripper_stop_failure', None), BaseException):
+                reason = f'Controller stop unresolved: {self.hardware.robot._gripper_stop_failure}'
                 quiescent_since = None
                 samples = 0
             elif not require_measurements:

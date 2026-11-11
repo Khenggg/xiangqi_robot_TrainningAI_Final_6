@@ -228,7 +228,7 @@ Khi camera hoặc bàn xê dịch, góc nhìn/độ phân giải/focus thay đ�
 
 | Mục đích | Thao tác | Điều cần đợi/kiểm tra |
 |---|---|---|
-| Tạm dừng ở Hai người + robot | **F8** | Yêu cầu controlled stop; chờ worker và bằng chứng dừng. VS ROBOT hiện chưa xử lý phím F8. Không tự thả quân đang kẹp |
+| Tạm dừng ở Hai người + robot | **F8** | Yêu cầu controlled stop và ngắt tín hiệu giữ kẹp; chờ worker kết thúc. VS ROBOT hiện chưa xử lý phím F8; không đưa tay vào khi robot còn chuyển động |
 | Chơi ván mới | **NEW GAME** | Đợi dừng/đối soát giao dịch trước; physical cần tự xếp lại 32 quân, V xác nhận rồi kích hoạt riêng |
 | Đổi môi trường/kiểu chơi | **F2 / CHỌN CHẾ ĐỘ** | Phiên cũ cần được đóng có kiểm soát; nếu bị giữ lại, xử lý panel phục hồi rồi thử F2 |
 | Đầu hàng | **SURRENDER** | Khi đang chạy, yêu cầu được giữ để chờ xử lý nước hiện tại và dừng/đối soát; không nhất thiết kết thúc ngay |
@@ -236,7 +236,9 @@ Khi camera hoặc bàn xê dịch, góc nhìn/độ phân giải/focus thay đ�
 
 **NEW GAME không tự xếp lại quân thật.** Nếu còn nước đang dở, phần mềm có thể giữ yêu cầu New Game và yêu cầu V đối soát trước. Khi đã nhận yêu cầu đổi ván/đầu hàng, V/CONTINUE trong luồng đó chỉ phục vụ đối soát, không được coi là nút thử lại chuyển động.
 
-**Xác nhận THOÁT đóng phần mềm ngay, không gửi lệnh dừng robot hoặc kẹp.** Đừng dùng đóng ứng dụng làm cách dừng thiết bị. Nếu đang có sự cố, xử lý thiết bị theo quy trình vận hành/E-stop thích hợp; giữ journal để xử lý kết quả chưa xác định. Bấm X cửa sổ client Đen đóng trực tiếp, khác cửa sổ chính.
+**Nếu còn tín hiệu kẹp đang hoạt động, xác nhận THOÁT yêu cầu dừng cánh tay rồi ngắt tín hiệu kẹp trước khi kết thúc tiến trình.** Nếu chưa xác nhận được dừng/OFF, lỗi được giữ lại. Khi không có ngõ ra kẹp đang hoạt động, thoát nhanh không gửi lệnh robot. Thao tác này không thay E-stop. Giữ journal để xử lý kết quả chưa xác định. Bấm X cửa sổ client Đen đóng trực tiếp, khác cửa sổ chính.
+
+**Kẹp khi gắp:** mở tối đa → tiếp cận/hạ xuống với kẹp mở → giữ hướng đóng suốt lúc nâng/di chuyển → ngắt đóng rồi mở nhả. Đã bỏ khép về khe chuẩn trước khi gắp; khép khe chuẩn sau khi đặt vẫn giữ. Thời gian trong `config.py` điều khiển xung mở và khoảng chờ ban đầu, không phải phép đo lực/độ mở. Lực giữ và khả năng chịu cấp điện liên tục của kẹp chưa được kiểm chứng trên robot thật.
 
 <a id="phuc-hoi"></a>
 ## 8. Chọn đúng cách phục hồi

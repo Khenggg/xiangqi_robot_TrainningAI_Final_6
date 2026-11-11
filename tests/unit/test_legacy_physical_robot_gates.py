@@ -6,6 +6,20 @@ from src.hardware.robot_VIP import FR5Robot, RobotCommandError, GripperCommandEr
 from src.motion.stages import MotionStage
 
 
+@pytest.fixture(autouse=True)
+def isolated_gripper_transport(monkeypatch):
+    """The driver also uses an independent transport for held-output stops."""
+    proxy = MagicMock()
+    proxy.StopMotion.return_value = 0
+    proxy.SetToolDO.return_value = 0
+    monkeypatch.setattr('src.hardware.rpc_transport.BoundedRPCProxy', MagicMock(return_value=proxy))
+    monkeypatch.setattr(FR5Robot, '_gripper_hold_registry', set())
+    monkeypatch.setattr(FR5Robot, '_gripper_holds_closing', False)
+    yield
+    for robot in tuple(FR5Robot._gripper_hold_registry):
+        robot._set_gripper_safe_idle()
+
+
 def ready_robot():
     arm=FR5Robot(); arm.dry=False; arm.connected=True
     arm.physical_motion_authorized=True
@@ -66,10 +80,10 @@ def test_land_failure_stops_before_grip_and_reports_stage():
     assert result.failed_stage==MotionStage.LAND
     assert result.last_completed_stage==MotionStage.APPROACH
     assert result.backend_code==112
-    # Only the pre-approach open-max and safe-gap pulses ran; the grip close never did.
+    # Only pre-approach open-max ran; there is no pre-pick safe-gap closure.
     active=[c for c in arm.robot.SetToolDO.call_args_list
             if c.kwargs.get("status")==config.GRIPPER_ACTIVE_STATUS]
-    assert [c.kwargs["id"] for c in active]==[config.GRIPPER_OPEN_DO_ID, config.GRIPPER_CLOSE_DO_ID]
+    assert [c.kwargs["id"] for c in active]==[config.GRIPPER_OPEN_DO_ID]
     assert arm.robot.MoveCart.call_count==2
 
 
@@ -83,8 +97,10 @@ def test_preposition_gripper_failure_stops_before_any_motion():
 
 def test_gripper_failure_stops_before_lift_or_place():
     arm=ready_robot()
-    # Open-max and safe-gap pulses (5 SetToolDO calls each) succeed; the grip close fails.
-    arm.robot.SetToolDO.side_effect=[0]*10+[77]*20
+    # Opening succeeds; fail the actual CLOSE ON instead of counting old gap pulses.
+    arm.robot.SetToolDO.side_effect = lambda **kwargs: (
+        77 if kwargs['id'] == config.GRIPPER_CLOSE_DO_ID
+        and kwargs['status'] == config.GRIPPER_ACTIVE_STATUS else 0)
     with patch("src.hardware.robot_VIP.time.sleep"):
         result=arm.move_piece(0,0,0,1,False)
     assert not result; assert result.failed_stage==MotionStage.GRIP
@@ -144,7 +160,7 @@ def test_first_pick_opens_unknown_gripper_before_approach(monkeypatch):
                  "GRIPPER_OPEN_SETTLE_SEC", "GRIPPER_CLOSE_SETTLE_SEC",
                  "GRIPPER_DIRECTION_DEADTIME_SEC"):
         monkeypatch.setattr(config, name, 0.0)
-    with patch.object(arm._motion_stop, "wait", return_value=True):
+    with patch.object(arm._motion_stop, "wait", return_value=False):
         arm.pick_at(0, 0)
     open_calls = [c for c in arm.robot.SetToolDO.call_args_list
                   if c.kwargs.get("id") == config.GRIPPER_OPEN_DO_ID
