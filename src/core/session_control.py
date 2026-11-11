@@ -46,8 +46,8 @@ class SessionControl:
             self.state.retire_ai_job()
         self.stop = self.hardware.request_controlled_stop(
             action, workers_finished=self.workers_finished)
-        event("session.stop_requested", "Đã nhận yêu cầu; chờ robot dừng", action=action)
-        self.state.set_status("Đang dừng robot; giữ nguyên bàn và quân đang kẹp.", duration=30)
+        event("session.stop_requested", "Request accepted; waiting for the robot to stop", action=action)
+        self.state.set_status("Stopping the robot; board and held piece are kept as is.", duration=30)
         return True
 
     def request_surrender(self, winner):
@@ -66,8 +66,8 @@ class SessionControl:
             self.state.retire_ai_job()
             self.state.ai_epoch += 1
             self.state.ai_job_token = None
-        event('session.surrender_requested', 'Đã nhận đầu hàng; chờ hoàn tất thao tác đang chạy', winner=winner)
-        self.state.set_status('Đã nhận đầu hàng; chờ hoàn tất nước đang chạy, không chọn nước mới.', duration=30)
+        event('session.surrender_requested', "Resignation accepted; waiting for the current operation to finish", winner=winner)
+        self.state.set_status("Resignation accepted; waiting for the current move to finish, no new move.", duration=30)
         return True
 
     def _report(self, message):
@@ -102,7 +102,7 @@ class SessionControl:
             raise
         self.action = None
         self._reported = None
-        self.state.set_status("Đã tiếp tục phiên mô phỏng từ bàn hiện tại.", duration=10)
+        self.state.set_status("Simulation session resumed from the current board.", duration=10)
         return True
 
     def poll(self):
@@ -121,19 +121,19 @@ class SessionControl:
             self.state.physical_sync_fault = True
             self.state.snapshot_continue_can_commit_pending = False
             detail = getattr(self.hardware.stop_coordinator, 'last_settle_diagnostic', None) or self.stop.result.reason
-            self._report(f"Chưa xác nhận dừng: {detail}. Kiểm tra tay/kẹp và controller đã dừng rồi V xác nhận.")
+            self._report(f"Stop not confirmed: {detail}. Check the arm/gripper and controller have stopped, then V to confirm.")
             return None
         if not self.workers_finished() or self.hardware.motion_worker.busy:
             return None
         if self.self_play is not None and self.self_play.status.value == "ending":
             return None
         if not self.hardware.stop_coordinator.safe_for_release():
-            self._report("RECOVERY_REQUIRED: trạng thái dừng không còn mới; kiểm tra lại trên pendant rồi V xác nhận.")
+            self._report("RECOVERY_REQUIRED: the stop state is stale; re-check on the pendant, then V to confirm.")
             return None
         if self.action == 'surrender':
             if (self.state.pending_move is not None or self.state.pending_ai_move is not None
                     or self.state.pending_test_motion is not None or self.state.visual_capture_checkpoint is not None):
-                self._report('Đã dừng; đầu hàng đang chờ đối soát nước dang dở. V chỉ đối soát, không chạy lại nước.')
+                self._report("Stopped; resignation is waiting to reconcile the unfinished move. V only reconciles, it does not replay the move.")
                 return None
             winner = self.state.winner if self.state.game_over else self._surrender_winner
             reason = (self.state.game_over_reason or 'CHECKMATE') if self.state.game_over else 'RESIGN'
@@ -141,22 +141,22 @@ class SessionControl:
                 self.state.handle_game_over(winner, reason=reason)
                 self.state.publish_match_end(winner='RED' if winner == 'r' else 'BLACK', reason=reason)
             except Exception as exc:
-                self._report(f'Chưa lưu được kết quả đầu hàng: {exc}')
+                self._report(f'Could not save the resignation result: {exc}')
                 return None
             self.action = None
             self._surrender_winner = None
-            self.state.set_status('Đã kết thúc ván do đầu hàng. Xếp lại bàn rồi NEW GAME để bắt đầu ván mới.', duration=60)
-            event('session.surrendered', 'Đã lưu kết quả đầu hàng', winner=winner)
+            self.state.set_status("Game ended by resignation. Reset the board, then NEW GAME to start a new game.", duration=60)
+            event('session.surrendered', "Resignation result saved", winner=winner)
             return 'surrender'
         if self.action == "quit":
             return "quit"
         if self.action == "pause":
-            self._report("Đã dừng; V đối soát bàn. F9/F10 bật lại robot sau khi khôi phục.")
+            self._report("Stopped; V to reconcile the board. F9/F10 to re-enable the robot after recovery.")
             self.action = None
             return None
         if self._reset_done and self.action == "reset":
             if self._reset_error is not None:
-                self._report(f"Reset chưa hoàn tất: {self._reset_error}")
+                self._report(f"Reset not finished: {self._reset_error}")
                 return None
             if self.hardware.simulation_runtime is not None or self.hardware.dry_run:
                 self.hardware.stop_coordinator.clear_after_recovery()
@@ -173,13 +173,13 @@ class SessionControl:
                 # An explicit virtual New Game may discard a settled virtual transaction.
                 # This branch is unavailable to a physical board/controller.
                 if not self.state.discard_stopped_virtual_work(self.hardware):
-                    self._report("Chưa lưu được việc hủy nước mô phỏng; giữ phiên để khôi phục.")
+                    self._report("Could not save the simulated move cancellation; the session is kept for recovery.")
                 return None
-            self._report("Đã nhận New Game; V đối soát nước đang dở trước khi thay phiên. Không tự đi lại.")
+            self._report("New Game accepted; V to reconcile the pending move before switching turns. No automatic replay.")
             return None
         if self.action == "home":
             if not self.hardware.dry_run and self.state.pick_test_resume_required:
-                self._report("Khôi phục bàn/New Game sau test rồi chọn chế độ; giữ nguyên phiên đang chờ.")
+                self._report("Restore the board/New Game after the test, then select a mode; the pending session is kept.")
                 return None
             if self.self_play is not None:
                 self.self_play.retire_settled_session()

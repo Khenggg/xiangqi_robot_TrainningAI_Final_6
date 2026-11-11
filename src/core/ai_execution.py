@@ -17,12 +17,12 @@ def execute_ai_move(state, hw, best_move, dry_run=False, visual_pick_enabled=Fal
         return False
     src, dst = best_move
     if not xiangqi.is_valid_move(src, dst, state.board, state.turn):
-        event("ai.illegal_move", "Nước đi AI không hợp lệ", level=logging.ERROR,
+        event("ai.illegal_move", "Invalid AI move", level=logging.ERROR,
               code="ENGINE_ILLEGAL_MOVE", src=src, dst=dst, fen=state.current_fen)
         state.set_status("Engine returned an illegal move; board unchanged.", duration=10)
         return False
     if not hw.is_robot_ready:
-        event("robot.not_ready", "Backend chưa sẵn sàng", level=logging.WARNING,
+        event("robot.not_ready", "Backend not ready", level=logging.WARNING,
               code="ROBOT_NOT_READY", src=src, dst=dst)
         state.set_status("Robot backend is not ready; board unchanged.", duration=10)
         return False
@@ -38,7 +38,7 @@ def execute_ai_move(state, hw, best_move, dry_run=False, visual_pick_enabled=Fal
     try:
         if request is not None:
             if not retry_is_current(state, request) or state.pending_ai_move["move"] != best_move:
-                event("ui.retry_rejected", "Từ chối đo lại tâm quân", level=logging.WARNING,
+                event("ui.retry_rejected", "Piece-center re-measure refused", level=logging.WARNING,
                       source="RETRY_WORKER", mode=getattr(getattr(state, "session_profile", None),
                                                         "game_mode", "HUMAN_VS_ROBOT"),
                       reason="STALE_PENDING_MOVE",
@@ -47,7 +47,7 @@ def execute_ai_move(state, hw, best_move, dry_run=False, visual_pick_enabled=Fal
                 raise RuntimeError("Stale retry; pending move cannot be replaced")
             context = state.pending_move
             event("vision.retry_started",
-                  f"Bắt đầu đo lại tâm quân ({request.get('stage') or 'n/a'})",
+                  f"Piece-center re-measure started ({request.get('stage') or 'n/a'})",
                   source="RETRY_WORKER", mode=getattr(getattr(state, "session_profile", None),
                                                       "game_mode", "HUMAN_VS_ROBOT"),
                   move_id=getattr(context, "move_id", None), stage=request.get("stage"),
@@ -55,7 +55,7 @@ def execute_ai_move(state, hw, best_move, dry_run=False, visual_pick_enabled=Fal
         else:
             context = state.create_move_context(src, dst, MoveActor.ROBOT)
             state.mark_move_pending(context)
-        event("move.started", "Bắt đầu thực hiện nước AI", move_id=context.move_id,
+        event("move.started", "AI move execution started", move_id=context.move_id,
               piece_id=context.piece_id, captured_piece_id=context.captured_piece_id,
               src=src, dst=dst, cell_order="col,row", fen_before=state.current_fen,
               backend=getattr(getattr(hw, "config", None), "ROBOT_BACKEND", "UNKNOWN"))
@@ -65,7 +65,7 @@ def execute_ai_move(state, hw, best_move, dry_run=False, visual_pick_enabled=Fal
             if not dry_run or getattr(hw.config, "ROBOT_BACKEND", None) != "VIRTUAL":
                 raise RuntimeError("Game-only mode requires VIRTUAL and DRY_RUN")
             committed = state.commit_pending_physical_move()
-            event("move.finished", "Kết thúc nước game-only", move_id=context.move_id,
+            event("move.finished", "Game-only move finished", move_id=context.move_id,
                   committed=committed, fen_after=state.current_fen,
                   duration_s=round(time.monotonic() - started, 3))
             return committed
@@ -81,7 +81,7 @@ def execute_ai_move(state, hw, best_move, dry_run=False, visual_pick_enabled=Fal
             if state.board != before or token != (state.game_epoch, state.ai_epoch, state.turn):
                 raise RuntimeError("Game changed during motion; reconcile board")
         committed = state.commit_pending_physical_move()
-        event("move.finished", "Kết thúc thực hiện nước AI", move_id=context.move_id,
+        event("move.finished", "AI move execution finished", move_id=context.move_id,
               committed=committed, fen_after=state.current_fen,
               duration_s=round(time.monotonic() - started, 3))
         return committed

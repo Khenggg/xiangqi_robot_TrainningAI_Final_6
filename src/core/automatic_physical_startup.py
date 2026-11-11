@@ -55,12 +55,12 @@ class AutomaticPhysicalStartup:
 
         def completed(result, error):
             if error is not None or not result:
-                error = error or "Controller chưa xác nhận enable"
-                state.set_status(f"Chưa tự bật được robot: {error}. Khắc phục rồi F9/F10 thử lại.", duration=60)
+                error = error or "Controller has not confirmed enable"
+                state.set_status(f"Could not auto-enable the robot: {error}. Fix it, then F9/F10 to retry.", duration=60)
                 event("physical.auto_enable_failed", str(error), level=logging.ERROR)
             else:
-                state.set_status("Robot đã tự bật quyền chuyển động. Không chạy HOME hay chỉnh kẹp.", duration=30)
-                event("physical.auto_enabled", "Đã bật quyền qua kiểm tra khởi động")
+                state.set_status("Robot motion authorization enabled automatically. No HOME run or gripper change.", duration=30)
+                event("physical.auto_enabled", "Authorization enabled through startup checks")
 
         # Never automatically replay an enable whose reply may have been lost.
         self.finished = True

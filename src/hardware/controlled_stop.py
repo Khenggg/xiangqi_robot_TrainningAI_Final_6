@@ -142,11 +142,11 @@ class ControlledStopCoordinator:
             try:
                 workers_ready = self.workers_idle() and self._all_workers_finished()
             except Exception as exc:
-                self.last_settle_diagnostic = f'Chưa xác định được trạng thái worker: {exc}'
+                self.last_settle_diagnostic = f'Could not determine the worker state: {exc}'
                 self._settle_probe = None
                 return False
             if (not workers_ready or getattr(self.hardware.robot, '_gripper_pulse_active', False) is True):
-                self.last_settle_diagnostic = 'Worker hoặc xung kẹp chưa kết thúc'
+                self.last_settle_diagnostic = "Worker or gripper pulse has not finished"
                 self._settle_probe = None
                 return False
             probe = self._settle_probe
@@ -159,9 +159,9 @@ class ControlledStopCoordinator:
                          and measured > probe['since'] and 0 <= time.time()-measured <= .5
                          and snapshot.motion_state in {'IDLE','READY'})
                 self.last_settle_diagnostic = (None if fresh else
-                    f'Telemetry dừng chưa hợp lệ: {snapshot.motion_state}; {getattr(snapshot, "last_error", None) or "ảnh đo cũ/thiếu dữ liệu"}')
+                    f'Invalid stop telemetry: {snapshot.motion_state}; {getattr(snapshot, "stale/no measurement image", None) or "ảnh đo cũ/thiếu dữ liệu"}')
             except Exception as exc:
-                self.last_settle_diagnostic = f'Không đọc được trạng thái robot: {exc}'
+                self.last_settle_diagnostic = f'Could not read robot state: {exc}'
                 fresh = False
             if not fresh:
                 probe['count'] = 0

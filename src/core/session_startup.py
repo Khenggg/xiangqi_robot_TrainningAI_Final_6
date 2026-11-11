@@ -52,7 +52,7 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
         profile = configure_session(config, options, mode=mode)
         state.session_profile = profile
         state.allow_mouse_move = profile.mouse_input == "VIRTUAL_TEST_ADAPTER"
-        event("session.capabilities", "Quyền vận hành của chế độ đã chọn", game_mode=profile.game_mode,
+        event("session.capabilities", "Operating permission of the selected mode", game_mode=profile.game_mode,
               requested_environment=profile.requested_environment, environment=profile.execution_environment,
               camera=profile.camera_enabled, physical_robot=profile.physical_robot_enabled,
               robot_moves=profile.robot_moves_enabled, mouse_input=profile.mouse_input)
@@ -66,9 +66,9 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
             canonical_journal = (Path(root) / relative_journal).resolve()
             if legacy_journal != canonical_journal and legacy_journal.exists():
                 raise RuntimeError(
-                    f"Có dữ liệu phiên tại vị trí cũ: {legacy_journal}. "
-                    f"Chưa mở camera/robot. Cần di trú phiên đã đóng sang {canonical_journal} "
-                    "trước khi chạy tiếp; không tự tạo ván mới đè trạng thái đang dở.")
+                    f"Session data found at the old location: {legacy_journal}. "
+                    f"Camera/robot not opened. Migrate the closed session to {canonical_journal} "
+                    "before continuing; no new game is created over the pending state.")
         if hasattr(state, "attach_journal"):
             state.attach_journal(root, profile.execution_environment, profile.game_mode, fresh_start=True)
         if cancelled is not None and cancelled.is_set():
@@ -97,7 +97,7 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
         except Exception as mirror_error:
             if not profile.physical_robot_enabled:
                 raise
-            event("startup.projection_unavailable", "Mô phỏng lỗi; giữ nguồn camera/FR3 thật",
+            event("startup.projection_unavailable", "Simulation failed; real camera/FR3 sources kept",
                   level=logging.WARNING, reason=str(mirror_error))
             manager.simulation_error = str(mirror_error)
             manager.close_simulation()
@@ -115,7 +115,7 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
             state.start_projection_worker()
         if board_ready:
             if not state.sync_current_board():
-                event('startup.projection_pending', 'Viewer chưa nhận bàn; giữ phiên Game đã lưu', level=logging.WARNING)
+                event('startup.projection_pending', "Viewer has not received the board; saved game session kept", level=logging.WARNING)
         if bridge is not None:
             try:
                 telemetry.start()
@@ -128,11 +128,11 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
                     requested_port = telemetry.port
                     telemetry.port = 0
                     telemetry.start()  # One retry; failure rolls back virtual startup.
-                    event("startup.telemetry_port_changed", "Mô phỏng dùng cổng WebSocket trống",
+                    event("startup.telemetry_port_changed", "Simulation uses a free WebSocket port",
                           level=logging.WARNING, requested_port=requested_port,
                           port=telemetry.port, environment="VIRTUAL")
                 else:
-                    event("startup.telemetry_unavailable", "WebSocket chưa mở; Game không dùng server đang chiếm cổng",
+                    event("startup.telemetry_unavailable", "WebSocket not opened; the game does not use the server occupying the port",
                           level=logging.WARNING, reason=str(telemetry_error), port=config.TELEMETRY_PORT)
                     telemetry.stop()
                     telemetry = None
@@ -144,7 +144,7 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
                     manager.simulation_error = f"WebSocket unavailable: {telemetry_error}"
         uncalibrated = getattr(bridge, 'uncalibrated_board', False) or not board_ready
         reason = None if not uncalibrated or config.GAME_ONLY else (
-            'Bàn mô phỏng mặc định (đồng bộ quân cờ BẬT); tọa độ lệnh theo visual. ' + str(manager.simulation_error or 'mirror unavailable'))
+            "Default simulation board (piece sync ON); command coordinates follow visual. " + str(manager.simulation_error or 'mirror unavailable'))
         if bridge is not None and telemetry is None:
             reason = manager.simulation_error or "WebSocket unavailable; viewer is not synchronized"
         if profile.viewer_enabled:
@@ -157,7 +157,7 @@ def build_session(config, options, root, state, cancelled=None, mode=None):
                             or not _address_in_use(viewer_error)):
                         raise
                     viewer = launch_options.ViewerServer(root, 0)
-                    event("startup.viewer_port_changed", "Mô phỏng dùng cổng HTTP viewer trống",
+                    event("startup.viewer_port_changed", "Simulation uses a free viewer HTTP port",
                           level=logging.WARNING, requested_port=options.viewer_port,
                           port=viewer.server.server_port, environment="VIRTUAL")
                 viewer.start(telemetry.port if telemetry is not None else config.TELEMETRY_PORT, unavailable_reason=reason,

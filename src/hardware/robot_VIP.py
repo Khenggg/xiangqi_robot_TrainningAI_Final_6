@@ -348,15 +348,15 @@ class FR5Robot:
             if use_current:
                 code, current_user = self.robot.GetActualWObjNum()
                 if int(code) != 0:
-                    raise RobotCommandError(f"Không đọc được WObj đang chọn: {code}", code)
+                    raise RobotCommandError(f"Could not read the selected WObj: {code}", code)
                 if parse_frame_identifier(current_user) != source_user:
                     raise RobotCommandError(
-                        f"Chọn User/WObj {source_user} trên pendant rồi F9/F10 để xác minh lại. "
-                        f"Firmware chỉ đọc được WObj đang chọn (hiện tại: {current_user}).")
+                        f"Select User/WObj {source_user} on the pendant, then F9/F10 to verify again. "
+                        f"Firmware can only read the selected WObj (current: {current_user}).")
                 code, wobj_offset = self.robot.GetCurWObjCoord()
                 after_code, after_user = self.robot.GetActualWObjNum()
                 if after_code != 0 or parse_frame_identifier(after_user) != source_user:
-                    raise RobotCommandError("WObj thay đổi trong lúc đọc; giữ nguyên frame rồi F9/F10 thử lại")
+                    raise RobotCommandError("WObj changed while reading; keep the frame and press F9/F10 to retry")
                 verification_source = "GetCurWObjCoord"
             if code != 0:
                 raise RobotCommandError(f"WObj {source_user} query failed: {code}", code)
@@ -1060,7 +1060,7 @@ class FR5Robot:
     def pixel_to_grid(self, px, py):
         """Convert tọa độ pixel ảnh → (col, row) bàn cờ."""
         if self.perspective_matrix is None:
-            raise RuntimeError("Chưa có perspective_matrix — hãy calibrate camera trước.")
+            raise RuntimeError("No perspective_matrix yet — calibrate the camera first.")
         src = np.array([[[float(px), float(py)]]], dtype=np.float32)
         dst = cv2.perspectiveTransform(src, self.perspective_matrix)[0][0]
         col = max(0, min(8, int(round(dst[0]))))

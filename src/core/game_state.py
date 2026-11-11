@@ -168,7 +168,7 @@ class GameState(GamePersistence):
         retiring_snapshot = None
         # [API] Đóng room cũ trước khi tạo game mới
         if self._journal is not None or self.api_client.room_id or getattr(self.api_client, 'pending', False):
-            print("[GAME] 🔚 Đóng room cũ trước khi tạo game mới...")
+            print("[GAME] 🔚 Closing the old room before creating a new game...")
             winner = "DRAW"
             reason = "OTHER"
             
@@ -326,11 +326,11 @@ class GameState(GamePersistence):
         if not self._history_change_allowed(hw_manager):
             return False
         if self._pre_space_state is None:
-            print("[ROLLBACK] ⚠️ Không có state để rollback!")
+            print("[ROLLBACK] ⚠️ No state to roll back!")
             self.set_status("⚠️  Nothing to roll back!", color=(180, 100, 0), duration=2.5)
             return
 
-        print("[ROLLBACK] ↩️ Khôi phục trạng thái trước SPACE...")
+        print("[ROLLBACK] ↩️ Restoring the state before SPACE...")
         self.retire_ai_job()
         self.game_epoch += 1
         self.ai_epoch += 1
@@ -576,7 +576,7 @@ class GameState(GamePersistence):
         self.move_number += 1
         self.update_fen_from_board()
         self._record_commit_result(context)
-        event("game.human_move", "Đã nhận nước người đi", move_id=context.move_id,
+        event("game.human_move", "Player move accepted", move_id=context.move_id,
               src=src, dst=dst, cell_order="col,row", captured_piece_id=context.captured_piece_id,
               piece_id=context.piece_id, fen=self.current_fen)
         notified = self._notify_human_commit(context)

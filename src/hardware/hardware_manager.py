@@ -495,16 +495,16 @@ class HardwareManager(VisualPickModes):
         try:
             snapshot = self.backend.get_state_snapshot()
         except Exception as exc:
-            return f"Chưa đọc được trạng thái robot: {exc}"
+            return f"Could not read robot state: {exc}"
         measured = snapshot.measurement_timestamp
         if (not snapshot.connected or not snapshot.joints_valid or measured is None
                 or not 0 <= time.time()-measured <= .5):
-            return "Telemetry robot mất kết nối hoặc đã cũ; chưa xác minh được trạng thái tay."
+            return "Robot telemetry is disconnected or stale; arm state could not be verified."
         if snapshot.motion_state == "ERROR" or snapshot.last_error:
-            return (f"Robot đang lỗi: {snapshot.last_error or snapshot.motion_state}. "
-                    "Xử lý cảnh báo trên WebApp/pendant; V/FEN không xóa lỗi controller.")
+            return (f"Robot error: {snapshot.last_error or snapshot.motion_state}. "
+                    "Clear the alarm on the WebApp/pendant; V/FEN does not clear a controller fault.")
         if snapshot.motion_state not in {"IDLE", "READY"}:
-            return f"Robot chưa ở trạng thái dừng: {snapshot.motion_state}."
+            return f"Robot is not in the stopped state: {snapshot.motion_state}."
         return None
 
     def activate_physical_game(self, state, *, commissioned=False,
@@ -651,8 +651,8 @@ class HardwareManager(VisualPickModes):
         def confirmation():
             profile = getattr(self.config, "AI_DIFFICULTY_PROFILES", {}).get(difficulty, {})
             if difficulty == "impossible":
-                return "Đã chọn IMPOSSIBLE — Moonfish nguyên gốc đang được sử dụng."
-            return (f"Đã chọn {difficulty.upper()} — Moonfish depth {profile.get('depth')}, "
+                return "IMPOSSIBLE selected — original Moonfish is in use."
+            return (f"Selected {difficulty.upper()} — Moonfish depth {profile.get('depth')}, "
                     f"≤{profile.get('nodes'):,} nodes, ≤{profile.get('think_ms') / 1000:g}s.")
 
         if difficulty == getattr(self.config, "AI_DIFFICULTY", "hard"):
@@ -1059,12 +1059,12 @@ class HardwareManager(VisualPickModes):
                         detail.update(col=target.col, row=target.row,
                                       offset_cells=target.offset_cells,
                                       confidence=target.confidence)
-                        message = (f"Đo tâm quân ({col},{row}) lần {attempt}: "
+                        message = (f"Piece-center measurement ({col}) attempt {row}) lần {attempt}: "
                                    f"col={target.col:.3f}, row={target.row:.3f}, "
-                                   f"offset={target.offset_cells:.3f} ô")
+                                   f" square{target.offset_cells:.3f} ô")
                     else:
-                        message = (f"Đo tâm quân ({col},{row}) lần {attempt}: "
-                                   f"không đạt ({detail['reason']})")
+                        message = (f"Piece-center measurement ({col}) attempt {row}) lần {attempt}: "
+                                   f"not reached ({detail['reason']})")
                     attempts_detail.append(detail)
                     event("vision.pick_attempt", message, level=logging.DEBUG, **detail)
             except Exception as exc:
@@ -1187,7 +1187,7 @@ class HardwareManager(VisualPickModes):
         if not virtual and not self.verify_physical_board(state.pick_test_board):
             raise RuntimeError("Camera must verify the full test board before pickup")
         if not virtual and not self.is_cell_visually_clear(destination):
-            raise RuntimeError("Ô đích chưa trống hoặc camera chưa xác nhận; chưa gửi lệnh")
+            raise RuntimeError("Target square is not empty or the camera has not confirmed; command not sent")
         target = None if virtual else self.get_robot_center_pick_targets({"moving": source})["moving"]
         if expected_binding != self.capture_execution_binding():
             raise RuntimeError("Calibration changed during test target acquisition")
@@ -1196,11 +1196,11 @@ class HardwareManager(VisualPickModes):
             moving_visual_target=target, piece_id=move_context.piece_id, move_context=move_context,
             **call_binding)
         if not isinstance(result, MotionExecutionResult) or not result.success:
-            raise RuntimeError(f"Test không hoàn tất: {getattr(result, 'message', 'executor không trả kết quả hợp lệ')}")
+            raise RuntimeError(f"Test did not complete: {getattr(result, "executor returned no valid result", 'executor không trả kết quả hợp lệ')}")
         if not virtual:
             test = state.pending_test_motion
             if test is None or not self.verify_physical_board(test["expected_board"]):
-                raise RuntimeError("Đã chạy nhưng camera chưa xác nhận toàn bộ bàn test; V đối soát, không chạy lại")
+                raise RuntimeError("Ran but the camera did not confirm the whole test board; V to reconcile, do not re-run")
             state.note_verified_test_board(move_context, "completed")
         return result
 
