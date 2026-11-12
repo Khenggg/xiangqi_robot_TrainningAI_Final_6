@@ -551,7 +551,7 @@ class HardwareTopModeTests(unittest.TestCase):
 
 class CommissioningLauncherTests(unittest.TestCase):
     def test_help_never_opens_camera_and_script_has_no_hardware_imports(self):
-        script = Path(__file__).resolve().parents[1]/'scripts/calibrate_pick_geometry.py'
+        script = Path(__file__).resolve().parents[1]/'scripts/calibration/calibrate_pick_geometry.py'
         source = script.read_text(encoding='utf-8')
         imports = []
         for node in ast.walk(ast.parse(source)):

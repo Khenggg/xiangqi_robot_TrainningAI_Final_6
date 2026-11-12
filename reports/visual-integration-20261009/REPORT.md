@@ -5,7 +5,7 @@
 - Nguồn visual: `fe3faa8dcac121defa4c9ee000d4df0ac6c8fd09`.
 - Target: `feature/unified-robot-vs-robot`, HEAD `7d8c5de`, cộng source chưa commit được giữ trong snapshot `da703237561c5264d96886514852bd958e613409`.
 - Chủ dự án đã chọn **C01–C10 = A**. Ghép chọn lọc trong `D:/OJT/_visual_integrate_20261009`; không merge nguyên file legacy hoặc chép calibration camera 0 sang runtime.
-- Hướng dẫn hiện hành: [VISUAL_V2_INTEGRATION.md](../../docs/VISUAL_V2_INTEGRATION.md).
+- Hướng dẫn hiện hành: [VISUAL_V2_INTEGRATION.md](../../docs/architecture/VISUAL_V2_INTEGRATION.md).
 
 ## Thay đổi
 

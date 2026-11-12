@@ -168,3 +168,16 @@ When working on a specific task, restrict your scope strictly to the mapped file
 | **Viewer UI / HUD / Jogging** | `robot-3d-viewer/index.html`<br>`robot-3d-viewer/main.mjs`<br>`robot-3d-viewer/styles.css` | `src/simulation/runtime.py`<br>`src/hardware/telemetry_publisher.py` | `node tests/unit/test_viewer_single_motion_authority.mjs`<br>`pytest tests/unit/test_phase3_final_master.py -k jog` |
 | **Reset / In-Process Recovery** | `src/simulation/runtime.py`<br>`src/simulation/virtual_fr3_backend.py` | `src/simulation/physics/world.py`<br>`robot-3d-viewer/main.mjs` | `pytest tests/unit/test_phase3_isolation_and_fail_fast.py -k reset`<br>`pytest tests/unit/test_phase3_final_master.py -k reset` |
 | **Ruler / 3D Dimension Tape** | `robot-3d-viewer/ruler.mjs`<br>`robot-3d-viewer/main.mjs` | `src/simulation/placement.py` | `node tests/unit/test_viewer_coordinate_ruler.mjs`<br>`pytest tests/unit/test_phase3_final_master.py -k ruler` |
+| **Installer / Xiangqi-FR3.zip** | `Xiangqi-FR3.bat`<br>`tools/installer/install.ps1`<br>`tools/installer/env_check.py`<br>`tools/installer/build_zip.py` | `scripts/windows/RUN.bat`<br>`requirements.txt`<br>`package-lock.json` | `pytest tests/unit/test_xiangqi_fr3_installer.py` |
+
+---
+
+## 3. REPOSITORY LAYOUT
+
+* Root: `Xiangqi-FR3.bat` (install-if-missing + start), `main.py`, `config.py`, agent docs (`AGENTS.md`, `PROJECT_CONTEXT.md`, `REPO_MAP.md`, `CURRENT_STATE.md`, `KNOWN_ISSUES.md`), dependency manifests.
+* Runtime: `src/`, `shared/`, `calibration/`, `models/`, `moonfish/`, `robot-3d-viewer/`, `assets/` (paths resolved from the repo root; do not move).
+* `scripts/windows/` — launchers: `RUN`, `SETUP_WINDOWS`, `SETUP_GPU`, `BUILD_CAPSULE`, `BUILD_XIANGQI_FR3`, `CALIBRATE_*`, `MEASURE_GEOMETRY` (each `cd`s to the repo root first).
+* `scripts/calibration/`, `scripts/training/`, `scripts/models/` — operator/technician Python tools.
+* `tools/installer/` — Xiangqi-FR3 installer and ZIP builder (`vendor/` holds the Python 3.12 installer); `tools/capsule/` — older portable capsule builder; `tools/simulation/`, `tools/diagnostics/`, `tools/hardware_tests/` (hardware: explicit authorization only).
+* `docs/guides/`, `docs/architecture/`, `docs/hardware/`, `docs/api/`, `docs/build/`, `docs/reviews/` (dated QA/audit notes), `docs/specs/` (.docx), `docs/notes/`.
+* `tests/unit/` (pytest `testpaths`), `reports/`, `plans/` (agent outputs).

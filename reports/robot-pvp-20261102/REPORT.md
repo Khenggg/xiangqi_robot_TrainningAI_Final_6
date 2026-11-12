@@ -105,4 +105,4 @@ own the real FR3; never run physical hosts from both worktrees simultaneously.
 Existing controller faults require their own recovery, not failed-session deletion.
 Full regression needs terminal results and triage before a merge-ready claim.
 
-Usage: `docs/TWO_HUMAN_ROBOT_MODE.md`.
+Usage: `docs/architecture/TWO_HUMAN_ROBOT_MODE.md`.

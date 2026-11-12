@@ -5,5 +5,5 @@
   "CURRENT_STATE.md": "d7f815a008d8fb35acb9773d58a8f2ffde83d694854e0c7514ee741a28d115d8",
   "KNOWN_ISSUES.md": "f229cc22207df64640b2a2eb9463589340455dad506d9f0abb9cf3087d599a30",
   "tests/unit/test_review_lifecycle_edges.py": null,
-  "docs/LIFECYCLE_EDGE_REVIEW_20261012.md": null
+  "docs/reviews/LIFECYCLE_EDGE_REVIEW_20261012.md": null
 }

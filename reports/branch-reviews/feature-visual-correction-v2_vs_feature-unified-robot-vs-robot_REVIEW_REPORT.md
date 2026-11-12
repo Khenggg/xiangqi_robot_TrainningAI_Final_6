@@ -18,7 +18,7 @@
 
 Nhánh visual bổ sung hình học mặt trên quân, consensus theo mm, calibration camera, height sampling, worker, retry, hover, colored-ring và biên gắp ngoài lưới. Tuy nhiên đường thực thi của donor là robot legacy; thiếu hợp đồng typed result, world/identity/simulation và full-board verification mà target hiện tại đang dùng. Thông số vật lý và camera cũng khác.
 
-Phiếu quyết định: [VISUAL_V2_INTEGRATION_CHOICES_20261009.md](../../docs/VISUAL_V2_INTEGRATION_CHOICES_20261009.md). Chưa có lựa chọn nào được tự xem là phê duyệt.
+Phiếu quyết định: [VISUAL_V2_INTEGRATION_CHOICES_20261009.md](../../docs/architecture/VISUAL_V2_INTEGRATION_CHOICES_20261009.md). Chưa có lựa chọn nào được tự xem là phê duyệt.
 
 ## Phạm vi diff và xung đột
 
@@ -35,10 +35,10 @@ Phiếu quyết định: [VISUAL_V2_INTEGRATION_CHOICES_20261009.md](../../docs/
 ```text
 .codex/session-data/last-state.md
 config.py
-docs/geometry-measurement.md
+docs/guides/geometry-measurement.md
 main.py
 requirements.txt
-scripts/measure_geometry.py
+scripts/calibration/measure_geometry.py
 src/core/game_state.py
 src/hardware/hardware_manager.py
 src/hardware/robot_VIP.py

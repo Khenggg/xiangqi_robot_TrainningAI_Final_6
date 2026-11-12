@@ -10,7 +10,7 @@ import numpy as np
 from src.vision.geometry_measurement import camera_grid_error, robot_xy_error, save_csv
 
 
-spec = importlib.util.spec_from_file_location('measure_geometry', Path(__file__).resolve().parents[1] / 'scripts' / 'measure_geometry.py')
+spec = importlib.util.spec_from_file_location('measure_geometry', Path(__file__).resolve().parents[1] / 'scripts' / 'calibration' / 'measure_geometry.py')
 measure = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(measure)
 

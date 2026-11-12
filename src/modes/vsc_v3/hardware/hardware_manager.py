@@ -279,7 +279,7 @@ class HardwareManager:
                 elif getattr(self.config, "VISUAL_HEIGHT_PICK_ENABLED", False):
                     intrinsic_path = Path(self.project_dir) / self.config.VISUAL_CAMERA_INTRINSICS_PATH
                     if not intrinsic_path.exists():
-                        print("[HEIGHT PICK] Camera intrinsics missing. Run CALIBRATE_CAMERA_INTRINSICS.bat "
+                        print("[HEIGHT PICK] Camera intrinsics missing. Run scripts/windows/CALIBRATE_CAMERA_INTRINSICS.bat "
                               "--square-mm MEASURED_VALUE with RUN closed. Height-mode picks are blocked until ready.")
                     else:
                         print(f"[HEIGHT PICK] Enabled; piece height={self.config.VISUAL_HEIGHT_PIECE_MM}mm. "
@@ -309,7 +309,7 @@ class HardwareManager:
                 print(f"[TOP PICK] Calibrated profile {geometry.profile_id} loaded.")
             except Exception as exc:
                 self.top_face_pick_estimator = None
-                print(f"[TOP PICK] BLOCKED: {exc}. Run CALIBRATE_PICK_GEOMETRY.bat with RUN closed.")
+                print(f"[TOP PICK] BLOCKED: {exc}. Run scripts/windows/CALIBRATE_PICK_GEOMETRY.bat with RUN closed.")
 
     def cleanup(self):
         """Retain owners on any shutdown failure; allow safe explicit retry."""

@@ -24,12 +24,12 @@ theo đơn vị ô. Điểm đỏ trên ảnh là giao điểm do người đo c
 Lặp lại trên nhiều frame với bàn đứng yên để đánh giá độ lặp lại.
 
 Đo ảnh có sẵn cùng hệ camera/calibration:
-`python scripts/measure_geometry.py camera --image path/to/frame.png`
+`python scripts/calibration/measure_geometry.py camera --image path/to/frame.png`
 
 ## Grid → robot (chọn 2)
 
 Mặc định `DRY_RUN=1` chặn đo robot thật. Khi đã chuẩn bị commissioning, mở phiên
-bằng PowerShell: `$env:DRY_RUN='0'; python scripts/measure_geometry.py gui`.
+bằng PowerShell: `$env:DRY_RUN='0'; python scripts/calibration/measure_geometry.py gui`.
 Chỉ kết nối không cấp quyền motion; mỗi lần bấm chạy vẫn cần checklist và gate bên dưới.
 
 Công cụ đọc R1–R4 và nội suy bilinear đúng như visual pick, gồm cả offset config.
@@ -78,9 +78,9 @@ va chạm cho robot thật; chuyển động đo trên cao vẫn cần người 
 Giao diện là mặc định khi chạy BAT. Các lệnh cũ vẫn dùng được:
 
 ```text
-python scripts/measure_geometry.py camera
-python scripts/measure_geometry.py robot
-python scripts/measure_geometry.py robot --move
+python scripts/calibration/measure_geometry.py camera
+python scripts/calibration/measure_geometry.py robot
+python scripts/calibration/measure_geometry.py robot --move
 ```
 
 Lệnh `robot` không có `--move` chỉ lưu kế hoạch. Trong console camera dùng
@@ -119,7 +119,7 @@ theo đơn vị ô. Điểm đỏ trên ảnh là giao điểm do người đo c
 Lặp lại trên nhiều frame với bàn đứng yên để đánh giá độ lặp lại.
 
 Đo ảnh có sẵn cùng hệ camera/calibration:
-`python scripts/measure_geometry.py camera --image path/to/frame.png`
+`python scripts/calibration/measure_geometry.py camera --image path/to/frame.png`
 
 ## Grid → robot (chọn 2)
 
@@ -163,9 +163,9 @@ dùng nút dừng trên pendant. Client không tự xác minh số XYZ bạn nh�
 Giao diện là mặc định khi chạy BAT. Các lệnh cũ vẫn dùng được:
 
 ```text
-python scripts/measure_geometry.py camera
-python scripts/measure_geometry.py robot
-python scripts/measure_geometry.py robot --move
+python scripts/calibration/measure_geometry.py camera
+python scripts/calibration/measure_geometry.py robot
+python scripts/calibration/measure_geometry.py robot --move
 ```
 
 Lệnh `robot` không có `--move` chỉ lưu kế hoạch. Trong console camera dùng

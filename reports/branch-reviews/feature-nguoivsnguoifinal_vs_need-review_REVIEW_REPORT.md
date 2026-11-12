@@ -53,7 +53,7 @@ Output nguyên bản: [player vs HEAD](pvp-20261030/player_vs_head.merge-tree.tx
 
 ## 4. Các phát hiện chặn lấy nguyên luồng robot
 
-Các vị trí `player_vs_player.py` và robot/manager bên dưới là source **donor 73af0f1**, được giữ nguyên trong [snapshot](pvp-20261030/final/). Khi nói "current", vị trí thuộc source chưa commit trên máy được hash trong metadata.
+Các vị trí `player_vs_player.py` và robot/manager bên dưới là source **donor 73af0f1**, được giữ nguyên trong [snapshot](pvp-20261030/final). Khi nói "current", vị trí thuộc source chưa commit trên máy được hash trong metadata.
 
 ### F1 — BLOCKER / HIGH: entry point PvP dùng startup cũ tự enable, điều khiển gripper và HOME trước camera
 

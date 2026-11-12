@@ -60,12 +60,12 @@
     "after_sha256": "fdd3a05c27ef933f8551b749d8f47cfaf9daf171c5af7e3152cfd198cb84f8e1"
   },
   {
-    "path": "docs/RELIABILITY_FIXES_20261012.md",
+    "path": "docs/reviews/RELIABILITY_FIXES_20261012.md",
     "before_sha256": "823cde141648c4b5a2e7fc5c4d6ce74eca4594db5df0dd9c894816e9e05967fc",
     "after_sha256": "6c5ab091b4b6f395e9f7a26c829c1fe13d8152ee3f8d24d52e597782ff0119cc"
   },
   {
-    "path": "docs/RELIABILITY_RECHECK_20261012.md",
+    "path": "docs/reviews/RELIABILITY_RECHECK_20261012.md",
     "before_sha256": null,
     "after_sha256": "ab0e79930c29e8725eec5938741c2b062432e211cde4e6af21a7fabafa4a2f76"
   }

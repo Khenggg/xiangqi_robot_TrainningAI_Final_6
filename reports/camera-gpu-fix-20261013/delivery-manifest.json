@@ -8,5 +8,5 @@
   "src/ui/board_renderer.py": "5c1cdb62b3ae73d85d57249e25089196f075add9b158c60420f4546ce2a4bcc7",
   "SETUP_GPU.bat": "50e0508ff87600945a730d79e3e4d71b4efba040ddb5fbddfb864092cfa6757e",
   "tests/unit/test_camera_gpu_lifecycle.py": "9c8844f000558c53b5689625334ea6fd019f6635c5eb3936c8e1fa73deeeb203",
-  "docs/CAMERA_MONITOR_GPU_FIX_20261013.md": "db3ece78618da53aa1d8a2ecb675825b32ade786f332abe6d15228098366faf7"
+  "docs/reviews/CAMERA_MONITOR_GPU_FIX_20261013.md": "db3ece78618da53aa1d8a2ecb675825b32ade786f332abe6d15228098366faf7"
 }

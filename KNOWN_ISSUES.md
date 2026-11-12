@@ -253,7 +253,7 @@ ping -n 2 -S 192.168.58.3 192.168.58.2
 ```
 
 Do not replay motion after an unknown RPC outcome and do not enable F9/F10 while
-the link is unstable. Full checklist: [`ROBOT_CONNECTION.md`](ROBOT_CONNECTION.md).
+the link is unstable. Full checklist: [`docs/hardware/ROBOT_CONNECTION.md`](docs/hardware/ROBOT_CONNECTION.md).
 
 ## 2026-10-28 client-control and rollback notes
 
@@ -356,7 +356,7 @@ unverified; a wrong jaw yaw can collide with neighbouring pieces. Gripper pulses
 remain the project's 0.30/0.80, not the donor 0.25/0.20. `MOTION_PROFILE_VERIFIED`
 stays false until the operator measures RPY and clearance on the pendant. No
 physical run was performed. Rollback values are in
-`docs/VISUAL_V2_MOTION_PROFILE.md`.
+`docs/architecture/VISUAL_V2_MOTION_PROFILE.md`.
 
 ## 2026-10-26 camera recognition readiness / board retry limitations
 
@@ -378,8 +378,8 @@ camera or capture resolution changes without `--recalibrate-camera`, startup
 can reuse a stale matrix. A missing file still opens the interactive window and
 an invalid file fails startup. Remote/headless operation still needs a desktop
 for Pygame; only the calibration window is skipped. No camera or hardware run
-was performed for this change. See `docs/START_PROJECT.md` and
-`docs/LOGGING.md`.
+was performed for this change. See `docs/guides/START_PROJECT.md` and
+`docs/guides/LOGGING.md`.
 
 ## 2026-10-26 base-only robot frame policy
 
@@ -391,14 +391,14 @@ operator re-teaches R1-R4, HOMECHESS and R_Trash in user 0. The read-only audit 
 No hardware or camera run was performed for this policy change, and no existing
 calibration artifact was rewritten. Pick/retry diagnostics now include measured
 centres, offsets, valid-sample counts and jitter in structured events; a rejected
-Y/Continue is logged with its mode and reason. See `docs/ROBOT_FRAME_BASE_ONLY.md`
-and `docs/LOGGING.md`.
+Y/Continue is logged with its mode and reason. See `docs/architecture/ROBOT_FRAME_BASE_ONLY.md`
+and `docs/guides/LOGGING.md`.
 
 ## 2026-10-19 executable QA: remaining regression and hardware gates
 
 The user has now authorized virtual/mock execution; the no-test blocker below
 is historical. Current results and source-backed fixes are recorded in
-docs/USER_FLOW_QA_20261019.md. Main user flows passed with real virtual motion
+docs/reviews/USER_FLOW_QA_20261019.md. Main user flows passed with real virtual motion
 and an independent headless viewer; the broad run still has 35 unresolved
 failures requiring contract/fixture/source triage. Do not equate the passing
 focused/serial suites with a clean full regression or physical acceptance.
@@ -540,7 +540,7 @@ evidence. No robot or Game command is replayed by the projection worker.
 SQLite journal/restore/command receipts and exception recovery UI are implemented
 but have no execution evidence. Durable outbox now has a draft worker/ACK adapter;
 legacy recovery consistency, three-mode routing and calibration remain open.
-No earlier test pass validates this draft; see docs/BRD_IMPLEMENTATION_PROGRESS.md.
+No earlier test pass validates this draft; see docs/reviews/BRD_IMPLEMENTATION_PROGRESS.md.
 
 ## 2026-10-14 controlled-stop worktree limitations
 
@@ -548,15 +548,15 @@ New stop/reset/end code is syntax-checked only; runtime/fault-injection evidence
 pending. Abrupt exceptions/KeyboardInterrupt and persistence have draft handlers
 but still need runtime/fault-injection verification.
 Pending real capture/motion is retained for operator reconciliation; unknown ACK
-does not allow replay. See docs/BRD_IMPLEMENTATION_PROGRESS.md. Not commissioned.
+does not allow replay. See docs/reviews/BRD_IMPLEMENTATION_PROGRESS.md. Not commissioned.
 
 ## 2026-10-13 Camera Monitor / GPU correction
 
-Continuous capture/inference start restored, atomic/pick snapshot APIs restored, stale boxes hidden, VISION_DEVICE=auto/cpu supported. Installed Torch2.14.1+cu126 + ORT-GPU1.20.2; actual camera2/DSHOW GPU preview retained32 named pieces through15s. Final scoped gate123passes. Full gate857passes/12baseline findings; UI accent fix resolves3,9findings remain. See docs/CAMERA_MONITOR_GPU_FIX_20261013.md. No robot actuation or calibration changes.
+Continuous capture/inference start restored, atomic/pick snapshot APIs restored, stale boxes hidden, VISION_DEVICE=auto/cpu supported. Installed Torch2.14.1+cu126 + ORT-GPU1.20.2; actual camera2/DSHOW GPU preview retained32 named pieces through15s. Final scoped gate123passes. Full gate857passes/12baseline findings; UI accent fix resolves3,9findings remain. See docs/reviews/CAMERA_MONITOR_GPU_FIX_20261013.md. No robot actuation or calibration changes.
 
 ## 2026-10-13 raw arm reconnect QA
 
-Failed SDK startup now retains the read-only state mirror/WebSocket so receiver recovery can reach the viewer independently of board calibration. No automatic actuation authorization. 98 scoped Python passes and three Node suites; actual FR3 + WebSocket + browser joint values matched with board uncalibrated. See docs/ARM_RECONNECT_QA_20261013.md.
+Failed SDK startup now retains the read-only state mirror/WebSocket so receiver recovery can reach the viewer independently of board calibration. No automatic actuation authorization. 98 scoped Python passes and three Node suites; actual FR3 + WebSocket + browser joint values matched with board uncalibrated. See docs/reviews/ARM_RECONNECT_QA_20261013.md.
 
 ## 2026-10-13 board-side orientation QA
 
@@ -576,30 +576,30 @@ Startup first reported SDK_state unavailable (receiver cause unproven); next att
 
 ## 2026-10-13 worker scheduling / retry corrections
 
-The six reproduced failures in `docs/RUNTIME_RACE_REVIEW_20261013.md` are repaired within the recorded software boundary. QUIT prevents later dispatch; it does not stop SDK motion already sent. Worker ownership gates defer scheduler commands; they do not certify FR3 physical safety. Retry preserves confirmed commits and requires camera baseline repair when needed. Hardware, real camera recognition, trajectories and spectator remote ACK remain NOT RUN in this round. Full gate: 1052 passes (exit 0). Primary compile/parity passed; see delivery-manifest.json.
+The six reproduced failures in `docs/reviews/RUNTIME_RACE_REVIEW_20261013.md` are repaired within the recorded software boundary. QUIT prevents later dispatch; it does not stop SDK motion already sent. Worker ownership gates defer scheduler commands; they do not certify FR3 physical safety. Retry preserves confirmed commits and requires camera baseline repair when needed. Hardware, real camera recognition, trajectories and spectator remote ACK remain NOT RUN in this round. Full gate: 1052 passes (exit 0). Primary compile/parity passed; see delivery-manifest.json.
 
 ## 2026-10-13 game mode review
 
-Repaired the UNIFIED Red-only/matcher lifecycle and confidence adapter gaps, interrupted sample window reuse, robot entrypoints ignoring terminal/unconfirmed turns, and Continuous surrender being gated by Step-only next-move permission. Matrix scope and exact limits: `docs/GAME_MODE_REVIEW_20261013.md`. The three-mode PyBullet board test mocks arm execution; it does not validate full pick/place paths, camera model accuracy or real hardware. WebSocket legacy warnings remain unchanged.
+Repaired the UNIFIED Red-only/matcher lifecycle and confidence adapter gaps, interrupted sample window reuse, robot entrypoints ignoring terminal/unconfirmed turns, and Continuous surrender being gated by Step-only next-move permission. Matrix scope and exact limits: `docs/reviews/GAME_MODE_REVIEW_20261013.md`. The three-mode PyBullet board test mocks arm execution; it does not validate full pick/place paths, camera model accuracy or real hardware. WebSocket legacy warnings remain unchanged.
 
 ## 2026-10-12 lifecycle edge review
 
-Repaired human checkmate/terminal spectator gaps, direct post-game and illegal Emergency mutations, rollback retaining cancelled undo snapshots, Emergency false baseline success after rejection/mirror failure, and camera Q still dispatching a ready AI move in the same frame. Evidence and scope: `docs/LIFECYCLE_EDGE_REVIEW_20261012.md`. Physical camera/FR3 and live HTTP remain unverified; camera acceptance of missing-king human terminal boards is not proven by the game-logic test.
+Repaired human checkmate/terminal spectator gaps, direct post-game and illegal Emergency mutations, rollback retaining cancelled undo snapshots, Emergency false baseline success after rejection/mirror failure, and camera Q still dispatching a ready AI move in the same frame. Evidence and scope: `docs/reviews/LIFECYCLE_EDGE_REVIEW_20261012.md`. Physical camera/FR3 and live HTTP remain unverified; camera acceptance of missing-king human terminal boards is not proven by the game-logic test.
 
 ## 2026-10-12 spectator lifecycle follow-up
 
-Repaired restart after spectator close, duplicate room creation/end requests, post-end FEN enqueue, finished self-play restart and startup error-message overwrite. Current software evidence: `docs/SPECTATOR_LIFECYCLE_FIX_20261012.md`. The previous spectator-close correction introduced the F8/F6 reopening gap now repaired. Live HTTP acceptance of a midgame FEN in a newly reopened room remains NOT RUN, as do camera/FR3 hardware and measured scene parity.
+Repaired restart after spectator close, duplicate room creation/end requests, post-end FEN enqueue, finished self-play restart and startup error-message overwrite. Current software evidence: `docs/reviews/SPECTATOR_LIFECYCLE_FIX_20261012.md`. The previous spectator-close correction introduced the F8/F6 reopening gap now repaired. Live HTTP acceptance of a midgame FEN in a newly reopened room remains NOT RUN, as do camera/FR3 hardware and measured scene parity.
 
 ## 2026-10-12 second review corrections
 
-The seven reproduced software failures in `docs/RELIABILITY_RECHECK_20261012.md` were repaired. Physical board recognition normally requires both kings; known king-capture removal/post-board may declare exactly the captured king color while retaining complete expected-board/quality gates. Hardware alignment/recognition/latency and mechanical commissioning remain unverified. This is scoped regression evidence, not a claim of zero remaining repository bugs.
+The seven reproduced software failures in `docs/reviews/RELIABILITY_RECHECK_20261012.md` were repaired. Physical board recognition normally requires both kings; known king-capture removal/post-board may declare exactly the captured king color while retaining complete expected-board/quality gates. Hardware alignment/recognition/latency and mechanical commissioning remain unverified. This is scoped regression evidence, not a claim of zero remaining repository bugs.
 
 ## 2026-10-12 current verification limits
 
 - Current physical commands follow visual-correction-v2; simulator collisions do not decide physical execution, as explicitly requested. Simulator attachment is a command estimate, not measured jaw contact.
 - Board contact offset/calibration still needs measurement to claim physical board/piece alignment. Raw-arm Connect live is available without that provider when controller telemetry is valid.
 - Hardware grasp/place/capture, firmware completion and real camera/robot/browser latency have not been tested in this correction. SDK socket timeout/lost reply cannot prove the arm stopped; no actuation replay is performed.
-- Historical failure notes below may be superseded; use `docs/RELIABILITY_FIXES_20261012.md` and the current run's evidence. WebSocket legacy API warnings remain; no dependency migration in this task.
+- Historical failure notes below may be superseded; use `docs/reviews/RELIABILITY_FIXES_20261012.md` and the current run's evidence. WebSocket legacy API warnings remain; no dependency migration in this task.
 
 ## 2026-10-09 physical lag / unavailable mirror
 
@@ -637,7 +637,7 @@ The seven reproduced software failures in `docs/RELIABILITY_RECHECK_20261012.md`
 - Measurement no longer bypasses read-only startup/current calibration frame. Requires fresh idle TCP/actual safe Z; close/menu/restart disable only activation owned by the session and report failures. Manual physical test faults also revoke owned activation.
 - Fixed carried-piece selection (`ATTACHED_TO_GRIPPER`) and rejected ambiguous/out-of-range/missing-distance cells. Removed stale 150mm initial UI readout. Updated fixed-placement/tool fixtures from canonical sources; replaced an obsolete reach-limit assertion with actual below-board rejection/invariance.
 - Remaining limits: camera/SDK failure paths use mocks; live optics and hardware commissioning are unverified. Measurement requires verified physical calibration, explicit operator clearance and DRY_RUN=0; it is not a hardware collision planner. No changes to the physical tool length or gripper opening in this integration.
-- Verification details and commands: `docs/VISUAL_LATEST_REVIEW_20261005.md`, `reports/visual-integration-20261005/`.
+- Verification details and commands: `docs/reviews/VISUAL_LATEST_REVIEW_20261005.md`, `reports/visual-integration-20261005/`.
 
 ## 2026-10-04 oversized game window
 
@@ -667,14 +667,14 @@ The seven reproduced software failures in `docs/RELIABILITY_RECHECK_20261012.md`
 
 - OPEN P1 in new manual pick/place: legacy robot wrappers allow code 112 through, and test runner ignores execution failure. Mocked probe continues through seven failed MoveCart calls and three gripper calls.
 - The donor's post-motion verification/retry gap is addressed in the current integrated path by a durable pending-test receipt and explicit V reconciliation. The new path has only static source checks so far; runtime fault-injection acceptance remains open.
-- Do not replace integrated read-only startup or canonical frame/mapping with donor legacy startup/Tool 0 User 1 assumptions. Detailed review: `docs/VISUAL_LATEST_REVIEW_20261005.md`.
+- Do not replace integrated read-only startup or canonical frame/mapping with donor legacy startup/Tool 0 User 1 assumptions. Detailed review: `docs/reviews/VISUAL_LATEST_REVIEW_20261005.md`.
 
 ## 2026-10-05 cross-feature audit
 
 - RESOLVED: game-only reset/rollback incorrectly demanded physical camera verification. Physical mock gates remain required. New game also discards stale SPACE rollback state from the preceding match.
 - OPEN: fresh broad unit run has one shortened-tool reachability assertion failure; selected viewer Node tests have three failures (picker boundary, fixed coordinate expectation, tool-status expectation). All four reproduce on clean 7d8c5de; no collision parameters were relaxed to hide them.
 - VERIFIED within scope: R1–R4 + actual capture + live polling + undo/reset keep piece cells and taught pose coherent; startup/cleanup and affected logging/game regression pass. This is not all-route or physical-hardware verification.
-- Evidence: `docs/CROSS_FEATURE_AUDIT_20261005.md`.
+- Evidence: `docs/reviews/CROSS_FEATURE_AUDIT_20261005.md`.
 
 ## 2026-10-05 R1–R4 UI review
 
@@ -682,7 +682,7 @@ The seven reproduced software failures in `docs/RELIABILITY_RECHECK_20261012.md`
 - RESOLVED UI ambiguity: H controls are disabled in four-point mode because backend preserves H and legacy placement apply is disabled. Editing H separately in this mode remains unsupported.
 - OPEN: four-point apply is runtime-only; persistent save is not implemented by this button. Full 90-cell validation took roughly eight minutes with no per-cell progress. Existing `test_viewer_single_motion_authority.mjs` expects old tool-status metadata and fails on clean 7d8c5de too.
 - OBSERVED during the long validation probe: one stale joint telemetry warning followed by recovery one second later. End-of-run placement and bridge state are consistent; investigate validation-time polling/freshness before treating the warning as a persistent device fault. Raw session events are preserved in the audit report artifacts.
-- Evidence: `docs/R1_R4_SIMULATION_AUDIT_20261005.md`.
+- Evidence: `docs/reviews/R1_R4_SIMULATION_AUDIT_20261005.md`.
 
 ## 2026-10-04 simulated captures
 
@@ -701,7 +701,7 @@ The seven reproduced software failures in `docs/RELIABILITY_RECHECK_20261012.md`
 - Full camera recognition has been exercised with synthetic quality-approved boards, but not verified against a live physical board. Camera quality and extrinsic calibration remain commissioning gates.
 - Current yaw-0 virtual black-cannon approach is blocked by the active collision guard at a gripper/base penetration of 0.18 mm. Keep rejection; plan and verify a collision-free route before enabling this move.
 - Re-scan infers the next turn only from one legal board transition. Multiple changes require operator confirmation with `1` (Red) or `2` (Black) before play resumes; an image alone cannot restore the exact move count in FEN.
-- Whole `tests/unit` regression remains red/incomplete on this base. Historical yaw-90 fixtures require separate rebaselining against the current yaw-0 scene. Focused camera/Game/Twin tests are recorded in `docs/CAMERA_GAME_TWIN_SYNC_2026-09-29.md`.
+- Whole `tests/unit` regression remains red/incomplete on this base. Historical yaw-90 fixtures require separate rebaselining against the current yaw-0 scene. Focused camera/Game/Twin tests are recorded in `docs/architecture/CAMERA_GAME_TWIN_SYNC_2026-09-29.md`.
 
 ## 2026-09-26 current collision milestone
 

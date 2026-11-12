@@ -5,7 +5,7 @@
 - Repo chính: `D:/OJT/xiangqi_robot_TrainningAI_Final_6`, branch `feature/unified-robot-vs-robot`, HEAD `7d8c5deee9e03bb187ccf8e8c1999703202cfd7e`.
 - Snapshot giữ patch tracked/untracked đang có; baseline 467 file. Worktree: `D:/OJT/_reliability_fix_20261012`.
 - Fetch donor `origin/feature/visual-correction-v2` tới `fb0598d`; chỉ lấy quy tắc tọa độ/Z/margin/rotation physical được yêu cầu. Không merge cả branch, không commit/push/reset/clean.
-- Chi tiết sửa và giới hạn: `docs/RELIABILITY_FIXES_20261012.md`.
+- Chi tiết sửa và giới hạn: `docs/reviews/RELIABILITY_FIXES_20261012.md`.
 
 ## Gate cuối
 

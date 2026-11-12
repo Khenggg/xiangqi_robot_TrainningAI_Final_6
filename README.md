@@ -1,16 +1,16 @@
-# [⬇ TẢI XIANGQI.ZIP — WINDOWS X64, ƯU TIÊN GPU](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261110-do0/xiangqi.zip)
+# [⬇ TẢI XIANGQI-FR3.ZIP — WINDOWS 10/11 X64](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-fr3-20261112/Xiangqi-FR3.zip)
 
 **Cập nhật source 11/11/2026 — nhánh `fix/fix-capsule`:** VS ROBOT ở chế độ robot thật phục hồi lỗi gắp/đặt bằng luồng **HOMECHESS → lấy quân và khôi phục bàn → R chạy lại đúng nước chờ**. Đã bỏ `Ctrl+F8`; xem [hướng dẫn R/H](#homechess-recovery). Cập nhật source rồi mở lại `RUN.bat` để sử dụng. Chưa tạo ZIP capsule mới cho thay đổi này; liên kết tải phía trên là bản phát hành ngày 10/11.
 
-**Bản ZIP hoàn chỉnh mới (10/11/2026) dùng chiều kẹp DO0 mở / DO1 đóng và luồng kẹp mới:** mở tối đa rồi khép về khe an toàn trước mỗi lần gắp, đặt quân bằng mở tối đa rồi khép lại khe an toàn sau khi nhấc. Thời gian xung mới: mở tối đa 0,25s, đóng gắp 0,20s. Đã gồm sửa lỗi R1–R4 và các sửa lỗi mô phỏng/web 3D mới nhất. Không cần bản vá riêng. Chi tiết: [luồng kẹp](docs/GRIPPER_DO_PATCH.md).
+**Bản ZIP hoàn chỉnh mới (10/11/2026) dùng chiều kẹp DO0 mở / DO1 đóng và luồng kẹp mới:** mở tối đa rồi khép về khe an toàn trước mỗi lần gắp, đặt quân bằng mở tối đa rồi khép lại khe an toàn sau khi nhấc. Thời gian xung mới: mở tối đa 0,25s, đóng gắp 0,20s. Đã gồm sửa lỗi R1–R4 và các sửa lỗi mô phỏng/web 3D mới nhất. Không cần bản vá riêng. Chi tiết: [luồng kẹp](docs/hardware/GRIPPER_DO_PATCH.md).
 
 **Không dùng bản vá `xiangqi-do1-open-do0-close-patch.zip` cũ** — nó đổi sang DO1 mở, ngược với dây thực tế. Máy đang dùng ZIP cũ chưa có R1–R4 vẫn có thể dùng [bản vá R1–R4](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261109/xiangqi-r1-r4-fix.zip), nhưng nên tải bản đầy đủ mới.
 
 **Cập nhật máy đã dùng bản cũ:** thoát ứng dụng và sao lưu `app/config.py` nếu đã chỉnh riêng. Có thể giải nén ZIP mới chồng lên đúng thư mục cũ để giữ `runtime/`, `state/` và dữ liệu ván; sau đó chỉ khôi phục các giá trị camera/IP riêng nếu cần, không chép lại nguyên config cũ vì sẽ đảo chiều DO và thời gian xung trở lại.
 
-Giải nén **toàn bộ ZIP** → lần đầu mở **INSTALL.bat** (cần Internet để cài thư viện GPU/CPU) → những lần sau mở **start.bat**. ZIP khoảng **274 MiB**; lúc cài cần thêm vài GB dung lượng.
+Giải nén **toàn bộ ZIP** → mở **`Xiangqi-FR3.bat`** ở đầu thư mục. Lần đầu, chương trình kiểm tra máy và chỉ cài phần còn thiếu (Python 3.12, `.venv312`, thư viện; cần Internet nếu thiếu thư viện), rồi mở game; những lần sau mở lại đúng file này. ZIP khoảng **144 MB** (đã gồm model); xem [mục 1](#bat-dau).
 
-Bản mới từ `fix/fix-capsule`: camera thử 0–2, tự enable khi kiểm tra đạt, Player vs Robot dùng logic `vsc-v3` riêng và giữ cấu hình phần cứng hiện tại; web 3D tiếp tục hiển thị. Đã kiểm tra YOLO và ONNX chạy CUDA trên GTX 1650. Xem [hướng dẫn capsule](docs/CAPSULE_OPERATOR.md), [luồng Player vs Robot](docs/HVR_VSC_V3.md) và [SHA256](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261110-do0/xiangqi.zip.sha256).
+Bản mới từ `fix/fix-capsule`: camera thử 0–2, tự enable khi kiểm tra đạt, Player vs Robot dùng logic `vsc-v3` riêng và giữ cấu hình phần cứng hiện tại; web 3D tiếp tục hiển thị. Đã kiểm tra YOLO và ONNX chạy CUDA trên GTX 1650. Xem [hướng dẫn capsule](docs/guides/CAPSULE_OPERATOR.md), [luồng Player vs Robot](docs/architecture/HVR_VSC_V3.md) và [SHA256](https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6/releases/download/xiangqi-gpu-light-20261110-do0/xiangqi.zip.sha256).
 
 # Xiangqi Robot — Sổ tay sử dụng
 
@@ -38,6 +38,14 @@ Hướng dẫn cho người chơi và người vận hành hệ thống cờ tư
 
 <a id="bat-dau"></a>
 ## 1. Bắt đầu trong vài bước
+
+### Bản Xiangqi-FR3.zip (cài và khởi động một chạm)
+
+1. Giải nén `Xiangqi-FR3.zip` vào thư mục local có quyền ghi.
+2. Mở **`Xiangqi-FR3.bat`** ở ngay đầu thư mục. Lần đầu, file này kiểm tra máy và chỉ cài phần còn thiếu: Python 3.12 (cài cho user hiện tại, giữ các bản Python khác), môi trường `.venv312` (dùng lại thư viện đã có trên máy), thư viện Python thiếu, Three.js và model. Nếu một thư viện đã có nhưng sai phiên bản, chương trình hỏi trước khi thêm bản tương thích cho riêng project; từ chối thì giữ nguyên bản cũ (project có thể không chạy đúng).
+3. Sau khi kiểm tra xong, game mở theo đúng luồng `scripts\windows\RUN.bat`; mọi tham số được chuyển nguyên vẹn (ví dụ `Xiangqi-FR3.bat --help`). `Xiangqi-FR3.bat --setup-only` chỉ cài, không mở game. Kết quả lần kiểm tra gần nhất: `build\installer\last-check.json`.
+
+Bộ cài không gửi lệnh nào tới robot. Nhóm build tạo ZIP bằng `scripts\windows\BUILD_XIANGQI_FR3.bat --models "<thư mục models>"`; xem [WINDOWS_CAPSULE_BUILD.md](docs/build/WINDOWS_CAPSULE_BUILD.md).
 
 ### Máy đã có capsule
 
@@ -166,7 +174,7 @@ Tự xác nhận ổn định không phải hệ thống bảo vệ phát hiện
 | Máy chủ đang ĐO LẠI | Người vận hành dùng V/Y trên host cho đúng nước chờ, theo [mục 8](#phuc-hoi) |
 | Muốn ván mới/đầu hàng | Điều khiển ở máy chủ; **SURRENDER trên host là Đỏ đầu hàng**, kể cả đang lượt Đen |
 
-SPACE, M, Z, T/H không dùng để đi tay, rollback hoặc test trong chế độ này. Chi tiết: [Hai người + robot](docs/TWO_HUMAN_ROBOT_MODE.md).
+SPACE, M, Z, T/H không dùng để đi tay, rollback hoặc test trong chế độ này. Chi tiết: [Hai người + robot](docs/architecture/TWO_HUMAN_ROBOT_MODE.md).
 
 ### 4.4. Khi ván kết thúc
 
@@ -181,7 +189,7 @@ Phần này dành cho người vận hành **bộ FR3 đã được hiệu chu�
 
 1. Kiểm tra đúng camera, controller và bộ bàn/quân của setup. Xếp đủ **32 quân đúng thế khai cuộc**.
 2. Cố định camera/bàn; ảnh nhìn rõ bốn giao điểm góc và toàn lưới, ánh sáng đều, không chói hoặc bị che. Nếu dùng DroidCam, mở kết nối điện thoại/PC trước.
-3. Kiểm tra Ethernet, IP/subnet và trạng thái controller. Camera có ảnh không chứng minh robot đã kết nối. Xem [Kết nối robot](ROBOT_CONNECTION.md).
+3. Kiểm tra Ethernet, IP/subnet và trạng thái controller. Camera có ảnh không chứng minh robot đã kết nối. Xem [Kết nối robot](docs/hardware/ROBOT_CONNECTION.md).
 4. Người phụ trách xác minh vị trí tay hiện tại, tool/TCP, robot-base/user frame, kẹp, vùng di chuyển, độ cao và đường đi; chuẩn bị E-stop. Sau mất điện, va chạm hoặc đổi setup, cần kiểm tra lại trước khi bật game.
 5. Không mở hai host physical ở hai bản source/capsule cùng lúc.
 
@@ -317,7 +325,7 @@ Không còn bước yêu cầu người chơi xác nhận tay/kẹp an toàn. V/
 | START.bat không mở / thiếu file / `Capsule missing/damaged` | Kiểm tra đúng Windows x64 và giải nén toàn bộ; xem `state/launcher-error-*.log`. Giữ bản cũ cùng journal/calibration; giải nén bản sạch sang thư mục riêng để kiểm tra, không dùng bản mới điều khiển physical khi giao dịch cũ chưa giải quyết |
 | `Capsule checksum mismatch` | Ghi lại đúng đường dẫn lỗi; team đối chiếu manifest/thay đổi. Không sửa manifest cho qua; bảo toàn dữ liệu trước khi thay bộ phát hành |
 | `settings.json` lỗi | Sửa đúng JSON và đúng ba trường hợp lệ ở mục 11; camera index phải là số nguyên, IP phải là IPv4 hợp lệ |
-| Source thiếu Python/dependency/Three.js | Chạy SETUP_WINDOWS.bat và kiểm tra thành công trước RUN; xem phụ lục. Không áp dụng cách này cho capsule |
+| Source thiếu Python/dependency/Three.js | Chạy `scripts\windows\SETUP_WINDOWS.bat` và kiểm tra thành công trước RUN; xem phụ lục. Không áp dụng cách này cho capsule |
 | Viewer không tự mở | Xem URL `[VIEWER]` trên terminal, mở đúng URL đó trong trình duyệt. Không mở trực tiếp `index.html` bằng `file://` |
 | Viewer trắng / model không tải | Capsule: kiểm tra bộ đầy đủ. Source: kiểm tra asset và chạy SETUP. Tải lại trang, xem `VIEWER_FAILED` trong log |
 | `PORT_BUSY` / cổng đang dùng | Kiểm tra phiên cũ và đúng tiến trình sở hữu cổng. Source có `--viewer-port`/`--telemetry-port`; xem phụ lục. Không mở thêm host physical để né lỗi |
@@ -362,7 +370,7 @@ Log đánh số **hàng 0–9, cột 0–8**. Ô `b9` nghĩa cột `b = 1`, hàn
 |---|---|
 | `READ-ONLY`, `ROBOT_NOT_READY` | Hoàn tất kiểm tra setup/bàn/controller rồi V đối soát nếu UI yêu cầu; auto-enable tiếp tục khi đủ điều kiện. Nếu vẫn chờ, đọc `physical.auto_enable_waiting` để biết cờ đang chặn |
 | `PHYSICAL_ENABLE_FAILED`, `Fresh idle robot telemetry required` | Kiểm tra telemetry mới, idle/ready, controller, camera và mọi pending/recovery; không dùng F12 thay kiểm tra thiết bị |
-| `Robot SDK not connected`, RPC timeout, `outcome unknown, do not resend` | Kiểm tra tay/kẹp trước; không gửi lại lệnh chưa rõ kết quả. Kiểm tra cáp/adapter/IP/subnet trên đúng đường Ethernet; xem ROBOT_CONNECTION.md |
+| `Robot SDK not connected`, RPC timeout, `outcome unknown, do not resend` | Kiểm tra tay/kẹp trước; không gửi lại lệnh chưa rõ kết quả. Kiểm tra cáp/adapter/IP/subnet trên đúng đường Ethernet; xem docs/hardware/ROBOT_CONNECTION.md |
 | Camera đã xác nhận bàn nhưng “Robot đang lỗi” | Xem mã lỗi controller trên UI và xử lý trên WebApp/pendant. V/Continue tự đọc lại trạng thái; không có bước xác nhận tay/kẹp. FEN/V/F12 không xóa lỗi controller |
 | `No stable box centre`, pick retry, offset vượt giới hạn | Xem đúng quân/ô, độ lệch và jitter. Giới hạn mặc định hiện tại là **6 mm** trong config; kiểm tra quân/ảnh/calibration rồi dùng Y/V đúng trạng thái. Không tăng ngưỡng để ép gắp |
 | `RECOVERY_REQUIRED`, `STOP_RECOVERY_REQUIRED` | Xem nguyên nhân cụ thể: lỗi controller, worker/xung kẹp còn chạy, telemetry cũ hoặc kết quả lệnh dừng chưa rõ. VS ROBOT giữ nước đi chờ phục hồi HOMECHESS. F2 thử đóng lại và tự kiểm tra controller; không yêu cầu xác nhận tay/kẹp |
@@ -422,7 +430,7 @@ Phím game áp dụng khi **cửa sổ game chính** được chọn; các thao 
 
 Bản mới không dùng `settings.json` để ghi đè cấu hình. Chỉnh camera/IP tại `app/config.py` giống chạy source; biến môi trường vẫn có tác dụng. Camera ưu tiên `VIDEO_INDEX` nếu có, nếu không dùng `VIDEO_SOURCE`, rồi thử các index còn lại trong 0–2.
 
-GPU được ưu tiên khi runtime CUDA và driver phù hợp; `VISION_DEVICE=cpu` cho phép chọn CPU theo cấu hình project. Lần đầu cần Internet để cài ML; những lần sau dùng runtime đã cài. Không ép engine/chế độ/token về cấu hình capsule cũ. Xem [hướng dẫn bộ cài](docs/CAPSULE_OPERATOR.md).
+GPU được ưu tiên khi runtime CUDA và driver phù hợp; `VISION_DEVICE=cpu` cho phép chọn CPU theo cấu hình project. Lần đầu cần Internet để cài ML; những lần sau dùng runtime đã cài. Không ép engine/chế độ/token về cấu hình capsule cũ. Xem [hướng dẫn bộ cài](docs/guides/CAPSULE_OPERATOR.md).
 
 ### Dữ liệu ở đâu?
 
@@ -454,7 +462,7 @@ GPU được ưu tiên khi runtime CUDA và driver phù hợp; `VISION_DEVICE=cp
 - Digital twin physical có thể hiển thị tay khi mirror bàn chưa được hiệu chuẩn đầy đủ. Mô phỏng không thay nghiệm thu hình học/va chạm thực tế.
 - Phòng Đỏ–Đen chỉ localhost cùng PC. Menu chưa có tiếp tục nguyên ván cũ.
 
-Chi tiết trạng thái: [KNOWN_ISSUES.md](KNOWN_ISSUES.md). Cẩm nang cũ tại `docs/USER_MANUAL_QUICKSTART.md` đã được chuyển hướng về README này; các tài liệu kỹ thuật có ngày cũ cần đối chiếu code/config hiện tại khi vận hành.
+Chi tiết trạng thái: [KNOWN_ISSUES.md](KNOWN_ISSUES.md). Cẩm nang cũ tại `docs/guides/USER_MANUAL_QUICKSTART.md` đã được chuyển hướng về README này; các tài liệu kỹ thuật có ngày cũ cần đối chiếu code/config hiện tại khi vận hành.
 
 <a id="source"></a>
 ## Phụ lục — Chạy source và tra cứu kỹ thuật
@@ -466,23 +474,23 @@ Dành cho người phát triển: cần **Git, Python 3.12 x64 có Launcher `py`
 ```powershell
 git clone --branch final https://github.com/Khenggg/xiangqi_robot_TrainningAI_Final_6.git
 cd xiangqi_robot_TrainningAI_Final_6
-.\SETUP_WINDOWS.bat
+.\scripts\windows\SETUP_WINDOWS.bat
 if ($LASTEXITCODE -ne 0) { throw 'SETUP thất bại. Xử lý lỗi trước khi chạy game.' }
-.\RUN.bat
+.\scripts\windows\RUN.bat
 ```
 
 SETUP tạo `.venv312`, cài thư viện và tài nguyên Three.js; không tải trọng số nhận diện/calibration. Physical cần đủ `models/best.pt`, `models/cchess/pose_4_v6.onnx`, `models/cchess/layout_nano_v3.onnx`, do team cung cấp riêng. Moonfish source đã có trong repo. Những lần sau dùng RUN; chỉ chạy lại SETUP khi cần sửa/cập nhật môi trường.
 
 | Lệnh source | Tác dụng |
 |---|---|
-| `.\RUN.bat --board-only` | Chọn sẵn bàn 2D; alias `--virtual` cũng nghĩa bàn 2D, không phải simulation 3D |
-| `.\RUN.bat --sim` | Chọn sẵn simulation 3D; cũng là mặc định |
-| `.\RUN.bat --robot` | Chọn sẵn physical, ban đầu chỉ đọc; alias `--physical` |
-| `.\RUN.bat --physical --recalibrate-camera` | Yêu cầu luồng calibration camera tương tác; checkbox trên menu mở chấm tay bốn góc |
-| `.\RUN.bat --no-3d` | Không mở viewer, giữ backend; alias `--no-viewer` |
-| `.\RUN.bat --simulation-profile fast` | Playback mô phỏng nhanh hơn; vẫn kiểm tra physics, không đổi tốc độ robot thật |
-| `.\RUN.bat --viewer-port 8098 --telemetry-port 8898` | Cổng viewer/WebSocket khác nhau khi cổng mặc định 8088/8765 bị chiếm; không cho phép chạy thêm chủ robot thật |
-| `.\RUN.bat --help` | Xem tùy chọn CLI, không mở thiết bị |
+| `.\scripts\windows\RUN.bat --board-only` | Chọn sẵn bàn 2D; alias `--virtual` cũng nghĩa bàn 2D, không phải simulation 3D |
+| `.\scripts\windows\RUN.bat --sim` | Chọn sẵn simulation 3D; cũng là mặc định |
+| `.\scripts\windows\RUN.bat --robot` | Chọn sẵn physical, ban đầu chỉ đọc; alias `--physical` |
+| `.\scripts\windows\RUN.bat --physical --recalibrate-camera` | Yêu cầu luồng calibration camera tương tác; checkbox trên menu mở chấm tay bốn góc |
+| `.\scripts\windows\RUN.bat --no-3d` | Không mở viewer, giữ backend; alias `--no-viewer` |
+| `.\scripts\windows\RUN.bat --simulation-profile fast` | Playback mô phỏng nhanh hơn; vẫn kiểm tra physics, không đổi tốc độ robot thật |
+| `.\scripts\windows\RUN.bat --viewer-port 8098 --telemetry-port 8898` | Cổng viewer/WebSocket khác nhau khi cổng mặc định 8088/8765 bị chiếm; không cho phép chạy thêm chủ robot thật |
+| `.\scripts\windows\RUN.bat --help` | Xem tùy chọn CLI, không mở thiết bị |
 
 Chọn một môi trường; không ghép `--sim` với `--robot`/`--board-only`. `--recalibrate-camera` cần `--physical`; playback profile chỉ cho simulation. Các cờ CLI ở bảng này dành cho **RUN.bat từ source**; START.bat capsule chỉ nhận `--check` và `--smoke`, môi trường chọn qua settings/menu.
 
@@ -493,26 +501,26 @@ Camera source lấy `VIDEO_INDEX` nếu có, nếu không lấy `config.VIDEO_SO
 Trên máy phát triển đã chuẩn bị đủ model:
 
 ```powershell
-.\BUILD_CAPSULE.bat --models "D:\path\to\models"
+.\scripts\windows\BUILD_CAPSULE.bat --models "D:\path\to\models"
 ```
 
-Kết quả portable/ZIP/checksum tại `dist/`. Build và kiểm chứng bộ mới trước khi phát hành; giữ dữ liệu phiên/calibration của máy vận hành khi nâng cấp. Xem [WINDOWS_CAPSULE_BUILD.md](docs/WINDOWS_CAPSULE_BUILD.md).
+Kết quả portable/ZIP/checksum tại `dist/`. Build và kiểm chứng bộ mới trước khi phát hành; giữ dữ liệu phiên/calibration của máy vận hành khi nâng cấp. Xem [WINDOWS_CAPSULE_BUILD.md](docs/build/WINDOWS_CAPSULE_BUILD.md).
 
 ### C. Tài liệu và điểm đối chiếu code
 
 | Chủ đề | Hướng dẫn / nguồn thực thi |
 |---|---|
-| Launcher capsule, check/smoke/settings | [CAPSULE_OPERATOR.md](docs/CAPSULE_OPERATOR.md), [launcher.py](tools/capsule/launcher.py) |
+| Launcher capsule, check/smoke/settings | [CAPSULE_OPERATOR.md](docs/guides/CAPSULE_OPERATOR.md), [launcher.py](tools/capsule/launcher.py) |
 | Menu, độ khó, enable, dừng/thoát | [main.py](main.py), [board_renderer.py](src/ui/board_renderer.py), [exit_confirmation.py](src/ui/exit_confirmation.py) |
-| Capability từng mode, CLI | [session_profile.py](src/core/session_profile.py), [launch_options.py](src/core/launch_options.py), [START_PROJECT.md](docs/START_PROJECT.md) |
+| Capability từng mode, CLI | [session_profile.py](src/core/session_profile.py), [launch_options.py](src/core/launch_options.py), [START_PROJECT.md](docs/guides/START_PROJECT.md) |
 | V/Y/F4/F12, emergency, rollback, test | [input_handler.py](src/ui/input_handler.py), [game_state.py](src/core/game_state.py), [recovery_status.py](src/ui/recovery_status.py) |
 | Dừng, đổi phiên, New Game, đầu hàng | [session_control.py](src/core/session_control.py), [controlled_stop.py](src/hardware/controlled_stop.py) |
-| Hai người + robot và client Đen | [TWO_HUMAN_ROBOT_MODE.md](docs/TWO_HUMAN_ROBOT_MODE.md), [robot_pvp.py](src/core/robot_pvp.py), [pvp_client.py](src/ui/pvp_client.py) |
+| Hai người + robot và client Đen | [TWO_HUMAN_ROBOT_MODE.md](docs/architecture/TWO_HUMAN_ROBOT_MODE.md), [robot_pvp.py](src/core/robot_pvp.py), [pvp_client.py](src/ui/pvp_client.py) |
 | Kiểm tra bàn/điểm gắp, bật physical | [hardware_manager.py](src/hardware/hardware_manager.py), [board_diagnostics.py](src/vision/board_diagnostics.py) |
 | Chấm góc camera | [calibrate_camera.py](src/vision/calibrate_camera.py), [camera_startup.py](src/vision/camera_startup.py) |
-| Ethernet và frame robot | [ROBOT_CONNECTION.md](ROBOT_CONNECTION.md), [ROBOT_FRAME_BASE_ONLY.md](docs/ROBOT_FRAME_BASE_ONLY.md), [BRD_XY_CALIBRATION.md](docs/BRD_XY_CALIBRATION.md) |
-| Calibration intrinsics/geometry — kỹ thuật viên | [camera_offset_notes.md](docs/camera_offset_notes.md), [geometry-measurement.md](docs/geometry-measurement.md), [teaching_points_guide.md](docs/teaching_points_guide.md) |
-| Log/journal và khởi tạo phiên | [LOGGING.md](docs/LOGGING.md), [project_logging.py](src/core/project_logging.py), [game_persistence.py](src/core/game_persistence.py), [session_startup.py](src/core/session_startup.py) |
+| Ethernet và frame robot | [docs/hardware/ROBOT_CONNECTION.md](docs/hardware/ROBOT_CONNECTION.md), [ROBOT_FRAME_BASE_ONLY.md](docs/architecture/ROBOT_FRAME_BASE_ONLY.md), [BRD_XY_CALIBRATION.md](docs/hardware/BRD_XY_CALIBRATION.md) |
+| Calibration intrinsics/geometry — kỹ thuật viên | [camera_offset_notes.md](docs/hardware/camera_offset_notes.md), [geometry-measurement.md](docs/guides/geometry-measurement.md), [teaching_points_guide.md](docs/guides/teaching_points_guide.md) |
+| Log/journal và khởi tạo phiên | [LOGGING.md](docs/guides/LOGGING.md), [project_logging.py](src/core/project_logging.py), [game_persistence.py](src/core/game_persistence.py), [session_startup.py](src/core/session_startup.py) |
 | Cấu hình đang thực thi | [config.py](config.py) |
 
 Sổ tay dành cho người dùng; không thay tài liệu commissioning hoặc hướng dẫn bảo trì của controller/robot.

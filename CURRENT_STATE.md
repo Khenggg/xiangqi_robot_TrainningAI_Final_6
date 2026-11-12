@@ -1,3 +1,17 @@
+## 2026-11-12 repository layout and Xiangqi-FR3.zip installer
+Files moved with git mv (contents unchanged except the path references they
+need): root launchers to scripts/windows/ (each now cds to the repo root),
+scripts to scripts/{calibration,training,models}/, ROBOT_CONNECTION.md and the
+59 flat docs to docs/{guides,architecture,hardware,api,build,reviews,specs,
+notes}/, the Python installer to tools/installer/vendor/. Runtime roots (src,
+shared, calibration, models, moonfish, robot-3d-viewer, assets, main.py,
+config.py) and agent docs stay put. Markdown links/path mentions rewritten;
+broken-link set identical before/after (41 pre-existing).
+New Xiangqi-FR3.bat + tools/installer/: install Python 3.12 / .venv312 /
+missing packages / Three.js / ONNX only when absent, pip pinned to installed
+versions, incompatible versions replaced only with consent, then calls
+scripts/windows/RUN.bat unchanged. build_zip.py writes Xiangqi-FR3.zip
+(gitignored) with models. No physical operation. LAST_REVIEWED_HEAD unchanged.
 ## 2026-11-05 need-review publication checks
 
 Robot PvP and the subsequent camera/stop/pick/exit fixes prepared on top of
@@ -322,7 +336,7 @@ timestamps/observation IDs. Scoped review resolved non-standard numeric JSON;
 no remaining introduced findings were reported. Focused initial gate: 27 parallel + 1 serial
 passed after fixing a finite retry mock stream that exhausted instead of
 representing a persistent wrong board. Production camera/robot and full
-repository regression: NOT RUN. Details: `docs/LOGGING.md`.
+repository regression: NOT RUN. Details: `docs/guides/LOGGING.md`.
 
 ## 2026-10-30 fresh game on launcher startup
 
@@ -373,7 +387,7 @@ cable/connector is loose. `GetControllerIP: controller reply unavailable` and
 `Robot SDK not connected` are link symptoms, not automatically code regressions.
 Re-seat the cable and verify with `ping -n 2 -S 192.168.58.3 192.168.58.2` before
 restarting. Do not replay motion or enable F9/F10 on an unstable link. See
-[`ROBOT_CONNECTION.md`](ROBOT_CONNECTION.md).
+[`docs/hardware/ROBOT_CONNECTION.md`](docs/hardware/ROBOT_CONNECTION.md).
 
 ## 2026-10-28 identity-WObj frame normalization
 
@@ -409,9 +423,9 @@ Removed self-suspended or legacy documentation that no longer reflects the
 current architecture: the Phase 4 runbook/audit/acceptance/checklist/template
 cluster, the FR5 motion model, the suspended R1-R4 placement guide, the
 2026-09-24/26 FR3 reviews, the 2026-09-25 handoff note and the 2026-09-09 branch
-changelog. Active pointers now reference `docs/BRD_XY_CALIBRATION.md`,
-`docs/ROBOT_FRAME_BASE_ONLY.md` and `docs/VISUAL_V2_MOTION_PROFILE.md`.
-`PROJECT_CONTEXT.md`, `CURRENT_STATE.md` and `docs/PHYSICAL_GEOMETRY_CONTRACT.md`
+changelog. Active pointers now reference `docs/hardware/BRD_XY_CALIBRATION.md`,
+`docs/architecture/ROBOT_FRAME_BASE_ONLY.md` and `docs/architecture/VISUAL_V2_MOTION_PROFILE.md`.
+`PROJECT_CONTEXT.md`, `CURRENT_STATE.md` and `docs/architecture/PHYSICAL_GEOMETRY_CONTRACT.md`
 were updated accordingly. Content remains in Git history; no code, tests,
 calibration artifacts or hardware were changed.
 
@@ -517,7 +531,7 @@ updates the gripper jaw; virtual/game-only never emits the packet and the viewer
 ignores stray copies. `world_state` remains the position source. Tests: physical
 packet emission, virtual isolation, stale-poll attachment and Node viewer gating;
 57 related tests passed with the known capture-retention baseline failure. No
-hardware run. See `docs/LOGGING.md`.
+hardware run. See `docs/guides/LOGGING.md`.
 
 ## 2026-10-26 viewer gripper animation no longer depends on telemetry poll
 
@@ -530,7 +544,7 @@ path logs `twin.animation_attached`/`released`, keeps
 command-animation flag. This changes display only; camera verification and game
 commit remain authoritative. New test covers stale-poll attachment; 24 related
 tests passed, with the known capture-retention baseline failure remaining. No
-hardware run. See `docs/LOGGING.md`.
+hardware run. See `docs/guides/LOGGING.md`.
 
 ## 2026-10-26 board mirror surface Z from R1-R4 or measurement
 
@@ -542,7 +556,7 @@ mirror refuses and the default relay remains. `board.surface_z_resolved` records
 the source/value/spread. This Z affects only the viewer mirror; command heights
 remain `PICK_Z`/`PLACE_Z`/`SAFE_Z`. Tests: 4 new source-resolution tests plus
 existing adapter/calibration suites; known baseline failures remain. No hardware
-run. See `docs/BRD_XY_CALIBRATION.md` and `docs/LOGGING.md`.
+run. See `docs/hardware/BRD_XY_CALIBRATION.md` and `docs/guides/LOGGING.md`.
 
 ## 2026-10-26 first-pick gripper opening and pick-target retry
 
@@ -554,7 +568,7 @@ retries `VISUAL_PICK_RETRY_ATTEMPTS=3` times with a 0.4s interval before
 `PICK_PAUSED`, logging `vision.pick_retry`; the 6mm/0.12-cell limits are
 unchanged. Evidence: 23 physical-gate tests, 3 retry tests and 192 targeted
 tests passed; one known baseline fixture failure remains. No physical run. See
-`docs/LOGGING.md`.
+`docs/guides/LOGGING.md`.
 
 ## 2026-10-26 visual-correction-v2 motion profile adopted
 
@@ -566,7 +580,7 @@ and physical startup emits `motion.profile_unverified`. Gripper pulses
 (0.30/0.80), `DRY_RUN`, camera index/resolution, height-pick and board-sync flags
 were deliberately not copied. No hardware measurement or actuation. Tests:
 profile-adoption test plus existing targeted suites; known baseline failures
-remain. See `docs/VISUAL_V2_MOTION_PROFILE.md`.
+remain. See `docs/architecture/VISUAL_V2_MOTION_PROFILE.md`.
 
 ## 2026-10-26 camera recognition readiness and board verification retry
 
@@ -578,7 +592,7 @@ bounded window (`VERIFY_BOARD_RETRY_TIMEOUT_SEC=2.0`, poll 0.15s) before failing
 while keeping exact 90-cell equality. It logs attempts and per-cell differences.
 Evidence: 279 targeted tests plus new calibration/readiness/retry tests; one
 known baseline fixture failure remains. No camera, robot or physical run. See
-`docs/START_PROJECT.md` and `docs/LOGGING.md`.
+`docs/guides/START_PROJECT.md` and `docs/guides/LOGGING.md`.
 
 ## 2026-10-26 camera calibration startup
 
@@ -589,7 +603,7 @@ explicit instruction. The source is logged as `SAVED_CALIBRATION` or
 `FRESH_CALIBRATION`, with path/hash/camera index. No camera-index or resolution
 metadata is bound to the matrix yet. Evidence: 99 targeted tests plus 5 new
 calibration-startup tests; the known baseline failure remains. No camera or
-hardware run. See `docs/START_PROJECT.md` and `docs/LOGGING.md`.
+hardware run. See `docs/guides/START_PROJECT.md` and `docs/guides/LOGGING.md`.
 
 ## 2026-10-26 robot frame policy: robot base only (user 0)
 
@@ -606,12 +620,12 @@ events: `vision.pick_attempt`, `vision.pick_resolved`, `vision.pick_failed`,
 evidence: 68 + 88 + 54 + 175 tests passed; the previously known baseline
 failures remain. No physical execution in this change. Re-teaching
 R1-R4/HOMECHESS/R_Trash in user 0 on the pendant is still required. See
-`docs/ROBOT_FRAME_BASE_ONLY.md` and `docs/LOGGING.md`.
+`docs/architecture/ROBOT_FRAME_BASE_ONLY.md` and `docs/guides/LOGGING.md`.
 
 ## 2026-10-19 executable user-flow QA follow-up
 
 The latest user request authorized mock/virtual execution. The earlier no-test
-blocker below is historical. See docs/USER_FLOW_QA_20261019.md and
+blocker below is historical. See docs/reviews/USER_FLOW_QA_20261019.md and
 reports/user-flow-qa-20261019/ for the current source manifest and evidence.
 Three real main-loop/PyBullet/headless-viewer flows completed 10 plies each,
 surrender, New Game and mode switching. Final focused tests: 125 passed;
@@ -637,7 +651,7 @@ next step is approved isolated verification and repairs driven by those results.
 combined with --physical or --virtual (simulation disabled). Physical speed and
 enable are untouched. Telemetry/viewer receive the selected default; virtual
 bindings include profile/backend speed. Source/syntax/diff only; playback timing,
-all-animation visibility and T-10/T-21 are not verified. See docs/SIMULATION_PLAYBACK.md.
+all-animation visibility and T-10/T-21 are not verified. See docs/guides/SIMULATION_PLAYBACK.md.
 
 ## 2026-10-19 captured tray draft
 
@@ -729,7 +743,7 @@ Simulation R1–R4 now fits XY SE(2); board height is a separate input. Apply re
 the current placement version; profile v2 records model/height and scene/geometry
 digests. Shared cell mapping reads authoritative geometry spacing. Source/syntax
 checks only, no execution evidence. Physical controller XY registration and full
-transaction/scene version integration remain open; see docs/BRD_XY_CALIBRATION.md.
+transaction/scene version integration remain open; see docs/hardware/BRD_XY_CALIBRATION.md.
 
 ## 2026-10-14 BRD spectator routing draft
 
@@ -771,7 +785,7 @@ Durable session journal and commit-before-projection hooks added. Reopened sessi
 are paused for operator reconciliation; unknown command-stage receipts are not
 replayed. Exception shutdown gains a recovery UI. Compileall/diff check only:
 NO runtime/tests/hardware evidence. Async outbox delivery has a later draft;
-full BRD gates remain open. See docs/BRD_IMPLEMENTATION_PROGRESS.md. Dirty worktree,
+full BRD gates remain open. See docs/reviews/BRD_IMPLEMENTATION_PROGRESS.md. Dirty worktree,
 not commissioned.
 
 ## 2026-10-14 BRD controlled-stop draft
@@ -779,56 +793,56 @@ not commissioned.
 Controlled-stop/deferred-reset/RvR end ordering implemented in the dirty worktree.
 Compileall and diff whitespace check succeeded; no tests, GUI or hardware execution.
 Do not treat earlier test evidence as covering these changes. PR2/BRD full goal is
-still active; see docs/BRD_IMPLEMENTATION_PROGRESS.md for scope and remaining gates.
+still active; see docs/reviews/BRD_IMPLEMENTATION_PROGRESS.md for scope and remaining gates.
 
 ## 2026-10-13 Camera Monitor / GPU correction
 
-Continuous capture/inference start restored, atomic/pick snapshot APIs restored, stale boxes hidden, VISION_DEVICE=auto/cpu supported. Installed Torch2.14.1+cu126 + ORT-GPU1.20.2; actual camera2/DSHOW GPU preview retained32 named pieces through15s. Final scoped gate123passes. Full gate857passes/12baseline findings; UI accent fix resolves3,9findings remain. See docs/CAMERA_MONITOR_GPU_FIX_20261013.md. No robot actuation or calibration changes.
+Continuous capture/inference start restored, atomic/pick snapshot APIs restored, stale boxes hidden, VISION_DEVICE=auto/cpu supported. Installed Torch2.14.1+cu126 + ORT-GPU1.20.2; actual camera2/DSHOW GPU preview retained32 named pieces through15s. Final scoped gate123passes. Full gate857passes/12baseline findings; UI accent fix resolves3,9findings remain. See docs/reviews/CAMERA_MONITOR_GPU_FIX_20261013.md. No robot actuation or calibration changes.
 
 ## 2026-10-13 raw arm reconnect QA
 
-Failed SDK startup now retains the read-only state mirror/WebSocket so receiver recovery can reach the viewer independently of board calibration. No automatic actuation authorization. 98 scoped Python passes and three Node suites; actual FR3 + WebSocket + browser joint values matched with board uncalibrated. See docs/ARM_RECONNECT_QA_20261013.md.
+Failed SDK startup now retains the read-only state mirror/WebSocket so receiver recovery can reach the viewer independently of board calibration. No automatic actuation authorization. 98 scoped Python passes and three Node suites; actual FR3 + WebSocket + browser joint values matched with board uncalibrated. See docs/reviews/ARM_RECONNECT_QA_20261013.md.
 
 ## 2026-10-13 board-side orientation QA
 
-Nominal board rotated180 around unchanged center/height to match requested physical red/black sides. Defaults/providers/cell helpers follow scene yaw; explicit rotations retained. Verified90 scoped Python tests, four Node suites, browser32 meshes and physical arm joint telemetry. Physical board calibration/motion still unverified. See docs/BOARD_SIDE_ORIENTATION_QA_20261013.md.
+Nominal board rotated180 around unchanged center/height to match requested physical red/black sides. Defaults/providers/cell helpers follow scene yaw; explicit rotations retained. Verified90 scoped Python tests, four Node suites, browser32 meshes and physical arm joint telemetry. Physical board calibration/motion still unverified. See docs/reviews/BOARD_SIDE_ORIENTATION_QA_20261013.md.
 
 ## 2026-10-13 raw arm viewer QA
 
-Main-process FR3 raw telemetry and browser joint update verified read-only. Misleading PREVIEW OFFLINE launch warning repaired: arm-live status and uncalibrated board warning are separate. Four Node viewer suites passed; isolated browser Connect/disconnect against actual main WebSocket passed. Operator tab verification pending; see docs/RAW_ARM_VIEWER_QA_20261013.md.
+Main-process FR3 raw telemetry and browser joint update verified read-only. Misleading PREVIEW OFFLINE launch warning repaired: arm-live status and uncalibrated board warning are separate. Four Node viewer suites passed; isolated browser Connect/disconnect against actual main WebSocket passed. Operator tab verification pending; see docs/reviews/RAW_ARM_VIEWER_QA_20261013.md.
 
 ## 2026-10-13 live QA / SDK shutdown
 
-VS ROBOT/EASY live QA: current session lacks SDK measurements; ping subsequently failed. SDK shutdown/reconnect cancellation repaired, 58 scoped passes (real local socket/thread tests). Fresh physical telemetry/viewer and moves pending operator network check. See docs/LIVE_QA_SDK_SHUTDOWN_20261013.md.
+VS ROBOT/EASY live QA: current session lacks SDK measurements; ping subsequently failed. SDK shutdown/reconnect cancellation repaired, 58 scoped passes (real local socket/thread tests). Fresh physical telemetry/viewer and moves pending operator network check. See docs/reviews/LIVE_QA_SDK_SHUTDOWN_20261013.md.
 
 ## 2026-10-13 SDK connection / calibration separation
 
-Live controller read: R1-R3 tool=0,user=1; R4 tool=0,user=0. Teaching-point validation no longer marks an established SDK connection disconnected. Raw arm telemetry/WebSocket remains available; invalid calibration blocks physical enable/actuation and board alignment. Focused gate: 106 passes, including actual local WebSocket with mocked measurements. Patched GUI/hardware motion NOT RUN. See docs/SDK_CONNECTION_CALIBRATION_SPLIT_20261013.md.
+Live controller read: R1-R3 tool=0,user=1; R4 tool=0,user=0. Teaching-point validation no longer marks an established SDK connection disconnected. Raw arm telemetry/WebSocket remains available; invalid calibration blocks physical enable/actuation and board alignment. Focused gate: 106 passes, including actual local WebSocket with mocked measurements. Patched GUI/hardware motion NOT RUN. See docs/hardware/SDK_CONNECTION_CALIBRATION_SPLIT_20261013.md.
 
 ## 2026-10-13 worker scheduling / retry review
 
-Six reproduced boundary failures repaired: QUIT remaining-event dispatch, F6 discarding unconsumed results or paused checkpoints, self-play overlapping UI worker jobs, retry baseline/mirror failures, and terminal retry publication. Final subsystem: 189 passes; independent before/after scheduling probe: 100/100 mock-executor replays. Full gate: 1044 parallel + 8 serial = 1052 passes (exit 0). Primary compile/parity passed; see delivery-manifest.json. See `docs/RUNTIME_RACE_REVIEW_20261013.md` and `reports/runtime-race-review-20261013/`. Hardware, firmware completion and real grasp remain unverified.
+Six reproduced boundary failures repaired: QUIT remaining-event dispatch, F6 discarding unconsumed results or paused checkpoints, self-play overlapping UI worker jobs, retry baseline/mirror failures, and terminal retry publication. Final subsystem: 189 passes; independent before/after scheduling probe: 100/100 mock-executor replays. Full gate: 1044 parallel + 8 serial = 1052 passes (exit 0). Primary compile/parity passed; see delivery-manifest.json. See `docs/reviews/RUNTIME_RACE_REVIEW_20261013.md` and `reports/runtime-race-review-20261013/`. Hardware, firmware completion and real grasp remain unverified.
 
 ## 2026-10-13 game mode review
 
-Repaired UNIFIED Black turns/rearming/recognition quality/sample gaps and post-mirror recovery, AI/self-play finished or unconfirmed entry guards, and Continuous surrender at a safe READY boundary. Final affected gate: 160 passes; full gate: 1029 parallel + 8 serial = 1037 passes. Each of three game modes completed a deterministic 10-ply/two-capture sequence, surrender and New Game with real PyBullet board reconciliation and mocked arm execution. Evidence: `docs/GAME_MODE_REVIEW_20261013.md`; latest hashes: `reports/mode-review-20261013/delivery-manifest.json`. Physical actuation/vision and trajectories remain unverified; no geometry/calibration change.
+Repaired UNIFIED Black turns/rearming/recognition quality/sample gaps and post-mirror recovery, AI/self-play finished or unconfirmed entry guards, and Continuous surrender at a safe READY boundary. Final affected gate: 160 passes; full gate: 1029 parallel + 8 serial = 1037 passes. Each of three game modes completed a deterministic 10-ply/two-capture sequence, surrender and New Game with real PyBullet board reconciliation and mocked arm execution. Evidence: `docs/reviews/GAME_MODE_REVIEW_20261013.md`; latest hashes: `reports/mode-review-20261013/delivery-manifest.json`. Physical actuation/vision and trajectories remain unverified; no geometry/calibration change.
 
 ## 2026-10-12 lifecycle edge review
 
-Additional fixes: human/Black Emergency terminal publication, entrypoint rejection for finished/unconfirmed/illegal moves, preservation of rejected Red Emergency recovery, rollback undo-stack restoration, Emergency mirror/result handling, and camera-Q same-frame dispatch prevention. Final subsystem gate: 142 passes; full gate: 1011 parallel + 8 serial = 1019 passes, including a real headless main.py camera-Q probe with mocked devices. Details: `docs/LIFECYCLE_EDGE_REVIEW_20261012.md`; latest hashes: `edge-delivery-manifest.json`. Hardware remains unverified.
+Additional fixes: human/Black Emergency terminal publication, entrypoint rejection for finished/unconfirmed/illegal moves, preservation of rejected Red Emergency recovery, rollback undo-stack restoration, Emergency mirror/result handling, and camera-Q same-frame dispatch prevention. Final subsystem gate: 142 passes; full gate: 1011 parallel + 8 serial = 1019 passes, including a real headless main.py camera-Q probe with mocked devices. Details: `docs/reviews/LIFECYCLE_EDGE_REVIEW_20261012.md`; latest hashes: `edge-delivery-manifest.json`. Hardware remains unverified.
 
 ## 2026-10-12 spectator lifecycle follow-up
 
-F8 → F6 reopens spectator with the current FEN, startup reuses queued rooms, New Game explicitly rotates rooms, and finished games require New Game. Self-play startup failure messages remain visible. Final subsystem gate: 85 passes; full gate: 996 parallel + 8 serial = 1004 passes. Real headless main.py F8/F6 event routing passed with mocked devices/HTTP and zero robot commands. See `docs/SPECTATOR_LIFECYCLE_FIX_20261012.md` for delivery evidence; latest hashes: `session-lifecycle-delivery-manifest.json`. Hardware and live spectator service remain unverified.
+F8 → F6 reopens spectator with the current FEN, startup reuses queued rooms, New Game explicitly rotates rooms, and finished games require New Game. Self-play startup failure messages remain visible. Final subsystem gate: 85 passes; full gate: 996 parallel + 8 serial = 1004 passes. Real headless main.py F8/F6 event routing passed with mocked devices/HTTP and zero robot commands. See `docs/reviews/SPECTATOR_LIFECYCLE_FIX_20261012.md` for delivery evidence; latest hashes: `session-lifecycle-delivery-manifest.json`. Hardware and live spectator service remain unverified.
 
 ## 2026-10-12 second reliability review
 
-Seven additional failure groups reproduced and repaired: startup UI rollback, Continue confidence/current-color, recovery error lifecycle, spectator stop/terminal publication, and known king-capture board verification. Final affected gate 110 passes; full pre-terminal snapshot 978 parallel + 8 serial passes. Scope and exact evidence: `docs/RELIABILITY_RECHECK_20261012.md`. Hardware remains unverified; latest hashes are `recheck-delivery-manifest.json`.
+Seven additional failure groups reproduced and repaired: startup UI rollback, Continue confidence/current-color, recovery error lifecycle, spectator stop/terminal publication, and known king-capture board verification. Final affected gate 110 passes; full pre-terminal snapshot 978 parallel + 8 serial passes. Scope and exact evidence: `docs/reviews/RELIABILITY_RECHECK_20261012.md`. Hardware remains unverified; latest hashes are `recheck-delivery-manifest.json`.
 
 ## 2026-10-12 reliability corrections
 
 - Physical target coordinates/heights follow fetched visual-correction-v2 `fb0598d`; explicit enable and fresh controller state remain required. Physical commands do not consult simulator collisions, per current user request. Virtual collision handling is retained.
-- Startup/recovery/engine/RPC/API/lifecycle and command-animation fixes are documented in `docs/RELIABILITY_FIXES_20261012.md`. Exact verification results and delivery hashes: `reports/reliability-fixes-20261012/REPORT.md` and `delivery-manifest.json`.
+- Startup/recovery/engine/RPC/API/lifecycle and command-animation fixes are documented in `docs/reviews/RELIABILITY_FIXES_20261012.md`. Exact verification results and delivery hashes: `reports/reliability-fixes-20261012/REPORT.md` and `delivery-manifest.json`.
 - Missing board surface contact calibration permits read-only arm telemetry; it does not prove board/piece alignment. No camera/FR3 physical test in this change. Earlier dated entries below describe earlier snapshots.
 
 ## 2026-10-09 physical UI latency fix
@@ -854,7 +868,7 @@ Seven additional failure groups reproduced and repaired: startup UI rollback, Co
 
 - Selected source `fe3faa8` under all recommendations A; preserve current simulation/R1-R4/geometry/executor/identity/telemetry and defaults. New camera optics/calibration, strict target guard, same-move retry checkpoints, physical worker, and T/H/Y UI adapters. New camera modes off; measured dimensions unset; donor calibration not activated.
 - Local evidence: full runner 727 parallel + 8 serial passed; after final guard/recovery refinements, 236 focused tests passed. Replay 10 plies each in three modes with actual PyBullet; 15 robot moves measured before FEN/reconcile, max XY error 0.173 mm in simulation. Rotated/translated R1-R4 hover and viewer reconnect observed.
-- Integration remains a selective uncommitted patch, not a merge commit. Camera/FR3 and fresh Python3.12 install unverified. Guide: `docs/VISUAL_V2_INTEGRATION.md`; scope/evidence: `reports/visual-integration-20261009/REPORT.md`.
+- Integration remains a selective uncommitted patch, not a merge commit. Camera/FR3 and fresh Python3.12 install unverified. Guide: `docs/architecture/VISUAL_V2_INTEGRATION.md`; scope/evidence: `reports/visual-integration-20261009/REPORT.md`.
 
 ## 2026-10-06 telemetry liveness fix verified in virtual self-play
 
@@ -868,40 +882,40 @@ Seven additional failure groups reproduced and repaired: startup UI rollback, Co
 - Added explicit save/restore of the active R1–R4 simulation pose across restarts, with frame/unit/provenance/calibration version, scene checksum and transit height. Restore uses existing SERVICE_SAFE, version, geometry and swept collision gates; no automatic startup relocation or physical calibration override.
 - Recovery panel now shows required action, fault, pending move and execution state. Camera recovery guidance applies to physical mode; virtual mode and manual test have their own guidance. Existing recovery/activation gates remain authoritative.
 - Isolated worktree: 70 subsystem checks passed; full unit runner 701 parallel + 8 serial passed (exit 0). After final UI/physical command guard refinements, 35 focused checks passed and viewer syntax check passed. Browser actual save/reset/stale rejection/preparation rejection/restore observed; GUI images retained. Mock physical ordinary/capture commits update real PyBullet/telemetry; failed camera confirmation retains board and blocks repeat motion.
-- Luna independent static review: one misleading manual-test instruction corrected, no remaining blocker reported. Eight edited code files have matching main/worktree SHA256. No hardware used; changes remain uncommitted. Guide: `docs/BOARD_PROFILE_AND_RECOVERY.md`; evidence: `reports/profile-recovery-20261005/`.
+- Luna independent static review: one misleading manual-test instruction corrected, no remaining blocker reported. Eight edited code files have matching main/worktree SHA256. No hardware used; changes remain uncommitted. Guide: `docs/architecture/BOARD_PROFILE_AND_RECOVERY.md`; evidence: `reports/profile-recovery-20261005/`.
 
 ## 2026-10-05 selective visual integration verified
 
 - Integrated stable corner consensus/operator approval, strict centre pick, independent measurement client/CLI, correction debug, and reimplemented manual pick/place through the unified executor. Preserved simulation, geometry, launcher/logging, read-only physical connect, resize/fullscreen and MOVE_SPEED=70.
 - Manual test owns a separate board/identity map; checked movement precedes scene reconciliation. SDK/camera/scene failures latch; game/AI/self-play stay paused until New Game/reconciliation. Physical faults revoke owned activation without gripper/HOME.
 - Isolated worktree evidence: broad gate 731 parallel + 8 serial passed; subsequent focused gates 97, 51 and 30 passed. Nine Node contracts and both startup smokes exit 0. Actual manual GUI → PyBullet move after yaw 3 degrees/X +10mm: XY error 0.1504mm before reconciliation; reset preserves taught pose and restores 32 pieces.
-- Main working changes retained, not committed/pushed. No real hardware exercised, no exhaustive 8010-route claim. Details: `docs/VISUAL_LATEST_REVIEW_20261005.md`, `reports/visual-integration-20261005/`.
+- Main working changes retained, not committed/pushed. No real hardware exercised, no exhaustive 8010-route claim. Details: `docs/reviews/VISUAL_LATEST_REVIEW_20261005.md`, `reports/visual-integration-20261005/`.
 
 ## 2026-10-05 latest visual branch review (historical, before selective integration)
 
 - Fetched `origin/feature/visual-correction-v2` at `652af26`, seven commits beyond donor `e6bb632`. Reviewed in detached worktree; 62 selected tests pass, but mocked SDK/camera probes reproduce two P1 issues in new manual pick/place: continuation after code 112 and repeat commands after failed post-motion verification.
 - Stable-corner approval, strict center pick, independent geometry measurement and debug changes are useful candidates. Keep current integration launcher, physical gates, typed results, simulation/viewer and resizing when incorporating them. Visual legacy startup remains physically active by default and must not replace current read-only startup.
-- Review only; source not merged or fixed on visual. Evidence: `docs/VISUAL_LATEST_REVIEW_20261005.md`, `reports/visual-review-652af26/`. This is not a whole-repository or hardware safety approval.
+- Review only; source not merged or fixed on visual. Evidence: `docs/reviews/VISUAL_LATEST_REVIEW_20261005.md`, `reports/visual-review-652af26/`. This is not a whole-repository or hardware safety approval.
 
 ## 2026-10-05 cross-feature audit
 
 - Fixed game-only new-game/rollback falsely requiring camera verification; undo uses the logical sync path. Reset now discards the previous SPACE rollback snapshot (an existing baseline bug).
 - Broad unit gate: 658 passed / 1 known baseline failure; separate serial gate: 8 passed. Final affected gate: 51 passed; visual application regression: 45 passed. Six of nine selected Node modules pass; three assertion failures reproduce on clean HEAD. Whole regression remains red.
 - Actual PyBullet capture after R1–R4 X +10 mm / yaw +3 degrees succeeds before reconciliation (XY error 0.152152 mm); undo restores victim and reset restores 32 pieces while retaining the taught pose. Both launcher startup probes exit 0. No physical hardware exercised.
-- Evidence: `docs/CROSS_FEATURE_AUDIT_20261005.md`, `reports/cross-feature-audit-20261005/`. Historical whole-repository review baseline is unchanged.
+- Evidence: `docs/reviews/CROSS_FEATURE_AUDIT_20261005.md`, `reports/cross-feature-audit-20261005/`. Historical whole-repository review baseline is unchanged.
 
 ## 2026-10-05 scoped R1–R4 simulation verification
 
 - UI apply verified in isolated worktree: X +10 mm, then yaw +90 degrees; 32 PyBullet bodies, motion provider, twin and backend versions follow the transform. Actual black pawn pick/place reaches (4,4) before reconciliation, XY error 0.152137 mm.
 - Shifted version 2 GUI validation: 90/90 LOCAL CELL TRAJECTORIES PASS. Not a claim for all 8010 routes or physical hardware. Four targeted Python modules: 31 passed; final logging gate: 8 passed; viewer placement integrity Node test passes.
 - Disabled unsupported H edits in R1–R4 mode and prevented legacy preview recalculation there. Console encoding failure now fails without logging recursion. Node single-motion-authority test has an existing tool-status fixture failure, reproduced on clean 7d8c5de.
-- Evidence: `docs/R1_R4_SIMULATION_AUDIT_20261005.md` and `reports/r1r4-audit-20261005/`. Historical LAST_REVIEWED_HEAD remains unchanged; this is a scoped review of working changes.
+- Evidence: `docs/reviews/R1_R4_SIMULATION_AUDIT_20261005.md` and `reports/r1r4-audit-20261005/`. Historical LAST_REVIEWED_HEAD remains unchanged; this is a scoped review of working changes.
 
 ## 2026-10-04 game window sizing
 
 - Added a resizable, aspect-preserving display around the existing 1440×1080 logical canvas, fit-to-desktop startup and SDL Windows DPI policy. F11 switches fullscreen; Esc restores the previous window size. Mouse positions are mapped before all menu/game handlers; letterbox margins are ignored.
 - Scoped gate: 22 passed via `tools/test_fast.ps1` (window, offline mouse confirmation, difficulty menu), exit 0. Direct Windows SDL probe: 1152×864 → 1920×1080 fullscreen → 1152×864, exit 0. New GUI observed fully within screen bounds.
-- Computer Use screen capture works but automated input remains unconfirmed; no complete GUI game was played. Details: `docs/GAME_WINDOW_DISPLAY.md`. Historical whole-repo review baseline remains unchanged.
+- Computer Use screen capture works but automated input remains unconfirmed; no complete GUI game was played. Details: `docs/guides/GAME_WINDOW_DISPLAY.md`. Historical whole-repo review baseline remains unchanged.
 
 ## 2026-10-04 gripper opening correction
 
@@ -923,11 +937,11 @@ Seven additional failure groups reproduced and repaired: startup UI rollback, Co
 
 # CURRENT_STATE.md — ACTIVE MACHINE-READABLE REPOSITORY STATE
 
-> **R1–R4 placement:** See `docs/BRD_XY_CALIBRATION.md` and `docs/ROBOT_FRAME_BASE_ONLY.md`. Simulator-generated points are provisional; no physical four-point measurement has been entered. Fixed-axis formulas below are historical, not a general board transform.
+> **R1–R4 placement:** See `docs/hardware/BRD_XY_CALIBRATION.md` and `docs/architecture/ROBOT_FRAME_BASE_ONLY.md`. Simulator-generated points are provisional; no physical four-point measurement has been entered. Fixed-axis formulas below are historical, not a general board transform.
 
 ## 2026-09-29 camera/GameState/PyBullet/Three.js worktree update
 
-On `feature/unified-robot-vs-robot` at base `b6acba6`, camera-confirmed red/black moves, captures, full-board rescan, semantic robot contexts, and viewer world-state parity have been implemented in an isolated worktree. A one-move rescan infers the next turn; ambiguous multi-change rescans require operator confirmation (`1` Red, `2` Black) before play resumes. Focused Game/Twin regression: 115 passed; Three.js reconciliation: PASS. No physical robot actuation or live-camera accuracy test. Virtual collision guard rejects a black-cannon approach at yaw 0° with gripper/base contact (-0.18 mm); game state stays unchanged. The full `tests/unit` regression was stopped at 92% after multiple failures, many historical yaw-90 tests are stale. Details: `docs/CAMERA_GAME_TWIN_SYNC_2026-09-29.md`. The historical `LAST_REVIEWED_HEAD` below is unchanged until a complete review of the branch is performed.
+On `feature/unified-robot-vs-robot` at base `b6acba6`, camera-confirmed red/black moves, captures, full-board rescan, semantic robot contexts, and viewer world-state parity have been implemented in an isolated worktree. A one-move rescan infers the next turn; ambiguous multi-change rescans require operator confirmation (`1` Red, `2` Black) before play resumes. Focused Game/Twin regression: 115 passed; Three.js reconciliation: PASS. No physical robot actuation or live-camera accuracy test. Virtual collision guard rejects a black-cannon approach at yaw 0° with gripper/base contact (-0.18 mm); game state stays unchanged. The full `tests/unit` regression was stopped at 92% after multiple failures, many historical yaw-90 tests are stale. Details: `docs/architecture/CAMERA_GAME_TWIN_SYNC_2026-09-29.md`. The historical `LAST_REVIEWED_HEAD` below is unchanged until a complete review of the branch is performed.
 
 ## 2026-09-26 collision worktree update
 
@@ -1125,7 +1139,7 @@ User selected final. Merged need-review55c5fd5 into final, preserving current ro
 
 ## 2026-11-07 final — user handbook (documentation only)
 
-Scope baseline: `005f95539531c32601232cdeeec3cca4185f32d9` on `final`. Replaced README's developer-oriented overview with a Vietnamese operator handbook covering capsule/source startup, three environments/four game modes, actual mouse/keyboard controls, camera calibration, physical enable, stop/session/end flows, pre-pick retry versus post-motion reconciliation, diagnostics and evidence collection. Replaced obsolete `docs/USER_MANUAL_QUICKSTART.md` with a pointer to the handbook, removing outdated centre-of-piece calibration, dry-run/disconnect and motion-error recovery advice. Download/video links retained; release ZIP is unchanged.
+Scope baseline: `005f95539531c32601232cdeeec3cca4185f32d9` on `final`. Replaced README's developer-oriented overview with a Vietnamese operator handbook covering capsule/source startup, three environments/four game modes, actual mouse/keyboard controls, camera calibration, physical enable, stop/session/end flows, pre-pick retry versus post-motion reconciliation, diagnostics and evidence collection. Replaced obsolete `docs/guides/USER_MANUAL_QUICKSTART.md` with a pointer to the handbook, removing outdated centre-of-piece calibration, dry-run/disconnect and motion-error recovery advice. Download/video links retained; release ZIP is unchanged.
 
 VERIFIED_FIXED (documentation scope only): stale quickstart instructions retired. No runtime/configuration/calibration changes or hardware calls.
 

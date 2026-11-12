@@ -34,7 +34,7 @@ và **New Game** để chơi tiếp. Lỗi lệnh, camera hoặc đồng bộ s�
 Robot thật vẫn phải được kích hoạt qua F9/F10 và camera xác nhận trước/sau thao tác.
 Chế độ game-only `--virtual` không có robot/simulation nên không chạy test gắp–thả.
 
-Đo sai số camera/grid và grid/robot độc lập: `python scripts/measure_geometry.py gui`.
+Đo sai số camera/grid và grid/robot độc lập: `python scripts/calibration/measure_geometry.py gui`.
 Xem [geometry-measurement.md](geometry-measurement.md) để chuẩn bị frame và phiên đo.
 
 ## Chơi bằng robot thật
@@ -45,7 +45,7 @@ Người đi ngoài đời rồi bấm SPACE. AI chỉ cập nhật nước đi 
 
 ## Lưu bàn và khôi phục lỗi
 
-Trong viewer, tab **Vị Trí** có **Lưu vị trí đã áp dụng** / **Khôi phục profile đã lưu**. Profile chỉ dùng cho mô phỏng; sau restart nạp theo thao tác có giám sát qua SERVICE_SAFE. Khi game khóa, panel trái hiện lý do, nước chờ và bước khôi phục. Xem `docs/BOARD_PROFILE_AND_RECOVERY.md`.
+Trong viewer, tab **Vị Trí** có **Lưu vị trí đã áp dụng** / **Khôi phục profile đã lưu**. Profile chỉ dùng cho mô phỏng; sau restart nạp theo thao tác có giám sát qua SERVICE_SAFE. Khi game khóa, panel trái hiện lý do, nước chờ và bước khôi phục. Xem `docs/architecture/BOARD_PROFILE_AND_RECOVERY.md`.
 
 ## Cổng đang được sử dụng
 

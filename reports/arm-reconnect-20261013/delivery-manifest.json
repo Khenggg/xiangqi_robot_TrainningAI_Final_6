@@ -5,5 +5,5 @@
   "src/core/launch_options.py": "021b090708956b3914fcfbd5fef1b58faff876940bea9314418e48a00c1d62aa",
   "robot-3d-viewer/main.mjs": "d3c98487f34c37c6e702e9150e546bbeeb81cd59ad4c3d5fc785f1d9ff0d29fa",
   "tests/unit/test_arm_reconnect_qa.py": "4b73bfb942e577184c8abbd24f3ffe0b21c0d21aeabcb8c326a1e1c97b39cdb4",
-  "docs/ARM_RECONNECT_QA_20261013.md": "abbcdaa4cf7607688e3682689bb5bbb2bb0e6dba2e855db65404439f09722e76"
+  "docs/reviews/ARM_RECONNECT_QA_20261013.md": "abbcdaa4cf7607688e3682689bb5bbb2bb0e6dba2e855db65404439f09722e76"
 }

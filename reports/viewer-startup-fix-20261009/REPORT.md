@@ -14,7 +14,7 @@
 - SETUP_WINDOWS.bat: installs pinned Three.js and checks asset availability; reports missing npm.
 - RUN.bat: forwards CLI arguments, returns Python exit code and corrects Moonfish notice.
 - tests/unit/test_viewer_startup.py: actual HTTP under bad MIME maps, missing assets and validation without starting threads.
-- docs/START_PROJECT.md, CURRENT_STATE.md, KNOWN_ISSUES.md: setup/start instructions and evidence limits.
+- docs/guides/START_PROJECT.md, CURRENT_STATE.md, KNOWN_ISSUES.md: setup/start instructions and evidence limits.
 
 ## Verification
 

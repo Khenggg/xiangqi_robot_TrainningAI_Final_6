@@ -7,9 +7,9 @@
 - `python main.py --virtual`: **tắt mô phỏng**, chỉ chạy game (theo quy ước của chủ dự án).
 - `python main.py --physical`: camera + FR3 + viewer; F9 rồi F10 trong game để xác nhận bật quyền chuyển động.
 
-Chi tiết: [START_PROJECT.md](docs/START_PROJECT.md). Các mô tả lịch sử bên dưới không thay thế các lệnh này.
+Chi tiết: [START_PROJECT.md](docs/guides/START_PROJECT.md). Các mô tả lịch sử bên dưới không thay thế các lệnh này.
 
-Mỗi lần chạy tự lưu nhật ký vào `logs/<id-phien>/`. Khi có lỗi, đọc `errors.log` trước. Hướng dẫn và mã lỗi: [LOGGING.md](docs/LOGGING.md).
+Mỗi lần chạy tự lưu nhật ký vào `logs/<id-phien>/`. Khi có lỗi, đọc `errors.log` trước. Hướng dẫn và mã lỗi: [LOGGING.md](docs/guides/LOGGING.md).
 
 > **Tài liệu kỹ thuật đầy đủ cho hệ thống Robot chơi Cờ Tướng tự động**  
 > Phiên bản: 2.2 | Cập nhật: 2026-03-14
@@ -373,7 +373,7 @@ Hệ thống sử dụng **Bilinear Interpolation** từ 4 góc teaching points 
 - R3 = (8,9) - Xe Đỏ Phải (góc xa, dễ Singularity): `X=164.929, Y=569.474, Z=184.730`
 - R4 = (0,9) - Xe Đỏ Trái (ít Singularity hơn): `X=154.034, Y=248.179, Z=182.267`
 
-**Xem hướng dẫn chi tiết:** `docs/teaching_points_guide.md`
+**Xem hướng dẫn chi tiết:** `docs/guides/teaching_points_guide.md`
 
 #### 3.3.2. `robot_sdk_core.py` & `robot_sdk_core.c`
 Bộ SDK điều khiển Robot nguyên bản do hãng Fairino cung cấp.
@@ -589,7 +589,7 @@ Khởi động lại và xem log:
 [ROBOT] 🎯 Sử dụng Bilinear Interpolation cho tất cả vị trí
 ```
 
-**Xem hướng dẫn chi tiết:** `docs/teaching_points_guide.md`
+**Xem hướng dẫn chi tiết:** `docs/guides/teaching_points_guide.md`
 
 #### 4.2.3. Dạy điểm HOMECHESS (TÙY CHỌN - Khuyến nghị)
 
@@ -880,7 +880,7 @@ Robot ở tư thế khớp thẳng hàng, đặc biệt khi di chuyển đến c
 1. **Dạy đủ 4 teaching points R1, R2, R3, R4** (BẮT BUỘC):
    - Hệ thống sử dụng Bilinear Interpolation với độ chính xác ±0.1mm
    - Tự động dùng MoveJ với joint angles an toàn cho các góc
-   - Xem chi tiết: `docs/teaching_points_guide.md`
+   - Xem chi tiết: `docs/guides/teaching_points_guide.md`
 
 2. **Kiểm tra log:**
    ```
@@ -1290,7 +1290,7 @@ Hệ thống sử dụng **Bilinear Interpolation** từ 4 góc teaching points 
 - R3 = (8,9) - Xe Đỏ Phải (góc xa, dễ Singularity): `X=164.929, Y=569.474, Z=184.730`
 - R4 = (0,9) - Xe Đỏ Trái (ít Singularity hơn): `X=154.034, Y=248.179, Z=182.267`
 
-**Xem hướng dẫn chi tiết:** `docs/teaching_points_guide.md`
+**Xem hướng dẫn chi tiết:** `docs/guides/teaching_points_guide.md`
 
 #### 3.3.2. `robot_sdk_core.py` & `robot_sdk_core.c`
 Bộ SDK điều khiển Robot nguyên bản do hãng Fairino cung cấp.
@@ -1506,7 +1506,7 @@ Khởi động lại và xem log:
 [ROBOT] 🎯 Sử dụng Bilinear Interpolation cho tất cả vị trí
 ```
 
-**Xem hướng dẫn chi tiết:** `docs/teaching_points_guide.md`
+**Xem hướng dẫn chi tiết:** `docs/guides/teaching_points_guide.md`
 
 #### 4.2.3. Dạy điểm HOMECHESS (TÙY CHỌN - Khuyến nghị)
 
@@ -1797,7 +1797,7 @@ Robot ở tư thế khớp thẳng hàng, đặc biệt khi di chuyển đến c
 1. **Dạy đủ 4 teaching points R1, R2, R3, R4** (BẮT BUỘC):
    - Hệ thống sử dụng Bilinear Interpolation với độ chính xác ±0.1mm
    - Tự động dùng MoveJ với joint angles an toàn cho các góc
-   - Xem chi tiết: `docs/teaching_points_guide.md`
+   - Xem chi tiết: `docs/guides/teaching_points_guide.md`
 
 2. **Kiểm tra log:**
    ```
@@ -2216,7 +2216,7 @@ Hệ thống sử dụng **Bilinear Interpolation** từ 4 góc teaching points 
 - R3 = (8,9) - Xe Đỏ Phải (góc xa, dễ Singularity): `X=164.929, Y=569.474, Z=184.730`
 - R4 = (0,9) - Xe Đỏ Trái (ít Singularity hơn): `X=154.034, Y=248.179, Z=182.267`
 
-**Xem hướng dẫn chi tiết:** `docs/teaching_points_guide.md`
+**Xem hướng dẫn chi tiết:** `docs/guides/teaching_points_guide.md`
 
 #### 3.3.2. `robot_sdk_core.py` & `robot_sdk_core.c`
 Bộ SDK điều khiển Robot nguyên bản do hãng Fairino cung cấp.
@@ -2432,7 +2432,7 @@ Khởi động lại và xem log:
 [ROBOT] 🎯 Sử dụng Bilinear Interpolation cho tất cả vị trí
 ```
 
-**Xem hướng dẫn chi tiết:** `docs/teaching_points_guide.md`
+**Xem hướng dẫn chi tiết:** `docs/guides/teaching_points_guide.md`
 
 #### 4.2.3. Dạy điểm HOMECHESS (TÙY CHỌN - Khuyến nghị)
 
@@ -2723,7 +2723,7 @@ Robot ở tư thế khớp thẳng hàng, đặc biệt khi di chuyển đến c
 1. **Dạy đủ 4 teaching points R1, R2, R3, R4** (BẮT BUỘC):
    - Hệ thống sử dụng Bilinear Interpolation với độ chính xác ±0.1mm
    - Tự động dùng MoveJ với joint angles an toàn cho các góc
-   - Xem chi tiết: `docs/teaching_points_guide.md`
+   - Xem chi tiết: `docs/guides/teaching_points_guide.md`
 
 2. **Kiểm tra log:**
    ```

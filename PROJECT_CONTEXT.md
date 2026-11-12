@@ -4,19 +4,19 @@ The robot controller Ethernet cable is physically loose. Intermittent
 `192.168.58.2` disconnects, `GetControllerIP: controller reply unavailable` and
 `Robot SDK not connected` are expected link symptoms; check/reseat the cable
 before treating them as a code regression. Full recovery checklist:
-[`ROBOT_CONNECTION.md`](ROBOT_CONNECTION.md).
+[`docs/hardware/ROBOT_CONNECTION.md`](docs/hardware/ROBOT_CONNECTION.md).
 
 ---
 
 # Current reliability boundary (2026-10-12)
 
-Read `docs/RELIABILITY_FIXES_20261012.md` for the current physical execution/display split. User-directed physical coordinates and Z come from visual-correction-v2 (`fb0598d`); virtual motion retains its collision guard. Physical simulation is a read-only mirror and command animation, not a collision-planning gate. Missing board contact calibration does not block raw arm telemetry or donor-mapped physical commands, but prevents claiming board/piece alignment. Hardware is unverified in this change.
+Read `docs/reviews/RELIABILITY_FIXES_20261012.md` for the current physical execution/display split. User-directed physical coordinates and Z come from visual-correction-v2 (`fb0598d`); virtual motion retains its collision guard. Physical simulation is a read-only mirror and command animation, not a collision-planning gate. Missing board contact calibration does not block raw arm telemetry or donor-mapped physical commands, but prevents claiming board/piece alignment. Hardware is unverified in this change.
 
 ---
 
 # Current integration authority (2026-10-04)
 
-Read `docs/VISUAL_UNIFIED_INTEGRATION_20261004.md` first for the current source ownership and runtime boundaries. Camera/game/AI/physical control now follow visual-correction-v2; simulation/viewer and shared geometry follow unified-robot-vs-robot. Default operation is VIRTUAL/DRY_RUN. Physical connect is read-only; measured physical parity remains a separate gate.
+Read `docs/architecture/VISUAL_UNIFIED_INTEGRATION_20261004.md` first for the current source ownership and runtime boundaries. Camera/game/AI/physical control now follow visual-correction-v2; simulation/viewer and shared geometry follow unified-robot-vs-robot. Default operation is VIRTUAL/DRY_RUN. Physical connect is read-only; measured physical parity remains a separate gate.
 
 The specification below is historical context at its stated commit. It does not override current config, the scene transform, or measured calibration provenance.
 
@@ -26,7 +26,7 @@ The specification below is historical context at its stated commit. It does not 
 
 > **Purpose:** Single source of persistent architectural facts, coordinate contracts, authority boundaries, and physical geometry. Agents MUST read this file first instead of rediscovering constants and architecture.
 > **Last Verified HEAD:** 7ce5e71 (Branch: `feature/virtual-robot-3d-simulator`; historical snapshot, not current HEAD)
-> **Current board/frame guidance:** `docs/BRD_XY_CALIBRATION.md` and `docs/ROBOT_FRAME_BASE_ONLY.md`. The old constants and placement assumptions in this file are not current calibration data.
+> **Current board/frame guidance:** `docs/hardware/BRD_XY_CALIBRATION.md` and `docs/architecture/ROBOT_FRAME_BASE_ONLY.md`. The old constants and placement assumptions in this file are not current calibration data.
 
 ---
 

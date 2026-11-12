@@ -290,7 +290,7 @@ def build(args):
         install_three(cache, app)
         resource_assets(cache, app)
         shutil.copy2(ROOT / 'tools/capsule/launcher.py', stage / 'launcher.py')
-        shutil.copy2(ROOT / 'docs/CAPSULE_OPERATOR.md', stage / 'READ_ME_FIRST.md')
+        shutil.copy2(ROOT / 'docs/guides/CAPSULE_OPERATOR.md', stage / 'READ_ME_FIRST.md')
         (stage / 'start.bat').write_text(START_BAT, encoding='ascii')
         (stage / 'INSTALL.bat').write_text(INSTALL_BAT, encoding='ascii')
         shutil.copy2(ROOT / 'tools/capsule/bootstrap.ps1', stage / 'start.run')

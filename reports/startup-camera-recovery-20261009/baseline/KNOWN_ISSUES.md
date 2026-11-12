@@ -23,7 +23,7 @@
 - Measurement no longer bypasses read-only startup/current calibration frame. Requires fresh idle TCP/actual safe Z; close/menu/restart disable only activation owned by the session and report failures. Manual physical test faults also revoke owned activation.
 - Fixed carried-piece selection (`ATTACHED_TO_GRIPPER`) and rejected ambiguous/out-of-range/missing-distance cells. Removed stale 150mm initial UI readout. Updated fixed-placement/tool fixtures from canonical sources; replaced an obsolete reach-limit assertion with actual below-board rejection/invariance.
 - Remaining limits: camera/SDK failure paths use mocks; live optics and hardware commissioning are unverified. Measurement requires verified physical calibration, explicit operator clearance and DRY_RUN=0; it is not a hardware collision planner. No changes to the physical tool length or gripper opening in this integration.
-- Verification details and commands: `docs/VISUAL_LATEST_REVIEW_20261005.md`, `reports/visual-integration-20261005/`.
+- Verification details and commands: `docs/reviews/VISUAL_LATEST_REVIEW_20261005.md`, `reports/visual-integration-20261005/`.
 
 ## 2026-10-04 oversized game window
 
@@ -53,14 +53,14 @@
 
 - OPEN P1 in new manual pick/place: legacy robot wrappers allow code 112 through, and test runner ignores execution failure. Mocked probe continues through seven failed MoveCart calls and three gripper calls.
 - OPEN P1: post-motion camera verification failure does not latch a manual-test fault; handler permits another command without reconciliation. Fix before integrating the donor's test feature.
-- Do not replace integrated read-only startup or canonical frame/mapping with donor legacy startup/Tool 0 User 1 assumptions. Detailed review: `docs/VISUAL_LATEST_REVIEW_20261005.md`.
+- Do not replace integrated read-only startup or canonical frame/mapping with donor legacy startup/Tool 0 User 1 assumptions. Detailed review: `docs/reviews/VISUAL_LATEST_REVIEW_20261005.md`.
 
 ## 2026-10-05 cross-feature audit
 
 - RESOLVED: game-only reset/rollback incorrectly demanded physical camera verification. Physical mock gates remain required. New game also discards stale SPACE rollback state from the preceding match.
 - OPEN: fresh broad unit run has one shortened-tool reachability assertion failure; selected viewer Node tests have three failures (picker boundary, fixed coordinate expectation, tool-status expectation). All four reproduce on clean 7d8c5de; no collision parameters were relaxed to hide them.
 - VERIFIED within scope: R1–R4 + actual capture + live polling + undo/reset keep piece cells and taught pose coherent; startup/cleanup and affected logging/game regression pass. This is not all-route or physical-hardware verification.
-- Evidence: `docs/CROSS_FEATURE_AUDIT_20261005.md`.
+- Evidence: `docs/reviews/CROSS_FEATURE_AUDIT_20261005.md`.
 
 ## 2026-10-05 R1–R4 UI review
 
@@ -68,7 +68,7 @@
 - RESOLVED UI ambiguity: H controls are disabled in four-point mode because backend preserves H and legacy placement apply is disabled. Editing H separately in this mode remains unsupported.
 - OPEN: four-point apply is runtime-only; persistent save is not implemented by this button. Full 90-cell validation took roughly eight minutes with no per-cell progress. Existing `test_viewer_single_motion_authority.mjs` expects old tool-status metadata and fails on clean 7d8c5de too.
 - OBSERVED during the long validation probe: one stale joint telemetry warning followed by recovery one second later. End-of-run placement and bridge state are consistent; investigate validation-time polling/freshness before treating the warning as a persistent device fault. Raw session events are preserved in the audit report artifacts.
-- Evidence: `docs/R1_R4_SIMULATION_AUDIT_20261005.md`.
+- Evidence: `docs/reviews/R1_R4_SIMULATION_AUDIT_20261005.md`.
 
 ## 2026-10-04 simulated captures
 
@@ -87,7 +87,7 @@
 - Full camera recognition has been exercised with synthetic quality-approved boards, but not verified against a live physical board. Camera quality and extrinsic calibration remain commissioning gates.
 - Current yaw-0 virtual black-cannon approach is blocked by the active collision guard at a gripper/base penetration of 0.18 mm. Keep rejection; plan and verify a collision-free route before enabling this move.
 - Re-scan infers the next turn only from one legal board transition. Multiple changes require operator confirmation with `1` (Red) or `2` (Black) before play resumes; an image alone cannot restore the exact move count in FEN.
-- Whole `tests/unit` regression remains red/incomplete on this base. Historical yaw-90 fixtures require separate rebaselining against the current yaw-0 scene. Focused camera/Game/Twin tests are recorded in `docs/CAMERA_GAME_TWIN_SYNC_2026-09-29.md`.
+- Whole `tests/unit` regression remains red/incomplete on this base. Historical yaw-90 fixtures require separate rebaselining against the current yaw-0 scene. Focused camera/Game/Twin tests are recorded in `docs/architecture/CAMERA_GAME_TWIN_SYNC_2026-09-29.md`.
 
 ## 2026-09-26 current collision milestone
 

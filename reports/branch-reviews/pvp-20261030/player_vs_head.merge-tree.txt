@@ -19,20 +19,20 @@
 100644 ac10f85fc38d6e4c7405f955acd9dec39ad46ddd 1	config.py
 100644 685a2d0600b3bbc5cef81868ec7f7693e87ae38c 2	config.py
 100644 6abc725ead01412b3c3e977438e2eab303a3ffa1 3	config.py
-100644 a646b4ff9dac718bb37215b0233c2d78840131a7 2	docs/geometry-measurement.md
-100644 511aec53058f1042066cd9057ec0ed0c88314a9c 3	docs/geometry-measurement.md
+100644 a646b4ff9dac718bb37215b0233c2d78840131a7 2	docs/guides/geometry-measurement.md
+100644 511aec53058f1042066cd9057ec0ed0c88314a9c 3	docs/guides/geometry-measurement.md
 100644 30da94fe6a44a06e58edc4daee9d556bfc1cee6e 1	main.py
 100644 eed37b1e96dc5ce3ac3067ecdd9ad120f20c9893 2	main.py
 100644 9a6c56b7c84872727b27dbd3784c2805e7e2b5f8 3	main.py
 100644 9d49ea59a8c442e24c693837af8dd63a90f6f59f 1	requirements.txt
 100644 e4bbcf68f4ee08154d198e2d79defd90b55328a0 2	requirements.txt
 100644 1aa365bff1b5166f77c7ff607c879d9344feb03c 3	requirements.txt
-100644 d1946e164785d5609be4598707b2bfc91909e38a 2	scripts/calibrate_camera_intrinsics.py
-100644 56d3372b57bbd30da288434ff665fc140c66b0d8 3	scripts/calibrate_camera_intrinsics.py
-100644 bf31c56f4dfedca2064718f4353666be9af55339 2	scripts/calibrate_pick_geometry.py
-100644 353927a6e0b393bb3b9f1f9f838f35bcba7b13e8 3	scripts/calibrate_pick_geometry.py
-100644 2e9e90840c3b799ed0b24f1555a2393d0679c8b4 2	scripts/measure_geometry.py
-100644 2a18893cc3013262766886549a0f8e9292a18bc6 3	scripts/measure_geometry.py
+100644 d1946e164785d5609be4598707b2bfc91909e38a 2	scripts/calibration/calibrate_camera_intrinsics.py
+100644 56d3372b57bbd30da288434ff665fc140c66b0d8 3	scripts/calibration/calibrate_camera_intrinsics.py
+100644 bf31c56f4dfedca2064718f4353666be9af55339 2	scripts/calibration/calibrate_pick_geometry.py
+100644 353927a6e0b393bb3b9f1f9f838f35bcba7b13e8 3	scripts/calibration/calibrate_pick_geometry.py
+100644 2e9e90840c3b799ed0b24f1555a2393d0679c8b4 2	scripts/calibration/measure_geometry.py
+100644 2a18893cc3013262766886549a0f8e9292a18bc6 3	scripts/calibration/measure_geometry.py
 100644 253499f4c1bbea29ef32ac9ab4abc93b69c2e598 1	src/core/game_state.py
 100644 37077ee730d69da2f740fee5662d8a202007f76e 2	src/core/game_state.py
 100644 af430d130a30ff30d867d5701b90831ea39491db 3	src/core/game_state.py
@@ -93,18 +93,18 @@ Auto-merging SETUP_WINDOWS.bat
 CONFLICT (add/add): Merge conflict in SETUP_WINDOWS.bat
 Auto-merging config.py
 CONFLICT (content): Merge conflict in config.py
-Auto-merging docs/geometry-measurement.md
-CONFLICT (add/add): Merge conflict in docs/geometry-measurement.md
+Auto-merging docs/guides/geometry-measurement.md
+CONFLICT (add/add): Merge conflict in docs/guides/geometry-measurement.md
 Auto-merging main.py
 CONFLICT (content): Merge conflict in main.py
 Auto-merging requirements.txt
 CONFLICT (content): Merge conflict in requirements.txt
-Auto-merging scripts/calibrate_camera_intrinsics.py
-CONFLICT (add/add): Merge conflict in scripts/calibrate_camera_intrinsics.py
-Auto-merging scripts/calibrate_pick_geometry.py
-CONFLICT (add/add): Merge conflict in scripts/calibrate_pick_geometry.py
-Auto-merging scripts/measure_geometry.py
-CONFLICT (add/add): Merge conflict in scripts/measure_geometry.py
+Auto-merging scripts/calibration/calibrate_camera_intrinsics.py
+CONFLICT (add/add): Merge conflict in scripts/calibration/calibrate_camera_intrinsics.py
+Auto-merging scripts/calibration/calibrate_pick_geometry.py
+CONFLICT (add/add): Merge conflict in scripts/calibration/calibrate_pick_geometry.py
+Auto-merging scripts/calibration/measure_geometry.py
+CONFLICT (add/add): Merge conflict in scripts/calibration/measure_geometry.py
 Auto-merging src/core/game_state.py
 CONFLICT (content): Merge conflict in src/core/game_state.py
 Auto-merging src/core/visual_move_coordinator.py

@@ -117,7 +117,7 @@
       "worktree_match": true
     },
     {
-      "path": "scripts/measure_geometry.py",
+      "path": "scripts/calibration/measure_geometry.py",
       "sha256": "57E309D2AE5A08DBBC1E643C6CFEC2C0020F5A9AE42890B37C2BD8C99EE9FE6E",
       "worktree_match": true
     },

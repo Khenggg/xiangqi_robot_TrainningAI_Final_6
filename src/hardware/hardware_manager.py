@@ -881,7 +881,7 @@ class HardwareManager(VisualPickModes):
                     print(f"[TOP PICK] Calibrated profile {geometry.profile_id} loaded.")
                 except Exception as exc:
                     self.top_face_pick_estimator = None
-                    print(f"[TOP PICK] BLOCKED: {exc}. Run CALIBRATE_PICK_GEOMETRY.bat with RUN closed.")
+                    print(f"[TOP PICK] BLOCKED: {exc}. Run scripts/windows/CALIBRATE_PICK_GEOMETRY.bat with RUN closed.")
 
             # Start exactly once, after startup calibration/profile reads.
             # The constructor only creates caches; without this there is no

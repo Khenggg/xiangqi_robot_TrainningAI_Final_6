@@ -86,7 +86,7 @@ def check_viewer_assets(repo):
         raise FileNotFoundError(
             "Viewer resources missing: " + ", ".join(missing)
             + ". Check the full checkout (index/main/vendor occt) and run "
-              "SETUP_WINDOWS.bat or npm ci for node_modules/three."
+              "scripts/windows/SETUP_WINDOWS.bat or npm ci for node_modules/three."
         )
 
 

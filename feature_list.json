@@ -179,7 +179,7 @@
     "id": "windows-capsule-build",
     "title": "Complete portable Windows release",
     "user_visible_behavior": "Extract a release containing runtime, local models, engine and viewer without installing dependencies",
-    "verification_command": "BUILD_CAPSULE.bat --models <team-models>",
+    "verification_command": "scripts/windows/BUILD_CAPSULE.bat --models <team-models>",
     "status": "passing",
     "evidence": "66 focused tests; actual bundle smoke and untouched ZIP Unicode relocation acceptance PASS; final ZIP SHA256 c5d1a6570d41954ffbeb0dbc0fb7451b275fa943f2bc09fbd1f61606f1120f5e",
     "notes": "Software-local verification; separate clean Windows PC and physical event-kit acceptance unverified. See reports/windows-capsule-20261105/REPORT.md",

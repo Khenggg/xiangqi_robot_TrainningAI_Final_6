@@ -225,7 +225,7 @@
     "after_sha256": "3409aacc4e08d3d430664626f6cb038a08b70bf92b10ea7f51924a0e5b731494"
   },
   {
-    "path": "docs/RELIABILITY_FIXES_20261012.md",
+    "path": "docs/reviews/RELIABILITY_FIXES_20261012.md",
     "before_sha256": null,
     "after_sha256": "823cde141648c4b5a2e7fc5c4d6ce74eca4594db5df0dd9c894816e9e05967fc"
   }

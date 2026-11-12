@@ -34,13 +34,13 @@
     " M tests/unit/test_viewer_coordinate_contract.mjs",
     " M tests/unit/test_viewer_single_motion_authority.mjs",
     "?? MEASURE_GEOMETRY.bat",
-    "?? docs/BOARD_PROFILE_AND_RECOVERY.md",
-    "?? docs/CROSS_FEATURE_AUDIT_20261005.md",
-    "?? docs/LOGGING.md",
-    "?? docs/R1_R4_SIMULATION_AUDIT_20261005.md",
-    "?? docs/START_PROJECT.md",
-    "?? docs/VISUAL_LATEST_REVIEW_20261005.md",
-    "?? docs/geometry-measurement.md",
+    "?? docs/architecture/BOARD_PROFILE_AND_RECOVERY.md",
+    "?? docs/reviews/CROSS_FEATURE_AUDIT_20261005.md",
+    "?? docs/guides/LOGGING.md",
+    "?? docs/reviews/R1_R4_SIMULATION_AUDIT_20261005.md",
+    "?? docs/guides/START_PROJECT.md",
+    "?? docs/reviews/VISUAL_LATEST_REVIEW_20261005.md",
+    "?? docs/guides/geometry-measurement.md",
     "?? reports/cross-feature-audit-20261005/",
     "?? reports/profile-recovery-20261005/",
     "?? reports/r1r4-audit-20261005/",
@@ -49,7 +49,7 @@
     "?? reports/visual-integration-20261005/",
     "?? reports/visual-preintegration-20261009/",
     "?? reports/visual-review-652af26/",
-    "?? scripts/measure_geometry.py",
+    "?? scripts/calibration/measure_geometry.py",
     "?? src/core/launch_options.py",
     "?? src/core/project_logging.py",
     "?? src/simulation/board_profile.py",
@@ -217,7 +217,7 @@
       "merge_file_exit": 0
     },
     {
-      "path": "docs/geometry-measurement.md",
+      "path": "docs/guides/geometry-measurement.md",
       "local_modified": true,
       "local_present": true,
       "same_as_visual": false,
@@ -297,7 +297,7 @@
       "merge_file_exit": 1
     },
     {
-      "path": "scripts/calibrate_camera_intrinsics.py",
+      "path": "scripts/calibration/calibrate_camera_intrinsics.py",
       "local_modified": false,
       "local_present": false,
       "same_as_visual": false,
@@ -305,7 +305,7 @@
       "merge_file_exit": 0
     },
     {
-      "path": "scripts/calibrate_pick_geometry.py",
+      "path": "scripts/calibration/calibrate_pick_geometry.py",
       "local_modified": false,
       "local_present": false,
       "same_as_visual": false,
@@ -313,7 +313,7 @@
       "merge_file_exit": 0
     },
     {
-      "path": "scripts/measure_geometry.py",
+      "path": "scripts/calibration/measure_geometry.py",
       "local_modified": true,
       "local_present": true,
       "same_as_visual": false,

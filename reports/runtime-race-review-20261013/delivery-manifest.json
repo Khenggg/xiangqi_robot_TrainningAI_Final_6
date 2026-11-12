@@ -30,7 +30,7 @@
     "after_sha256": "eebe3ebad3b8ddb9e443c8d6690d1d23538534d3760e80b64ff02cfe86a0e092"
   },
   {
-    "path": "docs/RUNTIME_RACE_REVIEW_20261013.md",
+    "path": "docs/reviews/RUNTIME_RACE_REVIEW_20261013.md",
     "before_sha256": null,
     "after_sha256": "3854c7830e6aff039d6c9a2b4498a745780e379967623a50f1adcc53c989bf93"
   }

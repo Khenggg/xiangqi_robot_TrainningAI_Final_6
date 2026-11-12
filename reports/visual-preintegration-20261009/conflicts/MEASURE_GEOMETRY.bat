@@ -10,7 +10,7 @@ if errorlevel 1 (
     set "measure_python=py"
 )
 echo Opening the step-by-step measurement client...
-"%measure_python%" scripts\measure_geometry.py gui
+"%measure_python%" scripts\calibration\measure_geometry.py gui
 if errorlevel 1 pause
 ||||||| D:\OJT\xiangqi_robot_TrainningAI_Final_6\reports\visual-preintegration-20261009\merge-inputs\base
 =======
@@ -25,6 +25,6 @@ if errorlevel 1 (
     set "measure_python=py"
 )
 echo Opening the step-by-step measurement client...
-"%measure_python%" scripts\measure_geometry.py gui
+"%measure_python%" scripts\calibration\measure_geometry.py gui
 if errorlevel 1 pause
 >>>>>>> D:\OJT\xiangqi_robot_TrainningAI_Final_6\reports\visual-preintegration-20261009\merge-inputs\visual

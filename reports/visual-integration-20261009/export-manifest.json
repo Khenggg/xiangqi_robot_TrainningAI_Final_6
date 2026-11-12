@@ -43,7 +43,7 @@
       "sha256": "f3dd9870a68a75e94c1c058bdc1494e8e9bdbba0a8e0bff3f99afeed84fc058e"
     },
     {
-      "path": "docs/VISUAL_V2_INTEGRATION.md",
+      "path": "docs/architecture/VISUAL_V2_INTEGRATION.md",
       "sha256": "5fcddb8ec20d4e689ad0237b05422c7fb9c6a0506262875ef57fb4d65b786cff"
     },
     {
@@ -51,11 +51,11 @@
       "sha256": "62c4c0a5be4dfae793208276ace3bbdf09e7e82c600fbdb7d7f29820890a18d7"
     },
     {
-      "path": "scripts/calibrate_camera_intrinsics.py",
+      "path": "scripts/calibration/calibrate_camera_intrinsics.py",
       "sha256": "63149b1b8f58bdb06459b03599f2aaf2c8b79e8401c85520b54dbf979a4a14d4"
     },
     {
-      "path": "scripts/calibrate_pick_geometry.py",
+      "path": "scripts/calibration/calibrate_pick_geometry.py",
       "sha256": "317f7994b12ce652e2569a4e74f0ede687372039e46379a37f089385ab9df30f"
     },
     {

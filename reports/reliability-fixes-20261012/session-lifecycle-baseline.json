@@ -6,6 +6,6 @@
   "CURRENT_STATE.md": "2024a52f1534b73e20c97c5e62a44e30ec6a25c9ae87db69a2e0ff835c62b473",
   "KNOWN_ISSUES.md": "fdd3a05c27ef933f8551b749d8f47cfaf9daf171c5af7e3152cfd198cb84f8e1",
   "tests/unit/test_spectator_lifecycle.py": null,
-  "docs/SPECTATOR_LIFECYCLE_FIX_20261012.md": null,
+  "docs/reviews/SPECTATOR_LIFECYCLE_FIX_20261012.md": null,
   "tests/unit/test_self_play_merge_contract.py": "2cc8c078741725e9e1b9a8f0cbcd1a525258e686419bd89a41ead0f83dcfb92e"
 }
