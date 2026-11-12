@@ -1,13 +1,13 @@
 # Sổ tay sử dụng Xiangqi Robot
 
-Hướng dẫn hiện hành của nhánh `final` nằm tại **[README — Sổ tay sử dụng](../../README.md)**, cập nhật ngày 07/11/2026 và đối chiếu code tại commit `005f95539531c32601232cdeeec3cca4185f32d9`.
+Hướng dẫn hiện hành nằm tại **[Sổ tay sử dụng](USER_MANUAL.md)** (tách từ README, nhánh `capsule`); phần cài đặt nhanh ở [README](../../README.md#cai-dat).
 
-- [Khởi động và chọn chế độ](../../README.md#bat-dau)
-- [Cách chơi từng chế độ](../../README.md#cach-choi)
-- [Chuẩn bị robot thật](../../README.md#robot-that)
-- [Chấm bốn giao điểm camera](../../README.md#camera)
-- [Dừng, đối soát và phục hồi](../../README.md#phuc-hoi)
-- [Tra lỗi và phím tắt](../../README.md#xu-ly-loi)
+- [Khởi động và chọn chế độ](USER_MANUAL.md#bat-dau)
+- [Cách chơi từng chế độ](USER_MANUAL.md#cach-choi)
+- [Chuẩn bị robot thật](USER_MANUAL.md#robot-that)
+- [Chấm bốn giao điểm camera](USER_MANUAL.md#camera)
+- [Dừng, đối soát và phục hồi](USER_MANUAL.md#phuc-hoi)
+- [Tra lỗi và phím tắt](USER_MANUAL.md#xu-ly-loi)
 
 Bản hướng dẫn 09/09/2026 trước đây đã được thay thế vì không còn khớp luồng hiện tại. Khi calibration, chọn **giao điểm lưới trên mặt bàn**, không chọn tâm mặt quân. Mất kết nối physical không tự biến phiên thành simulation. Lệnh chuyển động lỗi không được coi là thành công; không tự tắt nguồn/kéo tay/Home để thử lại. Xác nhận thoát ứng dụng không gửi lệnh dừng robot/kẹp.
 
