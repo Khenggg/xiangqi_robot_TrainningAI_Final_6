@@ -50,6 +50,9 @@ class HomeRecoveryRequest:
                 and not state.game_over and state.turn == 'b')
 
     def message(self):
+        if self.status == 'waiting_manual' and self.owner == 'test':
+            return ('Stopped at HOMECHESS. Clear the gripper and restore the board. '
+                    'R: retry test. T: exit test.')
         if self.status == 'waiting_manual':
             return ('Đã dừng ở HOMECHESS. Lấy quân khỏi kẹp, khôi phục bàn '
                     '(cả quân bị ăn), rút tay. R: chạy lại.')

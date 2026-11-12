@@ -458,3 +458,39 @@ def test_initial_manual_test_error_cannot_park_a_superseded_operation(recovery, 
     assert r.state.home_recovery.owner == 'test'
     assert not r.state.home_recovery.is_current(r.state)
     assert r.state.pick_test_resume_required and r.state.manual_override_active
+
+@pytest.mark.parametrize('parked', [True, False])
+def test_surrender_during_home_recovery_requires_verified_parking(recovery, parked):
+    r = recovery
+    r.home.return_value = SimpleNamespace(at_home=parked, reason='test')
+    begin(r)
+    fen = r.state.current_fen
+    r.handler.handle_mouse_down(*ui.BTN_SURRENDER_RECT.center)
+    assert r.state.current_fen == fen
+    assert r.state.game_over is parked
+    assert (r.state.home_recovery is None) is parked
+    assert (r.state.pending_ai_move is None) is parked
+    if parked:
+        r.state.api_client.end_match.assert_called_once_with(winner="BLACK", reason="RESIGN")
+    else:
+        r.state.api_client.end_match.assert_not_called()
+    r.execute.assert_not_called()
+    r.hw.robot.gripper_ctrl.assert_not_called()
+
+@pytest.mark.parametrize('use_mouse', [False, True])
+@pytest.mark.parametrize('parked', [False, True])
+def test_failed_pick_test_exit_requires_home(recovery, use_mouse, parked):
+    r = recovery
+    source, destination = prepare_manual_test(r)
+    r.home.return_value = SimpleNamespace(at_home=parked, reason='test')
+    r.handler._run_pick_test(source, destination)
+    r.hw.execute_pick_place_test.reset_mock()
+    if use_mouse:
+        r.handler.handle_mouse_down(*ui.BTN_PICK_TEST_RECT.center)
+    else:
+        r.handler.handle_keyboard(pygame.K_t)
+    assert (r.state.home_recovery is None) is parked
+    assert r.state.pick_test_mode is (not parked)
+    assert r.state.pick_test_resume_required
+    r.hw.execute_pick_place_test.assert_not_called()
+    r.hw.robot.gripper_ctrl.assert_not_called()

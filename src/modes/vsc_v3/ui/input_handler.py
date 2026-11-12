@@ -366,13 +366,24 @@ class InputHandler:
         import pygame  # type: ignore
         if getattr(self.state, "physical_motion_busy", False):
             return
-        if getattr(self.state, 'home_recovery', None) is not None:
-            if BTN_CONTINUE_RECT.collidepoint(mx, my):
+        recovery = getattr(self.state, 'home_recovery', None)
+        if recovery is not None:
+            if (recovery.status == 'waiting_manual' and not self.state.game_over
+                    and BTN_SURRENDER_RECT.collidepoint(mx, my)):
+                self.state.clear_pending_ai_move()
+                self.state.home_recovery = None
+                self.state.set_status("Game ended. Clear the gripper and reset the physical board before starting again.",
+                                      duration=60)
+            elif BTN_PICK_TEST_RECT.collidepoint(mx, my) and recovery.owner == 'test':
+                self.handle_keyboard(pygame.K_t)
+                return
+            elif BTN_CONTINUE_RECT.collidepoint(mx, my):
                 self.handle_keyboard(pygame.K_h if self.state.home_recovery.status == 'home_failed'
                                      else pygame.K_r)
+                return
             else:
-                self.state.set_status(self.state.home_recovery.message(), duration=3600)
-            return
+                self.state.set_status(recovery.message(), duration=3600)
+                return
         if getattr(self.state, "visual_pick_retry", None):
             if BTN_PICK_RETRY_RECT.collidepoint(mx, my):
                 self.handle_keyboard(pygame.K_r)
@@ -657,7 +668,11 @@ class InputHandler:
             return
         recovery = getattr(self.state, 'home_recovery', None)
         if recovery is not None:
-            if key == pygame.K_r:
+            if (key == pygame.K_t and recovery.owner == 'test'
+                    and recovery.status == 'waiting_manual' and self.state.pick_test_mode):
+                self.state.home_recovery = None
+                self._toggle_pick_test()
+            elif key == pygame.K_r:
                 self._retry_home_recovery()
             elif key == pygame.K_h and recovery.status == 'home_failed':
                 self._return_recovery_home()
