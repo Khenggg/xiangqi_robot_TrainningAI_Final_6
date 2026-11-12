@@ -471,8 +471,6 @@ def test_joint_measurement_must_match_pinned_packet(arm):
 
 @pytest.mark.parametrize('wrapped', [False, True])
 def test_move_result_preserves_unknown_rpc_outcome_through_donor_wrapper(arm, wrapped):
-    arm._gripper_hold_active = False
-    arm._stop_hold_after_failure = lambda exc: FR5Robot._stop_hold_after_failure(arm, exc)
     failure = RpcOutcomeUnknown('MoveCart outcome unknown')
     if wrapped:
         outer = RuntimeError('Wrapped operation failure')

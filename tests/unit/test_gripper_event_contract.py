@@ -1,5 +1,6 @@
 """Contract tests for physical gripper actions shared by the twin and relay."""
 
+import threading
 from unittest.mock import Mock, patch
 
 import config
@@ -8,7 +9,14 @@ from src.hardware.robot_VIP import FR5Robot
 
 
 def _robot_with_mock_listener():
-    robot = FR5Robot(dry_run=True)
+    robot = object.__new__(FR5Robot)
+    robot.dry = True
+    robot._gripper_lock = threading.Lock()
+    robot._motion_stop = threading.Event()
+    robot.gripper_close_do_id = 1
+    robot.gripper_open_do_id = 0
+    robot.gripper_command_known = False
+    robot.gripper_closed_estimate = False
     robot.motion_listener = Mock()
     robot._pulse_gripper_direction = Mock()
     return robot
@@ -26,13 +34,10 @@ def test_gripper_intent_distinguishes_safe_gap_from_release():
 
 def test_gripper_ctrl_passes_action_to_motion_listener():
     robot = _robot_with_mock_listener()
-    try:
-        with patch("src.hardware.robot_VIP.time.sleep"):
-            robot.gripper_ctrl(config.GRIPPER_ACTION_CLOSE)
-        robot.motion_listener.assert_called_once_with(
-            "gripper", True, config.GRIPPER_ACTION_CLOSE)
-    finally:
-        robot._set_gripper_safe_idle()
+    with patch("src.hardware.robot_VIP.time.sleep"):
+        robot.gripper_ctrl(config.GRIPPER_ACTION_CLOSE)
+    robot.motion_listener.assert_called_once_with(
+        "gripper", True, config.GRIPPER_ACTION_CLOSE)
 
 
 def test_gripper_ctrl_safe_gap_reports_non_release_action():
@@ -52,7 +57,7 @@ def test_short_release_opens_only_then_leaves_both_outputs_off():
         robot.gripper_ctrl(config.GRIPPER_ACTION_RELEASE)
     assert [c.args for c in robot._set_tool_do.call_args_list] == [
         (0, 0), (1, 0), (0, 1), (0, 0), (1, 0)]
-    wait.assert_called_once_with(config.GRIPPER_RELEASE_PULSE_SEC)
+    wait.assert_called_once_with(0.06)
     assert robot.gripper_command_known and not robot.gripper_closed_estimate
 
 
@@ -69,7 +74,7 @@ def test_board_place_opens_fully_lifts_then_returns_to_safe_gap():
                      config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP]
 
 
-def test_every_pick_opens_fully_without_safe_gap_before_approach():
+def test_every_pick_reestablishes_safe_gap_before_approach():
     robot = FR5Robot()
     robot.dry = True
     robot.gripper_command_known = True
@@ -81,9 +86,8 @@ def test_every_pick_opens_fully_without_safe_gap_before_approach():
     robot.movel_pose = Mock(side_effect=lambda pose: calls.append(pose[2]))
     robot.gripper_ctrl = Mock(side_effect=lambda action: calls.append(action))
     robot.pick_at(4, 2)
-    assert calls[:4] == [config.GRIPPER_ACTION_OPEN_MAX, "approach", config.PICK_Z,
-                         config.GRIPPER_ACTION_CLOSE]
-    assert config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP not in calls
+    assert calls[:5] == [config.GRIPPER_ACTION_OPEN_MAX, config.GRIPPER_ACTION_CLOSE_TO_SAFE_GAP,
+                         "approach", config.PICK_Z, config.GRIPPER_ACTION_CLOSE]
 
 
 def test_failed_release_blocks_lift_and_attempts_both_outputs_off():

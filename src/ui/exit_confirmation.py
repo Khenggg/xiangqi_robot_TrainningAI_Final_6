@@ -1,6 +1,5 @@
 """One operator decision closes the process without waiting for devices."""
 import os
-import sys
 
 import pygame
 
@@ -57,10 +56,7 @@ def confirm_exit():
 def exit_application():
     """Exit after consent, bypassing blocking device cleanup and atexit hooks.
 
-    Existing journal records are retained. Any continuous gripper hold must be
-    stopped and switched off before exiting; no HOME or general cleanup is requested.
+    Existing journal records are retained. This sends no robot/gripper commands
+    and does not mark an unfinished physical transaction as completed.
     """
-    driver_module = sys.modules.get('src.hardware.robot_VIP')
-    if driver_module is not None:
-        driver_module.FR5Robot.stop_all_gripper_holds()
     os._exit(0)

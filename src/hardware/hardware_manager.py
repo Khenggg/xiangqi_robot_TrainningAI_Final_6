@@ -926,15 +926,6 @@ class HardwareManager(VisualPickModes):
 
     def cleanup(self):
         self._closing = True
-        robot = getattr(self, 'robot', None)
-        if isinstance(getattr(robot, '_gripper_stop_failure', None), BaseException):
-            robot.stop_gripper_hold()  # OFF-only retry; never resend the unresolved arm stop.
-            raise RuntimeError(f'Hardware cleanup retained: {robot._gripper_stop_failure}')
-        if (getattr(robot, '_gripper_hold_active', False) is True
-                or getattr(robot, '_gripper_pulse_active', False) is True):
-            request = self.request_controlled_stop('Hardware cleanup with active gripper output')
-            if not request.done.wait(7.0) or not request.result.safe:
-                raise RuntimeError('Hardware cleanup retained: arm stop or gripper OFF is unverified')
         calibration_stop = getattr(self, "_calibration_capture_stop", None)
         calibration_reader = getattr(self, "_calibration_capture_thread", None)
         if calibration_stop is not None:

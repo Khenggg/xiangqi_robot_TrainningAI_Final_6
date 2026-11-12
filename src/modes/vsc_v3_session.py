@@ -389,11 +389,6 @@ class VscV3Session:
             if worker is not None:
                 worker.join(5)
                 if worker.is_alive():
-                    robot = getattr(self.hw, 'robot', None)
-                    if (getattr(robot, '_gripper_hold_active', False) is True
-                            or getattr(robot, '_gripper_pulse_active', False) is True
-                            or isinstance(getattr(robot, '_gripper_stop_failure', None), BaseException)):
-                        robot.stop_gripper_for_shutdown()
                     raise RuntimeError('VSC-v3 worker still owns session resources')
         self.showcase.close()
         client = getattr(self.state, 'api_client', None)

@@ -313,11 +313,6 @@ class HardwareManager:
 
     def cleanup(self):
         """Retain owners on any shutdown failure; allow safe explicit retry."""
-        robot = getattr(self, 'robot', None)
-        if (getattr(robot, '_gripper_hold_active', False) is True
-                or getattr(robot, '_gripper_pulse_active', False) is True
-                or isinstance(getattr(robot, '_gripper_stop_failure', None), BaseException)):
-            robot.stop_gripper_for_shutdown()
         reader = getattr(self, "_calibration_capture_thread", None)
         if reader is not None and reader.is_alive():
             raise RuntimeError("Calibration reader still running; capture retained")

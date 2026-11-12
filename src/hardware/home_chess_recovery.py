@@ -83,10 +83,6 @@ def _guard(robot, is_current=None, home=None):
         raise RuntimeError("Controller disable outcome is unknown")
     if getattr(robot, "_gripper_pulse_active", False) is True:
         raise RuntimeError("Gripper pulse has not finished")
-    if getattr(robot, "_gripper_hold_active", False) is True:
-        raise RuntimeError("Gripper close output is still active")
-    if isinstance(getattr(robot, '_gripper_stop_failure', None), BaseException):
-        raise RuntimeError(f'Controller stop unresolved: {robot._gripper_stop_failure}')
     tool, user = _frame_id(robot.tool_num), _frame_id(robot.user_num)
     if user != 0:
         raise RuntimeError("HOME recovery TCP requires robot-base user frame 0")
