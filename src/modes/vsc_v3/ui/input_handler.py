@@ -285,6 +285,21 @@ class InputHandler:
     def _current_home_recovery(self, request):
         return self.state.home_recovery is request and request.is_current(self.state)
 
+    def _confirm_manual_robot_move(self, request):
+        """Commit the pending match move only after a fresh board match."""
+        if not self._current_home_recovery(request):
+            self.state.set_status("Pending move changed. Recovery is still locked.", duration=30)
+            return
+        expected = [row[:] for row in request.pending["expected_board"]]
+        if not self.hw.verify_physical_board(expected):
+            self.state.set_status("Board does not match the completed robot move. Correct it and press V.",
+                                  duration=30)
+            return
+        if self._current_home_recovery(request):
+            self._finalize_pending_ai_move("Manual robot move confirmed. Your turn.", (0, 120, 0))
+            if self.state.pending_ai_move is None:
+                self.state.manual_override_active = False
+
     def _retry_home_recovery(self):
         """R is explicit empty-gripper/old-board approval; preserve the exact move."""
         if self._defer_motion(self._retry_home_recovery):
@@ -374,6 +389,9 @@ class InputHandler:
                 self.state.home_recovery = None
                 self.state.set_status("Game ended. Clear the gripper and reset the physical board before starting again.",
                                       duration=60)
+            elif BTN_SCAN_FEN_RECT.collidepoint(mx, my) and recovery.owner == 'ai':
+                self.handle_keyboard(pygame.K_v)
+                return
             elif BTN_PICK_TEST_RECT.collidepoint(mx, my) and recovery.owner == 'test':
                 self.handle_keyboard(pygame.K_t)
                 return
@@ -672,6 +690,8 @@ class InputHandler:
                     and recovery.status == 'waiting_manual' and self.state.pick_test_mode):
                 self.state.home_recovery = None
                 self._toggle_pick_test()
+            elif key == pygame.K_v and recovery.owner == 'ai' and recovery.status == 'waiting_manual':
+                self._confirm_manual_robot_move(recovery)
             elif key == pygame.K_r:
                 self._retry_home_recovery()
             elif key == pygame.K_h and recovery.status == 'home_failed':

@@ -54,8 +54,8 @@ class HomeRecoveryRequest:
             return ('Stopped at HOMECHESS. Clear the gripper and restore the board. '
                     'R: retry test. T: exit test.')
         if self.status == 'waiting_manual':
-            return ('Đã dừng ở HOMECHESS. Lấy quân khỏi kẹp, khôi phục bàn '
-                    '(cả quân bị ăn), rút tay. R: chạy lại.')
+            return ('Stopped at HOMECHESS. Clear the gripper. Complete the move by hand and press V, '
+                    'or restore the board and press R to retry.')
         if self.status == 'home_failed':
             return (f'Chưa về được HOMECHESS: {self.reason}. Xử lý lỗi controller; '
                     'H: yêu cầu về HOMECHESS lại. Chưa được lấy quân/chạy lại khi tay còn chuyển động.')

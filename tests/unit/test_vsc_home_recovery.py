@@ -131,7 +131,7 @@ def test_full_old_board_must_match_before_opening_or_replaying_a_capture(recover
     assert r.state.board == expected and r.state.r_captured == ['r_P']
 
 
-@pytest.mark.parametrize('key', [pygame.K_v, pygame.K_SPACE, pygame.K_m,
+@pytest.mark.parametrize('key', [pygame.K_SPACE, pygame.K_m,
                                  pygame.K_z, pygame.K_t, pygame.K_x])
 def test_ordinary_keys_cannot_bypass_manual_recovery(recovery, key):
     r = recovery
@@ -493,4 +493,20 @@ def test_failed_pick_test_exit_requires_home(recovery, use_mouse, parked):
     assert r.state.pick_test_mode is (not parked)
     assert r.state.pick_test_resume_required
     r.hw.execute_pick_place_test.assert_not_called()
+    r.hw.robot.gripper_ctrl.assert_not_called()
+
+
+@pytest.mark.parametrize("matches", [False, True])
+def test_v_reconciles_manual_match_move_without_retrying(recovery, matches):
+    r = recovery
+    begin(r)
+    expected = r.state.pending_ai_move["expected_board"]
+    r.hw.verify_physical_board.return_value = matches
+    r.handler.handle_keyboard(pygame.K_v)
+    r.hw.verify_physical_board.assert_called_once_with(expected)
+    assert (r.state.home_recovery is None) is matches
+    assert (r.state.pending_ai_move is None) is matches
+    assert r.state.turn == ("r" if matches else "b")
+    assert r.state.manual_override_active is (not matches)
+    r.execute.assert_not_called()
     r.hw.robot.gripper_ctrl.assert_not_called()
