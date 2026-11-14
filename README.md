@@ -17,7 +17,7 @@ Chơi trên bàn 2D, xem robot ảo trong mô phỏng 3D, hoặc đấu với ro
 ## Video demo
 
 <!-- TODO: thay video YouTube demo mới (thumbnail + link) tại đây. -->
-[![Video demo Xiangqi-FR3 — bấm để xem trên YouTube](https://img.youtube.com/vi/PShKIGPRk10/hqdefault.jpg)](https://youtu.be/PShKIGPRk10)
+https://www.youtube.com/watch?v=I4xB3tXT96s
 
 ## Mục lục
 
