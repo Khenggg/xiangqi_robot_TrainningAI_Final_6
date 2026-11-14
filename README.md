@@ -8,7 +8,7 @@ Hướng dẫn cho người chơi và người vận hành hệ thống cờ tư
 
 **Phạm vi kiểm chứng:** tài liệu mô tả hành vi từ code và cấu hình; lần cập nhật sổ tay này chưa chạy thử camera, robot thật hay một ván hoàn chỉnh trên Windows. Các vấn đề phần cứng còn mở được nêu ở [Giới hạn hiện tại](#gioi-han).
 
-[![Video demo Xiangqi Robot — bấm để xem trên YouTube](https://img.youtube.com/vi/PShKIGPRk10/hqdefault.jpg)](https://youtu.be/PShKIGPRk10)
+https://youtu.be/I4xB3tXT96s
 
 ## Tra cứu nhanh
 
